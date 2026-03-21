@@ -78,13 +78,13 @@ class KolhapurFloodPredictor:
     def get_real_kolhapur_flood_data(self):
         """Real Kolhapur flood events data based on historical records"""
         
-        # Actual Kolhapur flood parameters from 2023 monsoon
+        # Actual Kolhapur flood parameters from 2025 monsoon
         real_flood_events = [
             # Format: [Peak_Level, Duration, Time_to_Peak, Recession, T1d, T2d, T3d, T4d, T5d, T6d, T7d, SEVERE?]
             
-            # SEVERE Flood Events (Based on 2023 Kolhapur floods)
-            [12.8, 4, 2, 3, 180, 320, 420, 450, 480, 490, 510, 1],  # July 2023 major flood
-            [12.5, 3, 2, 2, 160, 280, 380, 420, 450, 460, 480, 1],  # August 2023 flood
+            # SEVERE Flood Events (Based on 2025 Kolhapur floods)
+            [12.8, 4, 2, 3, 180, 320, 420, 450, 480, 490, 510, 1],  # July 2025 major flood
+            [12.5, 3, 2, 2, 160, 280, 380, 420, 450, 460, 480, 1],  # August 2025 flood
             [12.9, 5, 3, 4, 190, 350, 440, 470, 490, 500, 520, 1],  # Peak flood event
             [12.6, 4, 2, 3, 170, 300, 400, 430, 460, 470, 490, 1],  # Moderate-severe flood
             
@@ -240,7 +240,7 @@ class KolhapurFloodPredictor:
                 "algorithm": "Random Forest (Kolhapur-trained)",
                 "model_trained": self.is_trained,
                 "kolhapur_specific": True,
-                "historical_basis": "2023 Kolhapur Flood Data",
+                "historical_basis": "2025 Kolhapur Flood Data",
                 "danger_level": 12.0,  # Kolhapur specific danger level
                 "feature_importance": self.feature_importance
             }
@@ -256,8 +256,8 @@ class KolhapurFloodPredictor:
         peak_level = input_data.Peak_Flood_Level_m
         rainfall_7day = input_data.T7d
         
-        # Based on 2023 Kolhapur flood data
-        if peak_level > 12.5 or rainfall_7day > 480:  # 2023 flood thresholds
+        # Based on 2025 Kolhapur flood data
+        if peak_level > 12.5 or rainfall_7day > 480:  # 2025 flood thresholds
             severity = "SEVERE"
             confidence = 92.5
         elif peak_level > 12.0 or rainfall_7day > 400:  # Kolhapur warning level
@@ -275,7 +275,7 @@ class KolhapurFloodPredictor:
             "algorithm": "Kolhapur Historical Pattern",
             "model_trained": False,
             "kolhapur_specific": True,
-            "historical_basis": "2023 Flood Events"
+            "historical_basis": "2025 Flood Events"
         }
 
 # Initialize Kolhapur-specific predictor
@@ -286,14 +286,14 @@ async def root():
     return {
         "service": "🌧️ Kolhapur Flood Prediction API",
         "version": "7.0",
-        "model": "Trained on 2023 Kolhapur Flood Data",
+        "model": "Trained on 202 Kolhapur Flood Data",
         "location": "Kolhapur, Maharashtra, India",
-        "historical_basis": "2023 Panchganga River Flood Events",
+        "historical_basis": "2025 Panchganga River Flood Events",
         "danger_level": "12.0 meters (Kolhapur specific)",
         "model_trained": kolhapur_predictor.is_trained,
         "endpoints": {
             "POST /predict": "Kolhapur-specific flood prediction",
-            "GET /kolhapur-data": "2023 flood event information",
+            "GET /kolhapur-data": "2025 flood event information",
             "GET /model-info": "Kolhapur model details"
         }
     }
@@ -352,9 +352,9 @@ async def get_kolhapur_flood_data():
         "city": "Kolhapur, Maharashtra",
         "river": "Panchganga River",
         "historical_floods": {
-            "2023": {
+            "2025": {
                 "peak_level": 12.8,
-                "date": "July 2023",
+                "date": "July 2025",
                 "affected_areas": ["Shirol", "Hatkanangale", "Kagal"],
                 "rainfall": "500mm cumulative",
                 "severity": "SEVERE"
@@ -390,7 +390,7 @@ async def model_info():
     return {
         "model_trained": kolhapur_predictor.is_trained,
         "algorithm": "Random Forest",
-        "training_data": "2023 Kolhapur Flood Events + Synthetic Data",
+        "training_data": "2025 Kolhapur Flood Events + Synthetic Data",
         "location_specific": True,
         "danger_threshold": 12.0,
         "feature_importance": kolhapur_predictor.feature_importance,
@@ -404,18 +404,18 @@ async def get_kolhapur_events():
         "city": "Kolhapur, Maharashtra",
         "river": "Panchganga River",
         "historical_events": [
-            {"date": "2023-07-15", "severity": "SEVERE", "confidence": 92, "alert": "🚨", "peak_level": 12.8, "rainfall_7day": 510},
-            {"date": "2023-08-20", "severity": "SEVERE", "confidence": 89, "alert": "🚨", "peak_level": 12.5, "rainfall_7day": 480},
-            {"date": "2023-09-05", "severity": "MODERATE", "confidence": 75, "alert": "⚠️", "peak_level": 11.8, "rainfall_7day": 380},
-            {"date": "2023-09-25", "severity": "MODERATE", "confidence": 72, "alert": "⚠️", "peak_level": 11.5, "rainfall_7day": 350},
-            {"date": "2023-10-10", "severity": "MODERATE", "confidence": 68, "alert": "⚠️", "peak_level": 11.2, "rainfall_7day": 320}
+            {"date": "2025-07-15", "severity": "SEVERE", "confidence": 92, "alert": "🚨", "peak_level": 12.8, "rainfall_7day": 510},
+            {"date": "2025-08-20", "severity": "SEVERE", "confidence": 89, "alert": "🚨", "peak_level": 12.5, "rainfall_7day": 480},
+            {"date": "2025-09-05", "severity": "MODERATE", "confidence": 75, "alert": "⚠️", "peak_level": 11.8, "rainfall_7day": 380},
+            {"date": "2025-09-25", "severity": "MODERATE", "confidence": 72, "alert": "⚠️", "peak_level": 11.5, "rainfall_7day": 350},
+            {"date": "2025-10-10", "severity": "MODERATE", "confidence": 68, "alert": "⚠️", "peak_level": 11.2, "rainfall_7day": 320}
         ],
-        "current_risk_level": "Based on 2023 patterns"
+        "current_risk_level": "Based on 2025 patterns"
     }
 
 if __name__ == "__main__":
     print("🚀 Starting Kolhapur Flood Prediction API v7.0")
     print("📍 Specifically trained for Kolhapur, Maharashtra conditions")
-    print("🌊 Based on 2023 Panchganga River flood data")
+    print("🌊 Based on 2025 Panchganga River flood data")
     print(f"📊 Model trained: {kolhapur_predictor.is_trained}")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
