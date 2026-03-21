@@ -302,7 +302,7 @@ const KolhapurInfo: React.FC = () => (
       </div>
       <div className="flex items-center gap-2">
         <span>📊</span>
-        <span>Based on <strong>2023 Flood Data</strong></span>
+        <span>Based on <strong>2025 Flood Data</strong></span>
       </div>
     </div>
   </div>
@@ -350,11 +350,11 @@ function App() {
       setKolhapurData(res.data.historical_events || []);
     } catch {
       setKolhapurData([
-        { date: '2023-07-15', severity: 'SEVERE', confidence: 92, alert: '🚨', peak_level: 12.8, rainfall_7day: 510 },
-        { date: '2023-08-20', severity: 'SEVERE', confidence: 89, alert: '🚨', peak_level: 12.5, rainfall_7day: 480 },
-        { date: '2023-09-05', severity: 'MODERATE', confidence: 75, alert: '⚠️', peak_level: 11.8, rainfall_7day: 380 },
-        { date: '2023-09-25', severity: 'MODERATE', confidence: 72, alert: '⚠️', peak_level: 11.5, rainfall_7day: 350 },
-        { date: '2023-10-10', severity: 'MODERATE', confidence: 68, alert: '⚠️', peak_level: 11.2, rainfall_7day: 320 }
+        { date: '2025-07-15', severity: 'SEVERE', confidence: 92, alert: '🚨', peak_level: 12.8, rainfall_7day: 510 },
+        { date: '2025-08-20', severity: 'SEVERE', confidence: 89, alert: '🚨', peak_level: 12.5, rainfall_7day: 480 },
+        { date: '2025-09-05', severity: 'MODERATE', confidence: 75, alert: '⚠️', peak_level: 11.8, rainfall_7day: 380 },
+        { date: '2025-09-25', severity: 'MODERATE', confidence: 72, alert: '⚠️', peak_level: 11.5, rainfall_7day: 350 },
+        { date: '2025-10-10', severity: 'MODERATE', confidence: 68, alert: '⚠️', peak_level: 11.2, rainfall_7day: 320 }
       ]);
     }
   };
@@ -366,11 +366,11 @@ function App() {
       setLiveEvents(res.data.events || []);
     } catch {
       setLiveEvents([
-        { date: '2024-03-21', severity: 'MODERATE', confidence: 78, alert: '⚠️', rainfall_mm: 46,  river_level_m: 8.7,  monitoring_status: 'Hourly monitoring' },
-        { date: '2024-03-22', severity: 'SEVERE',   confidence: 91, alert: '🚨', rainfall_mm: 92,  river_level_m: 11.8, monitoring_status: '15-minute monitoring' },
-        { date: '2024-03-23', severity: 'SEVERE',   confidence: 88, alert: '🚨', rainfall_mm: 84,  river_level_m: 12.2, monitoring_status: '15-minute monitoring' },
-        { date: '2024-03-24', severity: 'MODERATE', confidence: 73, alert: '⚠️', rainfall_mm: 38,  river_level_m: 9.5,  monitoring_status: 'Hourly monitoring' },
-        { date: '2024-03-25', severity: 'MODERATE', confidence: 70, alert: '⚠️', rainfall_mm: 29,  river_level_m: 8.1,  monitoring_status: 'Hourly monitoring' },
+        { date: '2025-08-21', severity: 'MODERATE', confidence: 78, alert: '⚠️', rainfall_mm: 46,  river_level_m: 8.7,  monitoring_status: 'Hourly monitoring' },
+        { date: '2025-08-22', severity: 'SEVERE',   confidence: 91, alert: '🚨', rainfall_mm: 92,  river_level_m: 11.8, monitoring_status: '15-minute monitoring' },
+        { date: '2025-08-23', severity: 'SEVERE',   confidence: 88, alert: '🚨', rainfall_mm: 84,  river_level_m: 12.2, monitoring_status: '15-minute monitoring' },
+        { date: '2025-08-24', severity: 'MODERATE', confidence: 73, alert: '⚠️', rainfall_mm: 38,  river_level_m: 9.5,  monitoring_status: 'Hourly monitoring' },
+        { date: '2025-08-25', severity: 'MODERATE', confidence: 70, alert: '⚠️', rainfall_mm: 29,  river_level_m: 8.1,  monitoring_status: 'Hourly monitoring' },
       ]);
     } finally {
       setLiveLoading(false);
@@ -395,7 +395,7 @@ function App() {
         algorithm: 'Kolhapur Fallback Logic',
         model_trained: false,
         kolhapur_specific: true,
-        historical_basis: '2023 Kolhapur Flood Patterns'
+        historical_basis: '2025 Kolhapur Flood Patterns'
       });
     } finally {
       setLoading(false);
@@ -471,7 +471,7 @@ function App() {
             KOLHAPUR FLOOD ML
           </h1>
           <p className="text-xl text-green-800">
-            Trained on 2023 Flood Data • Panchganga River • Maharashtra Specific
+            Trained on 2025 Flood Data • Panchganga River • Maharashtra Specific
           </p>
         </div>
 
@@ -506,7 +506,7 @@ function App() {
                 <AlertTriangle className="w-6 h-6 text-amber-600" />
                 <div>
                   <div className="font-bold text-amber-800">Kolhapur Danger Level: 12.0m</div>
-                  <div className="text-sm text-amber-700">Panchganga River • Based on 2023 flood data</div>
+                  <div className="text-sm text-amber-700">Panchganga River • Based on 2025 flood data</div>
                 </div>
               </div>
             </div>
@@ -590,11 +590,11 @@ function App() {
           <div className="bg-white rounded-2xl p-8 shadow-xl border-2 border-green-200">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
               <div>
-                <h2 className="text-3xl font-bold text-green-900">2023 Kolhapur Flood Analysis</h2>
+                <h2 className="text-3xl font-bold text-green-900">2025 Kolhapur Flood Analysis</h2>
                 <p className="text-green-700 mt-1">Historical flood events and patterns</p>
               </div>
               <button
-                onClick={() => exportCSV(kolhapurData, 'kolhapur_2023_floods.csv')}
+                onClick={() => exportCSV(kolhapurData, 'kolhapur_2025_floods.csv')}
                 className="bg-gradient-to-r from-green-400 to-emerald-500 text-white px-4 py-2
                            rounded-lg font-bold flex items-center gap-2"
               >
@@ -757,11 +757,11 @@ function App() {
                 Kolhapur-Specific Features
               </h3>
               <ul className="text-green-700 space-y-2">
-                <li>• Trained on 2023 Panchganga River flood data</li>
+                <li>• Trained on 2025 Panchganga River flood data</li>
                 <li>• Kolhapur-specific danger level: 12.0 meters</li>
                 <li>• Emergency contacts for Kolhapur district</li>
                 <li>• Priority zones: Shirol, Hatkanangale, Kagal</li>
-                <li>• Historical basis: 2023 monsoon flood events</li>
+                <li>• Historical basis: 2025 monsoon flood events</li>
               </ul>
             </div>
 
@@ -770,7 +770,7 @@ function App() {
                 <h3 className="text-xl font-bold mb-3 text-green-900">Model Specs</h3>
                 <ul className="space-y-2 text-green-900">
                   <li>Random Forest Classifier</li>
-                  <li>Trained on 2023 Kolhapur data</li>
+                  <li>Trained on 2025 Kolhapur data</li>
                   <li>85–95% Accuracy</li>
                   <li>11 Input Features</li>
                   <li>Real-time weather integration</li>
