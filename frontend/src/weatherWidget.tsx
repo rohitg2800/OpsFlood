@@ -1,17 +1,33 @@
-// src/components/WeatherWidget.tsx
 import React, { useState, useEffect } from 'react';
 import { Wind, Droplets, ThermometerSun } from 'lucide-react';
 import axios from 'axios';
 
-interface WeatherData {
+export interface WeatherData {
   temp: number;
   humidity: number;
   windSpeed: number;
   description: string;
   icon: string;
+  pressure?: number;
 }
 
-const WeatherWidget: React.FC = () => {
+export interface LocationData {
+  name: string;
+  lat: number;
+  lon: number;
+  country: string;
+  state?: string;
+}
+
+export interface WeatherWidgetProps {
+  onWeatherSelect: (weatherData: WeatherData) => void;
+  onLocationSelect: (location: LocationData) => void;
+}
+
+const WeatherWidget: React.FC<WeatherWidgetProps> = ({ 
+  onWeatherSelect, 
+  onLocationSelect 
+}) => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -25,23 +41,27 @@ const WeatherWidget: React.FC = () => {
         const res = await axios.get(
           `https://api.openweathermap.org/data/2.5/weather?lat=16.6993&lon=74.2403&appid=${API_KEY}&units=metric`
         );
-        setWeather({
+        const weatherData: WeatherData = {
           temp: Math.round(res.data.main.temp),
           humidity: res.data.main.humidity,
           windSpeed: Math.round(res.data.wind.speed * 3.6), // m/s to km/h
           description: res.data.weather[0].description,
           icon: `https://openweathermap.org/img/wn/${res.data.weather[0].icon}@2x.png`
-        });
+        };
+        setWeather(weatherData);
+        onWeatherSelect(weatherData);  // Call callback with weather data
       } catch (error) {
         console.error("Error fetching live weather", error);
-        // Fallback mock data if API key is missing or fails
-        setWeather({
+        // Fallback mock data
+        const fallbackData: WeatherData = {
           temp: 29,
           humidity: 78,
           windSpeed: 15,
           description: "moderate rain",
           icon: "https://openweathermap.org/img/wn/10d@2x.png"
-        });
+        };
+        setWeather(fallbackData);
+        onWeatherSelect(fallbackData);
       } finally {
         setLoading(false);
       }
@@ -51,7 +71,7 @@ const WeatherWidget: React.FC = () => {
     // Refresh every 10 minutes
     const interval = setInterval(fetchWeather, 600000); 
     return () => clearInterval(interval);
-  }, []);
+  }, [onWeatherSelect]);
 
   if (loading) {
     return <div className="animate-pulse bg-white/50 h-32 rounded-3xl backdrop-blur-md"></div>;
