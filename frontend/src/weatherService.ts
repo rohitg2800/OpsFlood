@@ -54,9 +54,9 @@ export interface LocationData {
 }
 
 class WeatherService {
-  private openWeatherApiKey = 'YOUR_OPENWEATHER_API_KEY'; // Replace with your API key
-  private visualCrossingApiKey = 'YOUR_VISUAL_CROSSING_API_KEY'; // Optional
-  private weatherApiKey = 'YOUR_WEATHERAPI_KEY'; // Optional
+  private openWeatherApiKey = '***REMOVED***'; // Replace with your API key
+  // private visualCrossingApiKey = 'YOUR_VISUAL_CROSSING_API_KEY'; // Optional
+  // private weatherApiKey = 'YOUR_WEATHERAPI_KEY'; // Optional
 
   // List of major Indian cities for quick selection
   readonly indianCities: LocationData[] = [
