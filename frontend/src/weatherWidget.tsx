@@ -16,14 +16,14 @@ const WeatherWidget: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Free API Key from OpenWeatherMap
-  const API_KEY = 'YOUR_OPENWEATHER_API_KEY'; 
+  const API_KEY = 'b435f0df4bcc5fd08ef7b8ef517ba504'; 
   const CITY = 'Kolhapur';
 
   useEffect(() => {
     const fetchWeather = async () => {
       try {
         const res = await axios.get(
-          `https://api.openweathermap.org/data/2.5/weather?q=${CITY}&units=metric&appid=${API_KEY}`
+          `https://api.openweathermap.org/data/2.5/weather?lat=16.6993&lon=74.2403&appid=${API_KEY}&units=metric`
         );
         setWeather({
           temp: Math.round(res.data.main.temp),
