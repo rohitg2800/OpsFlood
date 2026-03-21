@@ -10,32 +10,29 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import WeatherWidget from './weatherWidget';
+// import { WeatherData,  LocationData } from './weatherWidget';  // ✅ Keep these imports
 
 const API_BASE = 'http://127.0.0.1:8000';
 
-// Updated interfaces for Kolhapur-specific ML backend
+// Keep ONLY these App-specific interfaces:
 interface Prediction {
   severity: 'SEVERE' | 'MODERATE';
   confidence: number;
   confidence_percent: number;
   alert: string;
-  probabilities?: {
-    SEVERE: number;
-    MODERATE: number;
-  };
+  probabilities?: { SEVERE: number; MODERATE: number; };
   algorithm?: string;
   model_trained?: boolean;
   kolhapur_specific?: boolean;
   historical_basis?: string;
   danger_level?: number;
   monitoring?: {
-    level: string;
-    action: string;
-    frequency: string;
-    priority_zones: string[];
-    emergency_contacts?: string[];
+    level: string; action: string; frequency: string;
+    priority_zones: string[]; emergency_contacts?: string[];
   };
 }
+
+// ... rest of your interfaces (KolhapurEvent, LiveEvent, FormDataType) stay the same
 
 interface LocationData {
   name: string;
