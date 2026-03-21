@@ -1,6 +1,6 @@
 // src/components/WeatherWidget.tsx
 import React, { useState, useEffect } from 'react';
-import { CloudRain, Wind, Droplets, ThermometerSun } from 'lucide-react';
+import { Wind, Droplets, ThermometerSun } from 'lucide-react';
 import axios from 'axios';
 
 interface WeatherData {
