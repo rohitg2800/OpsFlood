@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kolhapur Flood Predictor - INDOFLOODS ML</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Weather Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.12/css/weather-icons.min.css">
+  
+  <!-- Custom Tailwind config -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            'sans': ['Inter', 'ui-sans-serif', 'system-ui'],
+            'mono': ['JetBrains Mono', 'monospace']
+          },
+          animation: {
+            'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'float': 'float 6s ease-in-out infinite',
+            'float-slow': 'float 8s ease-in-out infinite',
+            'rain': 'rain 1.5s linear infinite',
+            'rain-slow': 'rain 3s linear infinite',
+            'glow': 'glow 3s ease-in-out infinite alternate',
+            'glow-strong': 'glow 2s ease-in-out infinite alternate',
+            'bounce-slow': 'bounce 4s infinite',
+            'shimmer': 'shimmer 8s ease-in-out infinite',
+            'ripple': 'ripple 6s linear infinite',
+            'fade-in': 'fadeIn 1s ease-out forwards',
+            'slide-up': 'slideUp 0.8s ease-out forwards',
+            'spin-slow': 'spin 3s linear infinite',
+            'meteor': 'meteor 5s linear infinite',
+            'lightning': 'lightning 2s ease-in-out infinite'
+          },
+          keyframes: {
+            float: {
+              '0%, 100%': { transform: 'translateY(0px) rotate(0deg)' },
+              '33%': { transform: 'translateY(-15px) rotate(2deg)' },
+              '66%': { transform: 'translateY(-8px) rotate(-1deg)' }
+            },
+            rain: {
+              '0%': { 
+                transform: 'translateY(-100vh) translateX(0px) rotate(12deg)',
+                opacity: '0.8'
+              },
+              '100%': { 
+                transform: 'translateY(100vh) translateX(20px) rotate(12deg)',
+                opacity: '0.2'
+              }
+            },
+            glow: {
+              '0%': { 
+                boxShadow: '0 0 25px rgba(251,191,36,0.4)',
+                filter: 'brightness(1)'
+              },
+              '100%': { 
+                boxShadow: '0 0 45px rgba(251,191,36,0.7)',
+                filter: 'brightness(1.1)'
+              }
+            },
+            shimmer: {
+              '0%, 100%': { 
+                backgroundPosition: '-200% center',
+                opacity: '0.9'
+              },
+              '50%': { 
+                backgroundPosition: '200% center',
+                opacity: '1'
+              }
+            },
+            ripple: {
+              '0%': { 
+                transform: 'scale(0.8)',
+                opacity: '1'
+              },
+              '100%': { 
+                transform: 'scale(2.5)',
+                opacity: '0'
+              }
+            },
+            fadeIn: {
+              '0%': { 
+                opacity: '0',
+                transform: 'translateY(20px)'
+              },
+              '100%': { 
+                opacity: '1',
+                transform: 'translateY(0)'
+              }
+            },
+            slideUp: {
+              '0%': { 
+                opacity: '0',
+                transform: 'translateY(40px) scale(0.95)'
+              },
+              '100%': { 
+                opacity: '1',
+                transform: 'translateY(0) scale(1)'
+              }
+            },
+            meteor: {
+              '0%': { 
+                transform: 'translateX(-100px) translateY(-100px) rotate(45deg)',
+                opacity: '1'
+              },
+              '100%': { 
+                transform: 'translateX(100vw) translateY(100vh) rotate(45deg)',
+                opacity: '0'
+              }
+            },
+            lightning: {
+              '0%, 90%, 100%': { opacity: '0' },
+              '10%, 20%': { opacity: '1' }
+            }
+          },
+          colors: {
+            monsoon: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              200: '#bae6fd',
+              300: '#7dd3fc',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e'
+            },
+            storm: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              200: '#ddd6fe',
+              300: '#c4b5fd',
+              400: '#a78bfa',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9',
+              800: '#5b21b6',
+              900: '#4c1d95'
+            },
+            amber: {
+              950: '#1e1900'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Enhanced CSS with weather animations -->
+  <style>
+    :root {
+      --rain-color: rgba(96, 165, 250, 0.15);
+      --rain-color-2: rgba(59, 130, 246, 0.1);
+      --rain-size: 1.5px;
+      --cloud-opacity: 0.08;
+    }
+
+    * {
+      font-feature-settings: 'rlig' 1, 'calt' 1;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: 
+        radial-gradient(ellipse at 20% 20%, rgba(253, 230, 138, 0.4) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(251, 191, 36, 0.3) 0%, transparent 50%),
+        radial-gradient(ellipse at 40% 40%, rgba(252, 211, 77, 0.2) 0%, transparent 50%),
+        linear-gradient(135deg, #fef3c7 0%, #fde68a 33%, #fcd34d 66%, #fbbf24 100%);
+      background-attachment: fixed;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    /* Weather animations */
+    .weather-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: -10;
+      overflow: hidden;
+    }
+
+    .raindrop {
+      position: absolute;
+      width: var(--rain-size);
+      height: 35px;
+      background: linear-gradient(to bottom, 
+        rgba(96, 165, 250, 0.8) 0%, 
+        rgba(59, 130, 246, 0.4) 30%, 
+        rgba(37, 99, 235, 0.2) 100%);
+      animation-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      border-radius: 50% 50% 60% 60%;
+      filter: blur(0.3px);
+    }
+
+    .cloud {
+      position: absolute;
+      background: rgba(255, 255, 255, var(--cloud-opacity));
+      border-radius: 50%;
+      backdrop-filter: blur(15px);
+      filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
+    }
+
+    /* Weather condition animations */
+    .lightning-flash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.8);
+      animation: lightning 4s ease-in-out infinite;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .snowflake {
+      position: absolute;
+      background: white;
+      border-radius: 50%;
+      filter: blur(1px);
+      animation: float 8s linear infinite;
+    }
+
+    .fog-layer {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(180deg, 
+        rgba(255,255,255,0) 0%,
+        rgba(255,255,255,0.3) 50%,
+        rgba(255,255,255,0) 100%);
+      animation: float-slow 20s linear infinite;
+    }
+
+    /* Glassmorphism effects */
+    .glass-card {
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(24px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-card:hover {
+      transform: translateY(-4px) scale(1.01);
+      box-shadow: 
+        0 20px 50px rgba(0, 0, 0, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    }
+
+    /* Weather icon animations */
+    .weather-icon {
+      filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+      transition: all 0.3s ease;
+    }
+
+    .weather-icon.sun {
+      animation: spin-slow 20s linear infinite;
+    }
+
+    .weather-icon.cloud {
+      animation: float 6s ease-in-out infinite;
+    }
+
+    .weather-icon.rain {
+      animation: bounce-slow 2s infinite;
+    }
+
+    /* Gradient text */
+    .gradient-text {
+      background: linear-gradient(
+        135deg, 
+        #fbbf24 0%, 
+        #f59e0b 25%, 
+        #d97706 50%, 
+        #b45309 75%, 
+        #92400e 100%
+      );
+      background-size: 200% 200%;
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: shimmer 6s ease-in-out infinite;
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+      :root {
+        --rain-size: 1px;
+        --cloud-opacity: 0.06;
+      }
+      
+      .weather-canvas {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+
+<body class="relative min-h-screen overflow-x-hidden">
+  <!-- Weather Canvas -->
+  <div class="weather-canvas">
+    <div id="rain-container"></div>
+    <div id="weather-effects"></div>
+  </div>
+
+  <!-- Main Content -->
+  <div id="root" class="relative z-10"></div>
+
+  <script type="module" src="/src/main.tsx"></script>
+
+  <!-- Weather Animation System -->
+  <script>
+    class WeatherAnimationSystem {
+      constructor() {
+        this.rainContainer = document.getElementById('rain-container');
+        this.weatherEffects = document.getElementById('weather-effects');
+        this.currentWeather = 'clear';
+        this.init();
+      }
+
+      init() {
+        this.createRain();
+        this.createClouds();
+        this.animateWeather();
+      }
+
+      createRain() {
+        if (!this.rainContainer) return;
+        
+        for (let i = 0; i < 80; i++) {
+          const drop = document.createElement('div');
+          drop.className = 'raindrop';
+          
+          const left = Math.random() * 100;
+          const duration = Math.random() * 1 + 1.2;
+          const delay = Math.random() * 3;
+          const height = Math.random() * 20 + 25;
+          const opacity = Math.random() * 0.4 + 0.3;
+          
+          drop.style.cssText = `
+            left: ${left}%;
+            animation: rain ${duration}s linear ${delay}s infinite;
+            height: ${height}px;
+            opacity: ${opacity};
+          `;
+
+          this.rainContainer.appendChild(drop);
+        }
+      }
+
+      createClouds() {
+        if (!this.weatherEffects) return;
+
+        const clouds = [
+          { left: '5%', width: '180px', height: '60px', top: '15%', delay: '0s' },
+          { left: '65%', width: '220px', height: '70px', top: '35%', delay: '1s' },
+          { left: '15%', width: '160px', height: '50px', top: '75%', delay: '2s' },
+          { left: '75%', width: '200px', height: '65px', top: '8%', delay: '3s' }
+        ];
+
+        clouds.forEach(cloud => {
+          const cloudEl = document.createElement('div');
+          cloudEl.className = 'cloud';
+          cloudEl.style.cssText = `
+            left: ${cloud.left};
+            width: ${cloud.width};
+            height: ${cloud.height};
+            top: ${cloud.top};
+            animation: float 20s ease-in-out ${cloud.delay} infinite;
+          `;
+          this.weatherEffects.appendChild(cloudEl);
+        });
+      }
+
+      setWeatherCondition(condition) {
+        this.currentWeather = condition;
+        this.updateWeatherEffects();
+      }
+
+      updateWeatherEffects() {
+        if (!this.weatherEffects) return;
+
+        // Clear existing effects
+        const existingEffects = this.weatherEffects.querySelectorAll('.weather-effect');
+        existingEffects.forEach(el => el.remove());
+
+        switch(this.currentWeather) {
+          case 'thunderstorm':
+            this.createLightning();
+            this.createHeavyRain();
+            break;
+          case 'rain':
+            this.createHeavyRain();
+            break;
+          case 'snow':
+            this.createSnow();
+            break;
+          case 'fog':
+            this.createFog();
+            break;
+          case 'clear':
+            this.createSunbeams();
+            break;
+          case 'clouds':
+            this.createMoreClouds();
+            break;
+        }
+      }
+
+      createLightning() {
+        const lightning = document.createElement('div');
+        lightning.className = 'lightning-flash weather-effect';
+        this.weatherEffects.appendChild(lightning);
+      }
+
+      createHeavyRain() {
+        for (let i = 0; i < 50; i++) {
+          const drop = document.createElement('div');
+          drop.className = 'raindrop weather-effect';
+          
+          const left = Math.random() * 100;
+          const duration = Math.random() * 0.5 + 0.5;
+          const delay = Math.random() * 2;
+          
+          drop.style.cssText = `
+            left: ${left}%;
+            animation: rain ${duration}s linear ${delay}s infinite;
+            height: 45px;
+            opacity: ${Math.random() * 0.6 + 0.4};
+          `;
+
+          this.weatherEffects.appendChild(drop);
+        }
+      }
+
+      createSnow() {
+        for (let i = 0; i < 30; i++) {
+          const flake = document.createElement('div');
+          flake.className = 'snowflake weather-effect';
+          
+          const left = Math.random() * 100;
+          const size = Math.random() * 4 + 2;
+          const duration = Math.random() * 10 + 10;
+          const delay = Math.random() * 5;
+          
+          flake.style.cssText = `
+            left: ${left}%;
+            width: ${size}px;
+            height: ${size}px;
+            animation: float ${duration}s linear ${delay}s infinite;
+            opacity: ${Math.random() * 0.8 + 0.2};
+          `;
+
+          this.weatherEffects.appendChild(flake);
+        }
+      }
+
+      createFog() {
+        const fog = document.createElement('div');
+        fog.className = 'fog-layer weather-effect';
+        this.weatherEffects.appendChild(fog);
+      }
+
+      createSunbeams() {
+        for (let i = 0; i < 3; i++) {
+          const beam = document.createElement('div');
+          beam.className = 'weather-effect';
+          beam.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: ${20 + i * 30}%;
+            width: 100px;
+            height: 100%;
+            background: linear-gradient(90deg, 
+              rgba(255,255,255,0) 0%,
+              rgba(255,255,255,0.1) 50%,
+              rgba(255,255,255,0) 100%);
+            transform: rotate(${15 + i * 10}deg);
+            animation: float-slow ${15 + i * 5}s linear infinite;
+            opacity: 0.3;
+          `;
+          this.weatherEffects.appendChild(beam);
+        }
+      }
+
+      createMoreClouds() {
+        for (let i = 0; i < 3; i++) {
+          const cloud = document.createElement('div');
+          cloud.className = 'cloud weather-effect';
+          
+          const left = Math.random() * 80 + 10;
+          const top = Math.random() * 60 + 20;
+          const width = Math.random() * 100 + 100;
+          const height = width * 0.3;
+          
+          cloud.style.cssText = `
+            left: ${left}%;
+            top: ${top}%;
+            width: ${width}px;
+            height: ${height}px;
+            animation: float ${Math.random() * 10 + 15}s ease-in-out infinite;
+            opacity: ${Math.random() * 0.1 + 0.05};
+          `;
+
+          this.weatherEffects.appendChild(cloud);
+        }
+      }
+
+      animateWeather() {
+        // Simulate weather changes every 30 seconds
+        setInterval(() => {
+          const conditions = ['clear', 'clouds', 'rain', 'thunderstorm'];
+          const randomCondition = conditions[Math.floor(Math.random() * conditions.length)];
+          this.setWeatherCondition(randomCondition);
+        }, 30000);
+      }
+    }
+
+    // Initialize weather system
+    document.addEventListener('DOMContentLoaded', () => {
+      window.weatherSystem = new WeatherAnimationSystem();
+    });
+  </script>
+</body>
+</html>

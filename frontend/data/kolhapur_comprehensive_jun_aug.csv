@@ -1,0 +1,4 @@
+Month,Average_High_Temp_C,Average_Low_Temp_C,Average_Pressure_mbar,Average_Wind_Speed_kmh,Average_Max_Wind_Speed_kmh,Average_Wind_Gust_Speed_kmh,Average_Humidity_Percent,Average_Rainfall_mm,Average_Rainfall_Days,Average_Daylight_Hours,Average_Sunshine_Hours,Average_Sunshine_Days,Average_UV_Index,Average_Cloud_Cover_Percent,Average_Visibility_km
+Jun,29.2,22.8,1006.7,15.7,17.0,20.3,78,95,21.8,13h 1m,6h 2m,6.0,6,64,10
+Jul,25.8,21.9,1006.8,17.0,18.2,22.8,86,87,23.4,13h 0m,2h 5m,5.4,5,85,9
+Aug,25.9,21.0,1007.7,14.7,16.1,19.8,89,53,21.3,12h 4m,3h 2m,7.0,5,82,8
