@@ -15,8 +15,7 @@ import axios from 'axios';
 import WeatherWidget from './weatherWidget';
 import type { WeatherData, LocationData } from './weatherService';
 
-const API_BASE = 'http://127.0.0.1:8000';
-
+const API_BASE = 'https://floodredfl.onrender.com';
 // --- Interfaces ---
 interface Prediction {
   severity: 'SEVERE' | 'MODERATE' | 'LOW';
