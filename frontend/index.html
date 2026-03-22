@@ -641,7 +641,7 @@
         let result;
         try {
           // ==========================================
-          // CRITICAL FIX: HARDCODED TO YOUR RENDER URL
+          // 🚀 FULLY CONNECTED TO LIVE RENDER BACKEND
           // ==========================================
           const res = await fetch('https://floodredfl.onrender.com/predict', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -978,6 +978,7 @@
     // ==========================================
     window.checkAPIHealth = async function() {
       try {
+        // 🚀 FULLY CONNECTED TO LIVE RENDER BACKEND
         const res = await fetch('https://floodredfl.onrender.com/');
         if (res.ok) {
           const s = document.getElementById('api-status');
