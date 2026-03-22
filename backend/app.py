@@ -34,7 +34,7 @@ app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5500", "http://localhost:3000"], # Specific URLs only
+    allow_origins=["http://127.0.0.1:5500", "http://localhost:3000","https://floodredfl.onrender.com"], # Specific URLs only
     allow_credentials=True, 
     allow_methods=["*"],
     allow_headers=["*"],
