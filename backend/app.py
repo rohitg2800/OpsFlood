@@ -1,20 +1,21 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+from pydantic import BaseModel
 import numpy as np
 import joblib
-from typing import Dict, Any, List
-from datetime import datetime
+from typing import Dict, Any
 import uvicorn
-from pydantic import BaseModel
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 import warnings
+import os
+
 warnings.filterwarnings('ignore')
 
-# Pydantic model
+# ============= 1. PYDANTIC SCHEMA =============
+# Matches the Frontend payload perfectly
 class FloodPredictionInput(BaseModel):
     Peak_Flood_Level_m: float = 12.74
     Event_Duration_days: float = 3
@@ -28,32 +29,22 @@ class FloodPredictionInput(BaseModel):
     T6d: float = 384.4
     T7d: float = 455.6
 
-app = FastAPI(title="🌧️ Kolhapur Flood Prediction API", version="7.0")
+# ============= 2. FASTAPI SETUP =============
+app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://127.0.0.1:5500", "http://localhost:3000"], # Specific URLs only
+    allow_credentials=True, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============= REAL KOLHAPUR FLOOD DATA TRAINING =============
-
+# ============= 3. MACHINE LEARNING CORE =============
 class KolhapurFloodPredictor:
-    """ML model trained on real Kolhapur flood data"""
+    """ML model trained on historical & synthetic flood data"""
     
     def __init__(self):
-        self.model = None
-        self.scaler = StandardScaler()
-        self.feature_importance = {}
-        self.is_trained = False
-        
-        self.initialize_model()
-        self.load_pretrained_model()
-    
-    def initialize_model(self):
-        """Initialize Random Forest model optimized for flood prediction"""
         self.model = RandomForestClassifier(
             n_estimators=150,
             max_depth=12,
@@ -62,360 +53,214 @@ class KolhapurFloodPredictor:
             random_state=42,
             class_weight='balanced'
         )
+        self.scaler = StandardScaler()
+        self.feature_importance = {}
+        self.is_trained = False
+        
+        self.load_pretrained_model()
     
     def load_pretrained_model(self):
-        """Load pre-trained model if available"""
-        try:
-            self.model = joblib.load('kolhapur_flood_model.pkl')
-            self.scaler = joblib.load('kolhapur_flood_scaler.pkl')
-            self.feature_importance = joblib.load('kolhapur_flood_features.pkl')
-            self.is_trained = True
-            print("✅ Kolhapur flood model loaded successfully!")
-        except:
-            print("⚠️ Training model with real Kolhapur flood data...")
+        """Load pre-trained model if available, else train a new one"""
+        if os.path.exists('flood_model.pkl') and os.path.exists('flood_scaler.pkl'):
+            try:
+                self.model = joblib.load('flood_model.pkl')
+                self.scaler = joblib.load('flood_scaler.pkl')
+                self.feature_importance = joblib.load('flood_features.pkl')
+                self.is_trained = True
+                print("✅ ML Model loaded successfully from disk!")
+            except Exception as e:
+                print(f"⚠️ Error loading model: {e}. Retraining...")
+                self.train_with_real_data()
+        else:
+            print("⚠️ No pre-trained model found. Initializing training sequence...")
             self.train_with_real_data()
     
-    def get_real_kolhapur_flood_data(self):
-        """Real Kolhapur flood events data based on historical records"""
+    def get_training_data(self):
+        """Generates a robust 3-Class dataset: 0 (LOW), 1 (MODERATE), 2 (SEVERE)"""
         
-        # Actual Kolhapur flood parameters from 2025 monsoon
-        real_flood_events = [
-            # Format: [Peak_Level, Duration, Time_to_Peak, Recession, T1d, T2d, T3d, T4d, T5d, T6d, T7d, SEVERE?]
-            
-            # SEVERE Flood Events (Based on 2025 Kolhapur floods)
-            [12.8, 4, 2, 3, 180, 320, 420, 450, 480, 490, 510, 1],  # July 2025 major flood
-            [12.5, 3, 2, 2, 160, 280, 380, 420, 450, 460, 480, 1],  # August 2025 flood
-            [12.9, 5, 3, 4, 190, 350, 440, 470, 490, 500, 520, 1],  # Peak flood event
-            [12.6, 4, 2, 3, 170, 300, 400, 430, 460, 470, 490, 1],  # Moderate-severe flood
-            
-            # MODERATE Flood Events
-            [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 0],  # Normal monsoon
-            [11.5, 2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 0],  # Minor flooding
-            [11.9, 3, 2, 2, 130, 220, 300, 340, 370, 390, 410, 0],  # Elevated levels
-            [11.7, 3, 2, 2, 110, 190, 270, 310, 340, 360, 380, 0],  # Warning level
+        real_events = [
+            [13.5, 5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 2], # Extreme Severe
+            [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2], # Severe
+            [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 1], # Moderate
+            [11.2, 2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 1], # Moderate
+            [9.5,  1, 1, 1,  50,  80, 100, 120, 150, 160, 180, 0], # Low
+            [8.0,  0, 0, 1,  10,  20,  30,  40,  50,  60,  80, 0], # Low
         ]
         
-        # Generate additional synthetic data based on real patterns
         synthetic_data = []
-        for _ in range(200):  # Add more training samples
-            # SEVERE flood pattern (based on Kolhapur characteristics)
-            if np.random.random() > 0.6:
-                peak_level = np.random.uniform(12.3, 13.5)  # Kolhapur danger: 12.0m+
-                rainfall_7day = np.random.uniform(450, 600)  # Heavy rainfall
-                duration = np.random.uniform(3, 5)
-                time_to_peak = np.random.uniform(1.5, 3)
+        for _ in range(1000): # Increased sample size for better learning
+            rand = np.random.random()
+            if rand > 0.66: # 34% SEVERE
+                peak = np.random.uniform(12.2, 14.5)
+                rain_7d = np.random.uniform(450, 700)
+                dur = np.random.uniform(3, 7)
+                label = 2
+            elif rand > 0.33: # 33% MODERATE
+                peak = np.random.uniform(10.5, 12.1)
+                rain_7d = np.random.uniform(250, 449)
+                dur = np.random.uniform(2, 4)
                 label = 1
-            else:
-                # MODERATE flood pattern
-                peak_level = np.random.uniform(10.5, 12.2)  # Below danger level
-                rainfall_7day = np.random.uniform(300, 449)  # Moderate rainfall
-                duration = np.random.uniform(2, 4)
-                time_to_peak = np.random.uniform(2, 4)
+            else: # 33% LOW
+                peak = np.random.uniform(5.0, 10.4)
+                rain_7d = np.random.uniform(50, 249)
+                dur = np.random.uniform(0, 2)
                 label = 0
             
-            # Generate correlated rainfall data (Kolhapur pattern)
-            rainfall_pattern = np.random.normal(1, 0.2, 7)
-            rainfalls = rainfall_7day * rainfall_pattern / np.sum(rainfall_pattern)
+            # Distribute rain realistically across 7 days
+            rain_dist = np.random.dirichlet(np.ones(7), size=1)[0] * rain_7d
             
             event = [
-                peak_level, duration, time_to_peak, np.random.uniform(2, 4),
-                max(rainfalls[0], 50), max(rainfalls[1], 50), max(rainfalls[2], 50),
-                max(rainfalls[3], 50), max(rainfalls[4], 50), max(rainfalls[5], 50),
-                max(rainfalls[6], 50), label
+                peak, dur, np.random.uniform(1, 3), np.random.uniform(1, 4),
+                rain_dist[0], rain_dist[1], rain_dist[2], rain_dist[3], 
+                rain_dist[4], rain_dist[5], rain_dist[6], label
             ]
             synthetic_data.append(event)
         
-        # Combine real and synthetic data
-        all_data = real_flood_events + synthetic_data
-        
-        # Convert to numpy arrays
-        data_array = np.array([event[:-1] for event in all_data])
-        labels_array = np.array([event[-1] for event in all_data])
-        
-        return data_array, labels_array
+        all_data = real_events + synthetic_data
+        X = np.array([event[:-1] for event in all_data])
+        y = np.array([event[-1] for event in all_data])
+        return X, y
     
     def train_with_real_data(self):
-        """Train model with real Kolhapur flood data"""
-        print("🔄 Training with real Kolhapur flood data...")
+        """Train Random Forest with scaled features"""
+        print("🔄 Training Multi-Class Flood Matrix...")
+        X, y = self.get_training_data()
         
-        # Get real training data
-        X, y = self.get_real_kolhapur_flood_data()
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         
-        # Check class distribution
-        unique, counts = np.unique(y, return_counts=True)
-        print(f"📊 Training data: {counts[1]} SEVERE events, {counts[0]} MODERATE events")
-        
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-        
-        # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
         
-        # Train model
         self.model.fit(X_train_scaled, y_train)
         
-        # Evaluate
-        y_pred = self.model.predict(X_test_scaled)
-        accuracy = accuracy_score(y_test, y_pred)
+        accuracy = accuracy_score(y_test, self.model.predict(X_test_scaled))
+        print(f"📈 Model Accuracy: {accuracy * 100:.1f}%")
         
-        # Detailed evaluation
-        report = classification_report(y_test, y_pred, output_dict=True)
-        print("📈 Model Performance:")
-        print(f"   Accuracy: {accuracy:.4f}")
-        print(f"   SEVERE Precision: {report['1']['precision']:.4f}")
-        print(f"   SEVERE Recall: {report['1']['recall']:.4f}")
-        
-        # Calculate feature importance
-        feature_names = [
-            'Peak_Flood_Level_m', 'Event_Duration_days', 'Time_to_Peak_days',
-            'Recession_Time_day', 'T1d', 'T2d', 'T3d', 'T4d', 'T5d', 'T6d', 'T7d'
-        ]
-        
-        importance = self.model.feature_importances_
-        self.feature_importance = dict(zip(feature_names, importance))
-        
-        # Print top features
-        sorted_features = sorted(self.feature_importance.items(), key=lambda x: x[1], reverse=True)
-        print("🔝 Top 3 Features:")
-        for feature, importance in sorted_features[:3]:
-            print(f"   {feature}: {importance:.4f}")
+        features = ['Peak_Level', 'Duration', 'Time_to_Peak', 'Recession', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+        self.feature_importance = dict(zip(features, self.model.feature_importances_))
         
         self.is_trained = True
-        
-        # Save model and components
-        joblib.dump(self.model, 'kolhapur_flood_model.pkl')
-        joblib.dump(self.scaler, 'kolhapur_flood_scaler.pkl')
-        joblib.dump(self.feature_importance, 'kolhapur_flood_features.pkl')
-        
-        print("✅ Kolhapur flood model trained and saved!")
+        joblib.dump(self.model, 'flood_model.pkl')
+        joblib.dump(self.scaler, 'flood_scaler.pkl')
+        joblib.dump(self.feature_importance, 'flood_features.pkl')
+        print("✅ ML Matrix Trained & Saved to disk!")
     
-    def predict_kolhapur_flood(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
-        """Predict flood severity specifically for Kolhapur conditions"""
-        
+    def predict_flood(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
+        """Core prediction logic bridging FastAPI to Sklearn"""
         try:
-            # Prepare features
             features = np.array([[
-                input_data.Peak_Flood_Level_m,
-                input_data.Event_Duration_days,
-                input_data.Time_to_Peak_days,
-                input_data.Recession_Time_day,
-                input_data.T1d,
-                input_data.T2d,
-                input_data.T3d,
-                input_data.T4d,
-                input_data.T5d,
-                input_data.T6d,
-                input_data.T7d
+                input_data.Peak_Flood_Level_m, input_data.Event_Duration_days,
+                input_data.Time_to_Peak_days, input_data.Recession_Time_day,
+                input_data.T1d, input_data.T2d, input_data.T3d,
+                input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
             ]])
             
-            # Scale features
             features_scaled = self.scaler.transform(features)
             
-            # Get prediction
-            prediction = self.model.predict(features_scaled)[0]
-            probabilities = self.model.predict_proba(features_scaled)[0]
+            pred_class = self.model.predict(features_scaled)[0]
+            probs = self.model.predict_proba(features_scaled)[0]
+            classes = self.model.classes_.tolist()
             
-            confidence = max(probabilities) * 100
+            # Bulletproof Probability Mapping
+            prob_dict = {"LOW": 0.0, "MODERATE": 0.0, "SEVERE": 0.0}
+            for cls, prob in zip(classes, probs):
+                if cls == 0: prob_dict["LOW"] = round(prob * 100, 1)
+                elif cls == 1: prob_dict["MODERATE"] = round(prob * 100, 1)
+                elif cls == 2: prob_dict["SEVERE"] = round(prob * 100, 1)
             
-            # Kolhapur-specific thresholds
-            if prediction == 1:
-                severity = "SEVERE"
-                # Kolhapur-specific confidence adjustment
-                if input_data.Peak_Flood_Level_m > 12.5:  # Historical danger level
-                    confidence = min(95, confidence + 5)
-            else:
-                severity = "MODERATE"
+            severity_map = {0: "LOW", 1: "MODERATE", 2: "SEVERE"}
+            severity = severity_map.get(pred_class, "LOW")
+            confidence = max(probs) * 100
             
             return {
                 "severity": severity,
-                "confidence": round(confidence, 1),
                 "confidence_percent": round(confidence, 1),
-                "probabilities": {
-                    "SEVERE": round(probabilities[1] * 100, 1),
-                    "MODERATE": round(probabilities[0] * 100, 1)
-                },
-                "algorithm": "Random Forest (Kolhapur-trained)",
-                "model_trained": self.is_trained,
-                "kolhapur_specific": True,
-                "historical_basis": "2025 Kolhapur Flood Data",
-                "danger_level": 12.0,  # Kolhapur specific danger level
-                "feature_importance": self.feature_importance
+                "probabilities": prob_dict,
+                "alert": "🚨" if severity == "SEVERE" else "⚠️" if severity == "MODERATE" else "🟢",
+                "algorithm": "RandomForest Classifier (Live Inference)",
+                "model_trained": True,
+                "danger_level": 12.0,
+                "risk_score": round(confidence)
             }
             
         except Exception as e:
-            print(f"❌ Prediction error: {e}")
-            return self.kolhapur_fallback_prediction(input_data)
+            print(f"❌ Prediction error: {e}. Executing Fallback.")
+            return self.fallback_prediction(input_data)
     
-    def kolhapur_fallback_prediction(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
-        """Kolhapur-specific fallback based on historical patterns"""
+    def fallback_prediction(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
+        """Hardcoded logic in case ML inference fails"""
+        peak = input_data.Peak_Flood_Level_m
+        rain = input_data.T7d
         
-        # Kolhapur-specific thresholds
-        peak_level = input_data.Peak_Flood_Level_m
-        rainfall_7day = input_data.T7d
-        
-        # Based on 2025 Kolhapur flood data
-        if peak_level > 12.5 or rainfall_7day > 480:  # 2025 flood thresholds
-            severity = "SEVERE"
-            confidence = 92.5
-        elif peak_level > 12.0 or rainfall_7day > 400:  # Kolhapur warning level
-            severity = "MODERATE" 
-            confidence = 78.3
+        if peak > 12.5 or rain > 450:
+            sev, conf = "SEVERE", 92.5
+        elif peak > 11.5 or rain > 300:
+            sev, conf = "MODERATE", 78.3
         else:
-            severity = "MODERATE"
-            confidence = 65.0
-        
+            sev, conf = "LOW", 85.0
+            
         return {
-            "severity": severity,
-            "confidence": confidence,
-            "confidence_percent": confidence,
-            "alert": "🚨" if severity == "SEVERE" else "⚠️",
-            "algorithm": "Kolhapur Historical Pattern",
+            "severity": sev,
+            "confidence_percent": conf,
+            "probabilities": {"SEVERE": conf if sev=="SEVERE" else 5, "MODERATE": conf if sev=="MODERATE" else 15, "LOW": conf if sev=="LOW" else 5},
+            "alert": "🚨" if sev == "SEVERE" else "⚠️" if sev == "MODERATE" else "🟢",
+            "algorithm": "Python Heuristic Fallback",
             "model_trained": False,
-            "kolhapur_specific": True,
-            "historical_basis": "2025 Flood Events"
+            "danger_level": 12.0,
+            "risk_score": int(conf)
         }
 
-# Initialize Kolhapur-specific predictor
-kolhapur_predictor = KolhapurFloodPredictor()
+predictor = KolhapurFloodPredictor()
 
+# ============= 4. API ENDPOINTS =============
 @app.get("/")
 async def root():
     return {
-        "service": "🌧️ Kolhapur Flood Prediction API",
-        "version": "7.0",
-        "model": "Trained on 202 Kolhapur Flood Data",
-        "location": "Kolhapur, Maharashtra, India",
-        "historical_basis": "2025 Panchganga River Flood Events",
-        "danger_level": "12.0 meters (Kolhapur specific)",
-        "model_trained": kolhapur_predictor.is_trained,
-        "endpoints": {
-            "POST /predict": "Kolhapur-specific flood prediction",
-            "GET /kolhapur-data": "2025 flood event information",
-            "GET /model-info": "Kolhapur model details"
-        }
+        "service": "INDOFLOODS ML Server",
+        "status": "Online",
+        "model_ready": predictor.is_trained
     }
+
+@app.post("/train")
+async def force_retrain():
+    """Endpoint to manually force the model to retrain"""
+    predictor.train_with_real_data()
+    return {"message": "Model retrained and saved successfully!"}
 
 @app.post("/predict")
 async def predict_flood(input_data: FloodPredictionInput):
-    """Kolhapur-specific flood prediction"""
-    
+    """Endpoint consumed by the frontend"""
     try:
-        result = kolhapur_predictor.predict_kolhapur_flood(input_data)
+        # Get ML Response
+        result = predictor.predict_flood(input_data)
         
-        # Kolhapur-specific monitoring recommendations
+        # Attach Monitoring Protocols
         if result["severity"] == "SEVERE":
             result["monitoring"] = {
-                "level": "RED ALERT - KOLHAPUR",
-                "action": "Evacuate low-lying areas: Shirol, Hatkanangale",
-                "frequency": "15-minute monitoring at Irwin Bridge",
-                "priority_zones": [
-                    "Riverside areas near Rankala Lake",
-                    "Shirol agricultural belt", 
-                    "Hatkanangale low-lying areas",
-                    "Irwin Bridge gauge station"
-                ],
-                "emergency_contacts": [
-                    "Kolhapur Disaster Management: 1077",
-                    "Collector Office: 0231-2650121",
-                    "Police Control: 100"
-                ]
+                "level": "CRITICAL EMERGENCY",
+                "action": "Evacuate vulnerable river basins immediately.",
+                "priority_zones": ["Primary Catchment", "Downstream Villages", "Low-lying urban zones"]
+            }
+        elif result["severity"] == "MODERATE":
+            result["monitoring"] = {
+                "level": "ELEVATED ALERT",
+                "action": "Deploy monitoring teams & prep pumps.",
+                "priority_zones": ["Drainage bottlenecks", "Main river gauge"]
             }
         else:
             result["monitoring"] = {
-                "level": "YELLOW ALERT - KOLHAPUR",
-                "action": "Monitor Panchganga River levels",
-                "frequency": "Hourly monitoring",
-                "priority_zones": [
-                    "Main gauge stations",
-                    "Bhimashankar Temple area",
-                    "Agricultural zones"
-                ]
+                "level": "STANDARD PROTOCOL",
+                "action": "Maintain normal surveillance.",
+                "priority_zones": ["None"]
             }
-        
-        result["timestamp"] = datetime.utcnow().isoformat() + "Z"
-        result["location"] = "Kolhapur, Maharashtra"
-        
-        print(f"✅ Kolhapur Prediction: {result['severity']} ({result['confidence']}%)")
+            
+        print(f"✅ Served Prediction: {result['severity']} ({result['confidence_percent']}%)")
         return result
         
     except Exception as e:
-        print(f"❌ Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/kolhapur-data")
-async def get_kolhapur_flood_data():
-    """Get real Kolhapur flood event information"""
-    return {
-        "city": "Kolhapur, Maharashtra",
-        "river": "Panchganga River",
-        "historical_floods": {
-            "2025": {
-                "peak_level": 12.8,
-                "date": "July 2025",
-                "affected_areas": ["Shirol", "Hatkanangale", "Kagal"],
-                "rainfall": "500mm cumulative",
-                "severity": "SEVERE"
-            },
-            "2021": {
-                "peak_level": 13.2,
-                "date": "August 2021", 
-                "affected_areas": ["Multiple talukas"],
-                "rainfall": "550mm cumulative",
-                "severity": "SEVERE"
-            },
-            "2019": {
-                "peak_level": 14.1,
-                "date": "August 2019",
-                "affected_areas": ["Widespread flooding"],
-                "rainfall": "600mm cumulative",
-                "severity": "EXTREME"
-            }
-        },
-        "danger_level": 12.0,
-        "warning_level": 11.0,
-        "gauge_stations": ["Irwin Bridge", "Bhimashankar", "Shirol"],
-        "emergency_contacts": {
-            "disaster_management": "1077",
-            "collector_office": "0231-2650121",
-            "police_control": "100"
-        }
-    }
-
-@app.get("/model-info")
-async def model_info():
-    """Get Kolhapur model information"""
-    return {
-        "model_trained": kolhapur_predictor.is_trained,
-        "algorithm": "Random Forest",
-        "training_data": "2025 Kolhapur Flood Events + Synthetic Data",
-        "location_specific": True,
-        "danger_threshold": 12.0,
-        "feature_importance": kolhapur_predictor.feature_importance,
-        "performance": "Optimized for Kolhapur conditions"
-    }
-
-@app.get("/kolhapur")
-async def get_kolhapur_events():
-    """Historical Kolhapur flood events for analysis"""
-    return {
-        "city": "Kolhapur, Maharashtra",
-        "river": "Panchganga River",
-        "historical_events": [
-            {"date": "2025-07-15", "severity": "SEVERE", "confidence": 92, "alert": "🚨", "peak_level": 12.8, "rainfall_7day": 510},
-            {"date": "2025-08-20", "severity": "SEVERE", "confidence": 89, "alert": "🚨", "peak_level": 12.5, "rainfall_7day": 480},
-            {"date": "2025-09-05", "severity": "MODERATE", "confidence": 75, "alert": "⚠️", "peak_level": 11.8, "rainfall_7day": 380},
-            {"date": "2025-09-25", "severity": "MODERATE", "confidence": 72, "alert": "⚠️", "peak_level": 11.5, "rainfall_7day": 350},
-            {"date": "2025-10-10", "severity": "MODERATE", "confidence": 68, "alert": "⚠️", "peak_level": 11.2, "rainfall_7day": 320}
-        ],
-        "current_risk_level": "Based on 2025 patterns"
-    }
-
 if __name__ == "__main__":
-    print("🚀 Starting Kolhapur Flood Prediction API v7.0")
-    print("📍 Specifically trained for Kolhapur, Maharashtra conditions")
-    print("🌊 Based on 2025 Panchganga River flood data")
-    print(f"📊 Model trained: {kolhapur_predictor.is_trained}")
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    print("🚀 Starting INDOFLOODS ML Backend...")
+    # NOTE: Run this via terminal using: uvicorn app:app --reload
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
