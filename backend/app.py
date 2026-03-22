@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse             
 from pydantic import BaseModel
 import numpy as np
 import joblib
@@ -15,7 +16,6 @@ import os
 warnings.filterwarnings('ignore')
 
 # ============= 1. PYDANTIC SCHEMA =============
-# Matches the Frontend payload perfectly
 class FloodPredictionInput(BaseModel):
     Peak_Flood_Level_m: float = 12.74
     Event_Duration_days: float = 3
@@ -33,9 +33,11 @@ class FloodPredictionInput(BaseModel):
 app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
 origins = [
-    "https://floodredfl.onrender.com", # Your production frontend
-    "http://localhost:3000",           # Your local React/Vue/Plain HTML dev server
+    "https://floodredfl.onrender.com", 
+    "http://localhost:3000",           
     "http://127.0.0.1:3000",
+    "http://localhost:5173",           # Added for Vite Frontend
+    "http://127.0.0.1:5173",
 ]
 
 app.add_middleware(
@@ -45,6 +47,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ✅ Global Exception Handler (Clears the JSONResponse warning)
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"CRITICAL ERROR: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"message": "Internal Server Error", "detail": str(exc)}
+    )
+
 # ============= 3. MACHINE LEARNING CORE =============
 class KolhapurFloodPredictor:
     """ML model trained on historical & synthetic flood data"""
@@ -82,36 +94,34 @@ class KolhapurFloodPredictor:
     
     def get_training_data(self):
         """Generates a robust 3-Class dataset: 0 (LOW), 1 (MODERATE), 2 (SEVERE)"""
-        
         real_events = [
-            [13.5, 5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 2], # Extreme Severe
-            [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2], # Severe
-            [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 1], # Moderate
-            [11.2, 2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 1], # Moderate
-            [9.5,  1, 1, 1,  50,  80, 100, 120, 150, 160, 180, 0], # Low
-            [8.0,  0, 0, 1,  10,  20,  30,  40,  50,  60,  80, 0], # Low
+            [13.5, 5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 2],
+            [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2],
+            [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 1],
+            [11.2, 2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 1],
+            [9.5,  1, 1, 1,  50,  80, 100, 120, 150, 160, 180, 0],
+            [8.0,  0, 0, 1,  10,  20,  30,  40,  50,  60,  80, 0],
         ]
         
         synthetic_data = []
-        for _ in range(1000): # Increased sample size for better learning
+        for _ in range(1000): 
             rand = np.random.random()
-            if rand > 0.66: # 34% SEVERE
+            if rand > 0.66: 
                 peak = np.random.uniform(12.2, 14.5)
                 rain_7d = np.random.uniform(450, 700)
                 dur = np.random.uniform(3, 7)
                 label = 2
-            elif rand > 0.33: # 33% MODERATE
+            elif rand > 0.33: 
                 peak = np.random.uniform(10.5, 12.1)
                 rain_7d = np.random.uniform(250, 449)
                 dur = np.random.uniform(2, 4)
                 label = 1
-            else: # 33% LOW
+            else: 
                 peak = np.random.uniform(5.0, 10.4)
                 rain_7d = np.random.uniform(50, 249)
                 dur = np.random.uniform(0, 2)
                 label = 0
             
-            # Distribute rain realistically across 7 days
             rain_dist = np.random.dirichlet(np.ones(7), size=1)[0] * rain_7d
             
             event = [
@@ -166,7 +176,6 @@ class KolhapurFloodPredictor:
             probs = self.model.predict_proba(features_scaled)[0]
             classes = self.model.classes_.tolist()
             
-            # Bulletproof Probability Mapping
             prob_dict = {"LOW": 0.0, "MODERATE": 0.0, "SEVERE": 0.0}
             for cls, prob in zip(classes, probs):
                 if cls == 0: prob_dict["LOW"] = round(prob * 100, 1)
@@ -236,10 +245,8 @@ async def force_retrain():
 async def predict_flood(input_data: FloodPredictionInput):
     """Endpoint consumed by the frontend"""
     try:
-        # Get ML Response
         result = predictor.predict_flood(input_data)
         
-        # Attach Monitoring Protocols
         if result["severity"] == "SEVERE":
             result["monitoring"] = {
                 "level": "CRITICAL EMERGENCY",
@@ -265,7 +272,16 @@ async def predict_flood(input_data: FloodPredictionInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ✅ Catch-All Route (Must be the very last route before __main__)
+@app.api_route("/{path_name:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def catch_all(path_name: str):
+    return JSONResponse(
+        status_code=404, 
+        content={"error": f"The path '{path_name}' was not found."}
+    )
+
 if __name__ == "__main__":
     print("🚀 Starting INDOFLOODS ML Backend...")
-    # NOTE: Run this via terminal using: uvicorn app:app --reload
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    # ✅ Fixed Port Binding for Render Compatibility
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
