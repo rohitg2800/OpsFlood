@@ -32,14 +32,19 @@ class FloodPredictionInput(BaseModel):
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
+origins = [
+    "https://floodredfl.onrender.com", # Your production frontend
+    "http://localhost:3000",           # Your local React/Vue/Plain HTML dev server
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5500", "http://localhost:3000","https://floodredfl.onrender.com"], # Specific URLs only
-    allow_credentials=True, 
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # ============= 3. MACHINE LEARNING CORE =============
 class KolhapurFloodPredictor:
     """ML model trained on historical & synthetic flood data"""
