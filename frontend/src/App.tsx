@@ -15,7 +15,8 @@ import axios from 'axios';
 import WeatherWidget from './weatherWidget';
 import type { WeatherData, LocationData } from './weatherService';
 
-const API_BASE = 'https://floodredfl.onrender.com'; // Update with your actual backend URL
+// FIXED API BASE URL
+const API_BASE = 'https://floodredfl.onrender.com'; 
 
 // --- Interfaces ---
 interface Prediction {
@@ -26,6 +27,7 @@ interface Prediction {
   alert_level: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   probabilities?: { SEVERE: number; MODERATE: number; LOW: number; };
   algorithm?: string;
+  data_source?: string; // ADDED THIS LINE
   model_trained?: boolean;
   kolhapur_specific?: boolean;
   historical_basis?: string;
@@ -595,7 +597,6 @@ function App() {
     setAutoPredicting(true);
     const predict = async () => {
       try {
-        // FIXED: Route to the actual /predict endpoint with formData
         const res = await axios.post(`${API_BASE}/predict`, formData);
         const pred = res.data;
         
@@ -699,6 +700,7 @@ function App() {
     }
   };
 
+  // --- UPDATED HANDLE PREDICT (WITH CWC ALERTS) ---
   const handlePredict = async () => {
     setLoading(true);
     try {
@@ -716,7 +718,14 @@ function App() {
       
       setPrediction(pred);
       
-      if (pred.severity === 'SEVERE') {
+      // NEW: Trigger an alert if live CWC data overrode the manual input
+      if (pred.data_source && pred.data_source.includes("Live CWC")) {
+        setMLAlerts(prev => [{
+          id: Date.now().toString(), type: 'success', title: 'Live Data Override',
+          message: `Your manual input for Peak Level was overridden by authentic live sensor data from the Central Water Commission.`,
+          timestamp: new Date().toISOString(), icon: <Radio className="w-5 h-5 text-green-600 animate-pulse" />
+        }, ...prev]);
+      } else if (pred.severity === 'SEVERE') {
         setMLAlerts(prev => [{
           id: Date.now().toString(), type: 'critical', title: 'FASTAPI PREDICTION: Severe Flood Risk',
           message: `FastAPI backend indicates ${pred.confidence_percent}% severe flood probability based on input parameters.`,
@@ -750,6 +759,7 @@ function App() {
         alert: severity === 'SEVERE' ? '🚨' : severity === 'MODERATE' ? '⚠️' : '🟢',
         alert_level: severity === 'SEVERE' ? 'CRITICAL' : severity === 'MODERATE' ? 'HIGH' : 'LOW',
         algorithm: 'Local Fallback Logic (Server Offline)',
+        data_source: 'Manual Input (Offline)', // Added data_source here
         model_trained: false,
         kolhapur_specific: true,
         danger_level: 12.0,
@@ -917,6 +927,7 @@ function App() {
               {loading ? <><RefreshCw className="w-6 h-6 animate-spin" /> AI Analyzing Data on Server...</> : <><Server className="w-6 h-6" /> Send Payload to FastAPI</>}
             </button>
 
+            {/* --- UPDATED PREDICTION JSX (BADGES) --- */}
             {prediction && (
               <>
                 <div className={`mt-8 p-8 rounded-2xl text-center text-white ${severityCardBg(prediction.severity)} transform transition-all hover:scale-[1.01] shadow-2xl border border-white/20 ${animations.slideUp}`}>
@@ -924,17 +935,32 @@ function App() {
                   <div className="text-3xl font-black mb-2 tracking-wider">{prediction.severity} FLOOD RISK</div>
                   <div className="text-6xl font-black mb-2 filter drop-shadow-md">{prediction.confidence_percent.toFixed(1)}%</div>
                   <p className="text-lg opacity-90 font-medium tracking-wide">AI Confidence Score</p>
-                  <div className="mt-4 space-y-1 bg-black/20 inline-block px-5 py-3 rounded-xl backdrop-blur-sm border border-white/10">
-                    <p className="text-sm font-semibold flex items-center gap-2 justify-center"><Server className="w-4 h-4"/> Backend: {prediction.model_trained === false ? 'Offline (Using Local Fallback)' : 'FastAPI Connected'}</p>
-                    <p className="text-xs opacity-80 font-mono mt-1">Alg: {prediction.algorithm}</p>
+                  
+                  {/* UPDATED BADGE SECTION */}
+                  <div className="mt-6 flex flex-col md:flex-row items-center justify-center gap-3">
+                    <div className="bg-black/20 px-4 py-2 rounded-xl backdrop-blur-sm border border-white/10 flex items-center gap-2">
+                      <Server className="w-4 h-4"/> 
+                      <span className="text-sm font-semibold">
+                        {prediction.model_trained === false ? 'Offline Fallback' : 'FastAPI Connected'}
+                      </span>
+                    </div>
+                    
+                    {prediction.data_source && (
+                      <div className={`px-4 py-2 rounded-xl backdrop-blur-sm border flex items-center gap-2 ${prediction.data_source.includes('Live CWC') ? 'bg-green-500/20 border-green-400/30' : 'bg-black/20 border-white/10'}`}>
+                        {prediction.data_source.includes('Live CWC') ? <Radio className="w-4 h-4 animate-pulse text-green-300"/> : <Settings className="w-4 h-4"/>}
+                        <span className="text-sm font-semibold">
+                          Source: {prediction.data_source}
+                        </span>
+                      </div>
+                    )}
                   </div>
+                  
+                  <p className="text-xs opacity-80 font-mono mt-4">Alg: {prediction.algorithm}</p>
                 </div>
                 
                 <MLInfoPanel prediction={prediction} />
                 <AlertMeter severity={prediction.severity} confidence={prediction.confidence_percent} algorithm={prediction.algorithm} />
                 <MonitoringPanel prediction={prediction} />
-
-                {/* THE NEW ATTACHED NEURAL NETWORK GRAPH */}
                 <NeuralNetworkGraph />
               </>
             )}
