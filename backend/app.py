@@ -32,18 +32,18 @@ class FloodPredictionInput(BaseModel):
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
+# 🛡️ SECURE PRODUCTION CORS
 origins = [
-    "https://floodredfl.onrender.com", 
-    "http://localhost:3000",           
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",           # Added for Vite Frontend
+    "https://floodredfl.onrender.com",       # Your Backend URL
+    "https://kolhapurfloodred.onrender.com", # YOUR LIVE FRONTEND
+    "http://localhost:5173",                 # For local Mac testing
     "http://127.0.0.1:5173",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # ALLOW EVERY WEBSITE (Temporary)
-    allow_credentials=False,  # MUST be False if origins is "*"
+    allow_origins=origins,    # Re-enabled the strict security list
+    allow_credentials=True,   # Switched back to True for production security
     allow_methods=["*"],
     allow_headers=["*"],
 )
