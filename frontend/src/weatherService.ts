@@ -1,5 +1,4 @@
-
-
+// types.ts
 export interface WeatherData {
   location: string;
   temperature: number;
@@ -53,10 +52,16 @@ export interface LocationData {
   state?: string;
 }
 
+export interface UVIndexData {
+  uvi: number;
+}
+
+// WeatherService.ts
 class WeatherService {
-  private openWeatherApiKey = 'b435f0df4bcc5fd08ef7b8ef517ba504'; // Replace with your API key
-  // private visualCrossingApiKey = 'YOUR_VISUAL_CROSSING_API_KEY'; // Optional
-  // private weatherApiKey = 'YOUR_WEATHERAPI_KEY'; // Optional
+  // Using the API key directly for now (you can replace with your own key)
+  private openWeatherApiKey = 'b435f0df4bcc5fd08ef7b8ef517ba504';
+  private visualCrossingApiKey = ''; // Optional
+  private weatherApiKey = ''; // Optional
 
   // List of major Indian cities for quick selection
   readonly indianCities: LocationData[] = [
@@ -139,64 +144,72 @@ class WeatherService {
     { name: "Durgapur", lat: 23.520, lon: 87.311, country: "IN", state: "West Bengal" },
     { name: "Asansol", lat: 23.683, lon: 86.975, country: "IN", state: "West Bengal" },
     { name: "Rourkela", lat: 22.249, lon: 84.882, country: "IN", state: "Odisha" },
-    { name: "Nanded", lat: 19.138, lon: 77.321, country: "IN", state: "Maharashtra" },
-    { name: "Kolhapur", lat: 16.705, lon: 74.243, country: "IN", state: "Maharashtra" }
+    { name: "Nanded", lat: 19.138, lon: 77.321, country: "IN", state: "Maharashtra" }
   ];
 
   // Get current weather by city name
   async getWeatherByCity(city: string): Promise<WeatherData> {
     try {
+      const encodedCity = encodeURIComponent(city);
       const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${this.openWeatherApiKey}`
+        `https://api.openweathermap.org/data/2.5/weather?q=${encodedCity}&units=metric&appid=${this.openWeatherApiKey}`
       );
       
       if (!response.ok) {
-        throw new Error('City not found');
+        if (response.status === 404) {
+          throw new Error(`City "${city}" not found`);
+        }
+        throw new Error(`Weather service error: ${response.status}`);
       }
       
       const data = await response.json();
       return this.transformWeatherData(data);
     } catch (error) {
       console.error('Error fetching weather:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error('Failed to fetch weather data');
     }
   }
 
   // Get weather by coordinates
   async getWeatherByCoords(lat: number, lon: number): Promise<WeatherData> {
     try {
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        throw new Error('Invalid coordinates provided');
+      }
+
       const response = await fetch(
         `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${this.openWeatherApiKey}`
       );
       
       if (!response.ok) {
-        throw new Error('Location not found');
+        throw new Error(`Weather service error: ${response.status}`);
       }
       
       const data = await response.json();
       return this.transformWeatherData(data);
     } catch (error) {
       console.error('Error fetching weather:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error('Failed to fetch weather data');
     }
   }
 
   // Get 5-day forecast
   async getForecast(city: string): Promise<ForecastData[]> {
     try {
+      const encodedCity = encodeURIComponent(city);
       const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/forecast?q=${city}&units=metric&appid=${this.openWeatherApiKey}`
+        `https://api.openweathermap.org/data/2.5/forecast?q=${encodedCity}&units=metric&appid=${this.openWeatherApiKey}`
       );
       
       if (!response.ok) {
-        throw new Error('Forecast not available');
+        throw new Error(`Forecast service error: ${response.status}`);
       }
       
       const data = await response.json();
       return this.transformForecastData(data);
     } catch (error) {
       console.error('Error fetching forecast:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error('Failed to fetch forecast data');
     }
   }
 
@@ -208,14 +221,32 @@ class WeatherService {
       );
       
       if (!response.ok) {
-        throw new Error('Air quality data not available');
+        throw new Error(`Air quality service error: ${response.status}`);
       }
       
       const data = await response.json();
       return this.transformAirQualityData(data);
     } catch (error) {
       console.error('Error fetching air quality:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error('Failed to fetch air quality data');
+    }
+  }
+
+  // Get UV index data
+  async getUVIndex(lat: number, lon: number): Promise<UVIndexData> {
+    try {
+      const response = await fetch(
+        `https://api.openweathermap.org/data/2.5/uvi?lat=${lat}&lon=${lon}&appid=${this.openWeatherApiKey}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`UV index service error: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching UV index:', error);
+      throw error instanceof Error ? error : new Error('Failed to fetch UV index data');
     }
   }
 
@@ -223,21 +254,45 @@ class WeatherService {
   async getCurrentLocation(): Promise<{ lat: number; lon: number }> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        reject(new Error('Geolocation not supported'));
+        reject(new Error('Geolocation not supported by this browser'));
         return;
       }
 
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Geolocation request timed out'));
+      }, 15000);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          clearTimeout(timeoutId);
           resolve({
             lat: position.coords.latitude,
             lon: position.coords.longitude
           });
         },
         (error) => {
-          reject(error);
+          clearTimeout(timeoutId);
+          let errorMessage = 'Failed to get location';
+          
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Location access denied by user';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Location information unavailable';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Location request timed out';
+              break;
+          }
+          
+          reject(new Error(errorMessage));
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { 
+          enableHighAccuracy: true, 
+          timeout: 10000, 
+          maximumAge: 300000 // 5 minutes
+        }
       );
     });
   }
@@ -245,11 +300,17 @@ class WeatherService {
   // Search for locations
   async searchLocations(query: string): Promise<LocationData[]> {
     try {
+      if (!query.trim()) {
+        return [];
+      }
+
+      const encodedQuery = encodeURIComponent(query.trim());
       const response = await fetch(
-        `https://api.openweathermap.org/geo/1.0/direct?q=${query}&limit=5&appid=${this.openWeatherApiKey}`
+        `https://api.openweathermap.org/geo/1.0/direct?q=${encodedQuery}&limit=5&appid=${this.openWeatherApiKey}`
       );
       
       if (!response.ok) {
+        console.warn('Location search service error:', response.status);
         return [];
       }
       
@@ -281,81 +342,131 @@ class WeatherService {
       return await response.json();
     } catch (error) {
       console.error('Error fetching historical weather:', error);
-      throw error;
+      throw error instanceof Error ? error : new Error('Failed to fetch historical weather data');
     }
   }
 
-  // Transform OpenWeatherMap data to our format
-  private transformWeatherData(data: any): WeatherData {
-    return {
-      location: `${data.name}, ${data.sys.country}`,
-      temperature: Math.round(data.main.temp),
-      feels_like: Math.round(data.main.feels_like),
-      humidity: data.main.humidity,
-      pressure: data.main.pressure,
-      wind_speed: data.wind.speed,
-      wind_direction: data.wind.deg,
-      description: data.weather[0].description,
-      icon: data.weather[0].icon,
-      sunrise: data.sys.sunrise,
-      sunset: data.sys.sunset,
-      visibility: data.visibility,
-      clouds: data.clouds.all,
-      rain_1h: data.rain?.['1h'],
-      rain_3h: data.rain?.['3h'],
-      snow_1h: data.snow?.['1h'],
-      weather_condition: data.weather[0].main.toLowerCase(),
-      timestamp: data.dt,
-      timezone: data.timezone
-    };
-  }
-
-  // Transform forecast data
-  private transformForecastData(data: any): ForecastData[] {
-    const dailyData: { [key: string]: any } = {};
-    
-    data.list.forEach((item: any) => {
-      const date = new Date(item.dt * 1000).toLocaleDateString();
-      
-      if (!dailyData[date]) {
-        dailyData[date] = {
-          date,
-          temp_min: item.main.temp_min,
-          temp_max: item.main.temp_max,
-          humidity: item.main.humidity,
-          pressure: item.main.pressure,
-          wind_speed: item.wind.speed,
-          description: item.weather[0].description,
-          icon: item.weather[0].icon,
-          rain_chance: item.pop * 100,
-          rain_amount: item.rain?.['3h'] || 0
-        };
-      } else {
-        dailyData[date].temp_min = Math.min(dailyData[date].temp_min, item.main.temp_min);
-        dailyData[date].temp_max = Math.max(dailyData[date].temp_max, item.main.temp_max);
-        dailyData[date].rain_amount += item.rain?.['3h'] || 0;
+  // Get weather by IP location
+  async getWeatherByIP(): Promise<WeatherData> {
+    try {
+      const response = await fetch('https://ipapi.co/json/');
+      if (!response.ok) {
+        throw new Error('Failed to get location from IP');
       }
-    });
-
-    return Object.values(dailyData).slice(0, 5) as ForecastData[];
+      
+      const data = await response.json();
+      return await this.getWeatherByCoords(data.latitude, data.longitude);
+    } catch (error) {
+      console.error('Error getting weather by IP:', error);
+      throw error instanceof Error ? error : new Error('Failed to fetch weather by IP');
+    }
   }
 
-  // Transform air quality data
+  // Get weather alerts
+  async getWeatherAlerts(lat: number, lon: number): Promise<any[]> {
+    try {
+      const response = await fetch(
+        `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&appid=${this.openWeatherApiKey}&exclude=minutely,hourly,daily,current`
+      );
+      
+      if (!response.ok) {
+        return [];
+      }
+      
+      const data = await response.json();
+      return data.alerts || [];
+    } catch (error) {
+      console.error('Error fetching weather alerts:', error);
+      return [];
+    }
+  }
+
+  // Transform OpenWeatherMap data to our format with null safety
+  private transformWeatherData(data: any): WeatherData {
+    try {
+      return {
+        location: `${data.name}, ${data.sys.country}`,
+        temperature: Math.round(data.main.temp),
+        feels_like: Math.round(data.main.feels_like),
+        humidity: data.main.humidity,
+        pressure: data.main.pressure,
+        wind_speed: data.wind?.speed || 0,
+        wind_direction: data.wind?.deg || 0,
+        description: data.weather[0]?.description || 'Unknown',
+        icon: data.weather[0]?.icon || '01d',
+        sunrise: data.sys.sunrise,
+        sunset: data.sys.sunset,
+        visibility: data.visibility || 0,
+        clouds: data.clouds?.all || 0,
+        rain_1h: data.rain?.['1h'],
+        rain_3h: data.rain?.['3h'],
+        snow_1h: data.snow?.['1h'],
+        weather_condition: data.weather[0]?.main.toLowerCase() || 'unknown',
+        timestamp: data.dt,
+        timezone: data.timezone
+      };
+    } catch (error) {
+      console.error('Error transforming weather data:', error);
+      throw new Error('Invalid weather data format');
+    }
+  }
+
+  // Transform forecast data with improved logic
+  private transformForecastData(data: any): ForecastData[] {
+    try {
+      const dailyData: { [key: string]: any } = {};
+      
+      data.list.forEach((item: any) => {
+        const date = new Date(item.dt * 1000).toLocaleDateString();
+        
+        if (!dailyData[date]) {
+          dailyData[date] = {
+            date,
+            temp_min: item.main.temp_min,
+            temp_max: item.main.temp_max,
+            humidity: item.main.humidity,
+            pressure: item.main.pressure,
+            wind_speed: item.wind?.speed || 0,
+            description: item.weather[0]?.description || 'Unknown',
+            icon: item.weather[0]?.icon || '01d',
+            rain_chance: (item.pop || 0) * 100,
+            rain_amount: item.rain?.['3h'] || 0
+          };
+        } else {
+          dailyData[date].temp_min = Math.min(dailyData[date].temp_min, item.main.temp_min);
+          dailyData[date].temp_max = Math.max(dailyData[date].temp_max, item.main.temp_max);
+          dailyData[date].rain_amount += item.rain?.['3h'] || 0;
+        }
+      });
+
+      return Object.values(dailyData).slice(0, 5) as ForecastData[];
+    } catch (error) {
+      console.error('Error transforming forecast data:', error);
+      throw new Error('Invalid forecast data format');
+    }
+  }
+
+  // Transform air quality data with null safety
   private transformAirQualityData(data: any): AirQualityData {
-    const components = data.list[0].components;
-    
-    return {
-      aqi: data.list[0].main.aqi,
-      pm2_5: components.pm2_5,
-      pm10: components.pm10,
-      no2: components.no2,
-      so2: components.so2,
-      o3: components.o3,
-      co: components.co
-    };
+    try {
+      const components = data.list[0].components;
+      
+      return {
+        aqi: data.list[0].main.aqi,
+        pm2_5: components.pm2_5 || 0,
+        pm10: components.pm10 || 0,
+        no2: components.no2 || 0,
+        so2: components.so2 || 0,
+        o3: components.o3 || 0,
+        co: components.co || 0
+      };
+    } catch (error) {
+      console.error('Error transforming air quality data:', error);
+      throw new Error('Invalid air quality data format');
+    }
   }
 
-  // Get weather icon based on condition
+  // Get weather icon based on condition with more comprehensive mapping
   getWeatherIcon(condition: string, isDay: boolean = true): string {
     const icons: { [key: string]: string } = {
       'clear': isDay ? 'wi-day-sunny' : 'wi-night-clear',
@@ -375,10 +486,10 @@ class WeatherService {
       'tornado': 'wi-tornado'
     };
 
-    return icons[condition] || 'wi-day-sunny';
+    return icons[condition.toLowerCase()] || 'wi-day-sunny';
   }
 
-  // Get AQI description
+  // Get AQI description with improved formatting
   getAQIDescription(aqi: number): { level: string; color: string; description: string } {
     if (aqi <= 1) return { level: 'Good', color: 'green', description: 'Air quality is satisfactory' };
     if (aqi <= 2) return { level: 'Fair', color: 'yellow', description: 'Air quality is acceptable' };
@@ -387,37 +498,66 @@ class WeatherService {
     return { level: 'Very Poor', color: 'purple', description: 'Health alert: everyone may experience serious health effects' };
   }
 
-  // Get UV index description
-  getUVDescription(uv: number): { level: string; color: string; recommendation: string } {
-    if (uv <= 2) return { level: 'Low', color: 'green', recommendation: 'No protection needed' };
-    if (uv <= 5) return { level: 'Moderate', color: 'yellow', recommendation: 'Protection needed' };
-    if (uv <= 7) return { level: 'High', color: 'orange', recommendation: 'Extra protection needed' };
-    if (uv <= 10) return { level: 'Very High', color: 'red', recommendation: 'Avoid being outside' };
+  // Get UV index description (updated parameter type)
+  getUVDescription(uvIndex: number): { level: string; color: string; recommendation: string } {
+    if (uvIndex <= 2) return { level: 'Low', color: 'green', recommendation: 'No protection needed' };
+    if (uvIndex <= 5) return { level: 'Moderate', color: 'yellow', recommendation: 'Protection needed' };
+    if (uvIndex <= 7) return { level: 'High', color: 'orange', recommendation: 'Extra protection needed' };
+    if (uvIndex <= 10) return { level: 'Very High', color: 'red', recommendation: 'Avoid being outside' };
     return { level: 'Extreme', color: 'purple', recommendation: 'Stay indoors' };
   }
 
-  // Calculate flood risk based on weather data
+  // Calculate flood risk with improved algorithm
   calculateFloodRisk(weather: WeatherData, forecast: ForecastData[]): number {
-    let risk = 0;
-    
-    // Current rain contributes heavily
-    if (weather.rain_1h && weather.rain_1h > 10) risk += 40;
-    else if (weather.rain_1h && weather.rain_1h > 5) risk += 20;
-    
-    // High humidity increases risk
-    if (weather.humidity > 80) risk += 15;
-    
-    // Low pressure indicates storm systems
-    if (weather.pressure < 1000) risk += 20;
-    
-    // Forecast rain increases risk
-    const totalForecastRain = forecast.reduce((sum, day) => sum + (day.rain_amount || 0), 0);
-    if (totalForecastRain > 50) risk += 25;
-    
-    // Cloud cover contributes
-    if (weather.clouds > 70) risk += 10;
-    
-    return Math.min(risk, 100);
+    try {
+      let risk = 0;
+      
+      // Current rain contributes heavily (more granular)
+      if (weather.rain_1h) {
+        if (weather.rain_1h > 20) risk += 50;
+        else if (weather.rain_1h > 10) risk += 35;
+        else if (weather.rain_1h > 5) risk += 20;
+        else if (weather.rain_1h > 1) risk += 10;
+      }
+      
+      // Add rain_3h if available
+      if (weather.rain_3h) {
+        if (weather.rain_3h > 30) risk += 40;
+        else if (weather.rain_3h > 15) risk += 25;
+        else if (weather.rain_3h > 5) risk += 15;
+      }
+      
+      // High humidity increases risk
+      if (weather.humidity > 85) risk += 20;
+      else if (weather.humidity > 75) risk += 10;
+      
+      // Low pressure indicates storm systems (more granular)
+      if (weather.pressure < 980) risk += 30;
+      else if (weather.pressure < 1000) risk += 25;
+      else if (weather.pressure < 1010) risk += 15;
+      
+      // Forecast rain increases risk
+      const totalForecastRain = forecast.reduce((sum, day) => sum + (day.rain_amount || 0), 0);
+      if (totalForecastRain > 100) risk += 30;
+      else if (totalForecastRain > 50) risk += 20;
+      else if (totalForecastRain > 20) risk += 10;
+      
+      // High rain chance in forecast
+      const highRainChanceDays = forecast.filter(day => day.rain_chance > 70).length;
+      risk += highRainChanceDays * 5;
+      
+      // Cloud cover and weather condition
+      if (weather.clouds > 80) risk += 10;
+      
+      // Wind speed (high winds can indicate storms)
+      if (weather.wind_speed > 15) risk += 15;
+      else if (weather.wind_speed > 10) risk += 10;
+      
+      return Math.min(Math.max(risk, 0), 100); // Ensure result is between 0 and 100
+    } catch (error) {
+      console.error('Error calculating flood risk:', error);
+      return 0;
+    }
   }
 }
 
