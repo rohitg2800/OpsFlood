@@ -23,10 +23,14 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.abspath(os.path.join(BASE_DIR, os.pardir))
 
-load_dotenv(os.path.join(REPO_DIR, ".env"), override=False)
-load_dotenv(os.path.join(REPO_DIR, ".env.local"), override=False)
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
-load_dotenv(os.path.join(BASE_DIR, ".env.local"), override=False)
+def refresh_backend_env(override: bool = False):
+    load_dotenv(os.path.join(REPO_DIR, ".env"), override=override)
+    load_dotenv(os.path.join(REPO_DIR, ".env.local"), override=override)
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=override)
+    load_dotenv(os.path.join(BASE_DIR, ".env.local"), override=override)
+
+
+refresh_backend_env(override=False)
 
 # --- NEW IMPORTS FOR SCRAPING ---
 import requests
@@ -264,8 +268,8 @@ def normalize_origin_url(value: str) -> str:
 
 def configured_cors_origins() -> list[str]:
     defaults = [
-        "https://floodredfl.onrender.com",
-        "https://kolhapurfloodred.onrender.com",
+        # "https://floodredfl.onrender.com",
+        # "https://kolhapurfloodred.onrender.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:4173",
@@ -1153,12 +1157,13 @@ cwc_scraper = CWCRiverScraper()
 
 
 def get_openweather_api_key() -> str:
+    refresh_backend_env(override=True)
     return (
         os.getenv("OPENWEATHER_API_KEY")
         or os.getenv("WEATHER_API_KEY")
         or os.getenv("VITE_WEATHER_API_KEY")
         or ""
-    )
+    ).strip().strip('"').strip("'")
 
 
 def request_openweather(path: str, params: Dict[str, Any], base_url: str = "https://api.openweathermap.org") -> requests.Response:

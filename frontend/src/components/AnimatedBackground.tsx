@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { isLiteMotionDevice } from '../utils/performance';
 
 interface AnimatedBackgroundProps {
   severity?: 'LOW' | 'MODERATE' | 'SEVERE' | 'CRITICAL';
@@ -13,6 +14,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
+  const liteMotion = useMemo(() => isLiteMotionDevice(), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -20,14 +22,19 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const frameDuration = reducedMotion ? 1000 / 12 : 1000 / 24;
+    const frameDuration = liteMotion ? 1000 / 18 : 1000 / 30;
+    const resolutionScale = liteMotion ? 0.58 : 0.82;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
     let lastFrameTime = 0;
 
     // Set canvas size
     const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      viewport.width = window.innerWidth;
+      viewport.height = window.innerHeight;
+      canvas.width = Math.max(1, Math.floor(viewport.width * resolutionScale));
+      canvas.height = Math.max(1, Math.floor(viewport.height * resolutionScale));
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
     };
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
@@ -45,13 +52,13 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     // Initialize raindrops
     const initRaindrops = () => {
       raindrops.length = 0;
-      const count = Math.floor(rainIntensity * (reducedMotion ? 0.3 : 0.55));
+      const count = Math.floor(rainIntensity * (liteMotion ? 0.2 : 0.34));
       for (let i = 0; i < count; i++) {
         raindrops.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          length: Math.random() * 20 + 10,
-          speed: Math.random() * 5 + 8,
+          x: Math.random() * viewport.width,
+          y: Math.random() * viewport.height,
+          length: Math.random() * (liteMotion ? 14 : 20) + 8,
+          speed: Math.random() * (liteMotion ? 3.6 : 5) + (liteMotion ? 6 : 8),
           opacity: Math.random() * 0.5 + 0.2,
           wind: Math.random() * 2 - 1,
         });
@@ -81,10 +88,12 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
       if (timestamp - lastFrameTime < frameDuration) return;
       lastFrameTime = timestamp;
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(resolutionScale, 0, 0, resolutionScale, 0, 0);
 
       // Draw gradient background based on severity
-      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      const gradient = ctx.createLinearGradient(0, 0, 0, viewport.height);
       switch (severity) {
         case 'CRITICAL':
           gradient.addColorStop(0, 'rgba(107, 0, 15, 0.3)');
@@ -107,7 +116,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
           gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
       }
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, viewport.width, viewport.height);
 
       // Draw and update raindrops
       raindrops.forEach((drop) => {
@@ -126,12 +135,12 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
         drop.x += drop.wind;
 
         // Reset if off screen
-        if (drop.y > canvas.height) {
+        if (drop.y > viewport.height) {
           // Create ripple at bottom
-          if (!reducedMotion && Math.random() > 0.9) {
+          if (!liteMotion && Math.random() > 0.94) {
             ripples.push({
               x: drop.x,
-              y: canvas.height - 20,
+              y: viewport.height - 20,
               radius: 0,
               maxRadius: Math.random() * 30 + 20,
               opacity: 0.5,
@@ -139,10 +148,10 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
             });
           }
           drop.y = -drop.length;
-          drop.x = Math.random() * canvas.width;
+          drop.x = Math.random() * viewport.width;
         }
-        if (drop.x > canvas.width) drop.x = 0;
-        if (drop.x < 0) drop.x = canvas.width;
+        if (drop.x > viewport.width) drop.x = 0;
+        if (drop.x < 0) drop.x = viewport.width;
       });
 
       // Draw and update ripples
@@ -172,8 +181,8 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
 
         if (lightningOpacity > 0) {
           ctx.fillStyle = `rgba(255, 255, 255, ${lightningOpacity})`;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          lightningOpacity -= 0.05;
+          ctx.fillRect(0, 0, viewport.width, viewport.height);
+          lightningOpacity -= liteMotion ? 0.08 : 0.05;
         }
       }
 
@@ -187,13 +196,13 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [severity, rainIntensity, showLightning]);
+  }, [liteMotion, severity, rainIntensity, showLightning]);
 
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-0"
-      style={{ opacity: 0.6 }}
+      className="fixed inset-0 pointer-events-none z-0 will-change-transform"
+      style={{ opacity: liteMotion ? 0.36 : 0.54, transform: 'translateZ(0)' }}
     />
   );
 };

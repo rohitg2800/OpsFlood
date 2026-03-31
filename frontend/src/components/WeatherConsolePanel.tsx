@@ -16,6 +16,13 @@ interface WeatherConsolePanelProps {
 
 type WeatherProxyStatus = 'SECURE' | 'DEGRADED' | 'MISSING_KEY' | 'OFFLINE' | 'CHECKING';
 
+const normalizeWeatherLabel = (value: string | null | undefined) =>
+  (value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   target,
   subtitle,
@@ -26,11 +33,6 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   const weatherSnapshot = state.data.weatherData;
   const [proxyStatus, setProxyStatus] = useState<WeatherProxyStatus>('CHECKING');
   const [resolvedDestination, setResolvedDestination] = useState<LocationData | null>(null);
-  const showRainOverlay = Boolean(
-    weatherSnapshot &&
-      (/(rain|drizzle|thunderstorm)/i.test(String(weatherSnapshot.weather_condition || '')) ||
-        Number(weatherSnapshot.rain_1h ?? weatherSnapshot.rain_3h ?? 0) > 0),
-  );
   const destinationCandidates = useMemo(
     () =>
       [
@@ -59,9 +61,21 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     : coordinates;
   const resolvedNodeLabel = resolvedDestination?.name?.trim() || null;
   const normalizedResolvedNodeLabel = resolvedNodeLabel?.toLowerCase() || '';
+  const normalizedLockedDestination = normalizeWeatherLabel(lockedDestination);
+  const weatherSnapshotMatchesLock = Boolean(
+    weatherSnapshot &&
+      normalizeWeatherLabel(weatherSnapshot.location).includes(normalizedLockedDestination),
+  );
+  const lockedWeatherSnapshot = weatherSnapshotMatchesLock ? weatherSnapshot : null;
+  const showRainOverlay = Boolean(
+    lockedWeatherSnapshot &&
+      (/(rain|drizzle|thunderstorm)/i.test(String(lockedWeatherSnapshot.weather_condition || '')) ||
+        Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0) > 0),
+  );
   const showResolvedNodeLabel =
     Boolean(resolvedNodeLabel) &&
     normalizedResolvedNodeLabel !== lockedDestination.toLowerCase();
+  const widgetResetKey = `${lockedDestination}|${effectiveCoordinates?.lat ?? 'na'}|${effectiveCoordinates?.lon ?? 'na'}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -91,11 +105,9 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     };
 
     fetchStatus();
-    const interval = window.setInterval(fetchStatus, 60 * 1000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, []);
 
@@ -279,8 +291,8 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
         <div className="weather-chip-float inline-flex w-fit items-center gap-2 rounded-full bg-[#ff0037]/8 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff9eb1] backdrop-blur-md">
           <Wind size={14} className={!state.data.weatherLastUpdate ? 'animate-pulse' : ''} />
           {state.data.weatherLastUpdate
-            ? `Weather Sync ${new Date(state.data.weatherLastUpdate).toLocaleTimeString('en-US', { hour12: false })}`
-            : 'Awaiting Weather Sync'}
+            ? `Last Weather Load ${new Date(state.data.weatherLastUpdate).toLocaleTimeString('en-US', { hour12: false })}`
+            : 'Manual Refresh Ready'}
         </div>
       </div>
 
@@ -292,20 +304,20 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
         }
       >
         <LazyWeatherWidget
+          key={widgetResetKey}
           city={lockedDestination}
           displayLocation={lockedDestination}
           coordinates={effectiveCoordinates}
           onWeatherSelect={handleWeatherSelect}
           onLocationSelect={handleLocationSelect}
-          autoRefresh
-          refreshInterval={10}
+          autoRefresh={false}
           showLocationName
           showDetailedInfo={false}
           showMetaStrip={false}
         />
       </Suspense>
 
-      {weatherSnapshot && (
+      {lockedWeatherSnapshot ? (
         <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md">
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
@@ -313,7 +325,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               Feels Like
             </div>
             <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(weatherSnapshot.feels_like || weatherSnapshot.temperature || 0).toFixed(0)}°C
+              {Number(lockedWeatherSnapshot.feels_like || lockedWeatherSnapshot.temperature || 0).toFixed(0)}°C
             </div>
           </div>
           <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '0.35s' }}>
@@ -322,7 +334,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               Pressure
             </div>
             <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(weatherSnapshot.pressure || 0).toFixed(0)} <span className="text-xs text-stone-500">hPa</span>
+              {Number(lockedWeatherSnapshot.pressure || 0).toFixed(0)} <span className="text-xs text-stone-500">hPa</span>
             </div>
           </div>
           <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '0.7s' }}>
@@ -331,7 +343,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               Cloud Cover
             </div>
             <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(weatherSnapshot.clouds || 0).toFixed(0)}%
+              {Number(lockedWeatherSnapshot.clouds || 0).toFixed(0)}%
             </div>
           </div>
           <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '1.05s' }}>
@@ -340,11 +352,11 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               Precip Pulse
             </div>
             <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(weatherSnapshot.rain_1h ?? weatherSnapshot.rain_3h ?? 0).toFixed(1)} <span className="text-xs text-stone-500">mm</span>
+              {Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0).toFixed(1)} <span className="text-xs text-stone-500">mm</span>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
