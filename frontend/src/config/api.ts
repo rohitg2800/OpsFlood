@@ -5,9 +5,16 @@ function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
+function normalizeApiBaseUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return stripTrailingSlash(trimmed);
+  return `https://${stripTrailingSlash(trimmed)}`;
+}
+
 export const API_BASE_URL: string = (() => {
   const raw = import.meta.env.VITE_API_BASE_URL;
-  if (typeof raw === 'string' && raw.trim()) return stripTrailingSlash(raw.trim());
+  if (typeof raw === 'string' && raw.trim()) return normalizeApiBaseUrl(raw);
   // Local backend default (FastAPI)
   return 'http://localhost:8000';
 })();
