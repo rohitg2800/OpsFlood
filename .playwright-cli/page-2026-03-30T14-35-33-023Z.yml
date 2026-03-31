@@ -1,0 +1,105 @@
+- generic [ref=e3]:
+  - generic:
+    - img
+    - img
+    - img
+  - generic [ref=e4]: Restricted Access // Tactical Operations Console // Encrypted Channel
+  - banner [ref=e5]:
+    - generic [ref=e7]:
+      - img [ref=e9]
+      - generic [ref=e13]:
+        - heading "INDOFLOODS OPS" [level=1] [ref=e14]
+        - paragraph [ref=e15]: Flood Readiness Command
+    - generic [ref=e17]:
+      - link "Dashboard" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - img [ref=e19]
+        - generic [ref=e21]: Dashboard
+      - link "Geo-Spatial" [ref=e22] [cursor=pointer]:
+        - /url: /geo
+        - img [ref=e23]
+        - generic [ref=e25]: Geo-Spatial
+      - link "Telemetry" [ref=e26] [cursor=pointer]:
+        - /url: /telemetry
+        - img [ref=e27]
+        - generic [ref=e33]: Telemetry
+      - link "Archives" [active] [ref=e34] [cursor=pointer]:
+        - /url: /archives
+        - img [ref=e35]
+        - generic [ref=e39]: Archives
+  - main [ref=e40]:
+    - generic [ref=e424]:
+      - generic [ref=e425]:
+        - generic [ref=e426]:
+          - img [ref=e428]
+          - generic [ref=e431]:
+            - generic [ref=e432]: External Telemetry Logs
+            - heading "Archives Vault" [level=1] [ref=e433]
+            - paragraph [ref=e434]: Government feeds, local inference history, and export-ready records for Kolhapur.
+        - button "Export Full Dataset" [ref=e437]:
+          - img [ref=e438]
+          - text: Export Full Dataset
+      - generic [ref=e442]:
+        - generic [ref=e445]:
+          - heading "CWC Live Data - Rajaram Barrage (Kolhapur)" [level=3] [ref=e446]:
+            - img [ref=e447]
+            - text: CWC Live Data - Rajaram Barrage (Kolhapur)
+          - generic [ref=e450]:
+            - paragraph [ref=e451]: 9.27m
+            - paragraph [ref=e452]: "River: Panchganga • Warning: 11.80m • Danger: 13.10m"
+            - paragraph [ref=e453]: "Source: TACTICAL_REGISTRY"
+            - paragraph [ref=e454]: "Updated: 30/03/2026, 20:05:21"
+        - generic [ref=e455]:
+          - button "Kolhapur" [ref=e456]
+          - button "Pune" [ref=e457]
+          - button "Maharashtra" [ref=e458]
+        - generic [ref=e459]:
+          - generic [ref=e460]:
+            - generic [ref=e461]:
+              - heading "Historical Flood Logs (0)" [level=3] [ref=e462]:
+                - img [ref=e463]
+                - text: Historical Flood Logs (0)
+              - generic [ref=e467]:
+                - generic [ref=e468]: No Real Dataset
+                - generic [ref=e469]: Select row -> load CSV into input
+            - button "Export" [disabled] [ref=e470]:
+              - img [ref=e471]
+              - text: Export
+          - generic [ref=e474]: Unable to load historical flood logs right now.
+      - generic [ref=e475]:
+        - generic [ref=e477]:
+          - generic [ref=e478]:
+            - heading "Neural Archives" [level=2] [ref=e479]:
+              - img [ref=e480]
+              - text: Neural Archives
+            - paragraph [ref=e484]: Internal_Prediction_Database // Encrypted_Storage
+          - button "Export_Archive_CSV" [ref=e485]:
+            - img [ref=e486]
+            - text: Export_Archive_CSV
+        - table [ref=e490]:
+          - rowgroup [ref=e491]:
+            - row "Timestamp Environmental Vector System Verdict Fidelity_Index" [ref=e492]:
+              - columnheader "Timestamp" [ref=e493]
+              - columnheader "Environmental Vector" [ref=e494]
+              - columnheader "System Verdict" [ref=e495]
+              - columnheader "Fidelity_Index" [ref=e496]
+          - rowgroup [ref=e497]:
+            - 'row "30 Mar 2026, 08:05:20 pm LVL: 12.50m PRECIP: 2448.8mm SEVERE 89.4%" [ref=e498]':
+              - cell "30 Mar 2026, 08:05:20 pm" [ref=e499]
+              - 'cell "LVL: 12.50m PRECIP: 2448.8mm" [ref=e500]':
+                - generic [ref=e501]:
+                  - generic [ref=e502]:
+                    - generic [ref=e503]: "LVL:"
+                    - generic [ref=e504]: 12.50m
+                  - generic [ref=e505]:
+                    - generic [ref=e506]: "PRECIP:"
+                    - generic [ref=e507]: 2448.8mm
+              - cell "SEVERE" [ref=e508]:
+                - generic [ref=e509]:
+                  - generic [ref=e510]: SEVERE
+                  - img [ref=e511]
+              - cell "89.4%" [ref=e513]:
+                - generic [ref=e515]: 89.4%
+        - generic [ref=e516]:
+          - generic [ref=e517]: "Database_Sync: Standard"
+          - generic [ref=e518]: "Total_Records: 1"
