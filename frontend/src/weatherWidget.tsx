@@ -309,6 +309,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
     () => formatDisplayLocation(displayLocation) || formatDisplayLocation(city),
     [city, displayLocation],
   );
+  const visibleLocationLabel = lockedDisplayLocation || weather?.location || city;
 
   // Sync internal coords when prop changes
   useEffect(() => {
@@ -588,7 +589,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
             <div className="flex-1 text-center">
               {showLocationName && (
                 <h3 className="flex flex-wrap items-center justify-center gap-2 text-2xl font-black tracking-tight text-white">
-                  <span>{weather?.location || city}</span>
+                  <span>{visibleLocationLabel}</span>
                   {allowDeviceLocationOverride ? (
                     <button
                       onClick={getCurrentLocation}
