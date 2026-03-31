@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: opsflood-api
+    runtime: python
+    plan: free
+    repo: https://github.com/rohitg2800/OpsFlood
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+        - runtime.txt
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        fromService:
+          name: opsflood-frontend
+          type: web
+          property: host
+
+  - type: web
+    name: opsflood-frontend
+    runtime: static
+    repo: https://github.com/rohitg2800/OpsFlood
+    branch: main
+    autoDeploy: true
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    buildFilter:
+      paths:
+        - frontend/**
+        - render.yaml
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          name: opsflood-api
+          type: web
+          property: host

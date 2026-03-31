@@ -253,6 +253,42 @@ def normalize_weather_lookup(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (value or "").lower())).strip()
 
 
+def normalize_origin_url(value: str) -> str:
+    trimmed = (value or "").strip().rstrip("/")
+    if not trimmed:
+        return ""
+    if trimmed.startswith(("http://", "https://")):
+        return trimmed
+    return f"https://{trimmed}"
+
+
+def configured_cors_origins() -> list[str]:
+    defaults = [
+        "https://floodredfl.onrender.com",
+        "https://kolhapurfloodred.onrender.com",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
+    configured = []
+    for env_key in ("CORS_ORIGINS", "FRONTEND_ORIGIN", "FRONTEND_URL"):
+        raw_value = os.getenv(env_key, "")
+        if not raw_value.strip():
+            continue
+        configured.extend(
+            normalize_origin_url(part)
+            for part in raw_value.split(",")
+            if normalize_origin_url(part)
+        )
+
+    deduped: list[str] = []
+    for origin in [*defaults, *configured]:
+        if origin and origin not in deduped:
+            deduped.append(origin)
+    return deduped
+
+
 def _weather_hash_unit(seed: str) -> float:
     digest = hashlib.sha256(seed.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") / float((1 << 64) - 1)
@@ -810,14 +846,7 @@ class FloodPredictionInput(BaseModel):
 app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
 
 # 🛡️ SECURE PRODUCTION CORS
-origins = [
-    "https://floodredfl.onrender.com",       
-    "https://kolhapurfloodred.onrender.com", 
-    "http://localhost:5173",                 
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
-]
+origins = configured_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
