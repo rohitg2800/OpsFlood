@@ -1,0 +1,21 @@
+timestamp,location,peak_level_m,rainfall_7day_mm,severity,confidence_percent,alert_message,source
+2024-08-15T14:30:00Z,Kolhapur District,13.8,580.5,SEVERE,94.2,Critical flood warning issued for Shirol sector,CWC Official
+2024-08-14T09:15:00Z,Kolhapur District,13.2,562.3,SEVERE,91.7,Major flooding in Irwin Bridge area,CWC Official
+2024-08-13T16:45:00Z,Kolhapur District,12.5,520.1,MODERATE,87.3,Water levels rising in southern districts,IndoFloods ML
+2024-08-12T11:20:00Z,Kolhapur District,11.8,480.7,MODERATE,83.5,Moderate risk alert issued,CWC Official
+2024-08-11T08:00:00Z,Kolhapur District,10.9,400.2,LOW,72.1,Water levels stable,IndoFloods ML
+2024-08-10T15:30:00Z,Kolhapur District,10.2,350.8,LOW,68.9,Declining water levels,CWC Official
+2024-07-28T12:45:00Z,Kolhapur District,14.1,610.3,SEVERE,96.8,Extreme flood conditions in Panchganga basin,CWC Emergency
+2024-07-27T10:15:00Z,Kolhapur District,13.5,595.2,SEVERE,93.4,Record water level at Shirol gauge station,CWC Emergency
+2024-07-26T07:30:00Z,Kolhapur District,12.8,550.5,MODERATE,88.6,Continued heavy rainfall in region,Weather Service
+2024-07-25T14:00:00Z,Kolhapur District,12.1,505.3,MODERATE,84.2,Water levels rising crisis,IndoFloods ML
+2024-06-15T13:20:00Z,Kolhapur District,8.5,250.4,LOW,45.3,Pre-monsoon conditions stable,CWC Official
+2024-06-14T11:00:00Z,Kolhapur District,8.2,180.9,LOW,38.7,Low water levels before monsoon,IndoFloods ML
+2024-05-30T16:45:00Z,Kolhapur District,7.9,120.5,LOW,32.1,Summer drought conditions,CWC Official
+2024-05-15T09:30:00Z,Kolhapur District,7.5,85.2,LOW,28.4,Critical low water levels,Water Authority
+2024-04-20T14:15:00Z,Kolhapur District,7.3,60.1,LOW,24.6,Severe drought phase,CWC Official
+2024-03-10T10:00:00Z,Kolhapur District,7.1,45.3,LOW,20.8,Extended dry season,IndoFloods ML
+2024-02-28T15:30:00Z,Kolhapur District,6.9,30.2,LOW,18.1,Winter low flow period,CWC Official
+2024-01-15T12:00:00Z,Kolhapur District,6.8,25.5,LOW,16.3,Minimal water levels,Water Authority
+2023-12-10T08:30:00Z,Kolhapur District,6.7,22.1,LOW,14.5,Post-monsoon recession,CWC Official
+2023-10-25T11:45:00Z,Kolhapur District,9.2,380.6,LOW,55.2,Tail-end monsoon activity,IndoFloods ML

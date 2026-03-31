@@ -1,3 +1,6 @@
+import { apiUrl } from './config/api';
+import { resolveGeoCoordinate } from './data/geoCoordinates';
+
 // types.ts
 export interface WeatherData {
   location: string;
@@ -58,10 +61,85 @@ export interface UVIndexData {
 
 // WeatherService.ts
 class WeatherService {
-  // Using the API key directly for now (you can replace with your own key)
-  private openWeatherApiKey = '***REMOVED***';
-  private visualCrossingApiKey = ''; // Optional
-  private weatherApiKey = ''; // Optional
+  private readonly weatherNoisePattern =
+    /\b(sector|region|lowlands?|basin|banks?|bridge|barrage|ghats?|control|command|high[-\s]?ground|coastal|delta|island|catchment|console)\b/gi;
+
+  private formatGeolocationError(error: GeolocationPositionError | Error | null | undefined): string {
+    if (!error) {
+      return 'Unable to determine device location';
+    }
+
+    if ('code' in error) {
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          return 'Location access denied. Allow GPS access in your browser to use precise positioning.';
+        case error.POSITION_UNAVAILABLE:
+          return 'GPS signal unavailable on this device or network.';
+        case error.TIMEOUT:
+          return 'GPS lookup timed out.';
+      }
+    }
+
+    return error.message || 'Unable to determine device location';
+  }
+
+  private async getBrowserGeolocation(options: PositionOptions): Promise<{ lat: number; lon: number }> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation not supported by this browser'));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+          });
+        },
+        (error) => {
+          reject(error);
+        },
+        options,
+      );
+    });
+  }
+
+  private async getApproximateCoordsByIP(cause?: GeolocationPositionError | Error | null): Promise<{ lat: number; lon: number }> {
+    try {
+      const location = await this.getLocationByIP();
+      return {
+        lat: location.lat,
+        lon: location.lon,
+      };
+    } catch (ipError) {
+      const primaryMessage = this.formatGeolocationError(cause);
+      const fallbackMessage = ipError instanceof Error ? ipError.message : 'Network-based location fallback failed';
+      throw new Error(`${primaryMessage} ${fallbackMessage}`.trim());
+    }
+  }
+
+  private async fetchIpLocationData(): Promise<any> {
+    const response = await fetch('https://ipapi.co/json/');
+    if (!response.ok) {
+      throw new Error('Failed to get location from IP');
+    }
+
+    return response.json();
+  }
+
+  private isGeolocationLikeError(error: unknown): error is GeolocationPositionError | Error {
+    return error instanceof Error || (!!error && typeof error === 'object' && 'code' in error);
+  }
+
+  private async fetchJson(path: string) {
+    const response = await fetch(apiUrl(path));
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || `Weather service error: ${response.status}`);
+    }
+    return response.json();
+  }
 
   // List of major Indian cities for quick selection
   readonly indianCities: LocationData[] = [
@@ -147,22 +225,109 @@ class WeatherService {
     { name: "Nanded", lat: 19.138, lon: 77.321, country: "IN", state: "Maharashtra" }
   ];
 
+  private normalizeLookupValue(value: string): string {
+    return (value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private buildLookupCandidates(query: string): string[] {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const candidates = new Set<string>();
+    const addCandidate = (value: string) => {
+      const nextValue = value.trim();
+      if (nextValue) {
+        candidates.add(nextValue);
+      }
+    };
+
+    addCandidate(trimmed);
+    trimmed.split(',').forEach((part) => addCandidate(part));
+
+    const stripped = trimmed.replace(this.weatherNoisePattern, ' ').replace(/\s+/g, ' ').trim();
+    if (stripped && stripped !== trimmed) {
+      addCandidate(stripped);
+      stripped.split(',').forEach((part) => addCandidate(part));
+    }
+
+    return Array.from(candidates).slice(0, 6);
+  }
+
+  private findIndianCityMatch(query: string): LocationData | null {
+    const normalizedQuery = this.normalizeLookupValue(query);
+    if (!normalizedQuery) {
+      return null;
+    }
+
+    const exactMatch = this.indianCities.find((city) => {
+      const normalizedName = this.normalizeLookupValue(city.name);
+      const normalizedState = this.normalizeLookupValue(city.state || '');
+      return normalizedQuery === normalizedName || normalizedQuery === normalizedState;
+    });
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    return (
+      this.indianCities.find((city) => {
+        const normalizedName = this.normalizeLookupValue(city.name);
+        const normalizedState = this.normalizeLookupValue(city.state || '');
+        return (
+          normalizedQuery.includes(normalizedName) ||
+          normalizedName.includes(normalizedQuery) ||
+          (normalizedState && normalizedQuery.includes(normalizedState))
+        );
+      }) || null
+    );
+  }
+
+  async resolveLocation(query: string): Promise<LocationData | null> {
+    const candidates = this.buildLookupCandidates(query);
+    if (!candidates.length) {
+      return null;
+    }
+
+    for (const candidate of candidates) {
+      const cityMatch = this.findIndianCityMatch(candidate);
+      if (cityMatch) {
+        return cityMatch;
+      }
+
+      const mappedGeo = resolveGeoCoordinate(candidate);
+      if (mappedGeo) {
+        return {
+          name: mappedGeo.name,
+          lat: mappedGeo.lat,
+          lon: mappedGeo.lon,
+          country: 'IN',
+          state: mappedGeo.state,
+        };
+      }
+
+    }
+
+    for (const candidate of candidates) {
+      const locations = await this.searchLocations(candidate);
+      if (locations.length > 0) {
+        return locations[0];
+      }
+    }
+
+    return null;
+  }
+
   // Get current weather by city name
   async getWeatherByCity(city: string): Promise<WeatherData> {
     try {
       const encodedCity = encodeURIComponent(city);
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?q=${encodedCity}&units=metric&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`City "${city}" not found`);
-        }
-        throw new Error(`Weather service error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = await this.fetchJson(`/weather/current?city=${encodedCity}`);
       return this.transformWeatherData(data);
     } catch (error) {
       console.error('Error fetching weather:', error);
@@ -177,15 +342,7 @@ class WeatherService {
         throw new Error('Invalid coordinates provided');
       }
 
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Weather service error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = await this.fetchJson(`/weather/current?lat=${lat}&lon=${lon}`);
       return this.transformWeatherData(data);
     } catch (error) {
       console.error('Error fetching weather:', error);
@@ -197,15 +354,7 @@ class WeatherService {
   async getForecast(city: string): Promise<ForecastData[]> {
     try {
       const encodedCity = encodeURIComponent(city);
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/forecast?q=${encodedCity}&units=metric&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Forecast service error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = await this.fetchJson(`/weather/forecast?city=${encodedCity}`);
       return this.transformForecastData(data);
     } catch (error) {
       console.error('Error fetching forecast:', error);
@@ -216,15 +365,7 @@ class WeatherService {
   // Get air quality data
   async getAirQuality(lat: number, lon: number): Promise<AirQualityData> {
     try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Air quality service error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = await this.fetchJson(`/weather/air-quality?lat=${lat}&lon=${lon}`);
       return this.transformAirQualityData(data);
     } catch (error) {
       console.error('Error fetching air quality:', error);
@@ -235,15 +376,7 @@ class WeatherService {
   // Get UV index data
   async getUVIndex(lat: number, lon: number): Promise<UVIndexData> {
     try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/uvi?lat=${lat}&lon=${lon}&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`UV index service error: ${response.status}`);
-      }
-      
-      return await response.json();
+      return await this.fetchJson(`/weather/uv?lat=${lat}&lon=${lon}`);
     } catch (error) {
       console.error('Error fetching UV index:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch UV index data');
@@ -252,49 +385,62 @@ class WeatherService {
 
   // Get user's current location
   async getCurrentLocation(): Promise<{ lat: number; lon: number }> {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Geolocation not supported by this browser'));
-        return;
+    const canUsePreciseLocation = typeof window === 'undefined' || window.isSecureContext;
+
+    if (!canUsePreciseLocation || !navigator.geolocation) {
+      return this.getApproximateCoordsByIP(
+        new Error(
+          !canUsePreciseLocation
+            ? 'Precise GPS access requires HTTPS or localhost.'
+            : 'Geolocation not supported by this browser.',
+        ),
+      );
+    }
+
+    try {
+      return await this.getBrowserGeolocation({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      });
+    } catch (highAccuracyError) {
+      try {
+        return await this.getBrowserGeolocation({
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 900000,
+        });
+      } catch (coarseError) {
+        const geolocationError =
+          this.isGeolocationLikeError(coarseError)
+            ? coarseError
+            : (highAccuracyError as GeolocationPositionError | Error);
+        return this.getApproximateCoordsByIP(geolocationError);
+      }
+    }
+  }
+
+  async getLocationByIP(): Promise<LocationData> {
+    try {
+      const data = await this.fetchIpLocationData();
+      const lat = Number(data.latitude);
+      const lon = Number(data.longitude);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        throw new Error('Invalid network location coordinates');
       }
 
-      const timeoutId = setTimeout(() => {
-        reject(new Error('Geolocation request timed out'));
-      }, 15000);
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          clearTimeout(timeoutId);
-          resolve({
-            lat: position.coords.latitude,
-            lon: position.coords.longitude
-          });
-        },
-        (error) => {
-          clearTimeout(timeoutId);
-          let errorMessage = 'Failed to get location';
-          
-          switch (error.code) {
-            case error.PERMISSION_DENIED:
-              errorMessage = 'Location access denied by user';
-              break;
-            case error.POSITION_UNAVAILABLE:
-              errorMessage = 'Location information unavailable';
-              break;
-            case error.TIMEOUT:
-              errorMessage = 'Location request timed out';
-              break;
-          }
-          
-          reject(new Error(errorMessage));
-        },
-        { 
-          enableHighAccuracy: true, 
-          timeout: 10000, 
-          maximumAge: 300000 // 5 minutes
-        }
-      );
-    });
+      return {
+        name: data.city || data.region || data.country_name || 'Approximate Location',
+        lat,
+        lon,
+        country: data.country_code || data.country || 'IN',
+        state: data.region || undefined,
+      };
+    } catch (error) {
+      console.error('Error getting location by IP:', error);
+      throw error instanceof Error ? error : new Error('Failed to get location from IP');
+    }
   }
 
   // Search for locations
@@ -304,17 +450,14 @@ class WeatherService {
         return [];
       }
 
-      const encodedQuery = encodeURIComponent(query.trim());
-      const response = await fetch(
-        `https://api.openweathermap.org/geo/1.0/direct?q=${encodedQuery}&limit=5&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        console.warn('Location search service error:', response.status);
-        return [];
-      }
-      
-      const data = await response.json();
+      const trimmed = query.trim();
+      const coordinateMatch = trimmed.match(/^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/);
+      const data = coordinateMatch
+        ? await this.fetchJson(
+            `/weather/reverse-geocode?lat=${coordinateMatch[1]}&lon=${coordinateMatch[3]}&limit=1`,
+          )
+        : await this.fetchJson(`/weather/search?query=${encodeURIComponent(trimmed)}&limit=5`);
+
       return data.map((item: any) => ({
         name: item.name,
         lat: item.lat,
@@ -331,15 +474,7 @@ class WeatherService {
   // Get historical weather data (last 7 days)
   async getHistoricalWeather(lat: number, lon: number): Promise<any> {
     try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/onecall/timemachine?lat=${lat}&lon=${lon}&units=metric&appid=${this.openWeatherApiKey}`
-      );
-      
-      if (!response.ok) {
-        throw new Error('Historical data not available');
-      }
-      
-      return await response.json();
+      return await this.fetchJson(`/weather/historical?lat=${lat}&lon=${lon}`);
     } catch (error) {
       console.error('Error fetching historical weather:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch historical weather data');
@@ -349,13 +484,8 @@ class WeatherService {
   // Get weather by IP location
   async getWeatherByIP(): Promise<WeatherData> {
     try {
-      const response = await fetch('https://ipapi.co/json/');
-      if (!response.ok) {
-        throw new Error('Failed to get location from IP');
-      }
-      
-      const data = await response.json();
-      return await this.getWeatherByCoords(data.latitude, data.longitude);
+      const location = await this.getLocationByIP();
+      return await this.getWeatherByCoords(location.lat, location.lon);
     } catch (error) {
       console.error('Error getting weather by IP:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch weather by IP');
@@ -365,16 +495,7 @@ class WeatherService {
   // Get weather alerts
   async getWeatherAlerts(lat: number, lon: number): Promise<any[]> {
     try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&appid=${this.openWeatherApiKey}&exclude=minutely,hourly,daily,current`
-      );
-      
-      if (!response.ok) {
-        return [];
-      }
-      
-      const data = await response.json();
-      return data.alerts || [];
+      return await this.fetchJson(`/weather/alerts?lat=${lat}&lon=${lon}`);
     } catch (error) {
       console.error('Error fetching weather alerts:', error);
       return [];
