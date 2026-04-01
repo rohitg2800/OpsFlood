@@ -847,7 +847,7 @@ class FloodPredictionInput(BaseModel):
     state: str = "Maharashtra"
 
 # ============= 2. FASTAPI SETUP =============
-app = FastAPI(title="🌧️ INDOFLOODS ML API", version="8.5")
+app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
 
 # 🛡️ SECURE PRODUCTION CORS
 origins = configured_cors_origins()
@@ -877,6 +877,31 @@ class CWCRiverScraper:
             "Referer": "https://ffs.india-water.gov.in/"
         }
         self.cwc_api_base = "https://ffs.india-water.gov.in/iam/api"
+        self._station_feed_retry_after: datetime.datetime | None = None
+        self._station_feed_failure_message: str = ""
+        self._last_telemetry_error_log_at: datetime.datetime | None = None
+        self._last_telemetry_error_message: str = ""
+
+    def _remember_station_feed_failure(self, message: str, cooldown_seconds: int):
+        self._station_feed_failure_message = message
+        self._station_feed_retry_after = datetime.datetime.now() + datetime.timedelta(seconds=max(30, cooldown_seconds))
+
+    def _clear_station_feed_failure(self):
+        self._station_feed_retry_after = None
+        self._station_feed_failure_message = ""
+
+    def _log_telemetry_error(self, message: str):
+        now = datetime.datetime.now()
+        if (
+            self._last_telemetry_error_message == message
+            and self._last_telemetry_error_log_at
+            and (now - self._last_telemetry_error_log_at).total_seconds() < 300
+        ):
+            return
+
+        self._last_telemetry_error_message = message
+        self._last_telemetry_error_log_at = now
+        print(f"❌ CWC Telemetry Error: {message}")
 
     def _safe_float(self, value, default=0.0):
         try:
@@ -1001,6 +1026,9 @@ class CWCRiverScraper:
         return telemetry
 
     def _fetch_live_station_feed(self):
+        if self._station_feed_retry_after and datetime.datetime.now() < self._station_feed_retry_after:
+            raise RuntimeError(self._station_feed_failure_message or "CWC live telemetry endpoints are temporarily unavailable.")
+
         candidate_paths = [
             "/new-warning-station",
             "/warning-station",
@@ -1021,13 +1049,17 @@ class CWCRiverScraper:
                 response.raise_for_status()
                 payload = response.json()
                 if isinstance(payload, list):
+                    self._clear_station_feed_failure()
                     return path, payload
 
                 failures.append(f"{path}: unexpected payload {type(payload).__name__}")
             except Exception as exc:
                 failures.append(f"{path}: {exc}")
 
-        raise RuntimeError(" ; ".join(failures))
+        failure_summary = " ; ".join(failures)
+        cooldown_seconds = 900 if failures and all(": 404" in failure for failure in failures) else 180
+        self._remember_station_feed_failure(failure_summary, cooldown_seconds)
+        raise RuntimeError(failure_summary)
 
     def _site_priority(self, site: Dict[str, Any], target_state: str, target_station: str) -> int:
         station_match = bool(target_station) and (
@@ -1143,7 +1175,7 @@ class CWCRiverScraper:
                 "data": tactical_fallback,
             }
         except Exception as exc:
-            print(f"❌ CWC Telemetry Error: {exc}")
+            self._log_telemetry_error(str(exc))
             return {
                 "status": "FALLBACK_MODE",
                 "error": "Central Water Commission servers offline or blocking requests.",
@@ -1762,13 +1794,13 @@ predictor = KolhapurFloodPredictor()
 # ============= 5. API ENDPOINTS =============
 @app.get("/")
 async def root():
-    return {"service": "INDOFLOODS ML Server", "status": "Online", "model_ready": predictor.is_trained}
+    return {"service": "INDIA_FLOODS ML Server", "status": "Online", "model_ready": predictor.is_trained}
 
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
-        "service": "INDOFLOODS ML Server",
+        "service": "INDIA_FLOODS ML Server",
         "model_ready": predictor.is_trained,
         "artifact_count": len(predictor.artifact_catalog),
         "bundle_count": len(predictor.artifact_bundles),
@@ -2169,7 +2201,7 @@ async def catch_all(path_name: str):
     return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
 
 if __name__ == "__main__":
-    print("🚀 Starting INDOFLOODS ML Backend...")
+    print("🚀 Starting INDIA_FLOODS ML Backend...")
     port = int(os.environ.get("PORT", 8000))
     module = "backend.app:app" if (__package__ and __package__.startswith("backend")) else "app:app"
     uvicorn.run(module, host="0.0.0.0", port=port, reload=True)
