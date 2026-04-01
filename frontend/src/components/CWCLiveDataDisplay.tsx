@@ -82,12 +82,11 @@ export function CWCLiveDataDisplay() {
   useEffect(() => {
     if (state.system.apiStatus === 'OFFLINE' || state.system.apiStatus === 'INITIALIZING') return;
 
-    fetchCWCData();
-    const interval = window.setInterval(() => {
-      fetchCWCData();
-    }, 5 * 60 * 1000);
+    const timeoutId = window.setTimeout(() => {
+      void fetchCWCData();
+    }, 220);
 
-    return () => window.clearInterval(interval);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchCWCData, state.system.apiStatus]);
 
   const fillWidth = cwcLevel ? Math.min((cwcLevel / dangerLevel) * 100, 100) : 0;
@@ -109,7 +108,7 @@ export function CWCLiveDataDisplay() {
           </div>
         </div>
         <button
-          onClick={() => fetchCWCData()}
+          onClick={() => fetchCWCData({ force: true })}
           className="inline-flex items-center gap-2 rounded-md border border-[#ff0037]/35 bg-[#ff0037]/10 px-4 py-2 text-[9px] font-black uppercase leading-none text-[#ff9eb1] transition-all hover:bg-[#ff0037] hover:text-white"
         >
           <span className="flex h-3.5 w-3.5 items-center justify-center">

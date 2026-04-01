@@ -33,7 +33,7 @@ export const Navigation: React.FC<NavigationProps> = ({ apiStatus }) => {
         <div className="flex items-center justify-center text-center">
           <div>
             <h1 className="font-cinzel text-[2.15rem] font-black uppercase tracking-[0.08em] text-[#ff6b7d] drop-shadow-[0_0_16px_rgba(255,63,91,0.45)] sm:text-[2.75rem]">
-              INDOFLOODS <span className="text-[#ffd7dd] drop-shadow-[0_0_20px_rgba(255,151,167,0.28)]">OPS</span>
+              INDIA_FLOODS <span className="text-[#ffd7dd] drop-shadow-[0_0_20px_rgba(255,151,167,0.28)]">OPS</span>
             </h1>
             <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.45em] text-[#ff9aaa] sm:text-[11px]">
               Flood Readiness Command

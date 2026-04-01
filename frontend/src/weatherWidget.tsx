@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Wind, Droplets, ThermometerSun, MapPin, RefreshCw } from 'lucide-react';
 import WeatherService from './weatherService'; // Import the WeatherService
+import { isLiteMotionDevice } from './utils/performance';
 
 export interface WeatherData {
   location: string;
@@ -43,6 +44,7 @@ export interface WeatherWidgetProps {
   showLocationName?: boolean;
   showDetailedInfo?: boolean;
   showMetaStrip?: boolean;
+  showRefreshButton?: boolean;
 }
 
 type WeatherScene = 'sunny' | 'clouds' | 'night' | 'rain';
@@ -143,25 +145,57 @@ const scenePalette: Record<WeatherScene, { shell: string; glow: string; badge: s
   },
 };
 
-const WeatherSceneBackdrop: React.FC<{ scene: WeatherScene; showNightSky: boolean }> = ({
+const WeatherSceneBackdrop = React.memo(({
   scene,
   showNightSky,
+  liteMotion,
+}: {
+  scene: WeatherScene;
+  showNightSky: boolean;
+  liteMotion: boolean;
 }) => {
+  const sunRays = useMemo(
+    () => Array.from({ length: liteMotion ? 4 : 8 }, (_, index) => index),
+    [liteMotion],
+  );
+  const cloudLayers = useMemo(
+    () =>
+      liteMotion
+        ? [
+            { top: '18%', left: '10%', scale: 1, delay: '0s', opacity: 0.82 },
+            { top: '28%', left: '48%', scale: 0.9, delay: '-2.6s', opacity: 0.68 },
+          ]
+        : [
+            { top: '16%', left: '8%', scale: 1.05, delay: '0s', opacity: 0.9 },
+            { top: '30%', left: '34%', scale: 0.88, delay: '-2.2s', opacity: 0.76 },
+            { top: '14%', left: '62%', scale: 1.15, delay: '-3.5s', opacity: 0.72 },
+          ],
+    [liteMotion],
+  );
+  const rainColumns = useMemo(
+    () => Array.from({ length: liteMotion ? 12 : 28 }, (_, index) => index),
+    [liteMotion],
+  );
+  const starSlots = useMemo(
+    () => Array.from({ length: liteMotion ? 14 : 34 }, (_, index) => index),
+    [liteMotion],
+  );
+
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),transparent_32%,rgba(0,0,0,0.28))]" />
       {scene === 'sunny' ? (
         <>
-          <div className="weather-sun absolute right-10 top-6 h-20 w-20 rounded-full bg-[radial-gradient(circle,#ffe7a6_0%,#f59e0b_38%,rgba(245,158,11,0.18)_70%,transparent_100%)]" />
-          <div className="weather-sun-ring absolute right-5 top-1 h-[7.5rem] w-[7.5rem] rounded-full border border-[#f59e0b]/18" />
-          {Array.from({ length: 8 }).map((_, index) => (
+          <div className={`weather-sun absolute right-10 top-6 ${liteMotion ? 'h-16 w-16' : 'h-20 w-20'} rounded-full bg-[radial-gradient(circle,#ffe7a6_0%,#f59e0b_38%,rgba(245,158,11,0.18)_70%,transparent_100%)]`} />
+          <div className={`weather-sun-ring absolute ${liteMotion ? 'right-7 top-3 h-[5.75rem] w-[5.75rem]' : 'right-5 top-1 h-[7.5rem] w-[7.5rem]'} rounded-full border border-[#f59e0b]/18`} />
+          {sunRays.map((index) => (
             <span
               key={`sun-ray-${index}`}
               className="weather-ray absolute left-0 top-0 h-[2px] w-10 rounded-full bg-gradient-to-r from-[#ffd18a] to-transparent"
               style={{
-                top: `calc(3.5rem + ${Math.sin((index / 8) * Math.PI * 2) * 2.5}rem)`,
-                left: `calc(78% + ${Math.cos((index / 8) * Math.PI * 2) * 2.5}rem)`,
-                transform: `rotate(${index * 45}deg)`,
+                top: `calc(${liteMotion ? '3rem' : '3.5rem'} + ${Math.sin((index / sunRays.length) * Math.PI * 2) * (liteMotion ? 1.9 : 2.5)}rem)`,
+                left: `calc(78% + ${Math.cos((index / sunRays.length) * Math.PI * 2) * (liteMotion ? 1.9 : 2.5)}rem)`,
+                transform: `rotate(${index * (360 / sunRays.length)}deg)`,
                 animationDelay: `${index * 0.18}s`,
               }}
             />
@@ -171,11 +205,7 @@ const WeatherSceneBackdrop: React.FC<{ scene: WeatherScene; showNightSky: boolea
 
       {scene === 'clouds' || scene === 'rain' ? (
         <>
-          {[
-            { top: '16%', left: '8%', scale: 1.05, delay: '0s', opacity: 0.9 },
-            { top: '30%', left: '34%', scale: 0.88, delay: '-2.2s', opacity: 0.76 },
-            { top: '14%', left: '62%', scale: 1.15, delay: '-3.5s', opacity: 0.72 },
-          ].map((cloud, index) => (
+          {cloudLayers.map((cloud, index) => (
             <div
               key={`cloud-${index}`}
               className="weather-cloud absolute h-16 w-28"
@@ -200,7 +230,7 @@ const WeatherSceneBackdrop: React.FC<{ scene: WeatherScene; showNightSky: boolea
 
       {scene === 'rain' ? (
         <div className="absolute inset-0">
-          {Array.from({ length: 28 }).map((_, index) => (
+          {rainColumns.map((index) => (
             <span
               key={`rain-${index}`}
               className="weather-rain absolute top-[-18%] h-12 w-[1.5px] rounded-full bg-gradient-to-b from-[#dff0ff]/0 via-[#dff0ff]/85 to-[#73b9ff]/0"
@@ -234,7 +264,7 @@ const WeatherSceneBackdrop: React.FC<{ scene: WeatherScene; showNightSky: boolea
           />
           <div className="absolute left-10 top-8 h-16 w-16 rounded-full bg-[radial-gradient(circle,#f8fbff_0%,#d7e6ff_48%,rgba(215,230,255,0.18)_72%,transparent_100%)] shadow-[0_0_34px_rgba(180,210,255,0.34)]" />
           <div className="absolute left-14 top-6 h-16 w-16 rounded-full bg-[#0b1430]" />
-          {Array.from({ length: 34 }).map((_, index) => {
+          {starSlots.map((index) => {
             const size = index % 6 === 0 ? 4 : index % 3 === 0 ? 3.5 : 3;
             const leftBand =
               index % 4 === 0
@@ -271,7 +301,9 @@ const WeatherSceneBackdrop: React.FC<{ scene: WeatherScene; showNightSky: boolea
       ) : null}
     </div>
   );
-};
+});
+
+WeatherSceneBackdrop.displayName = 'WeatherSceneBackdrop';
 
 const WeatherWidget: React.FC<WeatherWidgetProps> = ({ 
   onWeatherSelect, 
@@ -284,6 +316,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
   showLocationName = true,
   showDetailedInfo = true,
   showMetaStrip = true,
+  showRefreshButton = false,
 }) => {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [, setLocation] = useState<LocationData | null>(null);
@@ -292,10 +325,17 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [coords, setCoords] = useState<typeof coordinates | null>(coordinates || null);
   const [iconLoadFailed, setIconLoadFailed] = useState(false);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  const liteMotion = useMemo(() => isLiteMotionDevice(), []);
   const showNightSky = useMemo(() => isNightSnapshot(weather), [weather]);
   const weatherScene = useMemo(() => getWeatherScene(weather), [weather]);
   const palette = scenePalette[weatherScene];
   const allowDeviceLocationOverride = !displayLocation;
+  const incomingLat = coordinates?.lat ?? null;
+  const incomingLon = coordinates?.lon ?? null;
+  const resolvedCoordLat = coords?.lat ?? incomingLat;
+  const resolvedCoordLon = coords?.lon ?? incomingLon;
   const weatherIconSrc = useMemo(() => {
     if (!weather?.icon) {
       return null;
@@ -313,24 +353,57 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
   // Sync internal coords when prop changes
   useEffect(() => {
-    setCoords(coordinates || null);
-  }, [coordinates]);
+    setCoords((current) => {
+      const nextCoords =
+        incomingLat !== null && incomingLon !== null
+          ? { lat: incomingLat, lon: incomingLon }
+          : null;
+
+      if (
+        current?.lat === nextCoords?.lat &&
+        current?.lon === nextCoords?.lon
+      ) {
+        return current;
+      }
+
+      return nextCoords;
+    });
+  }, [incomingLat, incomingLon]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     setIconLoadFailed(false);
   }, [weatherIconSrc]);
 
   const fetchWeather = useCallback(async (coordsOverride?: { lat: number; lon: number } | null) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const isActiveRequest = () => mountedRef.current && requestIdRef.current === requestId;
+
     try {
       setLoading(true);
       setError(null);
 
       let weatherData: WeatherData;
       let selectedLocation: LocationData | null = null;
-      const activeCoords = coordsOverride || coords || coordinates;
+      const activeCoords =
+        coordsOverride ||
+        (resolvedCoordLat !== null && resolvedCoordLon !== null
+          ? { lat: resolvedCoordLat, lon: resolvedCoordLon }
+          : null);
 
       if (!activeCoords && isPlaceholderLocation(city)) {
         weatherData = buildFallbackWeatherData(lockedDisplayLocation || city);
+        if (!isActiveRequest()) {
+          return;
+        }
         setWeather(weatherData);
         onWeatherSelect?.(weatherData);
         setLastUpdated(new Date());
@@ -340,13 +413,30 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
       if (activeCoords) {
         // Fetch weather by coordinates
         weatherData = await WeatherService.getWeatherByCoords(activeCoords.lat, activeCoords.lon);
-        
-        // Also get location name
-        const locations = await WeatherService.searchLocations(`${activeCoords.lat},${activeCoords.lon}`);
-        if (locations.length > 0) {
-          selectedLocation = locations[0];
+
+        if (lockedDisplayLocation) {
+          selectedLocation = {
+            name: lockedDisplayLocation,
+            lat: activeCoords.lat,
+            lon: activeCoords.lon,
+            country: 'IN',
+          };
+          if (!isActiveRequest()) {
+            return;
+          }
           setLocation(selectedLocation);
           onLocationSelect?.(selectedLocation);
+        } else {
+          // Also get location name when the UI doesn't already have a locked destination label.
+          const locations = await WeatherService.searchLocations(`${activeCoords.lat},${activeCoords.lon}`);
+          if (locations.length > 0) {
+            selectedLocation = locations[0];
+            if (!isActiveRequest()) {
+              return;
+            }
+            setLocation(selectedLocation);
+            onLocationSelect?.(selectedLocation);
+          }
         }
       } else {
         const resolvedLocation = await WeatherService.resolveLocation(city);
@@ -354,6 +444,9 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
         if (resolvedLocation) {
           selectedLocation = resolvedLocation;
           weatherData = await WeatherService.getWeatherByCoords(resolvedLocation.lat, resolvedLocation.lon);
+          if (!isActiveRequest()) {
+            return;
+          }
           setLocation(resolvedLocation);
           onLocationSelect?.(resolvedLocation);
         } else {
@@ -363,12 +456,18 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
           const locations = await WeatherService.searchLocations(city);
           if (locations.length > 0) {
             selectedLocation = locations[0];
+            if (!isActiveRequest()) {
+              return;
+            }
             setLocation(selectedLocation);
             onLocationSelect?.(selectedLocation);
           }
         }
       }
 
+      if (!isActiveRequest()) {
+        return;
+      }
       const normalizedWeather = {
         ...weatherData,
         location:
@@ -384,6 +483,9 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
     } catch (err) {
       console.error('Error fetching weather:', err);
+      if (!isActiveRequest()) {
+        return;
+      }
       setError(getReadableWeatherError(err, lockedDisplayLocation || city || 'this target'));
       
       // Use fallback data
@@ -392,9 +494,11 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
       setWeather(fallbackData);
       onWeatherSelect?.(fallbackData);
     } finally {
-      setLoading(false);
+      if (isActiveRequest()) {
+        setLoading(false);
+      }
     }
-  }, [city, coordinates, coords, lockedDisplayLocation, onLocationSelect, onWeatherSelect]);
+  }, [city, lockedDisplayLocation, onLocationSelect, onWeatherSelect, resolvedCoordLat, resolvedCoordLon]);
 
   const getCurrentLocation = async () => {
     try {
@@ -442,14 +546,14 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
   if (loading && !weather) {
     return (
-      <div className="animate-pulse bg-black/25 h-36 rounded-md backdrop-blur-xl flex items-center justify-center">
+      <div className={`animate-pulse bg-black/25 h-36 rounded-md flex items-center justify-center ${liteMotion ? '' : 'backdrop-blur-xl'}`}>
         <RefreshCw className="w-6 h-6 text-[#ff0037] animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className={`weather-widget-shell relative overflow-hidden rounded-[1.5rem] border-0 bg-gradient-to-br ${palette.shell} p-5 pt-6 shadow-[0_18px_60px_rgba(0,0,0,0.34)] backdrop-blur-[18px] sm:p-6 sm:pt-7`}>
+    <div className={`${liteMotion ? 'weather-widget-lite' : ''} weather-widget-shell relative overflow-hidden rounded-[1.5rem] border-0 bg-gradient-to-br ${palette.shell} p-5 pt-6 ${liteMotion ? 'shadow-[0_12px_28px_rgba(0,0,0,0.2)] backdrop-blur-sm' : 'shadow-[0_18px_60px_rgba(0,0,0,0.34)] backdrop-blur-[18px]'} sm:p-6 sm:pt-7`}>
       <style>{`
         @keyframes weather-cloud-drift {
           0% { transform: translateX(-4%) scale(var(--cloud-scale, 1)); }
@@ -519,6 +623,19 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
         .weather-sun-ring { animation: weather-sun-pulse 6.5s ease-in-out infinite; opacity: 0.45; }
         .weather-ray { animation: weather-ray-flicker 2.8s ease-in-out infinite; transform-origin: left center; }
         .weather-star { animation: weather-star-twinkle 2.4s ease-in-out infinite; }
+        .weather-widget-lite::after {
+          display: none;
+        }
+        .weather-widget-lite .weather-cloud,
+        .weather-widget-lite .weather-rain,
+        .weather-widget-lite .weather-sun,
+        .weather-widget-lite .weather-sun-ring,
+        .weather-widget-lite .weather-ray,
+        .weather-widget-lite .weather-star,
+        .weather-widget-lite .weather-widget-float,
+        .weather-widget-lite .weather-metric-card {
+          animation: none !important;
+        }
         @media (prefers-reduced-motion: reduce) {
           .weather-cloud,
           .weather-rain,
@@ -535,12 +652,12 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
       `}</style>
 
       <div className={`absolute inset-0 opacity-75 ${palette.glow}`} />
-      <WeatherSceneBackdrop scene={weatherScene} showNightSky={showNightSky} />
+      <WeatherSceneBackdrop scene={weatherScene} showNightSky={showNightSky} liteMotion={liteMotion} />
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(0,0,0,0.08),rgba(0,0,0,0.26))]" />
 
       <div className="weather-widget-float relative z-10 text-center">
         {error && (
-          <div className="mb-3 w-full rounded-xl bg-[#ff0037]/8 px-3 py-2 text-[#ff8ea0] backdrop-blur-md">
+          <div className={`mb-3 w-full rounded-xl bg-[#ff0037]/8 px-3 py-2 text-[#ff8ea0] ${liteMotion ? '' : 'backdrop-blur-md'}`}>
             <div className="flex items-center justify-between">
               <span className="font-medium">Error: {error}</span>
               <button
@@ -570,7 +687,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
         <div className="flex flex-col items-center justify-center gap-5">
           <div className="flex flex-col items-center gap-4 self-stretch">
-            <div className="rounded-md bg-gradient-to-br from-[#6b000f] via-[#b00020] to-[#f59e0b] p-2 shadow-[0_18px_60px_rgba(255,0,55,0.18)]">
+            <div className={`rounded-md bg-gradient-to-br from-[#6b000f] via-[#b00020] to-[#f59e0b] p-2 ${liteMotion ? 'shadow-[0_10px_24px_rgba(255,0,55,0.12)]' : 'shadow-[0_18px_60px_rgba(255,0,55,0.18)]'}`}>
               {weatherIconSrc && !iconLoadFailed ? (
                 <img
                   src={weatherIconSrc}
@@ -617,7 +734,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
           </div>
 
           <div className="flex flex-wrap justify-center gap-3 text-slate-200 lg:gap-4">
-            <div className="weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+            <div className={`weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`}>
               <ThermometerSun className="mb-1 h-5 w-5 text-[#f59e0b]" />
               <span className="font-mono text-xl font-black">{weather?.temperature}°C</span>
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Temp</span>
@@ -626,7 +743,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
               ) : null}
             </div>
 
-            <div className="weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" style={{ animationDelay: '0.3s' }}>
+            <div className={`weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`} style={{ animationDelay: '0.3s' }}>
               <Droplets className="mb-1 h-5 w-5 text-[#73b9ff]" />
               <span className="font-mono text-xl font-black">{weather?.humidity}%</span>
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Humidity</span>
@@ -635,7 +752,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
               ) : null}
             </div>
 
-            <div className="weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" style={{ animationDelay: '0.6s' }}>
+            <div className={`weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`} style={{ animationDelay: '0.6s' }}>
               <Wind className="mb-1 h-5 w-5 text-slate-200" />
               <span className="font-mono text-xl font-black">
                 {Math.round(weather?.wind_speed || 0)} <span className="text-xs text-slate-400">km/h</span>
@@ -650,19 +767,19 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
             {showDetailedInfo && (
               <>
-                <div className="weather-metric-card flex min-w-[60px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" style={{ animationDelay: '0.9s' }}>
+                <div className={`weather-metric-card flex min-w-[60px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`} style={{ animationDelay: '0.9s' }}>
                   <span className="text-base font-bold text-white">{weather?.pressure}</span>
                   <span className="text-[10px] font-bold uppercase text-slate-400">Pressure</span>
                   <span className="text-[10px] text-slate-500">hPa</span>
                 </div>
 
-                <div className="weather-metric-card flex min-w-[60px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" style={{ animationDelay: '1.2s' }}>
+                <div className={`weather-metric-card flex min-w-[60px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`} style={{ animationDelay: '1.2s' }}>
                   <span className="text-base font-bold text-white">{weather?.clouds}%</span>
                   <span className="text-[10px] font-bold uppercase text-slate-400">Clouds</span>
                   <span className="text-[10px] text-slate-500">Coverage</span>
                 </div>
 
-                <div className="weather-metric-card flex min-w-[70px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" style={{ animationDelay: '1.5s' }}>
+                <div className={`weather-metric-card flex min-w-[70px] flex-col items-center rounded-2xl bg-black/14 px-2 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`} style={{ animationDelay: '1.5s' }}>
                   <span className="text-xs font-bold text-white">{formatTime(weather?.sunrise || 0)}</span>
                   <span className="text-[10px] font-bold uppercase text-slate-400">Sunrise</span>
                   <span className="text-xs font-bold text-white">{formatTime(weather?.sunset || 0)}</span>
@@ -672,18 +789,20 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
             )}
           </div>
 
-          <div className="flex justify-center">
-            <button
-              onClick={() => {
-                void fetchWeather();
-              }}
-              disabled={loading}
-              className="rounded-full bg-black/14 p-2 text-white shadow-[0_18px_60px_rgba(255,0,55,0.12)] backdrop-blur-md transition-colors hover:bg-[#ff0037]/28 disabled:opacity-60"
-              title="Refresh weather data"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
+          {showRefreshButton ? (
+            <div className="flex justify-center">
+              <button
+                onClick={() => {
+                  void fetchWeather();
+                }}
+                disabled={loading}
+                className={`rounded-full bg-black/14 p-2 text-white ${liteMotion ? 'shadow-[0_8px_18px_rgba(255,0,55,0.1)]' : 'shadow-[0_18px_60px_rgba(255,0,55,0.12)] backdrop-blur-md'} transition-colors hover:bg-[#ff0037]/28 disabled:opacity-60`}
+                title="Refresh weather data"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

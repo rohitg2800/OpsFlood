@@ -26,7 +26,7 @@ function App() {
   const backgroundWaveHeight = severity === 'CRITICAL' ? 42 : severity === 'SEVERE' ? 30 : 18;
 
   useEffect(() => {
-    document.title = 'INDOFLOODS OPS';
+    document.title = 'INDIA_FLOODS OPS';
   }, [location.pathname]);
 
   return (

@@ -4,6 +4,7 @@ import { useAppState } from '../context/AppContext';
 import type { LocationData, WeatherData } from '../weatherWidget';
 import { apiUrl } from '../config/api';
 import WeatherService from '../weatherService';
+import { isLiteMotionDevice } from '../utils/performance';
 
 const LazyWeatherWidget = lazy(() => import('../weatherWidget'));
 
@@ -23,6 +24,16 @@ const normalizeWeatherLabel = (value: string | null | undefined) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const sameLocation = (left: Partial<LocationData> | null | undefined, right: Partial<LocationData> | null | undefined) =>
+  Boolean(
+    left &&
+      right &&
+      left.name === right.name &&
+      left.state === right.state &&
+      left.lat === right.lat &&
+      left.lon === right.lon,
+  );
+
 export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   target,
   subtitle,
@@ -31,8 +42,11 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
 }) => {
   const { state, dispatch } = useAppState();
   const weatherSnapshot = state.data.weatherData;
+  const coordinateLat = coordinates?.lat;
+  const coordinateLon = coordinates?.lon;
   const [proxyStatus, setProxyStatus] = useState<WeatherProxyStatus>('CHECKING');
   const [resolvedDestination, setResolvedDestination] = useState<LocationData | null>(null);
+  const liteMotion = useMemo(() => isLiteMotionDevice(), []);
   const destinationCandidates = useMemo(
     () =>
       [
@@ -56,12 +70,21 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     ],
   );
   const lockedDestination = (destinationCandidates[0] || target || 'Selected Region').trim();
-  const effectiveCoordinates = resolvedDestination
-    ? { lat: resolvedDestination.lat, lon: resolvedDestination.lon }
-    : coordinates;
+  const hasSpecificLocationLock = Boolean(
+    (state.prediction.selectedCity && state.prediction.selectedCity.trim()) ||
+      (state.form.data.station && state.form.data.station.trim()),
+  );
   const resolvedNodeLabel = resolvedDestination?.name?.trim() || null;
   const normalizedResolvedNodeLabel = resolvedNodeLabel?.toLowerCase() || '';
   const normalizedLockedDestination = normalizeWeatherLabel(lockedDestination);
+  const effectiveCoordinates =
+    hasSpecificLocationLock
+      ? resolvedDestination
+        ? { lat: resolvedDestination.lat, lon: resolvedDestination.lon }
+        : undefined
+      : resolvedDestination
+      ? { lat: resolvedDestination.lat, lon: resolvedDestination.lon }
+      : coordinates;
   const weatherSnapshotMatchesLock = Boolean(
     weatherSnapshot &&
       normalizeWeatherLabel(weatherSnapshot.location).includes(normalizedLockedDestination),
@@ -115,11 +138,46 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     let cancelled = false;
 
     const resolveDestination = async () => {
+      const coordinateBackedLocation =
+        coordinateLat !== undefined && coordinateLon !== undefined
+          ? {
+              name: lockedDestination,
+              lat: coordinateLat,
+              lon: coordinateLon,
+              country: 'IN',
+              state: state.prediction.selectedState || state.form.data.state || undefined,
+            }
+          : null;
+
+      if (hasSpecificLocationLock) {
+        const exactLockedLocation = await WeatherService.resolveLocation(lockedDestination);
+        if (exactLockedLocation) {
+          if (!cancelled) {
+            setResolvedDestination((current) =>
+              sameLocation(current, exactLockedLocation) ? current : exactLockedLocation,
+            );
+          }
+          return;
+        }
+      }
+
+      if (coordinateBackedLocation) {
+        if (!cancelled) {
+          setResolvedDestination((current) =>
+            sameLocation(current, coordinateBackedLocation) ? current : coordinateBackedLocation,
+          );
+        }
+        return;
+      }
+
       for (const candidate of destinationCandidates) {
+        if (normalizeWeatherLabel(candidate) === normalizedLockedDestination) {
+          continue;
+        }
         const resolved = await WeatherService.resolveLocation(candidate);
         if (resolved) {
           if (!cancelled) {
-            setResolvedDestination(resolved);
+            setResolvedDestination((current) => (sameLocation(current, resolved) ? current : resolved));
           }
           return;
         }
@@ -135,7 +193,16 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [destinationCandidates]);
+  }, [
+    coordinateLat,
+    coordinateLon,
+    destinationCandidates,
+    hasSpecificLocationLock,
+    lockedDestination,
+    normalizedLockedDestination,
+    state.form.data.state,
+    state.prediction.selectedState,
+  ]);
 
   const handleWeatherSelect = useCallback((weatherData: WeatherData) => {
     dispatch({ type: 'SET_WEATHER_DATA', payload: weatherData });
@@ -178,7 +245,9 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   const StatusIcon = statusMeta.icon;
 
   return (
-    <div className={`${className} weather-console-shell relative overflow-hidden rounded-[1.75rem] border-0 ring-0 bg-[linear-gradient(145deg,rgba(255,255,255,0.03),rgba(10,12,16,0.18)_28%,rgba(6,9,12,0.08)_100%)] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.24)] backdrop-blur-[24px] sm:p-8`}>
+    <div
+      className={`${className} ${liteMotion ? 'weather-console-lite' : ''} weather-console-shell relative overflow-hidden rounded-[1.75rem] border-0 ring-0 bg-[linear-gradient(145deg,rgba(255,255,255,0.03),rgba(10,12,16,0.18)_28%,rgba(6,9,12,0.08)_100%)] p-6 ${liteMotion ? 'shadow-[0_14px_36px_rgba(0,0,0,0.16)] backdrop-blur-md' : 'shadow-[0_28px_80px_rgba(0,0,0,0.24)] backdrop-blur-[24px]'} sm:p-8`}
+    >
       <style>{`
         @keyframes weather-console-drift {
           0%, 100% { transform: translate3d(0, 0, 0); }
@@ -233,6 +302,18 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
         .weather-console-rain {
           animation: weather-console-rain-fall linear infinite;
         }
+        .weather-console-lite::after {
+          display: none;
+        }
+        .weather-console-lite::before {
+          animation: none;
+          opacity: 0.58;
+        }
+        .weather-console-lite .weather-console-float,
+        .weather-console-lite .weather-chip-float,
+        .weather-console-lite .weather-console-rain {
+          animation: none !important;
+        }
         @media (prefers-reduced-motion: reduce) {
           .weather-console-shell::before,
           .weather-console-shell::after,
@@ -248,7 +329,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
       {showRainOverlay ? (
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          {Array.from({ length: 34 }).map((_, index) => (
+          {Array.from({ length: liteMotion ? 14 : 34 }).map((_, index) => (
             <span
               key={`console-rain-${index}`}
               className="weather-console-rain absolute top-[-20%] h-14 w-[1.5px] rounded-full bg-gradient-to-b from-[#dff0ff]/0 via-[#dff0ff]/88 to-[#73b9ff]/0"
@@ -283,12 +364,12 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               ) : null}
             </div>
           ) : null}
-          <div className={`weather-chip-float inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.2em] backdrop-blur-md ${statusMeta.tone}`}>
+          <div className={`weather-chip-float inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${liteMotion ? '' : 'backdrop-blur-md'} ${statusMeta.tone}`}>
             <StatusIcon size={12} className={proxyStatus === 'CHECKING' ? 'animate-pulse' : ''} />
             <span>{statusMeta.label}</span>
           </div>
         </div>
-        <div className="weather-chip-float inline-flex w-fit items-center gap-2 rounded-full bg-[#ff0037]/8 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff9eb1] backdrop-blur-md">
+        <div className={`weather-chip-float inline-flex w-fit items-center gap-2 rounded-full bg-[#ff0037]/8 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff9eb1] ${liteMotion ? '' : 'backdrop-blur-md'}`}>
           <Wind size={14} className={!state.data.weatherLastUpdate ? 'animate-pulse' : ''} />
           {state.data.weatherLastUpdate
             ? `Last Weather Load ${new Date(state.data.weatherLastUpdate).toLocaleTimeString('en-US', { hour12: false })}`
@@ -298,7 +379,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
 
       <Suspense
         fallback={
-          <div className="flex h-40 items-center justify-center rounded-[2rem] bg-black/25 backdrop-blur-xl">
+          <div className={`flex h-40 items-center justify-center rounded-[2rem] bg-black/25 ${liteMotion ? '' : 'backdrop-blur-xl'}`}>
             <RefreshCw className="h-6 w-6 animate-spin text-[#ff0037]" />
           </div>
         }
@@ -319,7 +400,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
 
       {lockedWeatherSnapshot ? (
         <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md">
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Thermometer size={12} className="text-[#ff7f96]" />
               Feels Like
@@ -328,7 +409,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               {Number(lockedWeatherSnapshot.feels_like || lockedWeatherSnapshot.temperature || 0).toFixed(0)}°C
             </div>
           </div>
-          <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '0.35s' }}>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.35s' }}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Gauge size={12} className="text-[#ff7f96]" />
               Pressure
@@ -337,7 +418,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               {Number(lockedWeatherSnapshot.pressure || 0).toFixed(0)} <span className="text-xs text-stone-500">hPa</span>
             </div>
           </div>
-          <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '0.7s' }}>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.7s' }}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Eye size={12} className="text-[#ff7f96]" />
               Cloud Cover
@@ -346,7 +427,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               {Number(lockedWeatherSnapshot.clouds || 0).toFixed(0)}%
             </div>
           </div>
-          <div className="weather-chip-float rounded-2xl bg-white/[0.035] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md" style={{ animationDelay: '1.05s' }}>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '1.05s' }}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Droplets size={12} className="text-[#ff7f96]" />
               Precip Pulse

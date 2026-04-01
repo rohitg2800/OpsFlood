@@ -63,6 +63,62 @@ export interface UVIndexData {
 class WeatherService {
   private readonly weatherNoisePattern =
     /\b(sector|region|lowlands?|basin|banks?|bridge|barrage|ghats?|control|command|high[-\s]?ground|coastal|delta|island|catchment|console)\b/gi;
+  private readonly currentWeatherCacheTtlMs = 60_000;
+  private readonly currentWeatherCache = new Map<string, { expiresAt: number; data: WeatherData }>();
+  private readonly currentWeatherInflight = new Map<string, Promise<WeatherData>>();
+
+  private buildWeatherCityCacheKey(city: string): string {
+    return `city:${this.normalizeLookupValue(city)}`;
+  }
+
+  private buildWeatherCoordsCacheKey(lat: number, lon: number): string {
+    return `coords:${lat.toFixed(3)},${lon.toFixed(3)}`;
+  }
+
+  private getCachedCurrentWeather(cacheKey: string): WeatherData | null {
+    const cached = this.currentWeatherCache.get(cacheKey);
+    if (!cached) {
+      return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+      this.currentWeatherCache.delete(cacheKey);
+      return null;
+    }
+
+    return { ...cached.data };
+  }
+
+  private async getOrFetchCurrentWeather(
+    cacheKey: string,
+    fetcher: () => Promise<WeatherData>,
+  ): Promise<WeatherData> {
+    const cached = this.getCachedCurrentWeather(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const inflight = this.currentWeatherInflight.get(cacheKey);
+    if (inflight) {
+      const shared = await inflight;
+      return { ...shared };
+    }
+
+    const request = (async () => {
+      const weather = await fetcher();
+      this.currentWeatherCache.set(cacheKey, {
+        expiresAt: Date.now() + this.currentWeatherCacheTtlMs,
+        data: { ...weather },
+      });
+      return weather;
+    })().finally(() => {
+      this.currentWeatherInflight.delete(cacheKey);
+    });
+
+    this.currentWeatherInflight.set(cacheKey, request);
+    const result = await request;
+    return { ...result };
+  }
 
   private formatGeolocationError(error: GeolocationPositionError | Error | null | undefined): string {
     if (!error) {
@@ -143,7 +199,7 @@ class WeatherService {
 
   // List of major Indian cities for quick selection
   readonly indianCities: LocationData[] = [
-    { name: "Kolhapur", lat: 16.705, lon: 74.243, country: "IN", state: "Maharashtra" },
+    { name: "Kolhapur", lat: 16.705, lon: 74.2433, country: "IN", state: "Maharashtra" },
     { name: "Mumbai", lat: 19.076, lon: 72.877, country: "IN", state: "Maharashtra" },
     { name: "Delhi", lat: 28.613, lon: 77.209, country: "IN", state: "Delhi" },
     { name: "Bangalore", lat: 12.971, lon: 77.594, country: "IN", state: "Karnataka" },
@@ -326,9 +382,11 @@ class WeatherService {
   // Get current weather by city name
   async getWeatherByCity(city: string): Promise<WeatherData> {
     try {
-      const encodedCity = encodeURIComponent(city);
-      const data = await this.fetchJson(`/weather/current?city=${encodedCity}`);
-      return this.transformWeatherData(data);
+      return await this.getOrFetchCurrentWeather(this.buildWeatherCityCacheKey(city), async () => {
+        const encodedCity = encodeURIComponent(city);
+        const data = await this.fetchJson(`/weather/current?city=${encodedCity}`);
+        return this.transformWeatherData(data);
+      });
     } catch (error) {
       console.error('Error fetching weather:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch weather data');
@@ -342,8 +400,10 @@ class WeatherService {
         throw new Error('Invalid coordinates provided');
       }
 
-      const data = await this.fetchJson(`/weather/current?lat=${lat}&lon=${lon}`);
-      return this.transformWeatherData(data);
+      return await this.getOrFetchCurrentWeather(this.buildWeatherCoordsCacheKey(lat, lon), async () => {
+        const data = await this.fetchJson(`/weather/current?lat=${lat}&lon=${lon}`);
+        return this.transformWeatherData(data);
+      });
     } catch (error) {
       console.error('Error fetching weather:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch weather data');
