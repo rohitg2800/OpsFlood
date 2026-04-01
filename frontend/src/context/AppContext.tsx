@@ -2,12 +2,60 @@ import React, { createContext, useContext, useReducer, ReactNode, useCallback } 
 import { INITIAL_STATE } from '../types';
 import type { AppState, AppAction, FormData, MLAlert, Prediction } from '../types';
 
+const sameLocationPayload = (left: any, right: any) =>
+  left === right ||
+  Boolean(
+    left &&
+      right &&
+      left.name === right.name &&
+      left.state === right.state &&
+      left.lat === right.lat &&
+      left.lon === right.lon,
+  );
+
+const sameWeatherPayload = (left: any, right: any) =>
+  left === right ||
+  Boolean(
+    left &&
+      right &&
+      left.location === right.location &&
+      left.timestamp === right.timestamp &&
+      left.temperature === right.temperature &&
+      left.weather_condition === right.weather_condition &&
+      left.icon === right.icon,
+  );
+
+const sameSensorPayload = (left: any[], right: any[]) =>
+  left === right ||
+  (Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((sensor, index) => {
+      const other = right[index];
+      return (
+        sensor === other ||
+        (other &&
+          sensor.station === other.station &&
+          sensor.river_level === other.river_level &&
+          sensor.status === other.status &&
+          sensor.last_update === other.last_update &&
+          sensor.source === other.source)
+      );
+    }));
+
+const sameRainfallDistribution = (left: any[], right: any[]) =>
+  left === right ||
+  (Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((item, index) => item.day === right[index]?.day && item.mm === right[index]?.mm));
+
 // ==========================================
 // STATE REDUCER
 // Handles all state mutations with validation
 // ==========================================
 
-export const appReducer = (state: AppState, action: AppAction): AppState => {
+const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
     // -------- UI STATE --------
     case 'SET_ACTIVE_TAB':
@@ -27,6 +75,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
 
     // -------- SYSTEM STATE --------
     case 'SET_API_STATUS':
+      if (state.system.apiStatus === action.payload) {
+        return state;
+      }
       return {
         ...state,
         system: { ...state.system, apiStatus: action.payload, lastSyncTime: new Date().toISOString() }
@@ -36,6 +87,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       return { ...state, system: { ...state.system, apiVersion: action.payload } };
     
     case 'SET_ERROR':
+      if (state.system.errorMessage === action.payload) {
+        return state;
+      }
       return { ...state, system: { ...state.system, errorMessage: action.payload } };
     
     case 'INIT_SYSTEM':
@@ -72,6 +126,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'SET_PREDICTION_LOADING':
+      if (state.prediction.isLoading === action.payload) {
+        return state;
+      }
       return {
         ...state,
         prediction: { ...state.prediction, isLoading: action.payload }
@@ -91,6 +148,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
 
     // -------- SENSOR STATE --------
     case 'SET_SENSOR_DATA':
+      if (sameSensorPayload(state.sensors.data, action.payload)) {
+        return state;
+      }
       return {
         ...state,
         sensors: {
@@ -104,6 +164,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'SET_SENSOR_LOADING':
+      if (state.sensors.isLoading === action.payload) {
+        return state;
+      }
       return {
         ...state,
         sensors: { ...state.sensors, isLoading: action.payload }
@@ -129,7 +192,13 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
 
     // -------- FORM STATE --------
-    case 'SET_FORM_DATA':
+    case 'SET_FORM_DATA': {
+      const changedEntries = Object.entries(action.payload).filter(
+        ([key, value]) => (state.form.data as any)[key] !== value,
+      );
+      if (!changedEntries.length) {
+        return state;
+      }
       return {
         ...state,
         form: {
@@ -138,8 +207,12 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           isDirty: true
         }
       };
+    }
     
     case 'SET_FORM_ERROR':
+      if (state.form.errors[action.payload.field] === action.payload.error) {
+        return state;
+      }
       return {
         ...state,
         form: {
@@ -188,6 +261,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'SET_FORM_VALID':
+      if (state.form.isValid === action.payload) {
+        return state;
+      }
       return {
         ...state,
         form: { ...state.form, isValid: action.payload }
@@ -241,6 +317,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
 
     // -------- DATA STATE --------
     case 'SET_WEATHER_DATA':
+      if (sameWeatherPayload(state.data.weatherData, action.payload)) {
+        return state;
+      }
       return {
         ...state,
         data: {
@@ -251,12 +330,18 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'SET_LOCATION_DATA':
+      if (sameLocationPayload(state.data.locationData, action.payload)) {
+        return state;
+      }
       return {
         ...state,
         data: { ...state.data, locationData: action.payload }
       };
     
     case 'SET_WEATHER_LOADING':
+      if (state.data.isLoadingWeather === action.payload) {
+        return state;
+      }
       return {
         ...state,
         data: { ...state.data, isLoadingWeather: action.payload }
@@ -289,12 +374,21 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
 
     // -------- INDIAN FLOOD MODEL STATE --------
     case 'SET_SELECTED_STATE':
+      if (state.prediction.selectedState === action.payload) {
+        return state;
+      }
       return {
         ...state,
         prediction: { ...state.prediction, selectedState: action.payload }
       };
     
     case 'SET_SELECTED_CITY':
+      if (
+        state.prediction.selectedCity === action.payload &&
+        state.form.data.station === action.payload
+      ) {
+        return state;
+      }
       return {
         ...state,
         prediction: { ...state.prediction, selectedCity: action.payload },
@@ -326,6 +420,13 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'UPDATE_RAINFALL_STATS':
+      if (
+        state.form.rainfallTotal === action.payload.total &&
+        state.form.rainfallAverage === action.payload.average &&
+        sameRainfallDistribution(state.form.rainfallDistribution, action.payload.distribution)
+      ) {
+        return state;
+      }
       return {
         ...state,
         form: {
@@ -338,12 +439,18 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
 
     // -------- CWC INTEGRATION --------
     case 'SET_CWC_CONNECTED':
+      if (state.cwc.isConnected === action.payload) {
+        return state;
+      }
       return {
         ...state,
         cwc: { ...state.cwc, isConnected: action.payload }
       };
     
     case 'SET_CWC_LIVE_DATA':
+      if (state.cwc.liveData === action.payload) {
+        return state;
+      }
       return {
         ...state,
         cwc: {
@@ -360,6 +467,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     
     case 'SET_CWC_DATA_SOURCE':
+      if (state.prediction.cwcDataSource === action.payload) {
+        return state;
+      }
       return {
         ...state,
         prediction: {

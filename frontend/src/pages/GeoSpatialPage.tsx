@@ -97,6 +97,10 @@ export const GeoSpatialPage: React.FC = () => {
   const hasMapTarget = Boolean(targetLocationLabel && targetLocationLabel !== 'AWAITING INPUT');
   const weatherTarget = targetLocationLabel || lockedMatrixState || 'Selected Region';
   const hasResolvedCoordinates = typeof lat === 'number' && typeof lon === 'number';
+  const weatherCoordinates = useMemo(
+    () => (hasResolvedCoordinates ? { lat: lat as number, lon: lon as number } : undefined),
+    [hasResolvedCoordinates, lat, lon],
+  );
   const mapQuery = stationFocus
     ? `${stationFocus}${lockedMatrixState && lockedMatrixState !== 'AWAITING INPUT' ? `, ${lockedMatrixState}` : ''}`
     : resolvedLocation
@@ -153,7 +157,7 @@ export const GeoSpatialPage: React.FC = () => {
 
       <WeatherConsolePanel
         target={weatherTarget}
-        coordinates={resolvedLocation ? { lat: resolvedLocation.lat, lon: resolvedLocation.lon } : undefined}
+        coordinates={weatherCoordinates}
         subtitle={`Atmospheric conditions for ${weatherTarget} linked to the current geo lock.`}
       />
 
@@ -239,8 +243,8 @@ export const GeoSpatialPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
-                    <div className="rounded-md border border-[#ff0037]/16 bg-black/35 p-2">
+                  <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
+                    <div className="rounded-md border border-[#ff0037]/16 bg-black/35 px-1.5 py-2">
                       <LayeredNeuralGraph
                         lanes={laneConfig}
                         preferredLabel={dominantProbabilityLane[0]}

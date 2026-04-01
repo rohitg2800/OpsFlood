@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAppState } from '../context/AppContext';
 import axios from 'axios';
 import type { Prediction, FormData, SensorData } from '../types';
@@ -69,63 +69,89 @@ export const usePredictionAPI = () => {
  */
 export const useSensorAPI = () => {
   const { state, dispatch } = useAppState();
+  const inflightRequestRef = useRef<Promise<SensorData[]> | null>(null);
+  const inflightKeyRef = useRef('');
+  const recentResultRef = useRef<{ key: string; timestamp: number; data: SensorData[] } | null>(null);
 
-  const fetchSensors = useCallback(async () => {
+  const fetchSensors = useCallback(async (options?: { force?: boolean }) => {
     dispatch({ type: 'SET_SENSOR_LOADING', payload: true });
     const selectedState = state.prediction.selectedState || state.form.data.state || 'Maharashtra';
     const selectedStation = state.form.data.station || state.prediction.selectedCity || selectedState;
+    const requestKey = `${selectedState}::${selectedStation}`;
     const tacticalSensors = tacticalCWCDataToSensors(
       generateTacticalCWCData(selectedState, selectedStation),
     );
+    const force = Boolean(options?.force);
+    const recentResult = recentResultRef.current;
 
-    try {
-      const params = {
-        state: selectedState,
-        station: selectedStation,
-      };
-
-      const response = await axios.get(apiUrl('/api/live-telemetry'), {
-        params,
-        timeout: 15000,
-      });
-
-      const sensorPayload = Array.isArray(response.data)
-        ? response.data
-        : Array.isArray(response.data?.data)
-        ? response.data.data
-        : [];
-
-      const normalizedApiSensors: SensorData[] = sensorPayload.map((sensor: any) => ({
-        station: sensor.station || sensor.stationName || 'Unknown Station',
-        river_level: Number(sensor.river_level ?? sensor.currentLevel ?? sensor.waterLevel ?? 0),
-        flow_rate: Number(sensor.flow_rate ?? sensor.flowRate ?? 0),
-        rainfall_last_hour: Number(sensor.rainfall_last_hour ?? sensor.rainfall ?? sensor.rainfallLastHour ?? 0),
-        status: sensor.status || 'ACTIVE',
-        last_update: sensor.last_update || sensor.lastUpdate || sensor.updateTime,
-        river: sensor.river,
-        warning_level: sensor.warning_level ?? sensor.warningLevel,
-        danger_level: sensor.danger_level ?? sensor.dangerLevel,
-        trend: sensor.trend,
-        state: sensor.state || selectedState,
-        source: sensor.source || 'CWC_API',
-      }));
-
-      const mergedSensors = mergeSensorTelemetry(normalizedApiSensors, tacticalSensors);
-
-      dispatch({ type: 'SET_SENSOR_DATA', payload: mergedSensors });
-      dispatch({ type: 'SET_API_STATUS', payload: 'ONLINE' });
-
-      return mergedSensors;
-    } catch (error) {
-      dispatch({
-        type: 'SET_ERROR',
-        payload: `Failed to fetch sensors: ${error}`
-      });
-      dispatch({ type: 'SET_SENSOR_DATA', payload: tacticalSensors });
-      return tacticalSensors;
-    } finally {
+    if (!force && recentResult && recentResult.key === requestKey && Date.now() - recentResult.timestamp < 2000) {
+      dispatch({ type: 'SET_SENSOR_DATA', payload: recentResult.data });
       dispatch({ type: 'SET_SENSOR_LOADING', payload: false });
+      return recentResult.data;
     }
+
+    if (!force && inflightRequestRef.current && inflightKeyRef.current === requestKey) {
+      return inflightRequestRef.current;
+    }
+
+    const request = (async () => {
+      try {
+        const params = {
+          state: selectedState,
+          station: selectedStation,
+        };
+
+        const response = await axios.get(apiUrl('/api/live-telemetry'), {
+          params,
+          timeout: 15000,
+        });
+
+        const sensorPayload = Array.isArray(response.data)
+          ? response.data
+          : Array.isArray(response.data?.data)
+          ? response.data.data
+          : [];
+
+        const normalizedApiSensors: SensorData[] = sensorPayload.map((sensor: any) => ({
+          station: sensor.station || sensor.stationName || 'Unknown Station',
+          river_level: Number(sensor.river_level ?? sensor.currentLevel ?? sensor.waterLevel ?? 0),
+          flow_rate: Number(sensor.flow_rate ?? sensor.flowRate ?? 0),
+          rainfall_last_hour: Number(sensor.rainfall_last_hour ?? sensor.rainfall ?? sensor.rainfallLastHour ?? 0),
+          status: sensor.status || 'ACTIVE',
+          last_update: sensor.last_update || sensor.lastUpdate || sensor.updateTime,
+          river: sensor.river,
+          warning_level: sensor.warning_level ?? sensor.warningLevel,
+          danger_level: sensor.danger_level ?? sensor.dangerLevel,
+          trend: sensor.trend,
+          state: sensor.state || selectedState,
+          source: sensor.source || 'CWC_API',
+        }));
+
+        const mergedSensors = mergeSensorTelemetry(normalizedApiSensors, tacticalSensors);
+        recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: mergedSensors };
+
+        dispatch({ type: 'SET_SENSOR_DATA', payload: mergedSensors });
+        dispatch({ type: 'SET_API_STATUS', payload: 'ONLINE' });
+
+        return mergedSensors;
+      } catch (error) {
+        dispatch({
+          type: 'SET_ERROR',
+          payload: `Failed to fetch sensors: ${error}`
+        });
+        recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: tacticalSensors };
+        dispatch({ type: 'SET_SENSOR_DATA', payload: tacticalSensors });
+        return tacticalSensors;
+      } finally {
+        inflightRequestRef.current = null;
+        inflightKeyRef.current = '';
+        dispatch({ type: 'SET_SENSOR_LOADING', payload: false });
+      }
+    })();
+
+    inflightRequestRef.current = request;
+    inflightKeyRef.current = requestKey;
+    return request;
   }, [dispatch, state.form.data.state, state.prediction.selectedCity, state.prediction.selectedState, state.form.data.station]);
 
   return { fetchSensors, isLoading: state.sensors.isLoading };
@@ -308,157 +334,183 @@ export const useFormValidation = (formData: any) => {
  */
 export const useCWCIntegration = () => {
   const { state, dispatch } = useAppState();
+  const inflightRequestRef = useRef<Promise<any> | null>(null);
+  const inflightKeyRef = useRef('');
+  const recentResultRef = useRef<{ key: string; timestamp: number; data: any } | null>(null);
 
-  const fetchCWCData = useCallback(async () => {
+  const fetchCWCData = useCallback(async (options?: { force?: boolean }) => {
     dispatch({ type: 'SET_CWC_CONNECTED', payload: false });
     const selectedState = state.prediction.selectedState || state.form.data.state || 'Maharashtra';
     const selectedStation = state.form.data.station || state.prediction.selectedCity || selectedState;
+    const requestKey = `${selectedState}::${selectedStation}`;
     const tacticalNodes = generateTacticalCWCData(selectedState, selectedStation);
     const fallbackNode = getPreferredHydrologyNode(tacticalNodes, selectedStation) || tacticalNodes[0];
+    const force = Boolean(options?.force);
+    const recentResult = recentResultRef.current;
 
-    try {
-      const cwcResult = await axios.get(apiUrl('/api/live-telemetry'), {
-        params: { state: selectedState, station: selectedStation, limit: 8 },
-        timeout: 10000
-      });
+    if (!force && recentResult && recentResult.key === requestKey && Date.now() - recentResult.timestamp < 2000) {
+      return recentResult.data;
+    }
 
-      const responseData = cwcResult.data as any;
-      const feedStatus = String(responseData?.status || '').toUpperCase();
-      const feedDataSource = String(responseData?.data_source || '').toUpperCase();
-      const backendFallbackMode =
-        feedStatus === 'FALLBACK_MODE' ||
-        feedStatus === 'PARTIAL_FALLBACK' ||
-        feedDataSource === 'TACTICAL_REGISTRY';
-      const sensorPayload = Array.isArray(responseData)
-        ? responseData
-        : Array.isArray(responseData?.data)
-        ? responseData.data
-        : [];
+    if (!force && inflightRequestRef.current && inflightKeyRef.current === requestKey) {
+      return inflightRequestRef.current;
+    }
 
-      const apiNodes = sensorPayload
-        .map((sensor: any, index: number) => {
-          const currentLevel = Number(sensor.river_level ?? sensor.currentLevel ?? sensor.waterLevel ?? NaN);
-          if (!Number.isFinite(currentLevel)) return null;
+    const request = (async () => {
+      try {
+        const cwcResult = await axios.get(apiUrl('/api/live-telemetry'), {
+          params: { state: selectedState, station: selectedStation, limit: 8 },
+          timeout: 10000
+        });
 
-          const matchedFallback = getPreferredHydrologyNode(
-            tacticalNodes,
-            sensor.station || sensor.stationName || sensor.river,
-          );
+        const responseData = cwcResult.data as any;
+        const feedStatus = String(responseData?.status || '').toUpperCase();
+        const feedDataSource = String(responseData?.data_source || '').toUpperCase();
+        const backendFallbackMode =
+          feedStatus === 'FALLBACK_MODE' ||
+          feedStatus === 'PARTIAL_FALLBACK' ||
+          feedDataSource === 'TACTICAL_REGISTRY';
+        const sensorPayload = Array.isArray(responseData)
+          ? responseData
+          : Array.isArray(responseData?.data)
+          ? responseData.data
+          : [];
 
-          const warningLevel =
-            Number(sensor.warning_level ?? sensor.warningLevel ?? matchedFallback?.warningLevel ?? NaN);
-          const dangerLevel =
-            Number(sensor.danger_level ?? sensor.dangerLevel ?? matchedFallback?.dangerLevel ?? NaN);
+        const apiNodes = sensorPayload
+          .map((sensor: any, index: number) => {
+            const currentLevel = Number(sensor.river_level ?? sensor.currentLevel ?? sensor.waterLevel ?? NaN);
+            if (!Number.isFinite(currentLevel)) return null;
 
-          const status =
-            sensor.status ||
-            (Number.isFinite(dangerLevel) && currentLevel >= dangerLevel
-              ? 'CRITICAL'
-              : Number.isFinite(warningLevel) && currentLevel >= warningLevel
-              ? 'WARNING'
-              : 'ACTIVE');
+            const matchedFallback = getPreferredHydrologyNode(
+              tacticalNodes,
+              sensor.station || sensor.stationName || sensor.river,
+            );
 
-          const sensorSource = String(sensor.source || '').toUpperCase();
-          const normalizedSource =
-            sensorSource.includes('TACTICAL')
-              ? 'TACTICAL_REGISTRY'
-              : sensorSource.includes('HTML')
-              ? 'HTML_SCRAPE'
-              : backendFallbackMode
-              ? 'TACTICAL_REGISTRY'
-              : 'CWC_API';
+            const warningLevel =
+              Number(sensor.warning_level ?? sensor.warningLevel ?? matchedFallback?.warningLevel ?? NaN);
+            const dangerLevel =
+              Number(sensor.danger_level ?? sensor.dangerLevel ?? matchedFallback?.dangerLevel ?? NaN);
 
-          return {
-            id: `CWC-API-${index}`,
-            state: selectedState,
-            river: sensor.river || matchedFallback?.river || 'Active Basin',
-            station: sensor.station || sensor.stationName || matchedFallback?.station || selectedStation,
-            currentLevel,
-            warningLevel: Number.isFinite(warningLevel) ? warningLevel : matchedFallback?.warningLevel || null,
-            dangerLevel: Number.isFinite(dangerLevel) ? dangerLevel : matchedFallback?.dangerLevel || null,
-            rainfallLastHour: Number(sensor.rainfall_last_hour ?? sensor.rainfall ?? sensor.rainfallLastHour ?? 0),
-            status,
-            trend: sensor.trend || matchedFallback?.trend || 'STEADY',
-            updateTime:
-              sensor.last_update ||
-              sensor.lastUpdate ||
-              sensor.updateTime ||
-              fallbackNode?.updateTime ||
-              new Date().toLocaleTimeString('en-IN', { hour12: false }),
-            source: normalizedSource,
-          };
-        })
-        .filter(Boolean);
+            const status =
+              sensor.status ||
+              (Number.isFinite(dangerLevel) && currentLevel >= dangerLevel
+                ? 'CRITICAL'
+                : Number.isFinite(warningLevel) && currentLevel >= warningLevel
+                ? 'WARNING'
+                : 'ACTIVE');
 
-      const regionalData = apiNodes.length
-        ? [
-            ...apiNodes,
-            ...tacticalNodes.filter(
-              (node) =>
-                !apiNodes.some(
-                  (apiNode: any) => apiNode.station.toLowerCase() === node.station.toLowerCase(),
-                ),
-            ),
-          ]
-        : tacticalNodes;
+            const sensorSource = String(sensor.source || '').toUpperCase();
+            const normalizedSource =
+              sensorSource.includes('TACTICAL')
+                ? 'TACTICAL_REGISTRY'
+                : sensorSource.includes('HTML')
+                ? 'HTML_SCRAPE'
+                : backendFallbackMode
+                ? 'TACTICAL_REGISTRY'
+                : 'CWC_API';
 
-      const preferredNode =
-        getPreferredHydrologyNode(regionalData as any, selectedStation) ||
-        fallbackNode;
+            return {
+              id: `CWC-API-${index}`,
+              state: selectedState,
+              river: sensor.river || matchedFallback?.river || 'Active Basin',
+              station: sensor.station || sensor.stationName || matchedFallback?.station || selectedStation,
+              currentLevel,
+              warningLevel: Number.isFinite(warningLevel) ? warningLevel : matchedFallback?.warningLevel || null,
+              dangerLevel: Number.isFinite(dangerLevel) ? dangerLevel : matchedFallback?.dangerLevel || null,
+              rainfallLastHour: Number(sensor.rainfall_last_hour ?? sensor.rainfall ?? sensor.rainfallLastHour ?? 0),
+              status,
+              trend: sensor.trend || matchedFallback?.trend || 'STEADY',
+              updateTime:
+                sensor.last_update ||
+                sensor.lastUpdate ||
+                sensor.updateTime ||
+                fallbackNode?.updateTime ||
+                new Date().toLocaleTimeString('en-IN', { hour12: false }),
+              source: normalizedSource,
+            };
+          })
+          .filter(Boolean);
 
-      if (!preferredNode) {
-        dispatch({ type: 'SET_CWC_CONNECTED', payload: false });
-        dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: 'LOCAL_CACHE' });
-        return null;
-      }
+        const regionalData = apiNodes.length
+          ? [
+              ...apiNodes,
+              ...tacticalNodes.filter(
+                (node) =>
+                  !apiNodes.some(
+                    (apiNode: any) => apiNode.station.toLowerCase() === node.station.toLowerCase(),
+                  ),
+              ),
+            ]
+          : tacticalNodes;
 
-      dispatch({
-        type: 'SET_CWC_LIVE_DATA',
-        payload: {
-          kolhapurLevel: preferredNode.currentLevel,
-          kolhapurStatus: preferredNode.status,
-          currentLevel: preferredNode.currentLevel,
-          status: preferredNode.status,
-          station: preferredNode.station,
-          river: preferredNode.river,
-          warningLevel: preferredNode.warningLevel,
-          dangerLevel: preferredNode.dangerLevel,
-          trend: preferredNode.trend,
-          regionalData,
-          source: preferredNode.source,
+        const preferredNode =
+          getPreferredHydrologyNode(regionalData as any, selectedStation) ||
+          fallbackNode;
+
+        if (!preferredNode) {
+          dispatch({ type: 'SET_CWC_CONNECTED', payload: false });
+          dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: 'LOCAL_CACHE' });
+          recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: null };
+          return null;
         }
-      });
-      const hasLiveNodes = apiNodes.some(
-        (node: any) => node?.source === 'CWC_API' || node?.source === 'HTML_SCRAPE',
-      );
-      dispatch({ type: 'SET_CWC_CONNECTED', payload: hasLiveNodes });
-      dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: hasLiveNodes ? 'LIVE_CWC' : 'TACTICAL_REGISTRY' });
 
-      return preferredNode;
-    } catch {
-      console.warn('CWC API unavailable, using cached or manual data');
-      if (fallbackNode) {
         dispatch({
           type: 'SET_CWC_LIVE_DATA',
           payload: {
-            kolhapurLevel: fallbackNode.currentLevel,
-            kolhapurStatus: fallbackNode.status,
-            currentLevel: fallbackNode.currentLevel,
-            status: fallbackNode.status,
-            station: fallbackNode.station,
-            river: fallbackNode.river,
-            warningLevel: fallbackNode.warningLevel,
-            dangerLevel: fallbackNode.dangerLevel,
-            trend: fallbackNode.trend,
-            regionalData: tacticalNodes,
-            source: 'TACTICAL_REGISTRY',
+            kolhapurLevel: preferredNode.currentLevel,
+            kolhapurStatus: preferredNode.status,
+            currentLevel: preferredNode.currentLevel,
+            status: preferredNode.status,
+            station: preferredNode.station,
+            river: preferredNode.river,
+            warningLevel: preferredNode.warningLevel,
+            dangerLevel: preferredNode.dangerLevel,
+            trend: preferredNode.trend,
+            regionalData,
+            source: preferredNode.source,
           }
         });
+        const hasLiveNodes = apiNodes.some(
+          (node: any) => node?.source === 'CWC_API' || node?.source === 'HTML_SCRAPE',
+        );
+        dispatch({ type: 'SET_CWC_CONNECTED', payload: hasLiveNodes });
+        dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: hasLiveNodes ? 'LIVE_CWC' : 'TACTICAL_REGISTRY' });
+        recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: preferredNode };
+
+        return preferredNode;
+      } catch {
+        console.warn('CWC API unavailable, using cached or manual data');
+        if (fallbackNode) {
+          dispatch({
+            type: 'SET_CWC_LIVE_DATA',
+            payload: {
+              kolhapurLevel: fallbackNode.currentLevel,
+              kolhapurStatus: fallbackNode.status,
+              currentLevel: fallbackNode.currentLevel,
+              status: fallbackNode.status,
+              station: fallbackNode.station,
+              river: fallbackNode.river,
+              warningLevel: fallbackNode.warningLevel,
+              dangerLevel: fallbackNode.dangerLevel,
+              trend: fallbackNode.trend,
+              regionalData: tacticalNodes,
+              source: 'TACTICAL_REGISTRY',
+            }
+          });
+        }
+        dispatch({ type: 'SET_CWC_CONNECTED', payload: false });
+        dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: 'TACTICAL_REGISTRY' });
+        recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: fallbackNode || null };
+        return fallbackNode || null;
+      } finally {
+        inflightRequestRef.current = null;
+        inflightKeyRef.current = '';
       }
-      dispatch({ type: 'SET_CWC_CONNECTED', payload: false });
-      dispatch({ type: 'SET_CWC_DATA_SOURCE', payload: 'TACTICAL_REGISTRY' });
-      return fallbackNode || null;
-    }
+    })();
+
+    inflightRequestRef.current = request;
+    inflightKeyRef.current = requestKey;
+    return request;
   }, [dispatch, state.form.data.state, state.prediction.selectedCity, state.prediction.selectedState, state.form.data.station]);
 
   return { fetchCWCData, isConnected: state.cwc.isConnected };
@@ -555,7 +607,7 @@ export const useEnhancedPrediction = () => {
       updateRainfallStats();
 
       // Fetch live CWC data
-      const cwcData = await fetchCWCData();
+      const cwcData = await fetchCWCData({ force: true });
 
       // If CWC data available, use it to override peak level
       if (typeof cwcData?.currentLevel === 'number') {

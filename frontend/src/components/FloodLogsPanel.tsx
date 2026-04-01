@@ -3,7 +3,6 @@ import { Database, Download, TrendingUp } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { apiUrl } from '../config/api';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
-import { useCWCIntegration } from '../hooks/useAppOperations';
 import { SkeletonLoader } from './SkeletonLoader';
 
 interface FloodLog {
@@ -24,7 +23,6 @@ interface FloodLogsPanelProps {
 
 export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, borderless = false }) => {
   const { state, dispatch } = useAppState();
-  const { fetchCWCData, isConnected } = useCWCIntegration();
   const [logs, setLogs] = useState<FloodLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [historicalMode, setHistoricalMode] = useState<'REAL_DATASET' | 'NO_REAL_DATASET'>('NO_REAL_DATASET');
@@ -39,11 +37,11 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
   const activeCityOrStation = state.form.data.station || state.prediction.selectedCity || '';
   const activeState = state.prediction.selectedState || state.form.data.state || '';
   const liveCWC = state.cwc.liveData;
+  const isConnected = state.cwc.isConnected;
 
-  const fetchLogsAndCWCData = useCallback(async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch historical logs
       const logsRes = await fetch(apiUrl(`/historical-logs?city=${encodeURIComponent(selectedCity)}&limit=50`));
       const logsData = await logsRes.json();
       if (logsData.status === 'success') {
@@ -57,8 +55,6 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
         setDatasetCity(null);
         setHistoricalMessage('Unable to load historical flood logs right now.');
       }
-
-      await fetchCWCData();
     } catch (error) {
       console.error('Error fetching logs:', error);
       setLogs([]);
@@ -68,11 +64,15 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     } finally {
       setLoading(false);
     }
-  }, [fetchCWCData, selectedCity]);
+  }, [selectedCity]);
 
   useEffect(() => {
-    fetchLogsAndCWCData();
-  }, [fetchLogsAndCWCData]);
+    const timeoutId = window.setTimeout(() => {
+      void fetchLogs();
+    }, 260);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [fetchLogs]);
 
   const exportLogs = () => {
     const csv = [

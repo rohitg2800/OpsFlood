@@ -78,8 +78,8 @@ export const NeuralOperationsGraph: React.FC<NeuralOperationsGraphProps> = ({ cl
           </div>
         </div>
 
-        <div className="grid items-center gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]">
-          <div className="rounded-md border border-[#ff0037]/14 bg-black/35 p-3">
+        <div className="grid items-center gap-5 xl:grid-cols-[24.5rem_minmax(0,1fr)]">
+          <div className="rounded-md border border-[#ff0037]/14 bg-black/35 px-2 py-3">
             <LayeredNeuralGraph
               lanes={laneConfig}
               preferredLabel={dominantProbabilityEntry[0]}

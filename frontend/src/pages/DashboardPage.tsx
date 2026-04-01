@@ -49,7 +49,7 @@ const getStrategicLocations = (stateName: string) => {
 // ==========================================
 
 const LuxeCard = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-  <div className={`min-w-0 rounded-lg border border-[#ff0037]/26 bg-[#0B0A08]/60 p-10 shadow-[0_25px_80px_rgba(0,0,0,0.8)] backdrop-blur-3xl transition-all duration-500 ${className}`}>
+  <div className={`min-w-0 rounded-lg border border-[#ff0037]/26 bg-[#0B0A08]/58 p-10 shadow-[0_16px_42px_rgba(0,0,0,0.52)] backdrop-blur-xl transition-[transform,box-shadow,background-color] duration-300 ${className}`}>
     {children}
   </div>
 );
@@ -79,7 +79,7 @@ const chipButtonClass =
   'min-h-[2.5rem] whitespace-nowrap rounded-md border border-[#ff9b2f]/32 bg-[#f59e0b]/14 px-4 py-2 text-[9px] font-black uppercase tracking-[0.16em] shadow-sm transition-all active:scale-95';
 
 const sectionShellClass =
-  'space-y-4 rounded-md border border-[#ff0037]/20 bg-black/30 p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-2xl';
+  'space-y-4 rounded-md border border-[#ff0037]/18 bg-black/26 p-5 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-lg';
 
 const getTrendMeta = (trend?: string) => {
   if (trend === 'RISING') {
@@ -450,6 +450,23 @@ export const DashboardPage: React.FC = () => {
     state.prediction.selectedState,
   );
   const dashboardWeatherTarget = selectedRiverLocationLabel || state.form.data.state || 'Selected Region';
+  const currentLocationData = useMemo(
+    () =>
+      state.data.locationData?.lat && state.data.locationData?.lon
+        ? {
+            name: state.data.locationData.name,
+            state: state.data.locationData.state,
+            lat: state.data.locationData.lat,
+            lon: state.data.locationData.lon,
+          }
+        : null,
+    [
+      state.data.locationData?.lat,
+      state.data.locationData?.lon,
+      state.data.locationData?.name,
+      state.data.locationData?.state,
+    ],
+  );
   const dashboardWeatherCoordinates = useMemo(() => {
     const focusedLocation = resolveGeoCoordinate(
       state.prediction.selectedCity,
@@ -462,10 +479,10 @@ export const DashboardPage: React.FC = () => {
 
     const focusTarget = state.prediction.selectedCity || state.form.data.station;
     if (focusTarget) {
-      if (locationMatchesCandidate(state.data.locationData, focusTarget)) {
+      if (locationMatchesCandidate(currentLocationData, focusTarget) && currentLocationData) {
         return {
-          lat: state.data.locationData.lat,
-          lon: state.data.locationData.lon,
+          lat: currentLocationData.lat,
+          lon: currentLocationData.lon,
         };
       }
 
@@ -481,16 +498,16 @@ export const DashboardPage: React.FC = () => {
       return { lat: stateLocation.lat, lon: stateLocation.lon };
     }
 
-    if (state.data.locationData?.lat && state.data.locationData?.lon) {
+    if (currentLocationData) {
       return {
-        lat: state.data.locationData.lat,
-        lon: state.data.locationData.lon,
+        lat: currentLocationData.lat,
+        lon: currentLocationData.lon,
       };
     }
 
     return undefined;
   }, [
-    state.data.locationData,
+    currentLocationData,
     state.form.data.state,
     state.form.data.station,
     state.prediction.selectedCity,
@@ -586,12 +603,11 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
 
-    fetchSensors();
-    const interval = window.setInterval(() => {
-      fetchSensors();
-    }, 5 * 60 * 1000);
+    const timeoutId = window.setTimeout(() => {
+      void fetchSensors();
+    }, 180);
 
-    return () => window.clearInterval(interval);
+    return () => window.clearTimeout(timeoutId);
   }, [apiStatus, fetchSensors]);
 
   useEffect(() => {
@@ -641,9 +657,14 @@ export const DashboardPage: React.FC = () => {
   const applyCustomCity = useCallback(() => {
     const nextCity = customCity.trim();
     if (!nextCity) return;
+    if (
+      nextCity === (state.prediction.selectedCity || '').trim() &&
+      nextCity === (state.form.data.station || '').trim()
+    ) {
+      return;
+    }
     dispatch({ type: 'SET_SELECTED_CITY', payload: nextCity });
-    dispatch({ type: 'SET_FORM_DATA', payload: { station: nextCity } });
-  }, [customCity, dispatch]);
+  }, [customCity, dispatch, state.form.data.station, state.prediction.selectedCity]);
 
   const scrollToPredictionInput = useCallback(() => {
     window.requestAnimationFrame(() => {

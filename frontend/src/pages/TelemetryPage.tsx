@@ -27,12 +27,11 @@ export const TelemetryPage: React.FC = () => {
   }, [state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.sensors.data]);
 
   useEffect(() => {
-    fetchSensors();
-    const refreshId = window.setInterval(() => {
-      fetchSensors();
-    }, 25000);
+    const timeoutId = window.setTimeout(() => {
+      void fetchSensors();
+    }, 180);
 
-    return () => window.clearInterval(refreshId);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchSensors]);
 
   // Helper for tactical status styling
@@ -78,7 +77,7 @@ export const TelemetryPage: React.FC = () => {
         action={
           <button
             type="button"
-            onClick={() => fetchSensors()}
+            onClick={() => fetchSensors({ force: true })}
             disabled={sensorsLoading}
             className="inline-flex items-center gap-3 rounded-md border border-[#ff0037]/40 bg-white/8 px-6 py-3 text-[10px] font-black uppercase tracking-[0.22em] text-[#ffb36a] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all hover:bg-[#ff0037] hover:text-white disabled:opacity-50"
           >
