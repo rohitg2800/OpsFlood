@@ -68,12 +68,48 @@ const GEO_INDEX = GEO_ENTRIES.reduce<Record<string, GeoCoordinate>>((acc, entry)
   return acc;
 }, {});
 
+const GEO_INDEX_ENTRIES = Object.entries(GEO_INDEX);
+
+function findFuzzyGeoCoordinate(normalizedCandidate: string): GeoCoordinate | null {
+  if (!normalizedCandidate || normalizedCandidate.length < 3) {
+    return null;
+  }
+
+  const candidatePhrase = ` ${normalizedCandidate} `;
+  let bestMatch: { coordinate: GeoCoordinate; score: number } | null = null;
+
+  for (const [alias, coordinate] of GEO_INDEX_ENTRIES) {
+    if (!alias || alias.length < 3) continue;
+
+    const aliasPhrase = ` ${alias} `;
+    if (!candidatePhrase.includes(aliasPhrase) && !aliasPhrase.includes(candidatePhrase)) {
+      continue;
+    }
+
+    const score =
+      aliasPhrase === candidatePhrase
+        ? alias.length + 1000
+        : Math.min(alias.length, normalizedCandidate.length);
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { coordinate, score };
+    }
+  }
+
+  return bestMatch?.coordinate || null;
+}
+
 export function resolveGeoCoordinate(...candidates: Array<string | undefined | null>): GeoCoordinate | null {
   for (const candidate of candidates) {
     const normalized = normalizeGeoKey(candidate || '');
     if (!normalized) continue;
     if (GEO_INDEX[normalized]) {
       return GEO_INDEX[normalized];
+    }
+
+    const fuzzyMatch = findFuzzyGeoCoordinate(normalized);
+    if (fuzzyMatch) {
+      return fuzzyMatch;
     }
   }
   return null;

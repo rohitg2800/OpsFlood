@@ -4,7 +4,7 @@ import { useAppState } from '../context/AppContext';
 import { useSensorAPI } from '../hooks/useAppOperations';
 import { PageShell, PageHero, PageCard } from '../components/PageShell';
 import { NeuralOperationsGraph } from '../components/NeuralOperationsGraph';
-import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
+import { getScopedSensorSelection, getSelectedRiverLocationLabel } from '../utils/regionReadings';
 
 // ==========================================
 // TELEMETRY PAGE COMPONENT
@@ -18,13 +18,18 @@ export const TelemetryPage: React.FC = () => {
     state.form.data.station,
     state.prediction.selectedState,
   );
-  const scopedSensors = useMemo(() => {
-    return scopeSensorsToSelectedLocation(state.sensors.data || [], {
+  const scopedSensorContext = useMemo(() => {
+    return getScopedSensorSelection(state.sensors.data || [], {
       selectedCity: state.prediction.selectedCity,
       station: state.form.data.station,
       selectedState: state.prediction.selectedState,
     });
   }, [state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.sensors.data]);
+  const scopedSensors = scopedSensorContext.sensors;
+  const telemetrySubtitle =
+    scopedSensorContext.mode === 'city_nearby'
+      ? `Field nodes, river levels, and nearby monitored water sources for ${selectedRiverLocationLabel}.`
+      : `Field nodes, river levels, and rainfall packets scoped to ${selectedRiverLocationLabel}.`;
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -72,7 +77,7 @@ export const TelemetryPage: React.FC = () => {
       <PageHero
         eyebrow="Live Sensor Telemetry"
         title="Telemetry Feed"
-        subtitle={`Field nodes, river levels, and rainfall packets scoped to ${selectedRiverLocationLabel}.`}
+        subtitle={telemetrySubtitle}
         icon={SignalHigh}
         action={
           <button
@@ -193,7 +198,10 @@ export const TelemetryPage: React.FC = () => {
 
         {/* TACTICAL FOOTER */}
         <div className="flex items-center justify-between border-t border-[#ff0037]/20 bg-black/40 p-6 text-[9px] font-black uppercase tracking-[0.3em] text-stone-600">
-           <span>River_Location: {selectedRiverLocationLabel}</span>
+           <span>
+             River_Location: {selectedRiverLocationLabel}
+             {scopedSensorContext.mode === 'city_nearby' ? ' // Nearby_Sources' : ''}
+           </span>
            <span>Active_Nodes: {scopedSensors.length}</span>
         </div>
       </PageCard>
