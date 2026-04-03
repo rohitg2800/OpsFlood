@@ -13,6 +13,7 @@ export type SeverityLevel = 'SEVERE' | 'MODERATE' | 'LOW' | 'CRITICAL';
  * Tracks API, database, and service health
  */
 export type SystemStatus = 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'INITIALIZING';
+export type SourcePolicyMode = 'OPEN_DATA' | 'OFFICIAL_VIEW_ONLY' | 'FALLBACK';
 
 /**
  * SENSOR STATUS
@@ -164,6 +165,23 @@ export interface FormData {
   station?: string;      // River gauge station name (e.g., "Kolhapur")
 }
 
+export interface SourcePolicyReference {
+  label: string;
+  title: string;
+  url: string;
+  usage: string;
+}
+
+export interface SourcePolicy {
+  mode: SourcePolicyMode;
+  label: string;
+  description: string;
+  allow_live_cwc_in_app: boolean;
+  telemetry_mode: string;
+  prediction_data_source: string;
+  public_sources: SourcePolicyReference[];
+}
+
 // ==========================================
 // STATE MATRIX DEFINITION
 // ==========================================
@@ -194,6 +212,7 @@ export interface AppState {
     lastSyncTime: string | null;
     errorMessage: string | null;
     isInitialized: boolean;
+    sourcePolicy: SourcePolicy;
   };
 
   // --------
@@ -325,6 +344,7 @@ export type AppAction =
   | { type: 'SET_API_STATUS'; payload: SystemStatus }
   | { type: 'SET_API_VERSION'; payload: string }
   | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_SOURCE_POLICY'; payload: SourcePolicy }
   | { type: 'INIT_SYSTEM' }
   
   // Prediction Actions
@@ -417,6 +437,34 @@ export const INITIAL_STATE: AppState = {
       lastSyncTime: null,
       errorMessage: null,
       isInitialized: false,
+      sourcePolicy: {
+        mode: 'OFFICIAL_VIEW_ONLY',
+        label: 'Official View Only',
+        description: 'Use official CWC portals for public monitoring, while the app stays on manual or tactical context.',
+        allow_live_cwc_in_app: false,
+        telemetry_mode: 'OFFICIAL_VIEW_ONLY',
+        prediction_data_source: 'Official View Only + Manual Input',
+        public_sources: [
+          {
+            label: 'Open Data',
+            title: 'data.gov.in Reservoir Levels',
+            url: 'https://www.data.gov.in/resource/daily-data-reservoir-level-central-water-commission-cwc',
+            usage: 'Safest public reuse path',
+          },
+          {
+            label: 'Official Monitor',
+            title: 'CWC Flood Forecast Portal',
+            url: 'https://ffs.india-water.gov.in/',
+            usage: 'Authoritative public viewing',
+          },
+          {
+            label: 'Advisory',
+            title: 'CWC 7-Day Forecast',
+            url: 'https://aff.india-water.gov.in/home.php',
+            usage: 'Forward-looking official advisories',
+          },
+        ],
+      },
   },
   prediction: {
     currentPrediction: null,

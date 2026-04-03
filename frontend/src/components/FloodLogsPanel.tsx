@@ -43,6 +43,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     isConnected,
     liveSource: liveCWC.source,
     predictionSource: state.prediction.cwcDataSource,
+    sourcePolicyMode: state.system.sourcePolicy.mode,
   });
 
   const fetchLogs = useCallback(async () => {

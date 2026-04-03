@@ -252,9 +252,18 @@ export const useSystemInit = () => {
 
       try {
         // Check API connectivity
-        await axios.get(apiUrl('/health'), {
+        const healthResponse = await axios.get(apiUrl('/health'), {
           timeout: 5000
         });
+        const healthPayload = healthResponse.data as any;
+
+        if (healthPayload?.version) {
+          dispatch({ type: 'SET_API_VERSION', payload: String(healthPayload.version) });
+        }
+
+        if (healthPayload?.source_policy) {
+          dispatch({ type: 'SET_SOURCE_POLICY', payload: healthPayload.source_policy });
+        }
 
         dispatch({ type: 'INIT_SYSTEM' });
         dispatch({ type: 'SET_API_STATUS', payload: 'ONLINE' });
