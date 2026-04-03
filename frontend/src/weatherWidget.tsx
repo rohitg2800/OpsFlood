@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Wind, Droplets, ThermometerSun, MapPin, RefreshCw } from 'lucide-react';
 import WeatherService from './weatherService'; // Import the WeatherService
 import { isLiteMotionDevice } from './utils/performance';
+import { formatTemperatureScale } from './utils/temperature';
 
 export interface WeatherData {
   location: string;
   temperature: number;
   feels_like: number;
+  temp_min: number;
+  temp_max: number;
   humidity: number;
   pressure: number;
   wind_speed: number;
@@ -68,6 +71,8 @@ const buildFallbackWeatherData = (target: string): WeatherData => ({
   location: target || 'Selected Region',
   temperature: 28,
   feels_like: 32,
+  temp_min: 26,
+  temp_max: 31,
   humidity: 75,
   pressure: 1013,
   wind_speed: 8,
@@ -88,7 +93,13 @@ const getReadableWeatherError = (error: unknown, target: string) => {
   if (rawMessage.includes('"city not found"') || rawMessage.includes('404')) {
     return `Live weather unavailable for ${target}; showing fallback conditions.`;
   }
-  return rawMessage;
+  if (
+    rawMessage.includes('Showing fallback conditions.') ||
+    rawMessage.includes('showing fallback conditions.')
+  ) {
+    return rawMessage;
+  }
+  return 'Weather data could not be refreshed. Showing fallback conditions.';
 };
 
 const isNightSnapshot = (weather: WeatherData | null) => {
@@ -350,6 +361,14 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
     [city, displayLocation],
   );
   const visibleLocationLabel = lockedDisplayLocation || weather?.location || city;
+  const temperatureScale = useMemo(
+    () => formatTemperatureScale(weather?.temperature),
+    [weather?.temperature],
+  );
+  const feelsLikeScale = useMemo(
+    () => formatTemperatureScale(weather?.feels_like),
+    [weather?.feels_like],
+  );
 
   // Sync internal coords when prop changes
   useEffect(() => {
@@ -659,7 +678,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
         {error && (
           <div className={`mb-3 w-full rounded-xl bg-[#ff0037]/8 px-3 py-2 text-[#ff8ea0] ${liteMotion ? '' : 'backdrop-blur-md'}`}>
             <div className="flex items-center justify-between">
-              <span className="font-medium">Error: {error}</span>
+              <span className="font-medium">{error}</span>
               <button
                 onClick={() => {
                   void fetchWeather();
@@ -687,7 +706,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
 
         <div className="flex flex-col items-center justify-center gap-5">
           <div className="flex flex-col items-center gap-4 self-stretch">
-            <div className={`rounded-md bg-gradient-to-br from-[#6b000f] via-[#b00020] to-[#f59e0b] p-2 ${liteMotion ? 'shadow-[0_10px_24px_rgba(255,0,55,0.12)]' : 'shadow-[0_18px_60px_rgba(255,0,55,0.18)]'}`}>
+            <div className="flex items-center justify-center">
               {weatherIconSrc && !iconLoadFailed ? (
                 <img
                   src={weatherIconSrc}
@@ -698,7 +717,7 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
                   }}
                 />
               ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-md bg-black/30 text-xl font-bold uppercase text-white">
+                <div className="flex h-12 w-12 items-center justify-center text-xl font-bold uppercase text-white">
                   {weather?.weather_condition.charAt(0).toUpperCase() || 'W'}
                 </div>
               )}
@@ -736,10 +755,13 @@ const WeatherWidget: React.FC<WeatherWidgetProps> = ({
           <div className="flex flex-wrap justify-center gap-3 text-slate-200 lg:gap-4">
             <div className={`weather-metric-card flex min-w-[80px] flex-col items-center rounded-2xl bg-black/14 px-4 py-2 ${liteMotion ? '' : 'backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'}`}>
               <ThermometerSun className="mb-1 h-5 w-5 text-[#f59e0b]" />
-              <span className="font-mono text-xl font-black">{weather?.temperature}°C</span>
+              <span className="font-mono text-xl font-black">{temperatureScale.celsius}</span>
+              <span className="text-xs font-mono text-slate-400">{temperatureScale.fahrenheit}</span>
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Temp</span>
               {showDetailedInfo ? (
-                <span className="text-xs font-mono text-slate-500">Feels {weather?.feels_like}°C</span>
+                <span className="text-xs font-mono text-slate-500">
+                  Feels {feelsLikeScale.celsius} / {feelsLikeScale.fahrenheit}
+                </span>
               ) : null}
             </div>
 
