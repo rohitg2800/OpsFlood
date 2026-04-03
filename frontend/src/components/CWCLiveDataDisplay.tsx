@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   Clock,
   Radio,
+  ExternalLink,
 } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { useCWCIntegration } from '../hooks/useAppOperations';
@@ -34,6 +35,7 @@ const getStatusTone = (status: string) => {
 export function CWCLiveDataDisplay() {
   const { state } = useAppState();
   const { fetchCWCData, isConnected } = useCWCIntegration();
+  const sourcePolicy = state.system.sourcePolicy;
 
   const selectedStation = getSelectedRiverLocationLabel(
     state.prediction.selectedCity,
@@ -58,7 +60,9 @@ export function CWCLiveDataDisplay() {
     isConnected,
     liveSource: source,
     predictionSource: state.prediction.cwcDataSource,
+    sourcePolicyMode: sourcePolicy.mode,
   });
+  const syncLabel = sourcePolicy.allow_live_cwc_in_app ? 'Sync_CWC' : 'Refresh_Context';
 
   const regionTelemetry = useMemo(() => {
     const scopedSensors = scopeSensorsToSelectedLocation(state.sensors.data || [], {
@@ -120,8 +124,20 @@ export function CWCLiveDataDisplay() {
           <span className="flex h-3.5 w-3.5 items-center justify-center">
             <RefreshCw size={12} className="shrink-0" />
           </span>
-          <span>Sync_CWC</span>
+          <span>{syncLabel}</span>
         </button>
+      </div>
+
+      <div className="mb-5 rounded-md border border-[#ff0037]/18 bg-black/30 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-black uppercase tracking-[0.2em] text-stone-500">Source Policy</span>
+          <span className="rounded-md border border-[#ff0037]/18 bg-white/[0.04] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-[#ff9eb1]">
+            {sourcePolicy.mode}
+          </span>
+        </div>
+        <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+          {sourcePolicy.description}
+        </p>
       </div>
 
       <div className="mb-5 rounded-md border border-[#ff0037]/22 bg-black/35 p-5">
@@ -234,6 +250,45 @@ export function CWCLiveDataDisplay() {
         <span className="font-black uppercase tracking-[0.2em] text-stone-500">Data Source</span>
         <div className="mt-2">
           {dataSourceMessage}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-md border border-[#ff0037]/18 bg-black/30 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-black uppercase tracking-[0.2em] text-stone-500">Official Public Sources</span>
+          <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-stone-600">
+            Legal monitoring references
+          </span>
+        </div>
+        <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+          For public app reuse, prefer open datasets from <span className="text-stone-300">data.gov.in</span>. For authoritative live public monitoring,
+          use the official CWC portals directly.
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-3">
+          {sourcePolicy.public_sources.map((sourceLink) => (
+            <a
+              key={sourceLink.url}
+              href={sourceLink.url}
+              target="_blank"
+              rel="noreferrer"
+              className="group flex items-center justify-between gap-4 rounded-md border border-[#ff0037]/12 bg-white/[0.03] px-4 py-3 transition-all hover:border-[#ff0037]/28 hover:bg-white/[0.05]"
+            >
+              <div className="min-w-0">
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-[#ff9eb1]">
+                  {sourceLink.label}
+                </div>
+                <div className="mt-1 truncate text-sm font-black text-white">
+                  {sourceLink.title}
+                </div>
+                <div className="mt-1 text-[10px] text-stone-500">
+                  {sourceLink.usage}
+                </div>
+              </div>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#ff0037]/18 bg-black/35 text-stone-400 transition-all group-hover:text-white">
+                <ExternalLink size={14} className="shrink-0" />
+              </span>
+            </a>
+          ))}
         </div>
       </div>
     </LuxeCard>

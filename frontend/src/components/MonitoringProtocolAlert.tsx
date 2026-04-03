@@ -14,6 +14,7 @@ export function MonitoringProtocolAlert() {
     isConnected: state.cwc.isConnected,
     liveSource: state.cwc.liveData.source,
     predictionSource: state.prediction.cwcDataSource,
+    sourcePolicyMode: state.system.sourcePolicy.mode,
   });
 
   if (!monitoring || !state.prediction.currentPrediction) {

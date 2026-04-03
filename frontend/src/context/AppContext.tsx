@@ -85,6 +85,15 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
     
     case 'SET_API_VERSION':
       return { ...state, system: { ...state.system, apiVersion: action.payload } };
+
+    case 'SET_SOURCE_POLICY':
+      if (state.system.sourcePolicy === action.payload) {
+        return state;
+      }
+      return {
+        ...state,
+        system: { ...state.system, sourcePolicy: action.payload }
+      };
     
     case 'SET_ERROR':
       if (state.system.errorMessage === action.payload) {

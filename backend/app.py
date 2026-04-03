@@ -50,6 +50,84 @@ except ImportError:
 
 warnings.filterwarnings('ignore')
 
+SOURCE_POLICY_MODES = {"OPEN_DATA", "OFFICIAL_VIEW_ONLY", "FALLBACK"}
+
+
+def get_source_policy_mode() -> str:
+    refresh_backend_env(override=True)
+    configured = (os.getenv("FLOOD_SOURCE_POLICY") or "OFFICIAL_VIEW_ONLY").strip().upper()
+    return configured if configured in SOURCE_POLICY_MODES else "OFFICIAL_VIEW_ONLY"
+
+
+def get_source_policy_payload() -> Dict[str, Any]:
+    mode = get_source_policy_mode()
+    base_sources = [
+        {
+            "label": "Open Data",
+            "title": "data.gov.in Reservoir Levels",
+            "url": "https://www.data.gov.in/resource/daily-data-reservoir-level-central-water-commission-cwc",
+            "usage": "Safest public reuse path",
+        },
+        {
+            "label": "Official Monitor",
+            "title": "CWC Flood Forecast Portal",
+            "url": "https://ffs.india-water.gov.in/",
+            "usage": "Authoritative public viewing",
+        },
+        {
+            "label": "Advisory",
+            "title": "CWC 7-Day Forecast",
+            "url": "https://aff.india-water.gov.in/home.php",
+            "usage": "Forward-looking official advisories",
+        },
+    ]
+
+    if mode == "OPEN_DATA":
+        return {
+            "mode": mode,
+            "label": "Open Data",
+            "description": "Use open/publicly reusable datasets as the legal default. Live in-app CWC scraping is disabled.",
+            "allow_live_cwc_in_app": False,
+            "telemetry_mode": "OPEN_DATA_CONTEXT",
+            "prediction_data_source": "Open Data Context + Manual Input",
+            "public_sources": base_sources,
+        }
+
+    if mode == "FALLBACK":
+        return {
+            "mode": mode,
+            "label": "Fallback",
+            "description": "Operate on tactical registry context and manual thresholds only. No official live ingestion is attempted in-app.",
+            "allow_live_cwc_in_app": False,
+            "telemetry_mode": "TACTICAL_FALLBACK",
+            "prediction_data_source": "Fallback Manual Context",
+            "public_sources": base_sources,
+        }
+
+    return {
+        "mode": "OFFICIAL_VIEW_ONLY",
+        "label": "Official View Only",
+        "description": "Use official CWC portals for public monitoring, but keep in-app telemetry on manual or tactical context unless explicit reuse rights are obtained.",
+        "allow_live_cwc_in_app": False,
+        "telemetry_mode": "OFFICIAL_VIEW_ONLY",
+        "prediction_data_source": "Official View Only + Manual Input",
+        "public_sources": base_sources,
+    }
+
+
+def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: str = "Kolhapur", limit: int = 6) -> Dict[str, Any]:
+    policy = get_source_policy_payload()
+    tactical_fallback = cwc_scraper._build_tactical_telemetry(state_name=state_name, station_name=station_name, limit=limit)
+
+    return {
+        "status": "POLICY_LOCKED",
+        "message": policy["description"],
+        "data_source": "TACTICAL_REGISTRY",
+        "source_policy": policy,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "data": tactical_fallback[:limit],
+    }
+
 FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo")
 INDOFLOODS_STATE_KEYS = {
     "andhra_pradesh",
@@ -1794,7 +1872,12 @@ predictor = KolhapurFloodPredictor()
 # ============= 5. API ENDPOINTS =============
 @app.get("/")
 async def root():
-    return {"service": "INDIA_FLOODS ML Server", "status": "Online", "model_ready": predictor.is_trained}
+    return {
+        "service": "INDIA_FLOODS ML Server",
+        "status": "Online",
+        "model_ready": predictor.is_trained,
+        "source_policy": get_source_policy_payload(),
+    }
 
 @app.get("/health")
 async def health():
@@ -1805,6 +1888,16 @@ async def health():
         "artifact_count": len(predictor.artifact_catalog),
         "bundle_count": len(predictor.artifact_bundles),
         "version": app.version,
+        "source_policy": get_source_policy_payload(),
+        "time": datetime.datetime.now().isoformat(),
+    }
+
+
+@app.get("/source-policy")
+async def get_source_policy():
+    return {
+        "status": "success",
+        "source_policy": get_source_policy_payload(),
         "time": datetime.datetime.now().isoformat(),
     }
 
@@ -1855,23 +1948,27 @@ async def get_state_severity_matrix_for_state(state_name: str):
 async def predict_flood(input_data: FloodPredictionInput):
     """Endpoint consumed by the frontend"""
     try:
-        data_source = "Frontend Manual Input"
-        
-        # 🌊 OVERRIDE WITH LIVE CWC DATA (run blocking I/O in thread)
-        print("🔄 Fetching live data from Central Water Commission...")
-        live_data = await asyncio.to_thread(cwc_scraper.get_live_river_level, "Kolhapur")
-        
-        if live_data.get("status") in ["success", "success_fallback"]:
-            live_level = live_data.get("current_level_m")
-            if live_level is not None:
-                input_data.Peak_Flood_Level_m = float(live_level)
-                data_source = f"Live CWC Sensor ({live_data['source']})"
-                print(f"🌊 OVERRIDE: Using Authentic Live CWC Level: {input_data.Peak_Flood_Level_m}m")
+        source_policy = get_source_policy_payload()
+        data_source = str(source_policy["prediction_data_source"])
+
+        if source_policy.get("allow_live_cwc_in_app"):
+            print("🔄 Fetching live data from Central Water Commission...")
+            live_data = await asyncio.to_thread(cwc_scraper.get_live_river_level, input_data.station or "Kolhapur")
+
+            if live_data.get("status") in ["success", "success_fallback"]:
+                live_level = live_data.get("current_level_m")
+                if live_level is not None:
+                    input_data.Peak_Flood_Level_m = float(live_level)
+                    data_source = f"Live CWC Sensor ({live_data['source']})"
+                    print(f"🌊 OVERRIDE: Using Authentic Live CWC Level: {input_data.Peak_Flood_Level_m}m")
+            else:
+                print("⚠️ CWC Servers unavailable. Proceeding with user's manual input.")
         else:
-            print("⚠️ CWC Servers unavailable. Proceeding with user's manual input.")
+            print(f"ℹ️ Source policy {source_policy['mode']} blocks in-app live CWC ingestion. Using manual/tactical context.")
 
         # Get ML Response (run blocking ML inference in thread)
         result = await asyncio.to_thread(predictor.predict_flood, input_data, source=data_source)
+        result["source_policy"] = source_policy
 
         # Attach Monitoring Protocols
         if result["severity"] == "CRITICAL":
@@ -2022,7 +2119,7 @@ async def get_sensors(station: str = "Kolhapur", state: str = "Maharashtra"):
     """
     Tactical telemetry endpoint for the frontend "Telemetry" tab.
     """
-    telemetry = cwc_scraper.get_live_telemetry(state_name=state, station_name=station)
+    telemetry = build_policy_bound_telemetry(state_name=state, station_name=station)
     return telemetry.get("data", [])
 
 @app.get("/api/live-telemetry")
@@ -2030,7 +2127,7 @@ async def get_live_telemetry(state: str = "Maharashtra", station: str = "Kolhapu
     """
     Returns formatted CWC telemetry similar to the provided Node/Express interceptor design.
     """
-    telemetry = cwc_scraper.get_live_telemetry(state_name=state, station_name=station, limit=limit)
+    telemetry = build_policy_bound_telemetry(state_name=state, station_name=station, limit=limit)
     return telemetry
 
 @app.get("/cwc-live-data")
@@ -2039,6 +2136,16 @@ async def get_cwc_live_data(station: str = "Kolhapur"):
     Fetch live CWC river level data for a monitoring station
     """
     try:
+        source_policy = get_source_policy_payload()
+        if not source_policy.get("allow_live_cwc_in_app"):
+            return {
+                "status": "policy_locked",
+                "station": station,
+                "message": source_policy["description"],
+                "source_policy": source_policy,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+
         live_data = cwc_scraper.get_live_river_level(station)
         
         if live_data.get("status") in ["success", "success_fallback"]:
@@ -2047,6 +2154,7 @@ async def get_cwc_live_data(station: str = "Kolhapur"):
                 "station": station,
                 "current_level_m": live_data.get("current_level_m"),
                 "source": live_data.get("source"),
+                "source_policy": source_policy,
                 "timestamp": datetime.datetime.now().isoformat(),
                 "api": "CWC Official"
             }
@@ -2055,6 +2163,7 @@ async def get_cwc_live_data(station: str = "Kolhapur"):
                 "status": "error",
                 "station": station,
                 "message": "Unable to fetch live CWC data",
+                "source_policy": source_policy,
                 "timestamp": datetime.datetime.now().isoformat()
             }
     except Exception as e:
@@ -2062,6 +2171,7 @@ async def get_cwc_live_data(station: str = "Kolhapur"):
             "status": "error",
             "station": station,
             "message": str(e),
+            "source_policy": get_source_policy_payload(),
             "timestamp": datetime.datetime.now().isoformat()
         }
 
