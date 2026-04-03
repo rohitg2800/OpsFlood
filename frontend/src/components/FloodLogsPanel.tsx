@@ -3,6 +3,7 @@ import { Database, Download, TrendingUp } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { apiUrl } from '../config/api';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
+import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 import { SkeletonLoader } from './SkeletonLoader';
 
 interface FloodLog {
@@ -38,6 +39,11 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
   const activeState = state.prediction.selectedState || state.form.data.state || '';
   const liveCWC = state.cwc.liveData;
   const isConnected = state.cwc.isConnected;
+  const dataSourceMessage = getCWCDataSourceMessage({
+    isConnected,
+    liveSource: liveCWC.source,
+    predictionSource: state.prediction.cwcDataSource,
+  });
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -165,7 +171,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
                     River: {liveCWC.river || 'Active Basin'} • Warning: {typeof liveCWC.warningLevel === 'number' ? `${liveCWC.warningLevel.toFixed(2)}m` : '--'} • Danger: {typeof liveCWC.dangerLevel === 'number' ? `${liveCWC.dangerLevel.toFixed(2)}m` : '--'}
                   </p>
                   <p className="text-[10px] text-slate-400">
-                    Source: {liveCWC.source}
+                    Data Source: {dataSourceMessage}
                   </p>
                   <p className="text-[9px] text-slate-500">
                     Updated: {state.cwc.lastFetchTime ? new Date(state.cwc.lastFetchTime).toLocaleString() : 'Awaiting sync'}

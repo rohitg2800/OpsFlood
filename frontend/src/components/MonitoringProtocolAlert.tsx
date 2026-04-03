@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { AlertTriangle, AlertCircle, Shield } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
+import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 import { isLiteMotionDevice } from '../utils/performance';
 
 export function MonitoringProtocolAlert() {
@@ -9,6 +10,11 @@ export function MonitoringProtocolAlert() {
   const monitoring = state.prediction.monitoringLevel;
   const action = state.prediction.monitoringAction;
   const zones = state.prediction.priorityZones;
+  const dataSourceMessage = getCWCDataSourceMessage({
+    isConnected: state.cwc.isConnected,
+    liveSource: state.cwc.liveData.source,
+    predictionSource: state.prediction.cwcDataSource,
+  });
 
   if (!monitoring || !state.prediction.currentPrediction) {
     return null;
@@ -99,7 +105,7 @@ export function MonitoringProtocolAlert() {
               <br />
               Risk Score: {state.prediction.currentPrediction?.risk_score}
               <br />
-              Data Source: {state.prediction.cwcDataSource}
+              Data Source: {dataSourceMessage}
             </p>
           </div>
         </div>
