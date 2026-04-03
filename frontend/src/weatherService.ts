@@ -6,6 +6,8 @@ export interface WeatherData {
   location: string;
   temperature: number;
   feels_like: number;
+  temp_min: number;
+  temp_max: number;
   humidity: number;
   pressure: number;
   wind_speed: number;
@@ -66,6 +68,63 @@ class WeatherService {
   private readonly currentWeatherCacheTtlMs = 60_000;
   private readonly currentWeatherCache = new Map<string, { expiresAt: number; data: WeatherData }>();
   private readonly currentWeatherInflight = new Map<string, Promise<WeatherData>>();
+
+  private getFriendlyWeatherErrorMessage(message: string, status?: number): string {
+    const trimmed = (message || '').trim();
+    const normalized = trimmed.toLowerCase();
+
+    if (!trimmed) {
+      return 'Live weather is temporarily unavailable. Showing fallback conditions.';
+    }
+
+    if (
+      status === 404 ||
+      normalized.includes('city not found') ||
+      normalized.includes('not found')
+    ) {
+      return 'Live weather is unavailable for this location. Showing fallback conditions.';
+    }
+
+    if (
+      status === 503 ||
+      normalized.includes('missing server weather api key') ||
+      normalized.includes('api key')
+    ) {
+      return 'Live weather is not configured right now. Showing fallback conditions.';
+    }
+
+    if (
+      status === 502 ||
+      status === 504 ||
+      status === 500 ||
+      normalized.includes('weather upstream request failed') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('httpsconnectionpool') ||
+      normalized.includes('networkerror') ||
+      normalized.includes('network request')
+    ) {
+      return 'Live weather is temporarily unavailable. Showing fallback conditions.';
+    }
+
+    return 'Weather data could not be refreshed. Showing fallback conditions.';
+  }
+
+  private async readWeatherErrorMessage(response: Response): Promise<string> {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const payload = await response.json().catch(() => null);
+      if (typeof payload?.detail === 'string') {
+        return this.getFriendlyWeatherErrorMessage(payload.detail, response.status);
+      }
+      if (typeof payload?.message === 'string') {
+        return this.getFriendlyWeatherErrorMessage(payload.message, response.status);
+      }
+    }
+
+    const message = await response.text().catch(() => '');
+    return this.getFriendlyWeatherErrorMessage(message, response.status);
+  }
 
   private buildWeatherCityCacheKey(city: string): string {
     return `city:${this.normalizeLookupValue(city)}`;
@@ -191,8 +250,8 @@ class WeatherService {
   private async fetchJson(path: string) {
     const response = await fetch(apiUrl(path));
     if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || `Weather service error: ${response.status}`);
+      const message = await this.readWeatherErrorMessage(response);
+      throw new Error(message);
     }
     return response.json();
   }
@@ -569,6 +628,8 @@ class WeatherService {
         location: `${data.name}, ${data.sys.country}`,
         temperature: Math.round(data.main.temp),
         feels_like: Math.round(data.main.feels_like),
+        temp_min: Math.round(data.main.temp_min ?? data.main.temp),
+        temp_max: Math.round(data.main.temp_max ?? data.main.temp),
         humidity: data.main.humidity,
         pressure: data.main.pressure,
         wind_speed: data.wind?.speed || 0,

@@ -5,6 +5,7 @@ import type { LocationData, WeatherData } from '../weatherWidget';
 import { apiUrl } from '../config/api';
 import WeatherService from '../weatherService';
 import { isLiteMotionDevice } from '../utils/performance';
+import { formatTemperatureScale } from '../utils/temperature';
 
 const LazyWeatherWidget = lazy(() => import('../weatherWidget'));
 
@@ -33,6 +34,13 @@ const sameLocation = (left: Partial<LocationData> | null | undefined, right: Par
       left.lat === right.lat &&
       left.lon === right.lon,
   );
+
+const describeCloudCover = (value: number): string => {
+  if (value <= 10) return 'Open sky window';
+  if (value <= 35) return 'Light cloud layer';
+  if (value <= 70) return 'Partial overcast';
+  return 'Dense cloud canopy';
+};
 
 export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   target,
@@ -99,6 +107,29 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     Boolean(resolvedNodeLabel) &&
     normalizedResolvedNodeLabel !== lockedDestination.toLowerCase();
   const widgetResetKey = `${lockedDestination}|${effectiveCoordinates?.lat ?? 'na'}|${effectiveCoordinates?.lon ?? 'na'}`;
+  const feelsLikeScale = useMemo(
+    () =>
+      formatTemperatureScale(
+        lockedWeatherSnapshot?.feels_like ?? lockedWeatherSnapshot?.temperature,
+      ),
+    [lockedWeatherSnapshot?.feels_like, lockedWeatherSnapshot?.temperature],
+  );
+  const minTemperatureScale = useMemo(
+    () => formatTemperatureScale(lockedWeatherSnapshot?.temp_min ?? lockedWeatherSnapshot?.temperature),
+    [lockedWeatherSnapshot?.temp_min, lockedWeatherSnapshot?.temperature],
+  );
+  const maxTemperatureScale = useMemo(
+    () => formatTemperatureScale(lockedWeatherSnapshot?.temp_max ?? lockedWeatherSnapshot?.temperature),
+    [lockedWeatherSnapshot?.temp_max, lockedWeatherSnapshot?.temperature],
+  );
+  const cloudCoverPercent = useMemo(
+    () => Math.max(0, Math.min(100, Math.round(Number(lockedWeatherSnapshot?.clouds ?? 0)))),
+    [lockedWeatherSnapshot?.clouds],
+  );
+  const cloudCoverLabel = useMemo(
+    () => describeCloudCover(cloudCoverPercent),
+    [cloudCoverPercent],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +138,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       try {
         const response = await fetch(apiUrl('/weather/status'));
         if (!response.ok) {
-          throw new Error(`Status error: ${response.status}`);
+          throw new Error('Weather status unavailable');
         }
 
         const data = await response.json();
@@ -399,14 +430,35 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       </Suspense>
 
       {lockedWeatherSnapshot ? (
-        <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
           <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Thermometer size={12} className="text-[#ff7f96]" />
               Feels Like
             </div>
-            <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(lockedWeatherSnapshot.feels_like || lockedWeatherSnapshot.temperature || 0).toFixed(0)}°C
+            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
+              <span className="text-2xl font-black">{feelsLikeScale.celsius}</span>
+              <span className="text-sm text-stone-400">{feelsLikeScale.fahrenheit}</span>
+            </div>
+          </div>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.18s' }}>
+            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
+              <Thermometer size={12} className="text-[#7bc0ff]" />
+              Min Temp
+            </div>
+            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
+              <span className="text-2xl font-black">{minTemperatureScale.celsius}</span>
+              <span className="text-sm text-stone-400">{minTemperatureScale.fahrenheit}</span>
+            </div>
+          </div>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.26s' }}>
+            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
+              <Thermometer size={12} className="text-[#ffb36b]" />
+              Max Temp
+            </div>
+            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
+              <span className="text-2xl font-black">{maxTemperatureScale.celsius}</span>
+              <span className="text-sm text-stone-400">{maxTemperatureScale.fahrenheit}</span>
             </div>
           </div>
           <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.35s' }}>
@@ -418,13 +470,19 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
               {Number(lockedWeatherSnapshot.pressure || 0).toFixed(0)} <span className="text-xs text-stone-500">hPa</span>
             </div>
           </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.7s' }}>
+          <div className={`weather-chip-float rounded-2xl bg-white/[0.055] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md'}`} style={{ animationDelay: '0.7s' }}>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
               <Eye size={12} className="text-[#ff7f96]" />
               Cloud Cover
             </div>
-            <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(lockedWeatherSnapshot.clouds || 0).toFixed(0)}%
+            <div className="mt-3 flex items-end gap-2 font-mono text-white">
+              <span className="text-3xl font-black tracking-tight tabular-nums">
+                {String(cloudCoverPercent).padStart(2, '0')}
+              </span>
+              <span className="mb-1 text-sm font-black text-[#d7ecff]">%</span>
+            </div>
+            <div className="mt-1 w-full text-center text-[11px] font-black uppercase leading-none tracking-[0.12em] text-[#d7ecff]/85">
+              {cloudCoverLabel}
             </div>
           </div>
           <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '1.05s' }}>
