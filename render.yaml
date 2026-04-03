@@ -23,7 +23,8 @@ services:
         fromService:
           name: opsflood-frontend
           type: web
-          property: host
+          # Use the frontend's public URL, not its private-network host.
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: opsflood-frontend
@@ -46,4 +47,5 @@ services:
         fromService:
           name: opsflood-api
           type: web
-          property: host
+          # Static-site builds need the API's public URL for browser requests.
+          envVarKey: RENDER_EXTERNAL_URL
