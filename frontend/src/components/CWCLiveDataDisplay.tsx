@@ -10,6 +10,7 @@ import {
 import { useAppState } from '../context/AppContext';
 import { useCWCIntegration } from '../hooks/useAppOperations';
 import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
+import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 
 const LuxeCard = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
   <div className={`flex h-full flex-col overflow-hidden rounded-lg border border-[#ff0037]/28 bg-[#0B0A08]/60 p-8 shadow-[0_25px_80px_rgba(0,0,0,0.8)] backdrop-blur-3xl ${className}`}>
@@ -53,6 +54,11 @@ export function CWCLiveDataDisplay() {
   const warningLevel = state.cwc.liveData.warningLevel;
   const preferredStation = state.cwc.liveData.station || selectedStation;
   const trend = state.cwc.liveData.trend;
+  const dataSourceMessage = getCWCDataSourceMessage({
+    isConnected,
+    liveSource: source,
+    predictionSource: state.prediction.cwcDataSource,
+  });
 
   const regionTelemetry = useMemo(() => {
     const scopedSensors = scopeSensorsToSelectedLocation(state.sensors.data || [], {
@@ -227,9 +233,7 @@ export function CWCLiveDataDisplay() {
       <div className="rounded-md border border-[#ff0037]/18 bg-black/35 p-4 text-xs text-stone-300">
         <span className="font-black uppercase tracking-[0.2em] text-stone-500">Data Source</span>
         <div className="mt-2">
-          {isConnected
-            ? `${source} • Live CWC station query`
-            : 'Fallback mode • using manual threshold context until CWC responds'}
+          {dataSourceMessage}
         </div>
       </div>
     </LuxeCard>
