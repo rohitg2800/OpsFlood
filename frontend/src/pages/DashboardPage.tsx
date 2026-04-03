@@ -19,7 +19,7 @@ import { SkeletonLoader } from '../components/SkeletonLoader';
 import { WeatherConsolePanel } from '../components/WeatherConsolePanel';
 import { apiUrl } from '../config/api';
 import { PageShell, PageHero } from '../components/PageShell';
-import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
+import { getScopedSensorSelection, getSelectedRiverLocationLabel } from '../utils/regionReadings';
 import { deriveProbabilityLanes, getDominantProbabilityLane } from '../utils/probabilityLanes';
 import type { SensorData } from '../types';
 import { locationMatchesCandidate, resolveGeoCoordinate } from '../data/geoCoordinates';
@@ -433,13 +433,14 @@ export const DashboardPage: React.FC = () => {
     };
   });
 
-  const selectedRegionSensors = useMemo(() => {
-    return scopeSensorsToSelectedLocation(state.sensors.data || [], {
+  const selectedRegionSensorScope = useMemo(() => {
+    return getScopedSensorSelection(state.sensors.data || [], {
       selectedCity: state.prediction.selectedCity,
       station: state.form.data.station,
       selectedState: state.prediction.selectedState,
     });
   }, [state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.sensors.data]);
+  const selectedRegionSensors = selectedRegionSensorScope.sensors;
 
   const leadRegionSensor = selectedRegionSensors[0] || null;
   const leadTrendMeta = leadRegionSensor ? getTrendMeta(leadRegionSensor.trend) : null;
@@ -520,6 +521,14 @@ export const DashboardPage: React.FC = () => {
     state.prediction.dangerLevel ||
     effectiveStateMatrix?.danger_level_m ||
     13.5;
+  const nearbyWaterSourcesNote =
+    selectedRegionSensorScope.mode === 'city_exact'
+      ? `Direct station match found for ${selectedRiverLocationLabel}.`
+      : selectedRegionSensorScope.mode === 'city_nearby'
+      ? `No exact station match for ${selectedRiverLocationLabel}. Showing the closest monitored sources from the active regional network.`
+      : selectedRegionSensorScope.mode === 'state'
+      ? `Showing monitored sources across ${state.prediction.selectedState || state.form.data.state || 'the selected state'}.`
+      : 'Showing the best available monitored sources from the current telemetry feed.';
 
   const heatmapData = useMemo(() => {
     const cityFocused = Boolean(state.prediction.selectedCity || state.form.data.station);
@@ -830,6 +839,58 @@ export const DashboardPage: React.FC = () => {
                 <p className="text-left text-[9px] font-mono uppercase tracking-[0.18em] text-stone-500">
                   Active city: {(state.prediction.selectedCity || state.form.data.station || 'none').toUpperCase()}
                 </p>
+                {(state.prediction.selectedCity || state.form.data.station) ? (
+                  <div className="rounded-md border border-[#ff0037]/18 bg-black/35 p-4 text-left">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff9eb1]">
+                        Nearby Water Sources
+                      </div>
+                      <div className="rounded-md border border-[#ff0037]/18 bg-white/[0.04] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-stone-300">
+                        {selectedRegionSensorScope.mode === 'city_exact'
+                          ? 'Exact Match'
+                          : selectedRegionSensorScope.mode === 'city_nearby'
+                          ? 'Nearby Network'
+                          : selectedRegionSensorScope.mode === 'state'
+                          ? 'State Network'
+                          : 'Live Feed'}
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+                      {nearbyWaterSourcesNote}
+                    </p>
+                    <div className="mt-4 space-y-2">
+                      {selectedRegionSensors.length ? (
+                        selectedRegionSensors.slice(0, 4).map((sensor) => (
+                          <div
+                            key={`${sensor.station}-${sensor.river || 'river'}`}
+                            className="flex items-center justify-between gap-3 rounded-md border border-[#ff0037]/12 bg-white/[0.03] px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-[10px] font-black uppercase tracking-[0.16em] text-white">
+                                {sensor.station}
+                              </div>
+                              <div className="truncate text-[9px] font-mono uppercase tracking-[0.14em] text-stone-500">
+                                {sensor.river || 'Active Basin'}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm font-black font-mono text-white">
+                                {Number(sensor.river_level || 0).toFixed(2)}m
+                              </div>
+                              <div className="text-[8px] font-black uppercase tracking-[0.16em] text-stone-500">
+                                {sensor.status}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-md border border-[#ff0037]/12 bg-white/[0.03] px-3 py-3 text-[10px] text-stone-500">
+                          Telemetry sync is still resolving nearby monitored water sources for this city.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -1119,7 +1180,17 @@ export const DashboardPage: React.FC = () => {
               <Droplets size={18} /> Selected Region Water Levels
             </h3>
             <p className="text-sm text-stone-500">
-              Live gauge levels for <span className="font-black text-white">{selectedRiverLocationLabel}</span> and linked regional stations only.
+              {selectedRegionSensorScope.mode === 'city_nearby'
+                ? (
+                    <>
+                      Nearby monitored water sources for <span className="font-black text-white">{selectedRiverLocationLabel}</span>, ranked from the active regional network.
+                    </>
+                  )
+                : (
+                    <>
+                      Live gauge levels for <span className="font-black text-white">{selectedRiverLocationLabel}</span> and linked regional stations only.
+                    </>
+                  )}
             </p>
           </div>
           <div className="inline-flex w-fit items-center gap-2 rounded-md border border-[#ff0037]/26 bg-[#ff0037]/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff9eb1]">
