@@ -1,81 +1,60 @@
 # Frontend Documentation Index
 
-This index points to the current useful documentation for the frontend and marks older planning documents as historical references where appropriate.
+Last reviewed: 2026-04-04
 
-## Start here
+This file is the routing table for frontend documentation.
 
-1. [../README.md](../README.md)
-   Project-level overview, routes, API groups, and repo layout.
-
-2. [../FEATURES.md](../FEATURES.md)
-   Complete feature inventory for the app, backend, weather stack, telemetry, and archives.
-
-3. [README.md](README.md)
-   Frontend-specific route map, architecture summary, and hook inventory.
-
-4. [../QUICKSTART.md](../QUICKSTART.md)
-   Local setup and startup flow.
-
-## Current source-of-truth docs
-
-### Product and architecture
+## Current Source-of-Truth Docs
 
 - [../README.md](../README.md)
+- [../QUICKSTART.md](../QUICKSTART.md)
 - [../FEATURES.md](../FEATURES.md)
 - [README.md](README.md)
+- [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md)
+- [STATE_MATRIX.md](STATE_MATRIX.md)
+- [INDOFLOODS_ML_INTEGRATION.md](INDOFLOODS_ML_INTEGRATION.md)
 
-### Operational startup
-
-- [../QUICKSTART.md](../QUICKSTART.md)
-
-### Code-level reference
+## Operational Code References
 
 - [src/App.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/App.tsx)
 - [src/context/AppContext.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/context/AppContext.tsx)
-- [src/types.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/types.ts)
 - [src/hooks/useAppOperations.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/hooks/useAppOperations.ts)
+- [src/types.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/types.ts)
 
-## Page map
+## Page Map
 
-- Dashboard: [src/pages/DashboardPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/DashboardPage.tsx)
-- Geo-Spatial Console: [src/pages/GeoSpatialPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GeoSpatialPage.tsx)
-- Telemetry Feed: [src/pages/TelemetryPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/TelemetryPage.tsx)
-- Archives Vault: [src/pages/ArchivesPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/ArchivesPage.tsx)
-- Utility Gradient Console: [src/pages/GradientGeneratorPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GradientGeneratorPage.tsx)
+- [src/pages/DashboardPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/DashboardPage.tsx)
+- [src/pages/GeoSpatialPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GeoSpatialPage.tsx)
+- [src/pages/TelemetryPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/TelemetryPage.tsx)
+- [src/pages/ArchivesPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/ArchivesPage.tsx)
+- [src/pages/GradientGeneratorPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GradientGeneratorPage.tsx)
 
-## Key component map
+## Component Map (High-use)
 
-- Navigation: [src/components/Navigation.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/Navigation.tsx)
-- Weather console: [src/components/WeatherConsolePanel.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/WeatherConsolePanel.tsx)
-- Monitoring alert: [src/components/MonitoringProtocolAlert.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/MonitoringProtocolAlert.tsx)
-- Historical logs: [src/components/FloodLogsPanel.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/FloodLogsPanel.tsx)
-- CWC display: [src/components/CWCLiveDataDisplay.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/CWCLiveDataDisplay.tsx)
-- Neural visual layer: [src/components/NeuralOperationsGraph.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/NeuralOperationsGraph.tsx)
+- [src/components/Navigation.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/Navigation.tsx)
+- [src/components/StateSelector.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/StateSelector.tsx)
+- [src/components/MonitoringProtocolAlert.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/MonitoringProtocolAlert.tsx)
+- [src/components/CWCLiveDataDisplay.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/CWCLiveDataDisplay.tsx)
+- [src/components/WeatherConsolePanel.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/WeatherConsolePanel.tsx)
+- [src/components/FloodLogsPanel.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/components/FloodLogsPanel.tsx)
 
-## Historical or planning-era docs
+## Historical and Planning Docs
 
-These files still contain useful context, but they should not be treated as the primary truth without checking current source files.
+These files are retained for project history and migration context.
 
 - [README_IMPLEMENTATION.md](README_IMPLEMENTATION.md)
 - [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md)
 - [COMPONENT_IMPLEMENTATION_GUIDE.md](COMPONENT_IMPLEMENTATION_GUIDE.md)
-- [INDOFLOODS_ML_INTEGRATION.md](INDOFLOODS_ML_INTEGRATION.md)
-- [STATE_MATRIX.md](STATE_MATRIX.md)
-- [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md)
+- [MULTI_PAGE_ARCHITECTURE_PLAN.md](MULTI_PAGE_ARCHITECTURE_PLAN.md)
+- [ANIMATION_GRAPHICS_PLAN.md](ANIMATION_GRAPHICS_PLAN.md)
 - [ANIMATION_COMPONENTS_GUIDE.md](ANIMATION_COMPONENTS_GUIDE.md)
 - [ANIMATION_IMPLEMENTATION_SUMMARY.md](ANIMATION_IMPLEMENTATION_SUMMARY.md)
 
-## Recommended reading order
-
-For product understanding:
+## Suggested Reading Order
 
 1. [../README.md](../README.md)
-2. [../FEATURES.md](../FEATURES.md)
+2. [../QUICKSTART.md](../QUICKSTART.md)
 3. [README.md](README.md)
-
-For implementation work:
-
-1. [src/App.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/App.tsx)
-2. [src/context/AppContext.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/context/AppContext.tsx)
-3. [src/hooks/useAppOperations.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/hooks/useAppOperations.ts)
-4. The page/component files relevant to the feature you are touching
+4. [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md)
+5. [STATE_MATRIX.md](STATE_MATRIX.md)
+6. [INDOFLOODS_ML_INTEGRATION.md](INDOFLOODS_ML_INTEGRATION.md)
