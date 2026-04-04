@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppState } from '../context/AppContext';
 import { useIndianStateModels } from '../hooks/useAppOperations';
+import { opsFieldClass, opsLabelClass } from './OpsPrimitives';
 
 interface StateSelectorProps {
   id?: string;
@@ -14,14 +15,14 @@ export function StateSelector({ id = 'state-select', className = '' }: StateSele
 
   return (
     <div className={`flex flex-col ${className}`}>
-      <label htmlFor={id} className="mb-2 block text-left text-[10px] font-black text-[#bc9437] uppercase tracking-[0.3em]">
+      <label htmlFor={id} className={`mb-2 block text-left ${opsLabelClass}`}>
         Indian State/UT
       </label>
       <select
         id={id}
         value={selectedState}
         onChange={(e) => selectState(e.target.value)}
-        className="w-full rounded-md border border-[#ff9b2f]/35 bg-[#f59e0b]/14 px-4 py-3 font-mono text-xs font-bold text-white shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)] outline-none transition-all focus:bg-[#f59e0b]/22 focus:ring-4 focus:ring-[#f59e0b]/18"
+        className={`${opsFieldClass} font-mono text-xs font-bold`}
       >
         <option value="">Select State...</option>
         {availableStates.map((state) => (
@@ -32,7 +33,7 @@ export function StateSelector({ id = 'state-select', className = '' }: StateSele
       </select>
 
       {selectedMatrixLabel && (
-        <p className="mt-2 text-left text-[9px] text-slate-500 font-mono">
+        <p className="mt-2 text-left text-[10px] font-mono text-[color:var(--ops-text-faint)]">
           Showing {selectedMatrixLabel} state matrix thresholds
         </p>
       )}

@@ -1,10 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Database, Download, TrendingUp } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Database, Download, Info, Radio, TrendingUp } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { apiUrl } from '../config/api';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
 import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 import { SkeletonLoader } from './SkeletonLoader';
+import {
+  ActionButton,
+  ConsolePanel,
+  EmptyState,
+  InsetPanel,
+  SectionHeader,
+  StatusBadge,
+  opsLabelClass,
+} from './OpsPrimitives';
 
 interface FloodLog {
   timestamp: string;
@@ -21,6 +30,13 @@ interface FloodLogsPanelProps {
   onLogLoaded?: () => void;
   borderless?: boolean;
 }
+
+const getSeverityTone = (severity: string) => {
+  if (severity === 'CRITICAL') return 'danger' as const;
+  if (severity === 'SEVERE') return 'warning' as const;
+  if (severity === 'MODERATE') return 'info' as const;
+  return 'success' as const;
+};
 
 export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, borderless = false }) => {
   const { state, dispatch } = useAppState();
@@ -45,6 +61,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     predictionSource: state.prediction.cwcDataSource,
     sourcePolicyMode: state.system.sourcePolicy.mode,
   });
+  const fallbackDatasetCity = 'Kolhapur';
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -81,10 +98,30 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     return () => window.clearTimeout(timeoutId);
   }, [fetchLogs]);
 
+  const emptyState = useMemo(() => {
+    if (logs.length > 0) {
+      return null;
+    }
+
+    if (historicalMessage === 'Unable to load historical flood logs right now.') {
+      return {
+        title: 'Historical logs are temporarily unavailable',
+        body: 'The archive request did not complete. Live telemetry and local prediction history are still available while the logs reconnect.',
+        note: 'Refresh the module in a moment if you need the historical table for this review session.',
+      };
+    }
+
+    return {
+      title: `No mapped historical dataset for ${selectedCity}`,
+      body: `This location does not currently ship with packaged historical flood rows in the demo dataset, so the table stays intentionally empty instead of falling back to fake records.`,
+      note: `You can continue with live telemetry, load your own prediction history, or switch to ${fallbackDatasetCity} to review the included real dataset sample.`,
+    };
+  }, [historicalMessage, logs.length, selectedCity]);
+
   const exportLogs = () => {
     const csv = [
       ['Timestamp', 'Location', 'Peak Level (m)', 'Rainfall 7d (mm)', 'Severity', 'Confidence (%)', 'Alert', 'Source'].join(','),
-      ...logs.map(log =>
+      ...logs.map((log) =>
         [
           log.timestamp,
           log.location,
@@ -93,9 +130,9 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
           log.severity,
           log.confidence,
           log.alert,
-          log.source
-        ].join(',')
-      )
+          log.source,
+        ].join(','),
+      ),
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -147,177 +184,168 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
   };
 
   return (
-    <div className={`space-y-6 ${borderless ? 'md:space-y-8' : ''}`}>
-      {/* CWC Live Data Card */}
+    <div className={`space-y-6 ${borderless ? 'md:space-y-7' : ''}`}>
       {loading && !liveCWC ? (
         <SkeletonLoader type="card" />
       ) : liveCWC ? (
-        <div className={`rounded-[2rem] p-6 backdrop-blur-xl ${borderless ? 'bg-black/18 shadow-[0_20px_60px_rgba(0,0,0,0.18)]' : 'border ring-1 ring-white/5'} ${
-          isConnected || liveCWC.source === 'TACTICAL_REGISTRY'
-            ? `${borderless ? 'bg-amber-500/8' : 'bg-amber-500/10 border-amber-500/30'} shadow-[0_18px_60px_rgba(245,158,11,0.10)]`
-            : `${borderless ? 'bg-[#ff0037]/8' : 'bg-[#ff0037]/10 border-[#ff0037]/30'} shadow-[0_18px_60px_rgba(255,0,55,0.12)]`
-        }`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="flex items-center gap-2 text-sm font-black text-white mb-2">
-                <TrendingUp size={16} className={isConnected || liveCWC.source === 'TACTICAL_REGISTRY' ? 'text-amber-300' : 'text-[#ff0037]'} />
-                CWC Live Data - {liveCWC.station || selectedCity}
-              </h3>
-              {(typeof liveCWC.currentLevel === 'number' || typeof liveCWC.kolhapurLevel === 'number') ? (
-                <div className="space-y-1">
-                  <p className="text-2xl font-black text-white">
-                    {(liveCWC.currentLevel ?? liveCWC.kolhapurLevel)?.toFixed(2)}m
-                  </p>
-                  <p className="text-[10px] text-slate-300">
-                    River: {liveCWC.river || 'Active Basin'} • Warning: {typeof liveCWC.warningLevel === 'number' ? `${liveCWC.warningLevel.toFixed(2)}m` : '--'} • Danger: {typeof liveCWC.dangerLevel === 'number' ? `${liveCWC.dangerLevel.toFixed(2)}m` : '--'}
-                  </p>
-                  <p className="text-[10px] text-slate-400">
-                    Data Source: {dataSourceMessage}
-                  </p>
-                  <p className="text-[9px] text-slate-500">
-                    Updated: {state.cwc.lastFetchTime ? new Date(state.cwc.lastFetchTime).toLocaleString() : 'Awaiting sync'}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-red-300 text-sm font-bold">No live registry data available for {selectedCity}</p>
-              )}
-            </div>
+        <ConsolePanel intensity="secondary" className={borderless ? '!bg-[color:var(--ops-surface-1)]' : ''}>
+          <SectionHeader
+            eyebrow="Live registry context"
+            title={`CWC context for ${liveCWC.station || selectedCity}`}
+            description="A compact live hydrology snapshot stays attached to the archives module so historical review always has current river context nearby."
+            icon={TrendingUp}
+            action={
+              <>
+                <StatusBadge tone={isConnected || liveCWC.source === 'TACTICAL_REGISTRY' ? 'success' : 'warning'} icon={Radio}>
+                  {isConnected || liveCWC.source === 'TACTICAL_REGISTRY' ? 'Live registry' : 'Fallback context'}
+                </StatusBadge>
+                <StatusBadge tone="neutral">
+                  {activeState || 'No state lock'}
+                </StatusBadge>
+              </>
+            }
+            className="mb-5"
+          />
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <InsetPanel variant="soft" className="space-y-2">
+              <div className={opsLabelClass}>Current level</div>
+              <div className="text-3xl font-semibold tracking-[-0.03em] text-[color:var(--ops-text)]">
+                {typeof liveCWC.currentLevel === 'number' || typeof liveCWC.kolhapurLevel === 'number'
+                  ? `${(liveCWC.currentLevel ?? liveCWC.kolhapurLevel)?.toFixed(2)}m`
+                  : '--'}
+              </div>
+              <div className="text-sm text-[color:var(--ops-text-soft)]">
+                River {liveCWC.river || 'Active basin'}
+              </div>
+            </InsetPanel>
+
+            <InsetPanel variant="soft" className="space-y-2">
+              <div className={opsLabelClass}>Thresholds</div>
+              <div className="text-lg font-semibold text-[color:var(--ops-text)]">
+                Warning {typeof liveCWC.warningLevel === 'number' ? `${liveCWC.warningLevel.toFixed(2)}m` : '--'}
+              </div>
+              <div className="text-sm text-[color:var(--ops-text-soft)]">
+                Danger {typeof liveCWC.dangerLevel === 'number' ? `${liveCWC.dangerLevel.toFixed(2)}m` : '--'}
+              </div>
+            </InsetPanel>
+
+            <InsetPanel variant="soft" className="space-y-2">
+              <div className={opsLabelClass}>Source</div>
+              <div className="text-sm leading-relaxed text-[color:var(--ops-text-soft)]">
+                {dataSourceMessage}
+              </div>
+              <div className="text-xs text-[color:var(--ops-text-faint)]">
+                Updated {state.cwc.lastFetchTime ? new Date(state.cwc.lastFetchTime).toLocaleString() : 'Awaiting sync'}
+              </div>
+            </InsetPanel>
           </div>
-        </div>
+        </ConsolePanel>
       ) : null}
 
-      {/* Active Context */}
-      <div className="flex flex-wrap gap-2">
-        {activeCityOrStation ? (
-          <span
-            className={`rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] ${
-              borderless
-                ? 'bg-gradient-to-r from-[#6b000f]/90 via-[#b00020]/90 to-[#f59e0b]/90 text-white shadow-[0_14px_40px_rgba(255,0,55,0.14)]'
-                : 'border border-white/10 bg-gradient-to-r from-[#6b000f] via-[#b00020] to-[#f59e0b] text-white shadow-[0_14px_40px_rgba(255,0,55,0.14)]'
-            }`}
-          >
-            City: {activeCityOrStation}
-          </span>
-        ) : null}
-        {activeState ? (
-          <span
-            className={`rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] ${
-              borderless
-                ? 'bg-white/[0.04] text-slate-300 shadow-[0_10px_30px_rgba(0,0,0,0.12)]'
-                : 'border border-white/10 bg-white/5 text-slate-300'
-            }`}
-          >
-            State: {activeState}
-          </span>
-        ) : null}
-      </div>
+      <ConsolePanel intensity="primary" frameTone="neutral" className={borderless ? '!bg-[color:var(--ops-surface-1)]' : ''} padded={false}>
+        <div className="px-5 py-5 sm:px-6 sm:py-6">
+          <SectionHeader
+            eyebrow="Historical logs"
+            title={`Archives dataset for ${selectedCity}`}
+            description="Review packaged historical flood records, export the current dataset view, or load a row back into the dashboard inputs for replay."
+            icon={Database}
+            action={
+              <>
+                <StatusBadge tone={historicalMode === 'REAL_DATASET' ? 'success' : 'neutral'}>
+                  {historicalMode === 'REAL_DATASET' ? 'Real dataset' : 'Dataset unavailable'}
+                </StatusBadge>
+                {datasetCity ? <StatusBadge tone="neutral">Dataset {datasetCity}</StatusBadge> : null}
+                <ActionButton onClick={exportLogs} disabled={logs.length === 0} icon={Download}>
+                  Export CSV
+                </ActionButton>
+              </>
+            }
+          />
 
-      {/* Historical Logs Table */}
-      <div className={`overflow-hidden rounded-[2rem] bg-black/25 backdrop-blur-xl ${borderless ? 'px-1 py-1 shadow-[0_24px_80px_rgba(0,0,0,0.2)]' : 'border border-white/10 ring-1 ring-white/5'}`}>
-        <div className={`flex items-center justify-between bg-white/[0.02] ${borderless ? 'gap-6 px-8 py-7' : 'border-b border-white/10 p-6'}`}>
-          <div className="space-y-2">
-            <h3 className="flex items-center gap-2 text-sm font-black text-white">
-              <Database size={16} className="text-[#ff0037]" /> Historical Flood Logs ({logs.length})
-            </h3>
-            <div className="flex flex-wrap items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em]">
-              <span
-                className={`rounded-md px-2.5 py-1 ${
-                  historicalMode === 'REAL_DATASET'
-                    ? `${borderless ? 'bg-[#ff0037]/10 text-[#ff9eb1]' : 'border border-[#ff0037]/30 bg-[#ff0037]/10 text-[#ff9eb1]'}`
-                    : `${borderless ? 'bg-white/[0.04] text-stone-400' : 'border border-white/10 bg-white/[0.04] text-stone-400'}`
-                }`}
-              >
-                {historicalMode === 'REAL_DATASET' ? 'Real Dataset' : 'No Real Dataset'}
-              </span>
-              {datasetCity ? (
-                <span className={`rounded-md bg-white/[0.03] px-2.5 py-1 text-stone-400 ${borderless ? '' : 'border border-white/10'}`}>
-                  Dataset: {datasetCity}
-                </span>
-              ) : null}
-              <span className={`rounded-md bg-white/[0.03] px-2.5 py-1 text-stone-400 ${borderless ? '' : 'border border-white/10'}`}>
-                Select row -&gt; load CSV into input
-              </span>
-            </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {activeCityOrStation ? <StatusBadge tone="info">City {activeCityOrStation}</StatusBadge> : null}
+            {activeState ? <StatusBadge tone="neutral">State {activeState}</StatusBadge> : null}
+            {logs.length > 0 ? <StatusBadge tone="neutral">Select a row to load the scenario</StatusBadge> : null}
           </div>
-          <button
-            onClick={exportLogs}
-            disabled={logs.length === 0}
-            className={`flex items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase text-[#ff0037] transition-all shadow-[0_12px_30px_rgba(255,0,55,0.08)] enabled:hover:bg-[#ff0037] enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40 ${borderless ? 'bg-white/[0.04]' : 'border border-white/10 bg-white/5'}`}
-          >
-            <Download size={14} /> Export
-          </button>
         </div>
 
         {loading ? (
-          <div className="p-6">
+          <div className="p-5 sm:p-6">
             <SkeletonLoader type="table" />
           </div>
         ) : logs.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">
-            {historicalMessage || `No real historical logs available for ${selectedCity}`}
+          <div className="p-5 sm:p-6">
+            <EmptyState
+              title={emptyState?.title || 'No historical logs available'}
+              description={
+                <>
+                  <div>{emptyState?.body}</div>
+                  <div className="mt-2 text-[color:var(--ops-text-faint)]">{emptyState?.note}</div>
+                </>
+              }
+              icon={Info}
+            />
           </div>
         ) : (
-          <div className={`max-h-[26rem] overflow-auto archives-scrollbar ${borderless ? 'px-2 pb-2' : ''}`}>
-            <table className="w-full text-left text-xs">
-              <thead className={`sticky top-0 z-10 backdrop-blur-md ${borderless ? 'bg-black/70' : 'bg-black/85'}`}>
-                <tr className="text-slate-500 font-black uppercase text-[9px]">
+          <div className="max-h-[34rem] overflow-auto rounded-b-[1.1rem] bg-[rgba(8,12,16,0.4)] px-2 pb-2 pt-2 archives-scrollbar sm:px-3">
+            <table className="w-full min-w-[760px] text-left">
+              <thead className="sticky top-0 z-10 bg-[rgba(7,10,15,0.9)] backdrop-blur-md">
+                <tr className="text-[10px] font-black uppercase tracking-[0.22em] text-[color:var(--ops-text-dim)]">
                   <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Peak Level</th>
+                  <th className="px-4 py-3">Peak level</th>
                   <th className="px-4 py-3">Rainfall 7d</th>
                   <th className="px-4 py-3">Severity</th>
                   <th className="px-4 py-3">Confidence</th>
                   <th className="px-4 py-3">Source</th>
-                  <th className="px-4 py-3 text-right">Input</th>
+                  <th className="px-4 py-3 text-right">Replay</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
-                {logs.map((log, idx) => (
-                  <tr
-                    key={idx}
-                    className={`transition-colors ${
-                      selectedLogKey === `${log.timestamp}-${log.location}`
-                        ? 'bg-[#ff0037]/8'
-                        : 'hover:bg-white/[0.03]'
-                    }`}
-                  >
-                    <td className="px-4 py-3 text-slate-400">
-                      {new Date(log.timestamp).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 font-black text-white">{log.peak_level.toFixed(1)}m</td>
-                    <td className="px-4 py-3 text-slate-400">{log.rainfall_7day.toFixed(0)}mm</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded text-[9px] font-black ${
-                        log.severity === 'SEVERE'
-                          ? 'bg-red-500/20 text-red-300'
-                          : log.severity === 'MODERATE'
-                          ? 'bg-yellow-500/20 text-yellow-300'
-                          : 'bg-green-500/20 text-green-300'
-                      }`}>
-                        {log.severity}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-white font-black">{log.confidence.toFixed(0)}%</td>
-                    <td className="px-4 py-3 text-[9px] text-slate-500">{log.source}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => loadLogIntoInputs(log)}
-                        className={`rounded-md px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.16em] transition-all ${
-                          selectedLogKey === `${log.timestamp}-${log.location}`
-                            ? `${borderless ? 'bg-[#ff0037]/14 text-[#ff9eb1]' : 'border border-[#ff0037]/38 bg-[#ff0037]/14 text-[#ff9eb1]'}`
-                            : `${borderless ? 'bg-white/[0.03] text-stone-300 hover:bg-[#ff0037]/10 hover:text-white' : 'border border-white/10 bg-white/[0.03] text-stone-300 hover:border-[#ff0037]/35 hover:bg-[#ff0037]/10 hover:text-white'}`
-                        }`}
-                      >
-                        {selectedLogKey === `${log.timestamp}-${log.location}` ? 'Loaded' : 'Load'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+              <tbody>
+                {logs.map((log, idx) => {
+                  const logKey = `${log.timestamp}-${log.location}`;
+                  const isSelected = selectedLogKey === logKey;
+
+                  return (
+                    <tr
+                      key={idx}
+                      className={isSelected ? 'bg-white/[0.06]' : 'transition-colors hover:bg-white/[0.03]'}
+                    >
+                      <td className="px-4 py-4 text-sm text-[color:var(--ops-text-soft)]">
+                        {new Date(log.timestamp).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-4 text-sm font-semibold text-[color:var(--ops-text)]">
+                        {log.peak_level.toFixed(1)}m
+                      </td>
+                      <td className="px-4 py-4 text-sm text-[color:var(--ops-text-soft)]">
+                        {log.rainfall_7day.toFixed(0)}mm
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge tone={getSeverityTone(log.severity)}>{log.severity}</StatusBadge>
+                      </td>
+                      <td className="px-4 py-4 text-sm font-semibold text-[color:var(--ops-text)]">
+                        {log.confidence.toFixed(0)}%
+                      </td>
+                      <td className="px-4 py-4 text-xs text-[color:var(--ops-text-faint)]">
+                        {log.source}
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <ActionButton
+                          onClick={() => loadLogIntoInputs(log)}
+                          variant={isSelected ? 'primary' : 'secondary'}
+                          className="min-h-[2.3rem] px-3 text-[10px]"
+                        >
+                          {isSelected ? 'Loaded' : 'Load into inputs'}
+                        </ActionButton>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </ConsolePanel>
     </div>
   );
 };

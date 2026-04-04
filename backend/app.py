@@ -2105,7 +2105,7 @@ async def get_historical_logs(city: str = "Kolhapur", limit: int = 50):
             "matching_scope": "station_priority" if logs and matched_dataset else None,
             "total_records": len(logs),
             "records": logs,
-            "message": None if logs else f"No real historical flood dataset found for {requested_city}.",
+            "message": None if logs else f"No packaged historical flood dataset is currently mapped to {requested_city}.",
         }
     except Exception as e:
         return {
