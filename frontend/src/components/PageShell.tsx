@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { isLiteMotionDevice } from '../utils/performance';
+import { ConsolePanel, StatusBadge } from './OpsPrimitives';
 
 interface PageShellProps {
   children: React.ReactNode;
@@ -23,7 +24,7 @@ interface PageCardProps {
 }
 
 export const PageShell: React.FC<PageShellProps> = ({ children, className = '' }) => (
-  <div className={`mx-auto w-full max-w-7xl space-y-8 pb-20 ${className}`}>
+  <div className={`mx-auto w-full max-w-[1400px] space-y-6 pb-24 ${className}`}>
     {children}
   </div>
 );
@@ -39,32 +40,41 @@ export const PageHero: React.FC<PageHeroProps> = ({
   const liteMotion = useMemo(() => isLiteMotionDevice(), []);
 
   return (
-    <div className={`flex flex-col gap-5 rounded-lg border border-[#ff0037]/30 bg-[#151d16]/88 px-6 py-6 ${liteMotion ? 'backdrop-blur-md shadow-[0_12px_32px_rgba(0,0,0,0.22)]' : 'backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.35)]'} sm:px-8`}>
-      <div className={`flex gap-3 ${centered ? 'flex-col items-center text-center' : 'items-center'}`}>
-        <div className={`flex h-12 w-12 items-center justify-center rounded-md border border-[#ff0037]/35 bg-gradient-to-br from-[#2f171b] via-[#571a26] to-[#9c2438] ${liteMotion ? 'shadow-[0_8px_18px_rgba(255,0,55,0.1)]' : 'shadow-[0_12px_30px_rgba(255,0,55,0.16)]'}`}>
-          <Icon size={22} className="text-white" />
-        </div>
-        <div className={`space-y-1 ${centered ? 'text-center' : ''}`}>
-          <div className="text-[10px] font-black uppercase tracking-[0.38em] text-[#87907a]">
-            {eyebrow}
+    <ConsolePanel
+      intensity="primary"
+      frameTone="olive"
+      elevated
+      className={`${liteMotion ? '' : 'relative overflow-hidden'} ${centered ? 'text-center' : ''}`}
+    >
+      {!liteMotion ? (
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(176,168,120,0.22),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(91,164,199,0.08),transparent_22%)]" />
+      ) : null}
+      <div className="relative z-10 flex flex-col gap-5">
+        <div className={`flex gap-4 ${centered ? 'flex-col items-center' : 'flex-col sm:flex-row sm:items-start sm:justify-between'}`}>
+          <div className={`flex gap-4 ${centered ? 'flex-col items-center text-center' : 'items-start'}`}>
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgba(109,122,66,0.7),rgba(44,52,35,0.92))] shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_14px_34px_rgba(0,0,0,0.3)]">
+              <Icon size={24} className="text-[color:var(--ops-text)]" />
+            </div>
+            <div className={`space-y-2 ${centered ? 'text-center' : ''}`}>
+              <StatusBadge tone="neutral" className="!rounded-lg !px-2.5 !py-1 !text-[9px]">
+                {eyebrow}
+              </StatusBadge>
+              <h1 className="ops-red-header font-cinzel text-[2.1rem] font-semibold uppercase tracking-[0.08em] sm:text-[2.7rem]">
+                {title}
+              </h1>
+              <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--ops-text-soft)] sm:text-[15px]">
+                {subtitle}
+              </p>
+            </div>
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-[#ece4ce] font-cinzel sm:text-3xl">
-            {title}
-          </h1>
-          <p className="text-sm font-medium text-[#a3aa94]">
-            {subtitle}
-          </p>
+          {action ? (
+            <div className="flex w-full flex-wrap items-center justify-center gap-3 sm:gap-4">
+              {action}
+            </div>
+          ) : null}
         </div>
       </div>
-      {action ? (
-        <div className={`flex flex-col gap-3 ${centered ? 'items-center' : 'sm:flex-row sm:items-center sm:justify-between'}`}>
-          {!centered ? <div className="hidden sm:block" /> : null}
-          <div className={`flex flex-wrap gap-3 ${centered ? 'justify-center' : ''}`}>
-            {action}
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </ConsolePanel>
   );
 };
 
@@ -72,10 +82,14 @@ export const PageCard: React.FC<PageCardProps> = ({ children, className = '', pa
   const liteMotion = useMemo(() => isLiteMotionDevice(), []);
 
   return (
-    <div
-      className={`overflow-hidden rounded-lg border border-[#ff0037]/28 bg-[#121812]/90 ${liteMotion ? 'backdrop-blur-md shadow-[0_14px_36px_rgba(0,0,0,0.24)]' : 'backdrop-blur-3xl shadow-[0_24px_80px_rgba(0,0,0,0.45)]'} ${padded ? 'p-8 sm:p-10' : ''} ${className}`}
+    <ConsolePanel
+      intensity={liteMotion ? 'secondary' : 'primary'}
+      frameTone="neutral"
+      elevated={!liteMotion}
+      padded={padded}
+      className={className}
     >
       {children}
-    </div>
+    </ConsolePanel>
   );
 };

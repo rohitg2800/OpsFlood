@@ -1,11 +1,30 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
-import { CloudRain, Wind, Thermometer, Gauge, Eye, Droplets, RefreshCw, ShieldCheck, AlertTriangle, Radio } from 'lucide-react';
+import {
+  AlertTriangle,
+  CloudRain,
+  Droplets,
+  Eye,
+  Gauge,
+  Radio,
+  RefreshCw,
+  ShieldCheck,
+  Thermometer,
+  Wind,
+} from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import type { LocationData, WeatherData } from '../weatherWidget';
 import { apiUrl } from '../config/api';
 import WeatherService from '../weatherService';
-import { isLiteMotionDevice } from '../utils/performance';
 import { formatTemperatureScale } from '../utils/temperature';
+import {
+  ConsolePanel,
+  EmptyState,
+  InsetPanel,
+  MetricTile,
+  SectionHeader,
+  StatusBadge,
+  opsLabelClass,
+} from './OpsPrimitives';
 
 const LazyWeatherWidget = lazy(() => import('../weatherWidget'));
 
@@ -54,7 +73,6 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   const coordinateLon = coordinates?.lon;
   const [proxyStatus, setProxyStatus] = useState<WeatherProxyStatus>('CHECKING');
   const [resolvedDestination, setResolvedDestination] = useState<LocationData | null>(null);
-  const liteMotion = useMemo(() => isLiteMotionDevice(), []);
   const destinationCandidates = useMemo(
     () =>
       [
@@ -98,11 +116,6 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       normalizeWeatherLabel(weatherSnapshot.location).includes(normalizedLockedDestination),
   );
   const lockedWeatherSnapshot = weatherSnapshotMatchesLock ? weatherSnapshot : null;
-  const showRainOverlay = Boolean(
-    lockedWeatherSnapshot &&
-      (/(rain|drizzle|thunderstorm)/i.test(String(lockedWeatherSnapshot.weather_condition || '')) ||
-        Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0) > 0),
-  );
   const showResolvedNodeLabel =
     Boolean(resolvedNodeLabel) &&
     normalizedResolvedNodeLabel !== lockedDestination.toLowerCase();
@@ -158,7 +171,7 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       }
     };
 
-    fetchStatus();
+    void fetchStatus();
 
     return () => {
       cancelled = true;
@@ -247,256 +260,181 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
     proxyStatus === 'SECURE'
       ? {
           icon: ShieldCheck,
-          label: 'Weather API: SECURE',
-          tone: 'bg-emerald-500/10 text-emerald-300',
+          label: 'Weather API secure',
+          tone: 'success' as const,
         }
       : proxyStatus === 'DEGRADED'
       ? {
           icon: AlertTriangle,
-          label: 'Weather API: DEGRADED',
-          tone: 'bg-amber-500/10 text-amber-300',
+          label: 'Weather API degraded',
+          tone: 'warning' as const,
         }
       : proxyStatus === 'MISSING_KEY'
       ? {
           icon: AlertTriangle,
-          label: 'Weather API: MISSING KEY',
-          tone: 'bg-amber-500/10 text-amber-300',
+          label: 'Weather key missing',
+          tone: 'warning' as const,
         }
       : proxyStatus === 'OFFLINE'
       ? {
           icon: AlertTriangle,
-          label: 'Weather API: OFFLINE',
-          tone: 'bg-[#ff0037]/10 text-[#ff9eb1]',
+          label: 'Weather API offline',
+          tone: 'danger' as const,
         }
       : {
           icon: Radio,
-          label: 'Weather API: CHECKING',
-          tone: 'bg-white/[0.05] text-stone-300',
+          label: 'Weather API checking',
+          tone: 'neutral' as const,
         };
   const StatusIcon = statusMeta.icon;
 
   return (
-    <div
-      className={`${className} ${liteMotion ? 'weather-console-lite' : ''} weather-console-shell relative overflow-hidden rounded-[1.75rem] border-0 ring-0 bg-[linear-gradient(145deg,rgba(255,255,255,0.03),rgba(10,12,16,0.18)_28%,rgba(6,9,12,0.08)_100%)] p-6 ${liteMotion ? 'shadow-[0_14px_36px_rgba(0,0,0,0.16)] backdrop-blur-md' : 'shadow-[0_28px_80px_rgba(0,0,0,0.24)] backdrop-blur-[24px]'} sm:p-8`}
-    >
-      <style>{`
-        @keyframes weather-console-drift {
-          0%, 100% { transform: translate3d(0, 0, 0); }
-          50% { transform: translate3d(0, -4px, 0); }
+    <ConsolePanel intensity="secondary" className={className}>
+      <SectionHeader
+        eyebrow="Weather context"
+        title="Regional weather console"
+        description={
+          subtitle || `Atmospheric conditions for ${lockedDestination} aligned with the active operating scope.`
         }
-        @keyframes weather-console-scan {
-          0% { transform: translateX(-120%); opacity: 0; }
-          18% { opacity: 0.28; }
-          100% { transform: translateX(120%); opacity: 0; }
+        icon={CloudRain}
+        action={
+          <>
+            <StatusBadge tone={statusMeta.tone} icon={StatusIcon}>
+              {statusMeta.label}
+            </StatusBadge>
+            <StatusBadge tone="neutral" icon={Wind}>
+              {state.data.weatherLastUpdate
+                ? `Updated ${new Date(state.data.weatherLastUpdate).toLocaleTimeString('en-US', { hour12: false })}`
+                : 'Awaiting weather sync'}
+            </StatusBadge>
+          </>
         }
-        @keyframes weather-console-glow {
-          0%, 100% { opacity: 0.32; }
-          50% { opacity: 0.58; }
-        }
-        @keyframes weather-chip-breathe {
-          0%, 100% { transform: translateY(0); box-shadow: 0 0 0 rgba(255,255,255,0); }
-          50% { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(255, 127, 150, 0.1); }
-        }
-        @keyframes weather-console-rain-fall {
-          0% { transform: translate3d(10px, -18%, 0) rotate(12deg); opacity: 0; }
-          12% { opacity: 0.82; }
-          100% { transform: translate3d(-26px, 155px, 0) rotate(12deg); opacity: 0; }
-        }
-        .weather-console-shell::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background:
-            radial-gradient(circle at 16% 20%, rgba(255,255,255,0.08), transparent 24%),
-            radial-gradient(circle at 82% 18%, rgba(255,127,150,0.12), transparent 26%),
-            linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
-          animation: weather-console-glow 8s ease-in-out infinite;
-          pointer-events: none;
-        }
-        .weather-console-shell::after {
-          content: '';
-          position: absolute;
-          top: 0;
-          bottom: 0;
-          width: 22%;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-          filter: blur(10px);
-          animation: weather-console-scan 10s linear infinite;
-          pointer-events: none;
-        }
-        .weather-console-float {
-          animation: weather-console-drift 7.5s ease-in-out infinite;
-        }
-        .weather-chip-float {
-          animation: weather-chip-breathe 4.6s ease-in-out infinite;
-        }
-        .weather-console-rain {
-          animation: weather-console-rain-fall linear infinite;
-        }
-        .weather-console-lite::after {
-          display: none;
-        }
-        .weather-console-lite::before {
-          animation: none;
-          opacity: 0.58;
-        }
-        .weather-console-lite .weather-console-float,
-        .weather-console-lite .weather-chip-float,
-        .weather-console-lite .weather-console-rain {
-          animation: none !important;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .weather-console-shell::before,
-          .weather-console-shell::after,
-          .weather-console-float,
-          .weather-chip-float,
-          .weather-console-rain {
-            animation: none !important;
-          }
-        }
-      `}</style>
+        className="mb-6"
+      />
 
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_24%,rgba(255,255,255,0.015)_72%,transparent)] pointer-events-none" />
-      <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
-      {showRainOverlay ? (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          {Array.from({ length: liteMotion ? 14 : 34 }).map((_, index) => (
-            <span
-              key={`console-rain-${index}`}
-              className="weather-console-rain absolute top-[-20%] h-14 w-[1.5px] rounded-full bg-gradient-to-b from-[#dff0ff]/0 via-[#dff0ff]/88 to-[#73b9ff]/0"
-              style={{
-                left: `${2 + (index * 3.1) % 98}%`,
-                animationDelay: `${(index % 9) * 0.16}s`,
-                animationDuration: `${0.9 + (index % 5) * 0.14}s`,
-                opacity: 0.26 + (index % 4) * 0.12,
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      <div className="weather-console-float relative z-10 mb-8 flex flex-col items-center gap-4 pb-6 text-center">
-        <div className="space-y-2">
-          <h3 className="flex items-center justify-center gap-3 text-xs font-black uppercase tracking-[0.3em] text-[#ff7f96]">
-            <CloudRain size={18} /> Weather Console
-          </h3>
-          <p className="text-sm text-stone-400">
-            {subtitle || (
-              <>
-                Atmospheric conditions for <span className="font-black text-white">{lockedDestination}</span>.
-              </>
-            )}
-          </p>
-          {destinationCandidates.length ? (
-            <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/45">
-              Destination lock: <span className="text-white/70">{lockedDestination}</span>
-              {showResolvedNodeLabel ? (
-                <span className="text-stone-400">{' // weather node '}{resolvedNodeLabel}</span>
-              ) : null}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <InsetPanel variant="soft" className="overflow-hidden p-0">
+          <div className="px-5 py-4">
+            <div className={opsLabelClass}>Locked location</div>
+            <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
+              {lockedDestination}
             </div>
-          ) : null}
-          <div className={`weather-chip-float inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${liteMotion ? '' : 'backdrop-blur-md'} ${statusMeta.tone}`}>
-            <StatusIcon size={12} className={proxyStatus === 'CHECKING' ? 'animate-pulse' : ''} />
-            <span>{statusMeta.label}</span>
+            <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
+              {showResolvedNodeLabel
+                ? `Weather node resolved to ${resolvedNodeLabel}.`
+                : 'Weather data is pinned to the current command scope.'}
+            </div>
           </div>
-        </div>
-        <div className={`weather-chip-float inline-flex w-fit items-center gap-2 rounded-full bg-[#ff0037]/8 px-4 py-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#ff9eb1] ${liteMotion ? '' : 'backdrop-blur-md'}`}>
-          <Wind size={14} className={!state.data.weatherLastUpdate ? 'animate-pulse' : ''} />
-          {state.data.weatherLastUpdate
-            ? `Last Weather Load ${new Date(state.data.weatherLastUpdate).toLocaleTimeString('en-US', { hour12: false })}`
-            : 'Manual Refresh Ready'}
+
+          <div className="p-4 sm:p-5">
+            <Suspense
+              fallback={
+                <div className="flex h-40 items-center justify-center rounded-2xl bg-black/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <RefreshCw className="h-5 w-5 animate-spin text-[color:var(--ops-info)]" />
+                </div>
+              }
+            >
+              <LazyWeatherWidget
+                key={widgetResetKey}
+                city={lockedDestination}
+                displayLocation={lockedDestination}
+                coordinates={effectiveCoordinates}
+                onWeatherSelect={handleWeatherSelect}
+                onLocationSelect={handleLocationSelect}
+                autoRefresh={false}
+                showLocationName
+                showDetailedInfo={false}
+                showMetaStrip={false}
+              />
+            </Suspense>
+          </div>
+        </InsetPanel>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+          <MetricTile
+            label="Resolved node"
+            value={resolvedDestination?.name || lockedDestination}
+            hint={
+              resolvedDestination?.state
+                ? `${resolvedDestination.state}, ${resolvedDestination.country || 'IN'}`
+                : 'Using the selected regional target'
+            }
+            tone="info"
+            framed
+            frameTone="cyan"
+          />
+
+          <InsetPanel variant="soft" className="space-y-3">
+            <div className={opsLabelClass}>Context notes</div>
+            <div className="text-sm leading-relaxed text-[color:var(--ops-text-soft)]">
+              {hasSpecificLocationLock
+                ? 'A direct city or station lock is active, so weather resolution favors the exact operational target first.'
+                : 'No station-level lock is active, so the panel is using the broader regional context to keep supporting weather visible.'}
+            </div>
+            {effectiveCoordinates ? (
+              <div className="rounded-xl bg-black/20 px-3 py-3 text-sm text-[color:var(--ops-text-soft)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                Coordinates {effectiveCoordinates.lat.toFixed(4)}, {effectiveCoordinates.lon.toFixed(4)}
+              </div>
+            ) : null}
+          </InsetPanel>
         </div>
       </div>
 
-      <Suspense
-        fallback={
-          <div className={`flex h-40 items-center justify-center rounded-[2rem] bg-black/25 ${liteMotion ? '' : 'backdrop-blur-xl'}`}>
-            <RefreshCw className="h-6 w-6 animate-spin text-[#ff0037]" />
-          </div>
-        }
-      >
-        <LazyWeatherWidget
-          key={widgetResetKey}
-          city={lockedDestination}
-          displayLocation={lockedDestination}
-          coordinates={effectiveCoordinates}
-          onWeatherSelect={handleWeatherSelect}
-          onLocationSelect={handleLocationSelect}
-          autoRefresh={false}
-          showLocationName
-          showDetailedInfo={false}
-          showMetaStrip={false}
-        />
-      </Suspense>
-
       {lockedWeatherSnapshot ? (
-        <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Thermometer size={12} className="text-[#ff7f96]" />
-              Feels Like
-            </div>
-            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
-              <span className="text-2xl font-black">{feelsLikeScale.celsius}</span>
-              <span className="text-sm text-stone-400">{feelsLikeScale.fahrenheit}</span>
-            </div>
-          </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.18s' }}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Thermometer size={12} className="text-[#7bc0ff]" />
-              Min Temp
-            </div>
-            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
-              <span className="text-2xl font-black">{minTemperatureScale.celsius}</span>
-              <span className="text-sm text-stone-400">{minTemperatureScale.fahrenheit}</span>
-            </div>
-          </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.26s' }}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Thermometer size={12} className="text-[#ffb36b]" />
-              Max Temp
-            </div>
-            <div className="mt-3 flex flex-col gap-1 font-mono text-white">
-              <span className="text-2xl font-black">{maxTemperatureScale.celsius}</span>
-              <span className="text-sm text-stone-400">{maxTemperatureScale.fahrenheit}</span>
-            </div>
-          </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '0.35s' }}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Gauge size={12} className="text-[#ff7f96]" />
-              Pressure
-            </div>
-            <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(lockedWeatherSnapshot.pressure || 0).toFixed(0)} <span className="text-xs text-stone-500">hPa</span>
-            </div>
-          </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.055] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md'}`} style={{ animationDelay: '0.7s' }}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Eye size={12} className="text-[#ff7f96]" />
-              Cloud Cover
-            </div>
-            <div className="mt-3 flex items-end gap-2 font-mono text-white">
-              <span className="text-3xl font-black tracking-tight tabular-nums">
-                {String(cloudCoverPercent).padStart(2, '0')}
-              </span>
-              <span className="mb-1 text-sm font-black text-[#d7ecff]">%</span>
-            </div>
-            <div className="mt-1 w-full text-center text-[11px] font-black uppercase leading-none tracking-[0.12em] text-[#d7ecff]/85">
-              {cloudCoverLabel}
-            </div>
-          </div>
-          <div className={`weather-chip-float rounded-2xl bg-white/[0.035] p-4 ${liteMotion ? '' : 'shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md'}`} style={{ animationDelay: '1.05s' }}>
-            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.22em] text-stone-500">
-              <Droplets size={12} className="text-[#ff7f96]" />
-              Precip Pulse
-            </div>
-            <div className="mt-3 text-2xl font-black font-mono text-white">
-              {Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0).toFixed(1)} <span className="text-xs text-stone-500">mm</span>
-            </div>
-          </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <MetricTile
+            label="Feels like"
+            value={feelsLikeScale.celsius}
+            hint={feelsLikeScale.fahrenheit}
+            icon={Thermometer}
+            tone="info"
+          />
+          <MetricTile
+            label="Min / max"
+            value={`${minTemperatureScale.celsius} / ${maxTemperatureScale.celsius}`}
+            hint={`${minTemperatureScale.fahrenheit} / ${maxTemperatureScale.fahrenheit}`}
+            icon={Thermometer}
+            tone="neutral"
+          />
+          <MetricTile
+            label="Pressure"
+            value={`${Number(lockedWeatherSnapshot.pressure || 0).toFixed(0)} hPa`}
+            hint={String(lockedWeatherSnapshot.weather_condition || 'Atmospheric reading')}
+            icon={Gauge}
+            tone="neutral"
+          />
+          <MetricTile
+            label="Cloud cover"
+            value={`${cloudCoverPercent}%`}
+            hint={cloudCoverLabel}
+            icon={Eye}
+            tone="info"
+          />
+          <MetricTile
+            label="Precipitation"
+            value={`${Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0).toFixed(1)} mm`}
+            hint="Rolling rainfall signal"
+            icon={Droplets}
+            tone={Number(lockedWeatherSnapshot.rain_1h ?? lockedWeatherSnapshot.rain_3h ?? 0) > 0 ? 'warning' : 'neutral'}
+          />
+          <MetricTile
+            label="Wind"
+            value={`${Number(lockedWeatherSnapshot.wind_speed || 0).toFixed(1)} m/s`}
+            hint={String(lockedWeatherSnapshot.location || lockedDestination)}
+            icon={Wind}
+            tone="neutral"
+          />
         </div>
-      ) : null}
-    </div>
+      ) : (
+        <div className="mt-6">
+          <EmptyState
+            title="Weather detail is still resolving"
+            description="The panel can still keep the location lock and weather service status visible while the detailed snapshot hydrates. This avoids dropping into an unexplained empty panel."
+            icon={CloudRain}
+          />
+        </div>
+      )}
+    </ConsolePanel>
   );
 };
 

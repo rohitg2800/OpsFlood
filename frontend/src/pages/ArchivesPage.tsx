@@ -1,9 +1,18 @@
 import React, { useCallback, useMemo } from 'react';
-import { Database, Download, FileText, ChevronRight } from 'lucide-react';
+import { Database, Download, FileText } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { FloodLogsPanel } from '../components/FloodLogsPanel';
-import { PageShell, PageHero, PageCard } from '../components/PageShell';
+import { PageShell, PageHero } from '../components/PageShell';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
+import {
+  ActionButton,
+  ConsolePanel,
+  EmptyState,
+  InsetPanel,
+  SectionHeader,
+  StatusBadge,
+  opsLabelClass,
+} from '../components/OpsPrimitives';
 
 function escapeCsvValue(value: string | number | null | undefined): string {
   const normalized = String(value ?? '');
@@ -32,10 +41,6 @@ function slugifyArchiveLabel(value: string): string {
       .replace(/^_+|_+$/g, '') || 'region'
   );
 }
-
-// ==========================================
-// ARCHIVES PAGE COMPONENT
-// ==========================================
 
 export const ArchivesPage: React.FC = () => {
   const { state } = useAppState();
@@ -152,136 +157,144 @@ export const ArchivesPage: React.FC = () => {
     state.system.apiVersion,
   ]);
 
+  const getSeverityTone = (severity: string) => {
+    if (severity === 'CRITICAL') return 'danger' as const;
+    if (severity === 'SEVERE') return 'warning' as const;
+    if (severity === 'MODERATE') return 'info' as const;
+    return 'success' as const;
+  };
+
   return (
-    <PageShell className="space-y-10">
+    <PageShell className="space-y-6">
       <PageHero
-        eyebrow="External Telemetry Logs"
+        eyebrow="Operational Archive"
         title="Archives Vault"
         subtitle={`Government feeds, local inference history, and export-ready records for ${selectedRiverLocationLabel}.`}
         icon={FileText}
         action={
-          <button
+          <ActionButton
             onClick={exportArchiveBundle}
             disabled={!hasArchiveData}
-            className="inline-flex items-center gap-3 rounded-md bg-white/[0.06] px-6 py-3 text-[10px] font-black uppercase tracking-[0.22em] text-[#ffb36a] transition-all enabled:hover:bg-[#ff0037] enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            icon={Download}
+            variant="secondary"
           >
-            <Download size={16} />
-            {hasArchiveData ? 'Export Full Dataset' : 'No Archive Data'}
-          </button>
+            {hasArchiveData ? 'Export full dataset' : 'No archive data'}
+          </ActionButton>
         }
       />
 
-      {/* CWC & GOVERNMENT FLOOD LOGS - INTEGRATED SHELL */}
-      <section className="relative pt-2">
-        <FloodLogsPanel borderless />
-      </section>
+      <FloodLogsPanel borderless />
 
-      {/* LOCAL PREDICTION HISTORY - PREMIUM VAULT STYLE */}
-      <PageCard className="relative !border-0 !bg-[#121812]/78 !p-0 !shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
-        <div className="flex flex-col items-start justify-between gap-8 bg-white/[0.02] px-10 py-12 md:flex-row md:items-center md:px-12">
-          <div className="space-y-1">
-            <h2 className="text-2xl font-black flex items-center gap-4 text-white font-cinzel tracking-widest uppercase">
-              <Database className="text-[#ff5b79]" size={28} /> Neural Archives
-            </h2>
-            <p className="text-[10px] text-stone-500 uppercase tracking-[0.2em] font-bold ml-11">
-              Internal_Prediction_Database // Encrypted_Storage
-            </p>
-          </div>
-          
-          <button
-            onClick={exportArchiveCsv}
-            disabled={!hasArchiveData}
-            className="group flex items-center gap-3 rounded-md bg-[#ff0037]/10 px-8 py-3 text-[10px] font-black uppercase text-[#ff9eb1] shadow-[0_15px_40px_rgba(255,0,55,0.1)] transition-all active:scale-95 enabled:hover:bg-[#ff0037] enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" /> 
-            {hasArchiveData ? 'Export_Archive_CSV' : 'No_Archives_Found'}
-          </button>
+      <ConsolePanel intensity="primary" frameTone="neutral" padded={false}>
+        <div className="px-5 py-5 sm:px-6 sm:py-6">
+          <SectionHeader
+            eyebrow="Local archive"
+            title="Prediction history"
+            description="Internal prediction runs are stored separately from packaged historical datasets so you can export scenario replay data and recent operator decisions."
+            icon={Database}
+            action={
+              <>
+                <StatusBadge tone="neutral">{archiveRecords.length} records</StatusBadge>
+                <ActionButton
+                  onClick={exportArchiveCsv}
+                  disabled={!hasArchiveData}
+                  icon={Download}
+                  variant="secondary"
+                >
+                  Export CSV
+                </ActionButton>
+              </>
+            }
+          />
         </div>
 
-        <div className="px-4 pb-4 md:px-6 md:pb-6">
-          <div className="max-h-[38rem] overflow-auto rounded-[1.5rem] archives-scrollbar">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 z-10 bg-black/88 backdrop-blur-md text-[10px] uppercase font-black text-stone-500 tracking-[0.3em]">
-              <tr>
-                <th className="px-8 py-6 md:px-10">Timestamp</th>
-                <th className="px-8 py-6 md:px-10">Environmental Vector</th>
-                <th className="px-8 py-6 md:px-10">System Verdict</th>
-                <th className="px-8 py-6 text-right md:px-10">Fidelity_Index</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04] font-mono">
-              {state.prediction.history.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-10 py-24 text-center">
-                    <div className="flex flex-col items-center gap-4 opacity-20">
-                      <Database size={48} />
-                      <p className="text-xs font-black uppercase tracking-[0.4em]">No_Archives_Found</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                state.prediction.history.map((log, idx) => (
-                  <tr key={log.id || idx} className="group transition-colors hover:bg-white/[0.03]">
-                    <td className="px-8 py-8 text-xs font-bold uppercase tracking-tighter text-stone-400 md:px-10">
-                      {new Date(log.timestamp).toLocaleString('en-IN', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit', second: '2-digit'
-                      })}
-                    </td>
-                    <td className="px-8 py-8 text-xs md:px-10">
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[#bc9437]/50 font-black tracking-widest text-[9px]">LVL:</span>
-                          <span className="text-white font-black">{log.peak_level.toFixed(2)}m</span>
-                        </div>
-                        <div className="w-[1px] h-3 bg-white/10" />
-                        <div className="flex items-center gap-2">
-                          <span className="text-blue-500/50 font-black tracking-widest text-[9px]">PRECIP:</span>
-                          <span className="text-white font-black">{log.rainfall.toFixed(1)}mm</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-8 md:px-10">
-                      <div className="flex items-center gap-3">
-                        <span className={`rounded-md border px-4 py-1.5 text-[9px] font-black uppercase ${
-                          log.severity === 'SEVERE' || log.severity === 'CRITICAL'
-                            ? 'bg-[#ff0037]/10 text-[#ff0037] border-[#ff0037]/30 shadow-[0_0_15px_rgba(255,0,55,0.1)]' 
-                            : log.severity === 'MODERATE'
-                            ? 'bg-amber-500/10 text-amber-400 border-[#ff0037]/24'
-                            : 'bg-emerald-500/10 text-emerald-400 border-[#ff0037]/24'
-                        }`}>
-                          {log.severity}
-                        </span>
-                        {(log.severity === 'SEVERE' || log.severity === 'CRITICAL') && (
-                          <ChevronRight size={14} className="text-[#ff0037] animate-pulse" />
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-8 py-8 text-right md:px-10">
-                       <div className="inline-flex flex-col items-end">
-                          <span className="text-sm font-black text-white">{log.confidence.toFixed(1)}%</span>
-                          <div className="w-16 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
-                             <div 
-                               className="h-full bg-[#bc9437]" 
-                               style={{ width: `${log.confidence}%` }}
-                             />
-                          </div>
-                       </div>
-                    </td>
+        {state.prediction.history.length === 0 ? (
+          <div className="p-5 sm:p-6">
+            <EmptyState
+              title="No prediction history yet"
+              description="Run the model from the dashboard to create a local archive entry. Once available, each row here becomes exportable and easy to scan."
+              icon={Database}
+            />
+          </div>
+        ) : (
+          <div className="space-y-4 p-5 sm:p-6">
+            <div className="grid gap-4 md:grid-cols-3">
+              <InsetPanel variant="soft">
+                <div className={opsLabelClass}>Selected location</div>
+                <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
+                  {selectedRiverLocationLabel}
+                </div>
+              </InsetPanel>
+              <InsetPanel variant="soft">
+                <div className={opsLabelClass}>Model version</div>
+                <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
+                  {state.prediction.modelVersion}
+                </div>
+              </InsetPanel>
+              <InsetPanel variant="soft">
+                <div className={opsLabelClass}>Monitoring level</div>
+                <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
+                  {state.prediction.monitoringLevel || 'Pending'}
+                </div>
+              </InsetPanel>
+            </div>
+
+            <div className="max-h-[38rem] overflow-auto rounded-2xl bg-[rgba(8,12,16,0.46)] archives-scrollbar">
+              <table className="w-full min-w-[760px] text-left">
+                <thead className="sticky top-0 z-10 bg-[rgba(7,10,15,0.9)] backdrop-blur-md">
+                  <tr className="text-[10px] font-black uppercase tracking-[0.22em] text-[color:var(--ops-text-dim)]">
+                    <th className="px-5 py-4">Timestamp</th>
+                    <th className="px-5 py-4">Environmental vector</th>
+                    <th className="px-5 py-4">Verdict</th>
+                    <th className="px-5 py-4 text-right">Confidence</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {state.prediction.history.map((log, idx) => (
+                    <tr key={log.id || idx} className="transition-colors hover:bg-white/[0.03]">
+                      <td className="px-5 py-5 text-sm text-[color:var(--ops-text-soft)]">
+                        {new Date(log.timestamp).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-[color:var(--ops-text-soft)]">
+                          <span>
+                            Level <span className="font-semibold text-[color:var(--ops-text)]">{log.peak_level.toFixed(2)}m</span>
+                          </span>
+                          <span className="h-3 w-px bg-white/10" />
+                          <span>
+                            Rain <span className="font-semibold text-[color:var(--ops-text)]">{log.rainfall.toFixed(1)}mm</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-5">
+                        <StatusBadge tone={getSeverityTone(log.severity)}>{log.severity}</StatusBadge>
+                      </td>
+                      <td className="px-5 py-5 text-right">
+                        <div className="inline-flex flex-col items-end">
+                          <span className="text-base font-semibold text-[color:var(--ops-text)]">{log.confidence.toFixed(1)}%</span>
+                          <div className="mt-2 h-1.5 w-20 overflow-hidden rounded-full bg-black/20">
+                            <div
+                              className="h-full rounded-full bg-[linear-gradient(90deg,#4c7cff,#79a5ff)]"
+                              style={{ width: `${Math.max(4, log.confidence)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-        
-        {/* Tactical Footer for Table */}
-        <div className="flex items-center justify-between bg-black/32 px-8 py-6 text-[9px] font-black uppercase tracking-[0.3em] text-stone-600 md:px-10">
-           <span>Database_Sync: Standard</span>
-           <span>Total_Records: {state.prediction.history.length}</span>
-        </div>
-      </PageCard>
+        )}
+      </ConsolePanel>
     </PageShell>
   );
 };

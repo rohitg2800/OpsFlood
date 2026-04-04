@@ -6,6 +6,7 @@ import { LayeredNeuralGraph } from './LayeredNeuralGraph';
 import { ProbabilityHeartbeatSparkline } from './ProbabilityLaneHeartbeat';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
 import { deriveProbabilityLanes, getDominantProbabilityLane } from '../utils/probabilityLanes';
+import { InsetPanel, SectionHeader, StatusBadge, opsLabelClass } from './OpsPrimitives';
 
 interface NeuralOperationsGraphProps {
   className?: string;
@@ -25,97 +26,71 @@ export const NeuralOperationsGraph: React.FC<NeuralOperationsGraphProps> = ({ cl
 
   const laneConfig = useMemo(() => ([
     { key: 'low', label: 'LOW', shortLabel: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1', tone: 'text-emerald-300' },
-    { key: 'moderate', label: 'MODERATE', shortLabel: 'MOD', value: probabilityLanes.moderate, fill: '#bc9437', tone: 'text-[#dcb978]' },
-    { key: 'severe', label: 'SEVERE', shortLabel: 'SEV', value: probabilityLanes.severe, fill: '#ff8a5b', tone: 'text-[#ffb08e]' },
-    { key: 'critical', label: 'CRITICAL', shortLabel: 'CRT', value: probabilityLanes.critical, fill: '#ff0037', tone: 'text-[#ff8ea0]' },
+    { key: 'moderate', label: 'MODERATE', shortLabel: 'MOD', value: probabilityLanes.moderate, fill: '#4c7cff', tone: 'text-sky-300' },
+    { key: 'severe', label: 'SEVERE', shortLabel: 'SEV', value: probabilityLanes.severe, fill: '#ff8a5b', tone: 'text-orange-200' },
+    { key: 'critical', label: 'CRITICAL', shortLabel: 'CRT', value: probabilityLanes.critical, fill: '#ff5f7e', tone: 'text-rose-200' },
   ]), [probabilityLanes]);
 
   const dominantConfig = laneConfig.find((lane) => lane.label === dominantProbabilityEntry[0]) || laneConfig[0];
 
-  const compactMetrics = useMemo(() => ([
-    { label: 'Preferred', value: dominantProbabilityEntry[0], tone: dominantConfig.tone },
-    { label: 'Confidence', value: `${Number(state.prediction.currentPrediction?.confidence_percent || 0).toFixed(0)}%`, tone: 'text-[#fff1f4]' },
-    { label: 'Latency', value: `${Math.max(0, Number(state.prediction.latency || 0))}ms`, tone: 'text-[#fff1f4]' },
-  ]), [
-    dominantConfig.tone,
-    dominantProbabilityEntry,
-    state.prediction.currentPrediction?.confidence_percent,
-    state.prediction.latency,
-  ]);
-
   return (
     <PageCard className={`space-y-4 ${className}`.trim()}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.24em] text-[#ff8ea0]">
-            <Brain size={14} className="text-[#ff5b79]" />
-            Neural Operations Graph
-          </div>
-          <p className="text-xs text-stone-500">
-            Dense neural thread map for {selectedRiverLocationLabel}.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {compactMetrics.map((metric) => (
-            <span
-              key={metric.label}
-              className="rounded-md border border-[#ff0037]/18 bg-black/35 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-stone-300"
-            >
-              {metric.label}: <span className={`ml-1 ${metric.tone}`}>{metric.value}</span>
-            </span>
-          ))}
-        </div>
-      </div>
+      <SectionHeader
+        eyebrow="Model graph"
+        title="Neural operations graph"
+        description={`Layered neural signal map for ${selectedRiverLocationLabel}.`}
+        icon={Brain}
+        action={
+          <>
+            <StatusBadge tone="info">Preferred {dominantProbabilityEntry[0]}</StatusBadge>
+            <StatusBadge tone="neutral">
+              Confidence {Number(state.prediction.currentPrediction?.confidence_percent || 0).toFixed(0)}%
+            </StatusBadge>
+            <StatusBadge tone="neutral">
+              Latency {Math.max(0, Number(state.prediction.latency || 0))}ms
+            </StatusBadge>
+          </>
+        }
+      />
 
-      <div className="rounded-md border border-[#ff0037]/18 bg-[#060504]/78 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:p-5">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.22em] text-stone-400">
-            <Network size={13} className="text-[#ff5b79]" />
-            Layered_Network
-          </div>
-          <div className="text-[9px] font-mono uppercase tracking-[0.16em] text-stone-500">
-            Preferred output: {dominantProbabilityEntry[0]}
-          </div>
-        </div>
-
-        <div className="grid items-center gap-5 xl:grid-cols-[24.5rem_minmax(0,1fr)]">
-          <div className="rounded-md border border-[#ff0037]/14 bg-black/35 px-2 py-3">
-            <LayeredNeuralGraph
-              lanes={laneConfig}
-              preferredLabel={dominantProbabilityEntry[0]}
-              compact
-              className="h-[16rem] w-full"
-            />
+      <div className="grid items-center gap-5 xl:grid-cols-[24.5rem_minmax(0,1fr)]">
+        <InsetPanel className="px-2 py-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className={opsLabelClass}>Layered network</div>
+            <div className="text-xs text-[color:var(--ops-text-faint)]">
+              Preferred output {dominantProbabilityEntry[0]}
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            {laneConfig.map((lane) => {
-              const isPreferredLane = lane.label === dominantProbabilityEntry[0];
-              return (
-                <div
-                  key={lane.key}
-                  className={`rounded-md border px-3 py-2.5 text-[9px] font-black uppercase tracking-[0.16em] ${
-                    isPreferredLane
-                      ? 'border-[#ff0037]/32 bg-[#ff0037]/10'
-                      : 'border-[#ff0037]/14 bg-black/35'
-                  }`}
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-2 text-stone-300">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: lane.fill, boxShadow: `0 0 8px ${lane.fill}` }} />
-                      {lane.label}
-                    </span>
-                    <span className={lane.tone}>{lane.value.toFixed(1)}%</span>
-                  </div>
-                  <ProbabilityHeartbeatSparkline
-                    lane={lane}
-                    highlighted={isPreferredLane}
-                    className="h-9 w-full"
-                  />
+          <LayeredNeuralGraph
+            lanes={laneConfig}
+            preferredLabel={dominantProbabilityEntry[0]}
+            compact
+            className="h-[16rem] w-full"
+          />
+        </InsetPanel>
+
+        <div className="grid grid-cols-2 gap-3">
+          {laneConfig.map((lane) => {
+            const isPreferredLane = lane.label === dominantProbabilityEntry[0];
+
+            return (
+              <InsetPanel key={lane.key} className={isPreferredLane ? 'ring-1 ring-white/10' : ''}>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-2 text-sm font-medium text-[color:var(--ops-text)]">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: lane.fill }} />
+                    {lane.label}
+                  </span>
+                  <span className={lane.tone}>{lane.value.toFixed(1)}%</span>
                 </div>
-              );
-            })}
-          </div>
+                <ProbabilityHeartbeatSparkline
+                  lane={lane}
+                  highlighted={isPreferredLane}
+                  className="h-9 w-full"
+                />
+              </InsetPanel>
+            );
+          })}
         </div>
       </div>
     </PageCard>
