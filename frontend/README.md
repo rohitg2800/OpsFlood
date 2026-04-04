@@ -1,103 +1,77 @@
 # Frontend Overview
 
-This frontend is a React + TypeScript + Vite application for the INDIA_FLOODS OPS interface. It is designed as a multi-page operations console that shares a centralized reducer-driven state across dashboard, telemetry, mapping, and archive workflows.
+Last reviewed: 2026-04-04
 
-## Primary routes
+This frontend is a React + TypeScript + Vite operations console for the INDIA_FLOODS OPS project.
 
-- `/` — Dashboard
-- `/geo` — Geo-Spatial Console
-- `/telemetry` — Telemetry Feed
-- `/archives` — Archives Vault
+## Routes
 
-## What the frontend includes
+- `/` - Dashboard
+- `/geo` - Geo-Spatial Console
+- `/telemetry` - Telemetry Feed
+- `/archives` - Archives Vault
 
-### Shared shell
+## Architecture Summary
 
-- Sticky navigation with route highlighting and API status
-- Shared page hero and content card primitives
-- Global visual theme and animated background layers
-- Route-level lazy loading
+- Route shell and lazy loading in `src/App.tsx`
+- Global reducer-driven state in `src/context/AppContext.tsx`
+- Typed state models in `src/types.ts`
+- Operational hooks in `src/hooks/useAppOperations.ts`
+- Shared UI primitives in `src/components/OpsPrimitives.tsx`
+
+## Key Frontend Modules
 
 ### Dashboard
 
-- Flood prediction input form
-- State matrix selection and regional filter
-- City or station lock
-- Scenario presets
-- Monitoring alert card
-- Weather console
-- Selected-region water levels
-- CWC live data display
-- Probability and neural visualizations
-- Risk heatmap
-- Historical flood logs panel
+- Prediction form and severity output
+- State selector and regional targeting
+- Monitoring protocol card
+- Weather, CWC/telemetry, heatmap, and archive widgets
 
-### Geo-Spatial Console
+### Geo-Spatial
 
-- Geo lock resolution from state, city, or station
-- Embedded OpenStreetMap panel
-- Launch-out mapping link
-- Weather console tied to the geo target
-- Probability lane visuals and tactical geo summaries
+- Geo lock derived from selected state/city/station
+- Embedded map context and external map handoff
+- Weather and probability context for selected target
 
-### Telemetry Feed
+### Telemetry
 
-- Scoped sensor cards for the selected region
-- River-level, rainfall, trend, and station metadata
-- Refreshable telemetry sync
+- Scoped river/sensor node cards
+- Trend, rainfall, river level, and freshness metadata
 
-### Archives Vault
+### Archives
 
-- Historical flood logs panel
-- Local prediction archive table
-- CSV and JSON exports
+- Historical flood logs (when mapped)
+- Local prediction history usage
+- CSV and JSON export tools
 
-## State architecture
+## Backend Touchpoints
 
-The frontend uses a context provider and reducer in [AppContext.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/context/AppContext.tsx) backed by the types and initial state in [types.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/types.ts).
+Frontend consumes backend endpoints for:
 
-Key state domains:
+- Health and policy (`/health`, `/source-policy`)
+- Prediction (`/predict`)
+- Telemetry (`/api/live-telemetry`, `/cwc-live-data`, `/sensors`)
+- Weather (`/weather/*`)
+- Historical logs (`/historical-logs`)
 
-- `system`
-- `prediction`
-- `sensors`
-- `form`
-- `data`
-- `preferences`
-- `cwc`
-- `models`
+## Local Run
 
-## Key hooks
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-The main operational hooks live in [useAppOperations.ts](/Users/rohitraj/Desktop/flood-app-new/frontend/src/hooks/useAppOperations.ts).
+Optional env:
 
-- `useSystemInit`
-- `usePredictionAPI`
-- `useEnhancedPrediction`
-- `useSensorAPI`
-- `useCWCIntegration`
-- `useRainfallStats`
-- `useFormValidation`
-- `useAlertNotifications`
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-## Backend integration points
-
-The frontend consumes:
-
-- health and source-policy endpoints during initialization
-- prediction endpoints for flood inference
-- telemetry and CWC endpoints for live or tactical node data
-- weather endpoints for current conditions, forecast, and related context
-- historical log endpoints for packaged flood records
-
-## Feature notes
-
-- Weather and telemetry both include graceful fallback behavior so the UI remains demoable when upstream data is unavailable.
-- The app tracks local prediction history and uses that state in the archives page.
-- A gradient generator page exists in `src/pages/GradientGeneratorPage.tsx`, but it is not currently linked from the main navigation.
-
-## Related docs
+## Related Docs
 
 - [../README.md](../README.md)
+- [../QUICKSTART.md](../QUICKSTART.md)
 - [../FEATURES.md](../FEATURES.md)
 - [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)
