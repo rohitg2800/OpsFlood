@@ -1,53 +1,48 @@
 services:
-  - type: web
-    name: opsflood-api
-    runtime: python
-    plan: free
-    repo: https://github.com/rohitg2800/OpsFlood
-    branch: main
-    autoDeploy: true
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    buildFilter:
-      paths:
-        - backend/**
-        - render.yaml
-        - runtime.txt
-    envVars:
-      - key: PORT
-        value: 10000
-      - key: OPENWEATHER_API_KEY
-        sync: false
-      - key: FLOOD_SOURCE_POLICY
-        value: OFFICIAL_VIEW_ONLY
-      - key: CORS_ORIGINS
-        fromService:
-          name: opsflood-frontend
-          type: web
-          # Use the frontend's public URL, not its private-network host.
-          envVarKey: RENDER_EXTERNAL_URL
+- type: web
+  name: opsflood-api
+  runtime: docker       
+  plan: free
+  repo: https://github.com/rohitg2800/OpsFlood
+  branch: main
+  autoDeploy: true
+  dockerfilePath: ./Dockerfile    
+  healthCheckPath: /health
+  buildFilter:
+    paths:
+    - backend/**
+    - render.yaml
+    - Dockerfile
+  envVars:
+  - key: OPENWEATHER_API_KEY
+    sync: false
+  - key: FLOOD_SOURCE_POLICY
+    value: OFFICIAL_VIEW_ONLY
+  - key: CORS_ORIGINS
+    fromService:
+      name: opsflood-frontend
+      type: web
+      envVarKey: RENDER_EXTERNAL_URL
 
-  - type: web
-    name: opsflood-frontend
-    runtime: static
-    repo: https://github.com/rohitg2800/OpsFlood
-    branch: main
-    autoDeploy: true
-    buildCommand: cd frontend && npm ci && npm run build
-    staticPublishPath: frontend/dist
-    buildFilter:
-      paths:
-        - frontend/**
-        - render.yaml
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_BASE_URL
-        fromService:
-          name: opsflood-api
-          type: web
-          # Static-site builds need the API's public URL for browser requests.
-          envVarKey: RENDER_EXTERNAL_URL
+- type: web
+  name: opsflood-frontend
+  runtime: static
+  repo: https://github.com/rohitg2800/OpsFlood
+  branch: main
+  autoDeploy: true
+  buildCommand: cd frontend && npm ci && npm run build
+  staticPublishPath: frontend/dist
+  buildFilter:
+    paths:
+    - frontend/**
+    - render.yaml
+  routes:
+  - type: rewrite
+    source: /*
+    destination: /index.html
+  envVars:
+  - key: VITE_API_BASE_URL
+    fromService:
+      name: opsflood-api
+      type: web
+      envVarKey: RENDER_EXTERNAL_URL
