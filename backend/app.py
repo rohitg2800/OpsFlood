@@ -1880,7 +1880,7 @@ async def root():
     }
 
 @app.get("/health")
-async def health():
+def health():
     return {
         "status": "ok",
         "service": "INDIA_FLOODS ML Server",
