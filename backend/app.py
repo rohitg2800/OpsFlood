@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 import asyncio
 import copy
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse             
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import numpy as np
 import joblib
@@ -22,6 +22,8 @@ from dotenv import load_dotenv
 # Resolve data/model paths relative to this backend folder (works regardless of CWD)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.abspath(os.path.join(BASE_DIR, os.pardir))
+FRONTEND_DIST_DIR = os.path.join(REPO_DIR, "frontend", "dist")
+FRONTEND_INDEX_PATH = os.path.join(FRONTEND_DIST_DIR, "index.html")
 
 def refresh_backend_env(override: bool = False):
     load_dotenv(os.path.join(REPO_DIR, ".env"), override=override)
@@ -324,6 +326,28 @@ def backend_path(*parts: str) -> str:
 
 def backend_relative_path(path: str) -> str:
     return os.path.relpath(path, BASE_DIR)
+
+
+def frontend_dist_ready() -> bool:
+    return os.path.isfile(FRONTEND_INDEX_PATH)
+
+
+def resolve_frontend_asset(path_name: str) -> str | None:
+    if not frontend_dist_ready():
+        return None
+
+    requested_path = (path_name or "").strip().lstrip("/")
+    if not requested_path:
+        return FRONTEND_INDEX_PATH
+
+    candidate_path = os.path.abspath(os.path.join(FRONTEND_DIST_DIR, requested_path))
+    dist_root = os.path.abspath(FRONTEND_DIST_DIR)
+
+    if not candidate_path.startswith(f"{dist_root}{os.sep}"):
+        return None
+    if os.path.isfile(candidate_path):
+        return candidate_path
+    return None
 
 
 def slugify_name(value: str) -> str:
@@ -1872,6 +1896,9 @@ predictor = KolhapurFloodPredictor()
 # ============= 5. API ENDPOINTS =============
 @app.get("/")
 async def root():
+    if frontend_dist_ready():
+        return FileResponse(FRONTEND_INDEX_PATH)
+
     return {
         "service": "INDIA_FLOODS ML Server",
         "status": "Online",
@@ -2306,7 +2333,17 @@ async def get_weather_alerts(lat: float, lon: float):
     )
     return data.get("alerts", [])
 
-@app.api_route("/{path_name:path}", methods=["GET", "POST", "PUT", "DELETE"])
+@app.get("/{path_name:path}", include_in_schema=False)
+async def serve_frontend(path_name: str):
+    frontend_file = resolve_frontend_asset(path_name)
+    if frontend_file:
+        return FileResponse(frontend_file)
+    if frontend_dist_ready():
+        return FileResponse(FRONTEND_INDEX_PATH)
+    return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
+
+
+@app.api_route("/{path_name:path}", methods=["POST", "PUT", "DELETE", "PATCH", "OPTIONS"], include_in_schema=False)
 async def catch_all(path_name: str):
     return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
 

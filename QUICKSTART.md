@@ -1,5 +1,8 @@
 # 🚀 IndoFloods Integration Complete
 
+> Note: this is a legacy local setup document and still contains old workstation-specific paths.
+> For the current single-service Render deployment, use [RENDER_DEPLOY.md](RENDER_DEPLOY.md).
+
 ## What Was Done
 
 ✅ **All 5 UI Components Created:**
