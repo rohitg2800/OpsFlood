@@ -7,10 +7,10 @@ import { AnimatedBackground } from './components/AnimatedBackground';
 import { WaterWaveBackground } from './components/WaterWaveBackground';
 import './index.css'; // Import global styles
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })));
-const GeoSpatialPage = lazy(() => import('./pages/GeoSpatialPage').then((module) => ({ default: module.GeoSpatialPage })));
-const TelemetryPage = lazy(() => import('./pages/TelemetryPage').then((module) => ({ default: module.TelemetryPage })));
-const ArchivesPage = lazy(() => import('./pages/ArchivesPage').then((module) => ({ default: module.ArchivesPage })));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const GeoSpatialPage = lazy(() => import('./pages/GeoSpatialPage'));
+const TelemetryPage = lazy(() => import('./pages/TelemetryPage'));
+const ArchivesPage = lazy(() => import('./pages/ArchivesPage'));
 
 // ==========================================
 // MAIN APPLICATION
