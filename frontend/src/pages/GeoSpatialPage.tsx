@@ -319,3 +319,5 @@ export const GeoSpatialPage: React.FC = () => {
     </PageShell>
   );
 };
+
+export default GeoSpatialPage;

@@ -329,7 +329,7 @@ function normalizeStateKey(stateName: string): string {
 // DASHBOARD PAGE COMPONENT
 // ==========================================
 
-export const DashboardPage: React.FC = () => {
+const DashboardPage: React.FC = () => {
   // HOOKS PRESERVED
   const { state, dispatch } = useAppState();
   const { predictWithFullModel } = useEnhancedPrediction();
@@ -1502,3 +1502,5 @@ export const DashboardPage: React.FC = () => {
     </PageShell>
   );
 };
+
+export default DashboardPage;

@@ -42,7 +42,7 @@ function slugifyArchiveLabel(value: string): string {
   );
 }
 
-export const ArchivesPage: React.FC = () => {
+const ArchivesPage: React.FC = () => {
   const { state } = useAppState();
   const selectedRiverLocationLabel = getSelectedRiverLocationLabel(
     state.prediction.selectedCity,
@@ -298,3 +298,5 @@ export const ArchivesPage: React.FC = () => {
     </PageShell>
   );
 };
+
+export default ArchivesPage;

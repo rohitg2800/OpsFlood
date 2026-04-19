@@ -24,7 +24,7 @@ import {
   opsLabelClass,
 } from '../components/OpsPrimitives';
 
-export const TelemetryPage: React.FC = () => {
+const TelemetryPage: React.FC = () => {
   const { state } = useAppState();
   const { fetchSensors, isLoading: sensorsLoading } = useSensorAPI();
   const selectedRiverLocationLabel = getSelectedRiverLocationLabel(
@@ -183,3 +183,5 @@ export const TelemetryPage: React.FC = () => {
     </PageShell>
   );
 };
+
+export default TelemetryPage;
