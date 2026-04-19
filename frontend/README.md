@@ -69,6 +69,14 @@ Optional env:
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
+For the single-container Render deployment, leave `VITE_API_BASE_URL` unset so the built frontend calls the backend on the same origin.
+
+## Render Deployment
+
+- `Dockerfile` builds `frontend/` and packages it with the FastAPI backend.
+- `backend/app.py` serves `frontend/dist` and falls back to `index.html` for SPA routes.
+- `render.yaml` defines one Docker web service named `opsflood`.
+
 ## Related Docs
 
 - [../README.md](../README.md)
