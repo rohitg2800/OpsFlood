@@ -1,6 +1,6 @@
 # INDIA_FLOODS OPS
 
-INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platform built with FastAPI, React, TypeScript, and Vite. It combines manual hydrology inputs, state-aware severity thresholds, live or policy-bounded telemetry, weather intelligence, and local archive tooling into a single demo-ready command console.
+INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platform built with FastAPI, React, TypeScript, and Vite. It combines manual hydrology inputs, state-aware severity thresholds, live or policy-bounded telemetry, weather intelligence, and PostgreSQL-backed operational archives into a single demo-ready command console.
 
 ## What the app does
 
@@ -8,7 +8,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 - Uses state-specific severity matrices and multi-bundle ML artifact selection
 - Displays scoped telemetry for a selected state, city, or station
 - Shows weather context with live API support and deterministic local fallbacks
-- Maintains local prediction history and exportable archive bundles
+- Persists prediction history, telemetry snapshots, and audit logs in PostgreSQL-backed archive tables
 - Presents geo-spatial context, hotspot heatmaps, and monitoring guidance for demo flows
 
 ## Main user-facing areas
@@ -38,7 +38,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 ### Archives Vault
 
 - Historical flood logs from packaged datasets when available
-- Local prediction history stored in app state
+- PostgreSQL-backed prediction history, telemetry snapshot counts, and audit activity
 - CSV and JSON export for archive data
 
 ## UI highlights
@@ -54,9 +54,10 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 - Core service: `/`, `/health`, `/source-policy`
 - Model inspection: `/model-artifacts`, `/model-artifacts/{state_name}`
 - State thresholds: `/state-severity-matrix`, `/state-severity-matrix/{state_name}`
-- Prediction: `/predict`
+- Prediction: `/predict`, `/prediction-history`
 - Historical logs: `/historical-logs`
-- Telemetry: `/sensors`, `/api/live-telemetry`, `/cwc-live-data`
+- Telemetry: `/sensors`, `/api/live-telemetry`, `/cwc-live-data`, `/telemetry-snapshots`
+- Audit: `/audit-logs`
 - Weather: `/weather/status`, `/weather/current`, `/weather/search`, `/weather/reverse-geocode`, `/weather/forecast`, `/weather/air-quality`, `/weather/uv`, `/weather/historical`, `/weather/alerts`
 
 ## Documentation map
@@ -69,9 +70,12 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 ## Repo structure
 
 ```text
+artifacts/
+  dvc/models/             DVC-backed model artifact store (models, scalers, features)
+
 backend/
   app.py                  FastAPI app, ML orchestration, telemetry, weather, archives
-  *.pkl / *.txt           Model, scaler, and feature artifacts
+  postgres_store.py       PostgreSQL schema/bootstrap and archive persistence helpers
 
 frontend/
   src/App.tsx             Route shell
@@ -83,6 +87,9 @@ frontend/
 
 ## Notes
 
+- Model artifacts now live outside the app package in `artifacts/dvc/models/`.
+- Override the artifact location with `MODEL_ARTIFACTS_DIR`; label the storage type with `MODEL_ARTIFACTS_BACKEND` if needed.
+- Set `DATABASE_URL` to enable PostgreSQL persistence for predictions, telemetry snapshots, and audit logs.
 - The frontend currently exposes four primary routes in navigation: dashboard, geo-spatial, telemetry, and archives.
 - A gradient utility page also exists in the codebase but is not wired into the main navigation.
 - Historical packaged flood logs are currently mapped for Kolhapur aliases; other locations fall back to an explanatory empty state.

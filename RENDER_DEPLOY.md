@@ -19,11 +19,14 @@ Use the included [render.yaml](render.yaml) blueprint or create the service manu
 ## Required env vars
 
 - `OPENWEATHER_API_KEY`
+- `DATABASE_URL`
 
 ## Optional env vars
 
 - `FLOOD_SOURCE_POLICY=OFFICIAL_VIEW_ONLY`
 - `CORS_ORIGINS`
+- `MODEL_ARTIFACTS_DIR=artifacts/dvc/models`
+- `MODEL_ARTIFACTS_BACKEND=DVC`
 
 `CORS_ORIGINS` is usually not needed for the single-service deploy because the frontend and backend share the same origin.
 

@@ -1,9 +1,11 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, Download, FileText } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { FloodLogsPanel } from '../components/FloodLogsPanel';
 import { PageShell, PageHero } from '../components/PageShell';
 import { getSelectedRiverLocationLabel } from '../utils/regionReadings';
+import { apiUrl } from '../config/api';
+import type { AuditLogRecord, StoredPredictionRecord, TelemetrySnapshotRecord } from '../types';
 import {
   ActionButton,
   ConsolePanel,
@@ -42,20 +44,104 @@ function slugifyArchiveLabel(value: string): string {
   );
 }
 
+interface PredictionHistoryResponse {
+  status: string;
+  storage?: {
+    backend?: string;
+    configured?: boolean;
+    ready?: boolean;
+    message?: string;
+  };
+  total_records?: number;
+  records?: StoredPredictionRecord[];
+}
+
+interface TelemetrySnapshotResponse {
+  status: string;
+  total_records?: number;
+  records?: TelemetrySnapshotRecord[];
+}
+
+interface AuditLogResponse {
+  status: string;
+  total_records?: number;
+  records?: AuditLogRecord[];
+}
+
 const ArchivesPage: React.FC = () => {
   const { state } = useAppState();
+  const [archiveRecords, setArchiveRecords] = useState<StoredPredictionRecord[]>([]);
+  const [telemetrySnapshots, setTelemetrySnapshots] = useState<TelemetrySnapshotRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [isLoadingArchive, setIsLoadingArchive] = useState(true);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [storageStatus, setStorageStatus] = useState<PredictionHistoryResponse['storage'] | null>(null);
   const selectedRiverLocationLabel = getSelectedRiverLocationLabel(
     state.prediction.selectedCity,
     state.form.data.station,
     state.prediction.selectedState,
   );
-  const archiveRecords = state.prediction.history;
+  const selectedStation = state.form.data.station || state.prediction.selectedCity || '';
   const archiveFileBase = useMemo(() => {
     const region = slugifyArchiveLabel(selectedRiverLocationLabel);
     const date = new Date().toISOString().split('T')[0];
     return `neural_archives_${region}_${date}`;
   }, [selectedRiverLocationLabel]);
   const hasArchiveData = archiveRecords.length > 0;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadArchiveData = async () => {
+      setIsLoadingArchive(true);
+      setArchiveError(null);
+
+      const params = new URLSearchParams({
+        state: state.prediction.selectedState,
+        limit: '100',
+      });
+      if (selectedStation) {
+        params.set('station', selectedStation);
+      }
+
+      const sharedQuery = params.toString();
+
+      try {
+        const [predictionRes, telemetryRes, auditRes] = await Promise.all([
+          fetch(apiUrl(`/prediction-history?${sharedQuery}`), { signal: controller.signal }),
+          fetch(apiUrl(`/telemetry-snapshots?${sharedQuery}`), { signal: controller.signal }),
+          fetch(apiUrl('/audit-logs?limit=25'), { signal: controller.signal }),
+        ]);
+
+        if (!predictionRes.ok || !telemetryRes.ok || !auditRes.ok) {
+          throw new Error('Archive services did not respond successfully.');
+        }
+
+        const predictionPayload = (await predictionRes.json()) as PredictionHistoryResponse;
+        const telemetryPayload = (await telemetryRes.json()) as TelemetrySnapshotResponse;
+        const auditPayload = (await auditRes.json()) as AuditLogResponse;
+
+        setArchiveRecords(Array.isArray(predictionPayload.records) ? predictionPayload.records : []);
+        setTelemetrySnapshots(Array.isArray(telemetryPayload.records) ? telemetryPayload.records : []);
+        setAuditLogs(Array.isArray(auditPayload.records) ? auditPayload.records : []);
+        setStorageStatus(predictionPayload.storage || null);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setArchiveRecords([]);
+        setTelemetrySnapshots([]);
+        setAuditLogs([]);
+        setStorageStatus(null);
+        setArchiveError(error instanceof Error ? error.message : 'Unable to load PostgreSQL archive data right now.');
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingArchive(false);
+        }
+      }
+    };
+
+    loadArchiveData();
+    return () => controller.abort();
+  }, [selectedStation, state.prediction.selectedState]);
 
   const exportArchiveCsv = useCallback(() => {
     if (!hasArchiveData) return;
@@ -80,8 +166,8 @@ const ArchivesPage: React.FC = () => {
         log.rainfall,
         log.severity,
         log.confidence,
-        state.prediction.modelVersion,
-        state.prediction.monitoringLevel,
+        log.model_version || state.prediction.modelVersion,
+        log.monitoring_level || state.prediction.monitoringLevel,
       ]),
     ];
 
@@ -114,15 +200,34 @@ const ArchivesPage: React.FC = () => {
       system: {
         api_status: state.system.apiStatus,
         api_version: state.system.apiVersion,
-        model_version: state.prediction.modelVersion,
-        total_predictions_made: state.prediction.totalPredictionsMade,
-        last_prediction_time: state.prediction.lastPredictionTime,
+        model_version: archiveRecords[0]?.model_version || state.prediction.modelVersion,
+        total_predictions_made: archiveRecords.length,
+        last_prediction_time: archiveRecords[0]?.timestamp || null,
+        storage_backend: storageStatus?.backend || 'postgresql',
+        storage_ready: storageStatus?.ready ?? false,
       },
       monitoring: {
         level: state.prediction.monitoringLevel,
         action: state.prediction.monitoringAction,
         priority_zones: state.prediction.priorityZones,
       },
+      telemetry_snapshots: telemetrySnapshots.map((snapshot) => ({
+        id: snapshot.id,
+        timestamp: snapshot.timestamp,
+        state: snapshot.state,
+        station: snapshot.station,
+        snapshot_status: snapshot.snapshot_status,
+        node_count: snapshot.node_count,
+        data_source: snapshot.data_source,
+      })),
+      audit_trail: auditLogs.map((entry) => ({
+        id: entry.id,
+        timestamp: entry.timestamp,
+        event_type: entry.event_type,
+        route: entry.route,
+        event_status: entry.event_status,
+        severity: entry.severity,
+      })),
       records: archiveRecords.map((log, index) => ({
         archive_index: index + 1,
         id: log.id,
@@ -131,6 +236,11 @@ const ArchivesPage: React.FC = () => {
         rainfall_mm: log.rainfall,
         severity: log.severity,
         confidence_percent: log.confidence,
+        state: log.state,
+        station: log.station,
+        model_version: log.model_version,
+        monitoring_level: log.monitoring_level,
+        data_source: log.data_source,
       })),
     };
 
@@ -145,16 +255,18 @@ const ArchivesPage: React.FC = () => {
     hasArchiveData,
     selectedRiverLocationLabel,
     state.form.data.station,
-    state.prediction.lastPredictionTime,
     state.prediction.modelVersion,
     state.prediction.monitoringAction,
     state.prediction.monitoringLevel,
     state.prediction.priorityZones,
     state.prediction.selectedCity,
     state.prediction.selectedState,
-    state.prediction.totalPredictionsMade,
     state.system.apiStatus,
     state.system.apiVersion,
+    storageStatus?.backend,
+    storageStatus?.ready,
+    telemetrySnapshots,
+    auditLogs,
   ]);
 
   const getSeverityTone = (severity: string) => {
@@ -169,7 +281,7 @@ const ArchivesPage: React.FC = () => {
       <PageHero
         eyebrow="Operational Archive"
         title="Archives Vault"
-        subtitle={`Government feeds, local inference history, and export-ready records for ${selectedRiverLocationLabel}.`}
+        subtitle={`Government feeds, PostgreSQL-backed prediction history, telemetry snapshots, and audit activity for ${selectedRiverLocationLabel}.`}
         icon={FileText}
         action={
           <ActionButton
@@ -188,9 +300,9 @@ const ArchivesPage: React.FC = () => {
       <ConsolePanel intensity="primary" frameTone="neutral" padded={false}>
         <div className="px-5 py-5 sm:px-6 sm:py-6">
           <SectionHeader
-            eyebrow="Local archive"
+            eyebrow="PostgreSQL archive"
             title="Prediction history"
-            description="Internal prediction runs are stored separately from packaged historical datasets so you can export scenario replay data and recent operator decisions."
+            description="Prediction runs now load from backend PostgreSQL tables so export bundles reflect persisted decisions, persisted telemetry context, and server-side audit activity."
             icon={Database}
             action={
               <>
@@ -208,17 +320,37 @@ const ArchivesPage: React.FC = () => {
           />
         </div>
 
-        {state.prediction.history.length === 0 ? (
+        {isLoadingArchive ? (
           <div className="p-5 sm:p-6">
             <EmptyState
-              title="No prediction history yet"
-              description="Run the model from the dashboard to create a local archive entry. Once available, each row here becomes exportable and easy to scan."
+              title="Loading persisted archives"
+              description="Fetching prediction history, telemetry snapshots, and audit activity from PostgreSQL."
+              icon={Database}
+            />
+          </div>
+        ) : archiveError ? (
+          <div className="p-5 sm:p-6">
+            <EmptyState
+              title="Archive sync unavailable"
+              description={archiveError}
+              icon={Database}
+            />
+          </div>
+        ) : !hasArchiveData ? (
+          <div className="p-5 sm:p-6">
+            <EmptyState
+              title="No persisted prediction history yet"
+              description={
+                storageStatus?.configured
+                  ? 'Run the model from the dashboard to create PostgreSQL-backed archive entries. Once persisted, each row here becomes exportable and easy to scan.'
+                  : 'Set DATABASE_URL for the backend to enable PostgreSQL archive storage for predictions, telemetry snapshots, and audit logs.'
+              }
               icon={Database}
             />
           </div>
         ) : (
           <div className="space-y-4 p-5 sm:p-6">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <InsetPanel variant="soft">
                 <div className={opsLabelClass}>Selected location</div>
                 <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
@@ -226,15 +358,21 @@ const ArchivesPage: React.FC = () => {
                 </div>
               </InsetPanel>
               <InsetPanel variant="soft">
-                <div className={opsLabelClass}>Model version</div>
+                <div className={opsLabelClass}>Storage backend</div>
                 <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
-                  {state.prediction.modelVersion}
+                  {(storageStatus?.backend || 'postgresql').toUpperCase()}
                 </div>
               </InsetPanel>
               <InsetPanel variant="soft">
-                <div className={opsLabelClass}>Monitoring level</div>
+                <div className={opsLabelClass}>Telemetry snapshots</div>
                 <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
-                  {state.prediction.monitoringLevel || 'Pending'}
+                  {telemetrySnapshots.length}
+                </div>
+              </InsetPanel>
+              <InsetPanel variant="soft">
+                <div className={opsLabelClass}>Audit events</div>
+                <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">
+                  {auditLogs.length}
                 </div>
               </InsetPanel>
             </div>
@@ -250,7 +388,7 @@ const ArchivesPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {state.prediction.history.map((log, idx) => (
+                  {archiveRecords.map((log, idx) => (
                     <tr key={log.id || idx} className="transition-colors hover:bg-white/[0.03]">
                       <td className="px-5 py-5 text-sm text-[color:var(--ops-text-soft)]">
                         {new Date(log.timestamp).toLocaleString('en-IN', {

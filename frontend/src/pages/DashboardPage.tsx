@@ -733,17 +733,6 @@ const DashboardPage: React.FC = () => {
       const result = await predictWithFullModel();
       const latency = Math.round(performance.now() - startTime);
       dispatch({ type: 'SET_LATENCY', payload: latency });
-      dispatch({
-        type: 'ADD_PREDICTION_LOG',
-        payload: {
-          id: Date.now(),
-          timestamp: new Date().toISOString(),
-          peak_level: state.form.data.Peak_Flood_Level_m || 0,
-          rainfall: rainfallTotalNow || 0,
-          severity: result.severity,
-          confidence: result.confidence_percent
-        }
-      });
       if (result.severity === 'CRITICAL' || result.severity === 'SEVERE') {
         notifyUser({
           title: `⚠️ ${result.severity} FLOOD ALERT`,
