@@ -9,7 +9,7 @@ This document captures the current implemented capabilities in the repository as
 - Manual flood input form with peak river level, event duration, time to peak, recession time, and 7-day rainfall distribution
 - Four prediction bands: `LOW`, `MODERATE`, `SEVERE`, `CRITICAL`
 - Prediction output includes severity, confidence, alert signal, risk score, danger level, state matrix thresholds, and monitoring metadata
-- Prediction history is stored locally in app state for later archive review
+- Prediction history is persisted in PostgreSQL for later archive review and export
 
 ### State-aware operations
 
@@ -122,21 +122,25 @@ This document captures the current implemented capabilities in the repository as
 - Clear empty state messaging when no packaged dataset exists for the selected location
 - Load selected historical row back into the dashboard input form
 
-### Local prediction archive
+### Persisted operations archive
 
-- Local inference history table in the archives page
-- CSV export for local predictions
+- PostgreSQL-backed inference history table in the archives page
+- Persisted telemetry snapshot counts surfaced alongside prediction history
+- Persisted audit log activity surfaced alongside prediction history
+- CSV export for persisted predictions
 - JSON bundle export including:
   - archive scope
   - system metadata
   - monitoring metadata
+  - telemetry snapshot metadata
+  - audit trail metadata
   - prediction records
 
 ## 7. Machine Learning and Risk Logic
 
 ### Model system
 
-- Artifact catalog discovery for models, scalers, and feature files
+- Artifact catalog discovery for models, scalers, and feature files stored in the repo-level DVC artifact directory
 - Bundle-based state model resolution
 - Default bundle fallback when a state-specific bundle is unavailable
 - Support for additional IndoFloods bundle selection for relevant states
@@ -184,6 +188,9 @@ This document captures the current implemented capabilities in the repository as
 - `GET /model-artifacts/{state_name}`
 - `GET /state-severity-matrix`
 - `GET /state-severity-matrix/{state_name}`
+- `GET /prediction-history`
+- `GET /telemetry-snapshots`
+- `GET /audit-logs`
 
 ### Forecasting and risk
 

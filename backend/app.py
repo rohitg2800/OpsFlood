@@ -24,6 +24,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.abspath(os.path.join(BASE_DIR, os.pardir))
 FRONTEND_DIST_DIR = os.path.join(REPO_DIR, "frontend", "dist")
 FRONTEND_INDEX_PATH = os.path.join(FRONTEND_DIST_DIR, "index.html")
+DEFAULT_MODEL_ARTIFACTS_DIR = os.path.join(REPO_DIR, "artifacts", "dvc", "models")
+MODEL_ARTIFACT_BACKENDS = {"DVC", "FILESYSTEM"}
+DEFAULT_MODEL_ARTIFACT_FILES = ("flood_model.pkl", "flood_scaler.pkl")
 
 def refresh_backend_env(override: bool = False):
     load_dotenv(os.path.join(REPO_DIR, ".env"), override=override)
@@ -46,11 +49,15 @@ try:
         get_state_severity_entry,
         severity_from_entry,
     )
+    from backend.postgres_store import PostgresOperationalStore
 except ImportError:
     # When running from within the backend folder: `uvicorn app:app`
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
+    from postgres_store import PostgresOperationalStore
 
 warnings.filterwarnings('ignore')
+operational_store = PostgresOperationalStore()
+operational_store.initialize()
 
 SOURCE_POLICY_MODES = {"OPEN_DATA", "OFFICIAL_VIEW_ONLY", "FALLBACK"}
 
@@ -115,6 +122,139 @@ def get_source_policy_payload() -> Dict[str, Any]:
         "prediction_data_source": "Official View Only + Manual Input",
         "public_sources": base_sources,
     }
+
+
+def current_timestamp_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def model_to_dict(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    if hasattr(model, "dict"):
+        return model.dict()
+    return dict(model)
+
+
+def calculate_rainfall_total(input_payload: Dict[str, Any]) -> float:
+    return round(
+        sum(float(input_payload.get(key) or 0.0) for key in ("T1d", "T2d", "T3d", "T4d", "T5d", "T6d", "T7d")),
+        3,
+    )
+
+
+def write_audit_log(
+    *,
+    event_type: str,
+    route: str,
+    event_status: str,
+    state_name: str | None = None,
+    station_name: str | None = None,
+    severity: str | None = None,
+    details: Dict[str, Any] | None = None,
+) -> int | None:
+    try:
+        return operational_store.save_audit_log(
+            {
+                "event_type": event_type,
+                "route": route,
+                "event_status": event_status,
+                "state_name": state_name,
+                "station_name": station_name,
+                "severity": severity,
+                "details": details or {},
+            }
+        )
+    except Exception as exc:
+        print(f"⚠️ Audit log persistence failed: {exc}")
+        return None
+
+
+def persist_prediction_record(input_data: Any, result: Dict[str, Any]) -> int | None:
+    input_payload = model_to_dict(input_data)
+    station_name = str(input_payload.get("station") or "").strip() or None
+    state_name = str(input_payload.get("state") or "Maharashtra").strip()
+    rainfall_total = calculate_rainfall_total(input_payload)
+
+    try:
+        prediction_id = operational_store.save_prediction(
+            {
+                "state_name": state_name,
+                "city_name": station_name,
+                "station_name": station_name,
+                "peak_level_m": float(input_payload.get("Peak_Flood_Level_m") or 0.0),
+                "rainfall_total_mm": rainfall_total,
+                "severity": str(result.get("severity") or "UNKNOWN"),
+                "confidence_percent": float(result.get("confidence_percent") or 0.0),
+                "risk_score": int(result.get("risk_score") or 0),
+                "data_source": str(result.get("data_source") or ""),
+                "algorithm": str(result.get("algorithm") or ""),
+                "model_version": str(result.get("algorithm") or ""),
+                "monitoring_level": str((result.get("monitoring") or {}).get("level") or ""),
+                "monitoring_action": str((result.get("monitoring") or {}).get("action") or ""),
+                "source_policy_mode": str((result.get("source_policy") or {}).get("mode") or ""),
+                "source_policy_label": str((result.get("source_policy") or {}).get("label") or ""),
+                "input_payload": input_payload,
+                "prediction_payload": result,
+            }
+        )
+    except Exception as exc:
+        print(f"⚠️ Prediction persistence failed: {exc}")
+        prediction_id = None
+
+    write_audit_log(
+        event_type="prediction.inference",
+        route="/predict",
+        event_status="success" if prediction_id else "skipped",
+        state_name=state_name,
+        station_name=station_name,
+        severity=str(result.get("severity") or "UNKNOWN"),
+        details={
+            "prediction_id": prediction_id,
+            "data_source": result.get("data_source"),
+            "confidence_percent": result.get("confidence_percent"),
+            "risk_score": result.get("risk_score"),
+            "storage_ready": operational_store.status().get("ready"),
+        },
+    )
+    return prediction_id
+
+
+def persist_telemetry_record(state_name: str, station_name: str, limit: int, telemetry: Dict[str, Any], route: str) -> int | None:
+    node_count = len(telemetry.get("data", [])) if isinstance(telemetry.get("data"), list) else 0
+
+    try:
+        snapshot_id = operational_store.save_telemetry_snapshot(
+            {
+                "state_name": state_name,
+                "station_name": station_name,
+                "request_limit": int(limit),
+                "snapshot_status": str(telemetry.get("status") or ""),
+                "data_source": str(telemetry.get("data_source") or ""),
+                "source_policy_mode": str(((telemetry.get("source_policy") or {}).get("mode")) or ""),
+                "node_count": node_count,
+                "payload": telemetry,
+            }
+        )
+    except Exception as exc:
+        print(f"⚠️ Telemetry snapshot persistence failed: {exc}")
+        snapshot_id = None
+
+    write_audit_log(
+        event_type="telemetry.snapshot",
+        route=route,
+        event_status="success" if snapshot_id else "skipped",
+        state_name=state_name,
+        station_name=station_name,
+        details={
+            "snapshot_id": snapshot_id,
+            "node_count": node_count,
+            "telemetry_status": telemetry.get("status"),
+            "data_source": telemetry.get("data_source"),
+            "storage_ready": operational_store.status().get("ready"),
+        },
+    )
+    return snapshot_id
 
 
 def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: str = "Kolhapur", limit: int = 6) -> Dict[str, Any]:
@@ -326,6 +466,54 @@ def backend_path(*parts: str) -> str:
 
 def backend_relative_path(path: str) -> str:
     return os.path.relpath(path, BASE_DIR)
+
+
+def repo_relative_path(path: str) -> str:
+    return os.path.relpath(path, REPO_DIR)
+
+
+def get_model_artifact_backend() -> str:
+    refresh_backend_env(override=True)
+    configured = (os.getenv("MODEL_ARTIFACTS_BACKEND") or "DVC").strip().upper()
+    return configured if configured in MODEL_ARTIFACT_BACKENDS else "DVC"
+
+
+def get_model_artifact_root() -> str:
+    refresh_backend_env(override=True)
+    configured = (os.getenv("MODEL_ARTIFACTS_DIR") or "").strip()
+    if configured:
+        resolved = configured if os.path.isabs(configured) else os.path.join(REPO_DIR, configured)
+    else:
+        resolved = DEFAULT_MODEL_ARTIFACTS_DIR
+
+    root = os.path.abspath(resolved)
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def resolve_model_artifact_path(path_name: str) -> str:
+    normalized = os.path.normpath((path_name or "").strip()).lstrip(os.sep)
+    root = get_model_artifact_root()
+    if not normalized or normalized == ".":
+        return root
+
+    repo_candidate = os.path.abspath(os.path.join(REPO_DIR, normalized))
+    if repo_candidate == root or repo_candidate.startswith(f"{root}{os.sep}"):
+        return repo_candidate
+
+    rooted_candidate = os.path.abspath(os.path.join(root, normalized))
+    if rooted_candidate == root or rooted_candidate.startswith(f"{root}{os.sep}"):
+        return rooted_candidate
+
+    raise ValueError(f"Invalid model artifact path: {path_name}")
+
+
+def default_model_artifact_paths() -> tuple[str, str]:
+    model_path, scaler_path = [
+        repo_relative_path(resolve_model_artifact_path(filename))
+        for filename in DEFAULT_MODEL_ARTIFACT_FILES
+    ]
+    return model_path, scaler_path
 
 
 def frontend_dist_ready() -> bool:
@@ -839,7 +1027,7 @@ def classify_backend_artifact(filename: str) -> str:
     return "artifact"
 
 
-def read_backend_artifact_preview(path: str) -> Any | None:
+def read_model_artifact_preview(path: str) -> Any | None:
     lower_name = os.path.basename(path).lower()
 
     try:
@@ -860,32 +1048,36 @@ def read_backend_artifact_preview(path: str) -> Any | None:
     return None
 
 
-def discover_backend_flood_artifacts() -> list[Dict[str, Any]]:
+def discover_model_artifacts() -> list[Dict[str, Any]]:
     artifacts: list[Dict[str, Any]] = []
+    artifact_root = get_model_artifact_root()
 
-    for filename in sorted(os.listdir(BASE_DIR)):
-        full_path = backend_path(filename)
-        lower_name = filename.lower()
+    if not os.path.isdir(artifact_root):
+        return artifacts
 
-        if not os.path.isfile(full_path):
-            continue
-        if not any(keyword in lower_name for keyword in FLOOD_ARTIFACT_KEYWORDS):
-            continue
+    for current_root, _dirs, filenames in os.walk(artifact_root):
+        for filename in sorted(filenames):
+            full_path = os.path.join(current_root, filename)
+            lower_name = filename.lower()
 
-        artifact: Dict[str, Any] = {
-            "name": filename,
-            "relative_path": backend_relative_path(full_path),
-            "kind": classify_backend_artifact(filename),
-            "size_bytes": os.path.getsize(full_path),
-        }
+            if not any(keyword in lower_name for keyword in FLOOD_ARTIFACT_KEYWORDS):
+                continue
 
-        preview = read_backend_artifact_preview(full_path)
-        if preview is not None:
-            artifact["preview"] = preview
+            artifact: Dict[str, Any] = {
+                "name": filename,
+                "relative_path": repo_relative_path(full_path),
+                "storage_relative_path": os.path.relpath(full_path, artifact_root),
+                "kind": classify_backend_artifact(filename),
+                "size_bytes": os.path.getsize(full_path),
+            }
 
-        artifacts.append(artifact)
+            preview = read_model_artifact_preview(full_path)
+            if preview is not None:
+                artifact["preview"] = preview
 
-    return artifacts
+            artifacts.append(artifact)
+
+    return sorted(artifacts, key=lambda artifact: artifact["relative_path"])
 
 
 def artifact_bundle_key(filename: str) -> str:
@@ -1376,26 +1568,31 @@ class KolhapurFloodPredictor:
         self.bundle_models = {}
         self.artifact_catalog = []
         self.artifact_bundles = {}
+        self.artifact_store_dir = get_model_artifact_root()
+        self.artifact_storage_backend = get_model_artifact_backend()
         self.default_bundle_key = "flood"
-        self.default_model_paths = ('flood_model.pkl', 'flood_scaler.pkl')
+        self.default_model_paths = default_model_artifact_paths()
         self.refresh_artifact_catalog()
         self.load_pretrained_model()
 
     def refresh_artifact_catalog(self):
-        self.artifact_catalog = discover_backend_flood_artifacts()
+        self.artifact_store_dir = get_model_artifact_root()
+        self.artifact_storage_backend = get_model_artifact_backend()
+        self.artifact_catalog = discover_model_artifacts()
         self.artifact_bundles = discover_model_bundles(self.artifact_catalog)
         self.bundle_models = {}
         self.state_models = {}
         self.default_bundle_key = self._resolve_default_bundle_key()
         default_bundle = self.artifact_bundles.get(self.default_bundle_key, {})
+        fallback_model_path, fallback_scaler_path = default_model_artifact_paths()
         self.default_model_paths = (
-            default_bundle.get("model") or 'flood_model.pkl',
-            default_bundle.get("scaler") or 'flood_scaler.pkl',
+            default_bundle.get("model") or fallback_model_path,
+            default_bundle.get("scaler") or fallback_scaler_path,
         )
         return self.artifact_catalog
 
-    def resolve_backend_artifact(self, relative_path: str) -> str:
-        return backend_path(relative_path)
+    def resolve_model_artifact(self, relative_path: str) -> str:
+        return resolve_model_artifact_path(relative_path)
 
     def _resolve_default_bundle_key(self) -> str:
         flood_bundle = self.artifact_bundles.get("flood")
@@ -1451,15 +1648,15 @@ class KolhapurFloodPredictor:
         return self.default_bundle_key, default_bundle
     
     def load_pretrained_model(self):
-        model_path = self.resolve_backend_artifact(self.default_model_paths[0])
-        scaler_path = self.resolve_backend_artifact(self.default_model_paths[1])
+        model_path = self.resolve_model_artifact(self.default_model_paths[0])
+        scaler_path = self.resolve_model_artifact(self.default_model_paths[1])
         if os.path.exists(model_path) and os.path.exists(scaler_path):
             try:
                 self.model = joblib.load(model_path)
                 self.scaler = joblib.load(scaler_path)
                 self.bundle_models[self.default_bundle_key] = (self.model, self.scaler)
                 self.is_trained = True
-                print("✅ ML Model loaded successfully from disk!")
+                print("✅ ML model loaded successfully from artifact storage!")
             except Exception:
                 self.train_with_real_data()
         else:
@@ -1476,8 +1673,8 @@ class KolhapurFloodPredictor:
             self.bundle_models[bundle_key] = None
             return None
 
-        model_path = self.resolve_backend_artifact(model_path_rel)
-        scaler_path = self.resolve_backend_artifact(scaler_path_rel)
+        model_path = self.resolve_model_artifact(model_path_rel)
+        scaler_path = self.resolve_model_artifact(scaler_path_rel)
         if not (os.path.exists(model_path) and os.path.exists(scaler_path)):
             self.bundle_models[bundle_key] = None
             return None
@@ -1795,14 +1992,16 @@ class KolhapurFloodPredictor:
         bundle_key, bundle = self.resolve_bundle_for_state(state_name)
         model_path_rel = bundle.get("model") or self.default_model_paths[0]
         scaler_path_rel = bundle.get("scaler") or self.default_model_paths[1]
-        model_path = self.resolve_backend_artifact(model_path_rel)
-        scaler_path = self.resolve_backend_artifact(scaler_path_rel)
+        model_path = self.resolve_model_artifact(model_path_rel)
+        scaler_path = self.resolve_model_artifact(scaler_path_rel)
 
         return {
             "state": state_name,
             "state_key": key,
             "bundle_key": bundle_key,
             "bundle_complete": bool(bundle.get("is_complete")),
+            "artifact_root": repo_relative_path(self.artifact_store_dir),
+            "storage_backend": self.artifact_storage_backend,
             "model": {
                 "relative_path": model_path_rel,
                 "exists": os.path.exists(model_path),
@@ -1847,12 +2046,13 @@ class KolhapurFloodPredictor:
         
         X_train_scaled = self.scaler.fit_transform(X_train)
         self.model.fit(X_train_scaled, y_train)
-        
+
         self.is_trained = True
-        joblib.dump(self.model, self.resolve_backend_artifact('flood_model.pkl'))
-        joblib.dump(self.scaler, self.resolve_backend_artifact('flood_scaler.pkl'))
+        fallback_model_path, fallback_scaler_path = default_model_artifact_paths()
+        joblib.dump(self.model, self.resolve_model_artifact(fallback_model_path))
+        joblib.dump(self.scaler, self.resolve_model_artifact(fallback_scaler_path))
         self.refresh_artifact_catalog()
-        print("✅ ML Matrix Trained & Saved!")
+        print("✅ ML Matrix trained and saved to artifact storage!")
     
     def predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input") -> Dict[str, Any]:
         try:
@@ -1912,6 +2112,7 @@ def health():
         "status": "ok",
         "service": "INDIA_FLOODS ML Server",
         "model_ready": predictor.is_trained,
+        "database": operational_store.status(),
         "artifact_count": len(predictor.artifact_catalog),
         "bundle_count": len(predictor.artifact_bundles),
         "version": app.version,
@@ -1934,7 +2135,8 @@ async def get_model_artifacts():
     predictor.refresh_artifact_catalog()
     return {
         "status": "success",
-        "base_dir": "backend",
+        "base_dir": repo_relative_path(predictor.artifact_store_dir),
+        "storage_backend": predictor.artifact_storage_backend,
         "artifact_count": len(predictor.artifact_catalog),
         "bundle_count": len(predictor.artifact_bundles),
         "default_bundle_key": predictor.default_bundle_key,
@@ -1996,6 +2198,7 @@ async def predict_flood(input_data: FloodPredictionInput):
         # Get ML Response (run blocking ML inference in thread)
         result = await asyncio.to_thread(predictor.predict_flood, input_data, source=data_source)
         result["source_policy"] = source_policy
+        result["timestamp"] = current_timestamp_iso()
 
         # Attach Monitoring Protocols
         if result["severity"] == "CRITICAL":
@@ -2006,11 +2209,101 @@ async def predict_flood(input_data: FloodPredictionInput):
             result["monitoring"] = {"level": "ELEVATED ALERT", "action": "Deploy monitoring teams & prep pumps.", "priority_zones": ["Drainage bottlenecks", "Main river gauge"]}
         else:
             result["monitoring"] = {"level": "STANDARD PROTOCOL", "action": "Maintain normal surveillance.", "priority_zones": ["None"]}
-            
+
+        prediction_id = persist_prediction_record(input_data, result)
+        result["prediction_id"] = prediction_id
         return result
         
     except Exception as e:
+        input_payload = model_to_dict(input_data)
+        write_audit_log(
+            event_type="prediction.inference",
+            route="/predict",
+            event_status="error",
+            state_name=str(input_payload.get("state") or "Maharashtra"),
+            station_name=str(input_payload.get("station") or "").strip() or None,
+            details={"error": str(e)},
+        )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prediction-history")
+async def get_prediction_history(state: str | None = None, station: str | None = None, limit: int = 100):
+    records = operational_store.list_predictions(limit=limit, state_name=state, station_name=station)
+    return {
+        "status": "success",
+        "storage": operational_store.status(),
+        "total_records": len(records),
+        "records": [
+            {
+                "id": record["id"],
+                "timestamp": record["created_at"].isoformat() if record.get("created_at") else None,
+                "state": record.get("state_name"),
+                "city": record.get("city_name"),
+                "station": record.get("station_name"),
+                "peak_level": float(record.get("peak_level_m") or 0.0),
+                "rainfall": float(record.get("rainfall_total_mm") or 0.0),
+                "severity": record.get("severity"),
+                "confidence": float(record.get("confidence_percent") or 0.0),
+                "risk_score": record.get("risk_score"),
+                "data_source": record.get("data_source"),
+                "algorithm": record.get("algorithm"),
+                "model_version": record.get("model_version"),
+                "monitoring_level": record.get("monitoring_level"),
+                "monitoring_action": record.get("monitoring_action"),
+                "source_policy_mode": record.get("source_policy_mode"),
+                "source_policy_label": record.get("source_policy_label"),
+            }
+            for record in records
+        ],
+    }
+
+
+@app.get("/telemetry-snapshots")
+async def get_telemetry_snapshots(state: str | None = None, station: str | None = None, limit: int = 50):
+    records = operational_store.list_telemetry_snapshots(limit=limit, state_name=state, station_name=station)
+    return {
+        "status": "success",
+        "storage": operational_store.status(),
+        "total_records": len(records),
+        "records": [
+            {
+                "id": record["id"],
+                "timestamp": record["created_at"].isoformat() if record.get("created_at") else None,
+                "state": record.get("state_name"),
+                "station": record.get("station_name"),
+                "request_limit": record.get("request_limit"),
+                "snapshot_status": record.get("snapshot_status"),
+                "data_source": record.get("data_source"),
+                "source_policy_mode": record.get("source_policy_mode"),
+                "node_count": record.get("node_count"),
+            }
+            for record in records
+        ],
+    }
+
+
+@app.get("/audit-logs")
+async def get_audit_logs(limit: int = 50):
+    records = operational_store.list_audit_logs(limit=limit)
+    return {
+        "status": "success",
+        "storage": operational_store.status(),
+        "total_records": len(records),
+        "records": [
+            {
+                "id": record["id"],
+                "timestamp": record["created_at"].isoformat() if record.get("created_at") else None,
+                "event_type": record.get("event_type"),
+                "route": record.get("route"),
+                "event_status": record.get("event_status"),
+                "state": record.get("state_name"),
+                "station": record.get("station_name"),
+                "severity": record.get("severity"),
+            }
+            for record in records
+        ],
+    }
 
 @app.get("/historical-logs")
 async def get_historical_logs(city: str = "Kolhapur", limit: int = 50):
@@ -2147,6 +2440,7 @@ async def get_sensors(station: str = "Kolhapur", state: str = "Maharashtra"):
     Tactical telemetry endpoint for the frontend "Telemetry" tab.
     """
     telemetry = build_policy_bound_telemetry(state_name=state, station_name=station)
+    persist_telemetry_record(state, station, 6, telemetry, "/sensors")
     return telemetry.get("data", [])
 
 @app.get("/api/live-telemetry")
@@ -2155,6 +2449,8 @@ async def get_live_telemetry(state: str = "Maharashtra", station: str = "Kolhapu
     Returns formatted CWC telemetry similar to the provided Node/Express interceptor design.
     """
     telemetry = build_policy_bound_telemetry(state_name=state, station_name=station, limit=limit)
+    snapshot_id = persist_telemetry_record(state, station, limit, telemetry, "/api/live-telemetry")
+    telemetry["snapshot_id"] = snapshot_id
     return telemetry
 
 @app.get("/cwc-live-data")
@@ -2348,7 +2644,7 @@ async def catch_all(path_name: str):
     return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
 
 if __name__ == "__main__":
-    print("🚀 Starting INDIA_FLOODS ML Backend...")
+    print(" Starting INDIA_FLOODS ML Backend...")
     port = int(os.environ.get("PORT", 8000))
     module = "backend.app:app" if (__package__ and __package__.startswith("backend")) else "app:app"
     uvicorn.run(module, host="0.0.0.0", port=port, reload=True)

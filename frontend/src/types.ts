@@ -74,10 +74,12 @@ export interface Prediction {
   };
   
   // Metadata
+  prediction_id?: number | null;
   timestamp?: string;
   state?: string;               // Indian state name
   peak_level_prediction?: number;
   ai_recommendations?: string[];
+  source_policy?: SourcePolicy;
 
   // Per-state severity thresholds used by backend calibration
   state_matrix?: {
@@ -89,15 +91,47 @@ export interface Prediction {
   };
 }
 
-export interface PredictionLog {
+export interface StoredPredictionRecord {
   id: number;
   timestamp: string;
+  state?: string | null;
+  city?: string | null;
+  station?: string | null;
   peak_level: number;
   rainfall: number;
   severity: string;
   confidence: number;
-  predicted_severity?: SeverityLevel;
-  predicted_confidence?: number;
+  risk_score?: number | null;
+  data_source?: string | null;
+  algorithm?: string | null;
+  model_version?: string | null;
+  monitoring_level?: string | null;
+  monitoring_action?: string | null;
+  source_policy_mode?: string | null;
+  source_policy_label?: string | null;
+}
+
+export interface TelemetrySnapshotRecord {
+  id: number;
+  timestamp: string;
+  state?: string | null;
+  station?: string | null;
+  request_limit?: number | null;
+  snapshot_status?: string | null;
+  data_source?: string | null;
+  source_policy_mode?: string | null;
+  node_count?: number | null;
+}
+
+export interface AuditLogRecord {
+  id: number;
+  timestamp: string;
+  event_type: string;
+  route: string;
+  event_status: string;
+  state?: string | null;
+  station?: string | null;
+  severity?: string | null;
 }
 
 export interface SensorData {
@@ -220,7 +254,6 @@ export interface AppState {
   // --------
   prediction: {
     currentPrediction: Prediction | null;
-    history: PredictionLog[];
     isLoading: boolean;
     lastPredictionTime: string | null;
     totalPredictionsMade: number;
@@ -349,7 +382,6 @@ export type AppAction =
   
   // Prediction Actions
   | { type: 'SET_PREDICTION'; payload: Prediction }
-  | { type: 'ADD_PREDICTION_LOG'; payload: PredictionLog }
   | { type: 'CLEAR_PREDICTION' }
   | { type: 'SET_PREDICTION_LOADING'; payload: boolean }
   | { type: 'SET_ACCURACY'; payload: number }
@@ -468,7 +500,6 @@ export const INITIAL_STATE: AppState = {
   },
   prediction: {
     currentPrediction: null,
-    history: [],
     isLoading: false,
     lastPredictionTime: null,
     totalPredictionsMade: 0,

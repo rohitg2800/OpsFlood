@@ -119,15 +119,6 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         }
       };
     
-    case 'ADD_PREDICTION_LOG':
-      return {
-        ...state,
-        prediction: {
-          ...state.prediction,
-          history: [action.payload, ...state.prediction.history].slice(0, 100) // Keep last 100
-        }
-      };
-    
     case 'CLEAR_PREDICTION':
       return {
         ...state,

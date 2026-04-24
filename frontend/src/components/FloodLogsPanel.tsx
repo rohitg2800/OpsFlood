@@ -106,7 +106,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     if (historicalMessage === 'Unable to load historical flood logs right now.') {
       return {
         title: 'Historical logs are temporarily unavailable',
-        body: 'The archive request did not complete. Live telemetry and local prediction history are still available while the logs reconnect.',
+        body: 'The archive request did not complete. Live telemetry and PostgreSQL-backed prediction history are still available while the logs reconnect.',
         note: 'Refresh the module in a moment if you need the historical table for this review session.',
       };
     }
@@ -114,7 +114,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     return {
       title: `No mapped historical dataset for ${selectedCity}`,
       body: `This location does not currently ship with packaged historical flood rows in the demo dataset, so the table stays intentionally empty instead of falling back to fake records.`,
-      note: `You can continue with live telemetry, load your own prediction history, or switch to ${fallbackDatasetCity} to review the included real dataset sample.`,
+      note: `You can continue with live telemetry, review persisted prediction history, or switch to ${fallbackDatasetCity} to review the included real dataset sample.`,
     };
   }, [historicalMessage, logs.length, selectedCity]);
 

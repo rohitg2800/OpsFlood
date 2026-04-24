@@ -60,6 +60,8 @@ Keep this terminal running. The frontend talks to the backend at `http://localho
 Notes:
 - If you `cd backend` first, use `pip install -r requirements.txt` (not `backend/requirements.txt`).
 - If you run from the repo root, use `uvicorn backend.app:app`. If you run from `backend/`, use `uvicorn app:app`.
+- The backend now reads model artifacts from `artifacts/dvc/models/` by default. Set `MODEL_ARTIFACTS_DIR` to point at a different DVC-mounted location if needed.
+- Set `DATABASE_URL` before starting the backend if you want prediction history, telemetry snapshots, and audit logs persisted into PostgreSQL.
 
 ### Command 3: Start Development Server (Frontend)
 ```bash

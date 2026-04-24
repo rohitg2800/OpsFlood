@@ -24,6 +24,7 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend ./backend
+COPY artifacts ./artifacts
 COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
 EXPOSE 10000
