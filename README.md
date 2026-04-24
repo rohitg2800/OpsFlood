@@ -101,6 +101,7 @@ frontend/
 - Set `DATABASE_URL` to enable PostgreSQL persistence for predictions, telemetry snapshots, and audit logs.
 - Set `ENABLE_DATA_INGESTION_SCHEDULER=1` to run scheduled weather and water-level ingestion in the backend process.
 - Tune ingestion cadence with `DATA_INGESTION_INTERVAL_MINUTES` and targets with `DATA_INGESTION_TARGETS`.
+- GitHub Actions now provides CI gates for backend tests, frontend build, and Docker build validation before merges to the Render deploy branch.
 - The frontend currently exposes four primary routes in navigation: dashboard, geo-spatial, telemetry, and archives.
 - A gradient utility page also exists in the codebase but is not wired into the main navigation.
 - Historical packaged flood logs are currently mapped for Kolhapur aliases; other locations fall back to an explanatory empty state.
