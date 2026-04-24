@@ -16,6 +16,16 @@ Use the included [render.yaml](render.yaml) blueprint or create the service manu
 - Dockerfile path: `./Dockerfile`
 - Health check path: `/health`
 
+## CI gate before auto-deploy
+
+Keep Render `autoDeploy: true`, but require the GitHub Actions `CI` workflow to pass before changes merge into `main`.
+
+That keeps the current Docker deploy flow intact while still validating:
+
+- backend tests
+- frontend production build
+- container build
+
 ## Required env vars
 
 - `OPENWEATHER_API_KEY`
