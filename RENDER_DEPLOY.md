@@ -27,6 +27,8 @@ Use the included [render.yaml](render.yaml) blueprint or create the service manu
 - `CORS_ORIGINS`
 - `MODEL_ARTIFACTS_DIR=artifacts/dvc/models`
 - `MODEL_ARTIFACTS_BACKEND=DVC`
+- `ENABLE_DATA_INGESTION_SCHEDULER=1`
+- `DATA_INGESTION_INTERVAL_MINUTES=60`
 
 `CORS_ORIGINS` is usually not needed for the single-service deploy because the frontend and backend share the same origin.
 

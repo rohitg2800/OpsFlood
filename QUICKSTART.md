@@ -62,6 +62,7 @@ Notes:
 - If you run from the repo root, use `uvicorn backend.app:app`. If you run from `backend/`, use `uvicorn app:app`.
 - The backend now reads model artifacts from `artifacts/dvc/models/` by default. Set `MODEL_ARTIFACTS_DIR` to point at a different DVC-mounted location if needed.
 - Set `DATABASE_URL` before starting the backend if you want prediction history, telemetry snapshots, and audit logs persisted into PostgreSQL.
+- Set `ENABLE_DATA_INGESTION_SCHEDULER=1` to enable recurring weather and water-level ingestion into `data/raw`, `data/cleaned`, and `data/features`.
 
 ### Command 3: Start Development Server (Frontend)
 ```bash

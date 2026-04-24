@@ -9,6 +9,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 - Displays scoped telemetry for a selected state, city, or station
 - Shows weather context with live API support and deterministic local fallbacks
 - Persists prediction history, telemetry snapshots, and audit logs in PostgreSQL-backed archive tables
+- Schedules weather and water-level ingestion into `raw`, `cleaned`, and feature-ready dataset layers
 - Presents geo-spatial context, hotspot heatmaps, and monitoring guidance for demo flows
 
 ## Main user-facing areas
@@ -57,6 +58,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 - Prediction: `/predict`, `/prediction-history`
 - Historical logs: `/historical-logs`
 - Telemetry: `/sensors`, `/api/live-telemetry`, `/cwc-live-data`, `/telemetry-snapshots`
+- Data engineering: `/ingestion/status`, `/ingestion/run`
 - Audit: `/audit-logs`
 - Weather: `/weather/status`, `/weather/current`, `/weather/search`, `/weather/reverse-geocode`, `/weather/forecast`, `/weather/air-quality`, `/weather/uv`, `/weather/historical`, `/weather/alerts`
 
@@ -75,7 +77,14 @@ artifacts/
 
 backend/
   app.py                  FastAPI app, ML orchestration, telemetry, weather, archives
+  data_pipeline.py        Scheduled ingestion, raw/cleaned/features materialization
   postgres_store.py       PostgreSQL schema/bootstrap and archive persistence helpers
+
+data/
+  raw/                    Append-only weather and water-level ingestion captures
+  cleaned/                Normalized analytical datasets
+  features/               Feature-ready joined datasets
+  manifest/               Ingestion run summaries
 
 frontend/
   src/App.tsx             Route shell
@@ -90,6 +99,8 @@ frontend/
 - Model artifacts now live outside the app package in `artifacts/dvc/models/`.
 - Override the artifact location with `MODEL_ARTIFACTS_DIR`; label the storage type with `MODEL_ARTIFACTS_BACKEND` if needed.
 - Set `DATABASE_URL` to enable PostgreSQL persistence for predictions, telemetry snapshots, and audit logs.
+- Set `ENABLE_DATA_INGESTION_SCHEDULER=1` to run scheduled weather and water-level ingestion in the backend process.
+- Tune ingestion cadence with `DATA_INGESTION_INTERVAL_MINUTES` and targets with `DATA_INGESTION_TARGETS`.
 - The frontend currently exposes four primary routes in navigation: dashboard, geo-spatial, telemetry, and archives.
 - A gradient utility page also exists in the codebase but is not wired into the main navigation.
 - Historical packaged flood logs are currently mapped for Kolhapur aliases; other locations fall back to an explanatory empty state.
