@@ -1,0 +1,12 @@
+ingested_at,pipeline_run_id,state_name,requested_station_name,weather_query,resolved_location,lat,lon,weather_source,weather_main,weather_description,temperature_c,feels_like_c,temp_min_c,temp_max_c,humidity_pct,pressure_hpa,cloud_cover_pct,wind_speed_mps,wind_deg,visibility_m,rainfall_1h_mm,rainfall_3h_mm
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Assam,Guwahati,"Guwahati, Assam",Guwahati,26.1445,91.7362,LOCAL_FALLBACK,Drizzle,light rain bands,31.8,33.8,30.0,34.2,57,1012,80,12.5,96,5152,2.4,5.4
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Bihar,Patna,"Patna, Bihar",Patna,25.5941,85.1376,LOCAL_FALLBACK,Drizzle,light rain bands,25.8,28.2,24.0,28.2,78,1014,70,3.4,10,5968,1.6,3.6
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Gujarat,Surat,"Surat, Gujarat",Surat,21.1702,72.8311,LOCAL_FALLBACK,Clouds,broken clouds,30.9,33.2,29.1,33.3,81,1004,74,10.4,109,6322,0.3,0.7
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Kerala,Kochi,"Kochi, Kerala",Kochi,9.9312,76.2673,LOCAL_FALLBACK,Clouds,broken clouds,20.9,22.7,19.1,23.3,61,1014,67,15.1,331,6448,0.8,1.7
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Maharashtra,Kolhapur,"Kolhapur, Maharashtra",Kolhapur,16.705,74.2433,LOCAL_FALLBACK,Drizzle,light rain bands,33.8,35.9,32.0,36.2,60,1008,80,16.6,62,4984,2.8,4.9
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Odisha,Bhubaneswar,"Bhubaneswar, Odisha",Bhubaneswar,20.2961,85.8245,LOCAL_FALLBACK,Clear,clear sky,21.0,23.0,19.2,23.4,65,1011,46,9.9,81,7330,1.1,2.0
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Punjab,Chandigarh,"Chandigarh, Punjab",Chandigarh,30.7333,76.7794,LOCAL_FALLBACK,Clouds,broken clouds,28.8,30.8,27.0,31.2,70,1010,60,10.2,273,7120,0.0,0.0
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Tamil Nadu,Chennai,"Chennai, Tamil Nadu",Chennai,13.0827,80.2707,LOCAL_FALLBACK,Clear,clear sky,27.8,29.5,26.0,30.2,59,1012,48,14.2,259,7570,0.3,0.6
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Uttar Pradesh,Lucknow,"Lucknow, Uttar Pradesh",Lucknow,26.8467,80.9462,LOCAL_FALLBACK,Clear,clear sky,24.4,26.9,22.6,26.8,88,1006,26,9.8,156,8752,0.0,0.0
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,Uttarakhand,Dehradun,"Dehradun, Uttarakhand",Dehradun,30.3165,78.0322,LOCAL_FALLBACK,Clouds,broken clouds,32.1,34.8,30.3,34.5,93,1007,66,12.1,94,6496,0.8,1.6
+2026-04-24T16:30:13.526218+00:00,20260424T163013Z,West Bengal,Kolkata,"Kolkata, West Bengal",Kolkata,22.5726,88.3639,LOCAL_FALLBACK,Drizzle,light rain bands,28.4,31.0,26.6,30.8,81,1015,91,13.6,235,4708,2.2,4.1

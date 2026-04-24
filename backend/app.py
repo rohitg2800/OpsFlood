@@ -44,6 +44,7 @@ import datetime
 
 try:
     # When running as a package (recommended): `uvicorn backend.app:app`
+    from backend.data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from backend.state_severity_matrix import (
         STATE_SEVERITY_MATRIX,
         get_state_severity_entry,
@@ -52,6 +53,7 @@ try:
     from backend.postgres_store import PostgresOperationalStore
 except ImportError:
     # When running from within the backend folder: `uvicorn app:app`
+    from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
     from postgres_store import PostgresOperationalStore
 
@@ -1162,6 +1164,17 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"message": "Internal Server Error", "detail": str(exc)}
     )
 
+
+@app.on_event("startup")
+async def startup_ingestion_scheduler():
+    data_pipeline.update_targets(get_data_ingestion_targets())
+    data_ingestion_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_ingestion_scheduler():
+    data_ingestion_scheduler.stop()
+
 # ============= 3. DATA ACQUISITION (CWC SCRAPER) =============
 class CWCRiverScraper:
     def __init__(self):
@@ -1541,6 +1554,129 @@ def resolve_weather_location(query: str) -> Dict[str, Any] | None:
             return results[0]
 
     return build_local_weather_location(query=query)
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def get_data_ingestion_targets() -> list[IngestionTarget]:
+    refresh_backend_env(override=True)
+    configured = (os.getenv("DATA_INGESTION_TARGETS") or "").strip()
+    configured_targets: list[IngestionTarget] = []
+
+    if configured:
+        for item in configured.split(";"):
+            parts = [part.strip() for part in item.split("|")]
+            if len(parts) < 2:
+                continue
+
+            state_name = parts[0]
+            station_name = parts[1]
+            weather_query = parts[2] if len(parts) > 2 and parts[2] else f"{station_name}, {state_name}"
+
+            try:
+                lat = float(parts[3]) if len(parts) > 3 and parts[3] else None
+            except ValueError:
+                lat = None
+
+            try:
+                lon = float(parts[4]) if len(parts) > 4 and parts[4] else None
+            except ValueError:
+                lon = None
+
+            configured_targets.append(
+                IngestionTarget(
+                    state_name=state_name,
+                    station_name=station_name,
+                    weather_query=weather_query,
+                    lat=lat,
+                    lon=lon,
+                )
+            )
+
+    if configured_targets:
+        return configured_targets
+
+    return [
+        IngestionTarget(
+            state_name=str(entry["state"]),
+            station_name=str(entry["name"]),
+            weather_query=f"{entry['name']}, {entry['state']}",
+            lat=float(entry["lat"]),
+            lon=float(entry["lon"]),
+        )
+        for entry in WEATHER_LOCATION_HINTS
+    ]
+
+
+def build_weather_ingestion_snapshot(target: IngestionTarget) -> Dict[str, Any]:
+    location = resolve_weather_location(target.weather_query) or build_local_weather_location(
+        query=target.weather_query,
+        lat=target.lat,
+        lon=target.lon,
+    )
+    lat = float(target.lat if target.lat is not None else location["lat"])
+    lon = float(target.lon if target.lon is not None else location["lon"])
+
+    payload = resilient_openweather(
+        "/data/2.5/weather",
+        {"lat": lat, "lon": lon, "units": "metric"},
+        fallback_factory=lambda exc: build_fallback_current_weather(
+            city=str(location.get("name") or target.station_name),
+            lat=lat,
+            lon=lon,
+            reason=f"INGESTION_FALLBACK_AFTER_{getattr(exc, 'status_code', 'ERROR')}",
+        ),
+    )
+
+    if isinstance(payload, dict):
+        payload.setdefault("_pipeline_meta", {})
+        payload["_pipeline_meta"].update(
+            {
+                "target_state": target.state_name,
+                "target_station": target.station_name,
+                "weather_query": target.weather_query,
+            }
+        )
+
+    return payload
+
+
+def build_water_level_ingestion_snapshot(target: IngestionTarget) -> Dict[str, Any]:
+    limit = max(3, int(os.getenv("DATA_INGESTION_WATER_NODE_LIMIT") or 6))
+    payload = build_policy_bound_telemetry(
+        state_name=target.state_name,
+        station_name=target.station_name,
+        limit=limit,
+    )
+    payload.setdefault("_pipeline_meta", {})
+    payload["_pipeline_meta"].update(
+        {
+            "target_state": target.state_name,
+            "target_station": target.station_name,
+            "water_node_limit": limit,
+        }
+    )
+    return payload
+
+
+data_pipeline = OperationalDataPipeline(
+    repo_dir=REPO_DIR,
+    weather_fetcher=build_weather_ingestion_snapshot,
+    water_level_fetcher=build_water_level_ingestion_snapshot,
+    audit_logger=write_audit_log,
+    targets=get_data_ingestion_targets(),
+)
+data_ingestion_scheduler = ScheduledIngestionService(
+    pipeline=data_pipeline,
+    interval_seconds=max(60, int(float(os.getenv("DATA_INGESTION_INTERVAL_MINUTES") or 60) * 60)),
+    enabled=env_flag("ENABLE_DATA_INGESTION_SCHEDULER", default=False),
+    run_on_startup=env_flag("DATA_INGESTION_RUN_ON_STARTUP", default=True),
+)
 
 
 @app.get("/weather/status")
@@ -2113,6 +2249,7 @@ def health():
         "service": "INDIA_FLOODS ML Server",
         "model_ready": predictor.is_trained,
         "database": operational_store.status(),
+        "ingestion": data_ingestion_scheduler.status(),
         "artifact_count": len(predictor.artifact_catalog),
         "bundle_count": len(predictor.artifact_bundles),
         "version": app.version,
@@ -2127,6 +2264,27 @@ async def get_source_policy():
         "status": "success",
         "source_policy": get_source_policy_payload(),
         "time": datetime.datetime.now().isoformat(),
+    }
+
+
+@app.get("/ingestion/status")
+async def get_ingestion_status():
+    data_pipeline.update_targets(get_data_ingestion_targets())
+    return {
+        "status": "success",
+        "scheduler": data_ingestion_scheduler.status(),
+        "time": current_timestamp_iso(),
+    }
+
+
+@app.post("/ingestion/run")
+async def run_ingestion_now():
+    data_pipeline.update_targets(get_data_ingestion_targets())
+    result = await asyncio.to_thread(data_ingestion_scheduler.trigger_now)
+    return {
+        "status": "success" if result.get("status") == "success" else result.get("status"),
+        "result": result,
+        "time": current_timestamp_iso(),
     }
 
 

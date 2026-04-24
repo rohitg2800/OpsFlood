@@ -10,6 +10,7 @@ This document captures the current implemented capabilities in the repository as
 - Four prediction bands: `LOW`, `MODERATE`, `SEVERE`, `CRITICAL`
 - Prediction output includes severity, confidence, alert signal, risk score, danger level, state matrix thresholds, and monitoring metadata
 - Prediction history is persisted in PostgreSQL for later archive review and export
+- Scheduled weather and water-level ingestion materializes raw, cleaned, and feature-ready datasets
 
 ### State-aware operations
 
@@ -77,6 +78,22 @@ This document captures the current implemented capabilities in the repository as
 - Tactical registry generation when live feeds are unavailable or policy-blocked
 - Merge logic that combines API sensors and tactical fallback nodes
 - Cached recent telemetry requests to avoid duplicate network churn
+
+## 4A. Data Engineering Features
+
+### Scheduled ingestion
+
+- Backend-owned scheduler for recurring weather and water-level ingestion
+- Manual trigger endpoint for immediate pipeline runs
+- Status endpoint exposing scheduler state, targets, and last run summary
+
+### Dataset layers
+
+- Raw append-only JSONL partitions for weather snapshots
+- Raw append-only JSONL partitions for water-level snapshots
+- Cleaned CSV tables for weather and water-level observations
+- Feature-ready weather + water-level joined CSV output
+- Manifest summaries for row counts, paths, and ingestion errors
 
 ## 5. Weather Intelligence Features
 
@@ -191,6 +208,8 @@ This document captures the current implemented capabilities in the repository as
 - `GET /prediction-history`
 - `GET /telemetry-snapshots`
 - `GET /audit-logs`
+- `GET /ingestion/status`
+- `POST /ingestion/run`
 
 ### Forecasting and risk
 
