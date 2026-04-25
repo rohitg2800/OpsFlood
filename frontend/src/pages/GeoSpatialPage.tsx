@@ -33,7 +33,7 @@ type LaneConfig = {
 const clampCoordinate = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
-const buildOpenStreetMapEmbed = (lat: number, lon: number) => {
+const buildOpenStreetMapEmbed = (lat: number, lon: number, regionName?: string) => {
   const latDelta = 0.16;
   const lonDelta = 0.22;
   const minLon = clampCoordinate(lon - lonDelta, -180, 180);
@@ -41,11 +41,16 @@ const buildOpenStreetMapEmbed = (lat: number, lon: number) => {
   const maxLon = clampCoordinate(lon + lonDelta, -180, 180);
   const maxLat = clampCoordinate(lat + latDelta, -90, 90);
 
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lon}`;
+  // Add a marker for the region name if provided
+  const regionMarker = regionName ? `&mlabel=${encodeURIComponent(regionName)}` : '';
+
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lon}${regionMarker}`;
 };
 
-const buildOpenStreetMapLaunchHref = (lat: number, lon: number) =>
-  `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=11/${lat}/${lon}`;
+const buildOpenStreetMapLaunchHref = (lat: number, lon: number, regionName?: string) => {
+  const regionMarker = regionName ? `&mlabel=${encodeURIComponent(regionName)}` : '';
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=11/${lat}/${lon}${regionMarker}`;
+};
 
 const formatLocationLabel = (location?: {
   name?: string;
