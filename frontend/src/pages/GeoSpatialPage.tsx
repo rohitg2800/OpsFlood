@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo } from 'react';
-/// <reference types="react" />
 import { Crosshair, Map as MapIcon, MapPin, Navigation2, Radar, Waves } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { PageShell, PageHero } from '../components/PageShell';
 import { CWCLiveDataDisplay } from '../components/CWCLiveDataDisplay';
-import { locationMatchesCandidate, normalizeGeoKey, resolveGeoCoordinate } from '../data/geoCoordinates';
+import {
+  locationMatchesCandidate,
+  resolveGeoCoordinate,
+} from '../data/geoCoordinates';
 import { WeatherConsolePanel } from '../components/WeatherConsolePanel';
 import { LayeredNeuralGraph } from '../components/LayeredNeuralGraph';
 import { ProbabilityHeartbeatSparkline } from '../components/ProbabilityLaneHeartbeat';
@@ -28,7 +30,8 @@ type LaneConfig = {
   tone: 'success' | 'info' | 'warning' | 'danger';
 };
 
-const clampCoordinate = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const clampCoordinate = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
 
 const buildOpenStreetMapEmbed = (lat: number, lon: number) => {
   const latDelta = 0.16;
@@ -44,6 +47,17 @@ const buildOpenStreetMapEmbed = (lat: number, lon: number) => {
 const buildOpenStreetMapLaunchHref = (lat: number, lon: number) =>
   `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=11/${lat}/${lon}`;
 
+const formatLocationLabel = (location?: {
+  name?: string;
+  state?: string;
+} | null) => {
+  if (!location) return '';
+  if (location.name && location.state && location.name !== location.state) {
+    return `${location.name}, ${location.state}`;
+  }
+  return location.name || location.state || '';
+};
+
 export const GeoSpatialPage: React.FC = () => {
   const { state, dispatch } = useAppState();
 
@@ -51,83 +65,72 @@ export const GeoSpatialPage: React.FC = () => {
     state.prediction.selectedState ||
     state.form.data.state ||
     'Awaiting input';
-  const rawStationFocus = state.prediction.selectedCity || state.form.data.station || '';
+
+  const rawStationFocus =
+    state.prediction.selectedCity ||
+    state.form.data.station ||
+    '';
+
   const stateMappedLocation = useMemo(
-    () =>
-      resolveGeoCoordinate(
-        state.prediction.selectedState,
-        state.form.data.state,
-      ),
-    [state.form.data.state, state.prediction.selectedState],
+    () => resolveGeoCoordinate(state.prediction.selectedState, state.form.data.state),
+    [state.prediction.selectedState, state.form.data.state],
   );
+
   const focusedStationLocation = useMemo(
     () => resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station),
-    [state.form.data.station, state.prediction.selectedCity],
+    [state.prediction.selectedCity, state.form.data.station],
   );
-  const stationFocus = useMemo(() => {
-    if (!rawStationFocus || !focusedStationLocation) {
-      return '';
-    }
 
-    if (!stateMappedLocation?.state || !focusedStationLocation.state) {
+  const stationFocus = useMemo(() => {
+    if (rawStationFocus && focusedStationLocation) {
       return rawStationFocus;
     }
-
-    return normalizeGeoKey(focusedStationLocation.state) === normalizeGeoKey(stateMappedLocation.state)
-      ? rawStationFocus
-      : '';
-  }, [focusedStationLocation, rawStationFocus, stateMappedLocation?.state]);
-  const inputLocationLabel =
-    stationFocus ||
-    lockedMatrixState ||
-    'Awaiting input';
-  const targetLocationLabel = stationFocus || inputLocationLabel;
+    return '';
+  }, [rawStationFocus, focusedStationLocation]);
 
   const resolvedLocation = useMemo(() => {
-    if (stationFocus && focusedStationLocation) {
+    if (focusedStationLocation) {
       return focusedStationLocation;
     }
 
-    if (rawStationFocus && locationMatchesCandidate(state.data.locationData, rawStationFocus)) {
-      const currentLocationState = normalizeGeoKey(state.data.locationData?.state || '');
-      const mappedState = normalizeGeoKey(stateMappedLocation?.state || '');
-      if (!mappedState || !currentLocationState || mappedState === currentLocationState) {
-        return state.data.locationData;
-      }
+    if (stateMappedLocation) {
+      return stateMappedLocation;
     }
 
-    if (stateMappedLocation) return stateMappedLocation;
-
-    if (state.data.locationData?.lat && state.data.locationData?.lon) {
+    if (
+      state.data.locationData?.lat &&
+      state.data.locationData?.lon &&
+      locationMatchesCandidate(
+        state.data.locationData,
+        rawStationFocus || lockedMatrixState,
+      )
+    ) {
       return state.data.locationData;
     }
 
-    // Fallback to a default location if no resolved location is found
     return {
-      lat: 20.5937, // Default latitude (India)
-      lon: 78.9629, // Default longitude (India)
-      name: 'Default Location',
+      lat: 20.5937,
+      lon: 78.9629,
+      name: 'India',
       state: 'India',
     };
   }, [
-    state.data.locationData,
-    state.form.data.state,
-    state.form.data.station,
-    state.prediction.selectedCity,
-    state.prediction.selectedState,
     focusedStationLocation,
-    rawStationFocus,
     stateMappedLocation,
-    stationFocus,
+    state.data.locationData,
+    rawStationFocus,
+    lockedMatrixState,
   ]);
 
   useEffect(() => {
     if (!resolvedLocation) return;
+
     const current = state.data.locationData;
     if (
       current?.lat === resolvedLocation.lat &&
       current?.lon === resolvedLocation.lon &&
-      current?.name === resolvedLocation.name
+      current?.name === resolvedLocation.name &&
+      current?.state === resolvedLocation.state
     ) {
       return;
     }
@@ -137,31 +140,82 @@ export const GeoSpatialPage: React.FC = () => {
 
   const lat = resolvedLocation?.lat;
   const lon = resolvedLocation?.lon;
-  const hasMapTarget = Boolean(targetLocationLabel && targetLocationLabel !== 'Awaiting input');
-  const weatherTarget = targetLocationLabel || lockedMatrixState || 'Selected Region';
   const hasResolvedCoordinates = typeof lat === 'number' && typeof lon === 'number';
+
+  const targetLocationLabel =
+    formatLocationLabel(resolvedLocation) ||
+    stationFocus ||
+    lockedMatrixState;
+
+  const weatherTarget = targetLocationLabel || 'Selected Region';
+
   const weatherCoordinates = useMemo(
     () => (hasResolvedCoordinates ? { lat: lat as number, lon: lon as number } : undefined),
     [hasResolvedCoordinates, lat, lon],
   );
-  const mapQuery = stationFocus
-    ? `${stationFocus}${lockedMatrixState && lockedMatrixState !== 'Awaiting input' ? `, ${lockedMatrixState}` : ''}`
-    : resolvedLocation
-    ? `${resolvedLocation.name}${resolvedLocation.state ? `, ${resolvedLocation.state}` : ''}`
-    : lockedMatrixState;
-  const mapEmbedSrc = hasResolvedCoordinates ? buildOpenStreetMapEmbed(lat as number, lon as number) : null;
+
+  const mapQuery = targetLocationLabel || lockedMatrixState;
+
+  const mapEmbedSrc = hasResolvedCoordinates
+    ? buildOpenStreetMapEmbed(lat as number, lon as number)
+    : null;
+
   const mapLaunchHref = hasResolvedCoordinates
     ? buildOpenStreetMapLaunchHref(lat as number, lon as number)
     : `https://www.openstreetmap.org/search?query=${encodeURIComponent(mapQuery)}`;
-  const probabilityLanes = useMemo(() => deriveProbabilityLanes(state.prediction.currentPrediction), [state.prediction.currentPrediction]);
-  const dominantProbabilityLane = useMemo(() => getDominantProbabilityLane(probabilityLanes), [probabilityLanes]);
-  const laneConfig = useMemo(() => ([
-    { key: 'low', label: 'LOW', shortLabel: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1', tone: 'success' as const },
-    { key: 'moderate', label: 'MODERATE', shortLabel: 'MOD', value: probabilityLanes.moderate, fill: '#4c7cff', tone: 'info' as const },
-    { key: 'severe', label: 'SEVERE', shortLabel: 'SEV', value: probabilityLanes.severe, fill: '#ff8a5b', tone: 'warning' as const },
-    { key: 'critical', label: 'CRITICAL', shortLabel: 'CRT', value: probabilityLanes.critical, fill: '#ff5f7e', tone: 'danger' as const },
-  ]), [probabilityLanes]);
-  const dominantLaneConfig = laneConfig.find((lane) => lane.label === dominantProbabilityLane[0]) || laneConfig[0];
+
+  const hasMapTarget = Boolean(targetLocationLabel && targetLocationLabel !== 'Awaiting input');
+
+  const probabilityLanes = useMemo(
+    () => deriveProbabilityLanes(state.prediction.currentPrediction),
+    [state.prediction.currentPrediction],
+  );
+
+  const dominantProbabilityLane = useMemo(
+    () => getDominantProbabilityLane(probabilityLanes),
+    [probabilityLanes],
+  );
+
+  const laneConfig: LaneConfig[] = useMemo(
+    () => [
+      {
+        key: 'low',
+        label: 'LOW',
+        shortLabel: 'LOW',
+        value: probabilityLanes.low,
+        fill: '#8ff0c1',
+        tone: 'success',
+      },
+      {
+        key: 'moderate',
+        label: 'MODERATE',
+        shortLabel: 'MOD',
+        value: probabilityLanes.moderate,
+        fill: '#4c7cff',
+        tone: 'info',
+      },
+      {
+        key: 'severe',
+        label: 'SEVERE',
+        shortLabel: 'SEV',
+        value: probabilityLanes.severe,
+        fill: '#ff8a5b',
+        tone: 'warning',
+      },
+      {
+        key: 'critical',
+        label: 'CRITICAL',
+        shortLabel: 'CRT',
+        value: probabilityLanes.critical,
+        fill: '#ff5f7e',
+        tone: 'danger',
+      },
+    ],
+    [probabilityLanes],
+  );
+
+  const dominantLaneConfig =
+    laneConfig.find((lane) => lane.label === dominantProbabilityLane[0]) || laneConfig[0];
 
   return (
     <PageShell>
@@ -198,12 +252,14 @@ export const GeoSpatialPage: React.FC = () => {
                   {typeof lat === 'number' ? `${lat.toFixed(4)}°` : '--'}
                 </div>
               </InsetPanel>
+
               <InsetPanel>
                 <div className={opsLabelClass}>Longitude</div>
                 <div className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-[color:var(--ops-text)]">
                   {typeof lon === 'number' ? `${lon.toFixed(4)}°` : '--'}
                 </div>
               </InsetPanel>
+
               {stationFocus ? (
                 <InsetPanel>
                   <div className={opsLabelClass}>Station focus</div>
@@ -249,7 +305,9 @@ export const GeoSpatialPage: React.FC = () => {
                   <InsetPanel key={lane.key}>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <StatusBadge tone={lane.tone}>{lane.label}</StatusBadge>
-                      <span className="text-sm font-semibold text-[color:var(--ops-text)]">{lane.value.toFixed(1)}%</span>
+                      <span className="text-sm font-semibold text-[color:var(--ops-text)]">
+                        {lane.value.toFixed(1)}%
+                      </span>
                     </div>
                     <ProbabilityHeartbeatSparkline
                       lane={lane}
@@ -274,7 +332,9 @@ export const GeoSpatialPage: React.FC = () => {
                 action={
                   <>
                     <StatusBadge tone="neutral">{lockedMatrixState}</StatusBadge>
-                    <StatusBadge tone={hasResolvedCoordinates ? 'success' : 'warning'}>{hasResolvedCoordinates ? 'Resolved' : 'Pending'}</StatusBadge>
+                    <StatusBadge tone={hasResolvedCoordinates ? 'success' : 'warning'}>
+                      {hasResolvedCoordinates ? 'Resolved' : 'Pending'}
+                    </StatusBadge>
                   </>
                 }
               />
@@ -288,7 +348,11 @@ export const GeoSpatialPage: React.FC = () => {
                       title="Live geo-spatial feed"
                       width="100%"
                       height="100%"
-                      style={{ border: 0, filter: 'invert(100%) hue-rotate(180deg) brightness(92%) contrast(112%) sepia(10%)' }}
+                      style={{
+                        border: 0,
+                        filter:
+                          'invert(100%) hue-rotate(180deg) brightness(92%) contrast(112%) sepia(10%)',
+                      }}
                       className="absolute inset-0"
                       loading="lazy"
                       allowFullScreen
@@ -317,11 +381,15 @@ export const GeoSpatialPage: React.FC = () => {
                       <div className={opsLabelClass}>Geo readout</div>
                       <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
                         <span className="text-[color:var(--ops-text-faint)]">Target</span>
-                        <span className="font-medium text-[color:var(--ops-text)]">{targetLocationLabel}</span>
+                        <span className="font-medium text-[color:var(--ops-text)]">
+                          {targetLocationLabel}
+                        </span>
                         <span className="text-[color:var(--ops-text-faint)]">Matrix</span>
                         <span className="text-[color:var(--ops-text)]">{lockedMatrixState}</span>
                         <span className="text-[color:var(--ops-text-faint)]">Basemap</span>
-                        <span className="text-[color:var(--ops-text)]">OpenStreetMap tactical relay</span>
+                        <span className="text-[color:var(--ops-text)]">
+                          OpenStreetMap tactical relay
+                        </span>
                       </div>
                     </InsetPanel>
                   </div>
@@ -350,7 +418,9 @@ export const GeoSpatialPage: React.FC = () => {
 
       <div>
         <div className="mb-4">
-          <StatusBadge tone="info" icon={Waves}>Live CWC context for {lockedMatrixState}</StatusBadge>
+          <StatusBadge tone="info" icon={Waves}>
+            Live CWC context for {lockedMatrixState}
+          </StatusBadge>
         </div>
         <CWCLiveDataDisplay />
       </div>
