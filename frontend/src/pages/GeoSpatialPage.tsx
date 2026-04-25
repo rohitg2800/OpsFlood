@@ -89,12 +89,12 @@ export const GeoSpatialPage: React.FC = () => {
   }, [rawStationFocus, focusedStationLocation]);
 
   const resolvedLocation = useMemo(() => {
-    if (focusedStationLocation) {
-      return focusedStationLocation;
+    if (lockedMatrixState && stateMappedLocation) {
+      return stateMappedLocation;
     }
 
-    if (stateMappedLocation) {
-      return stateMappedLocation;
+    if (focusedStationLocation) {
+      return focusedStationLocation;
     }
 
     if (
@@ -115,11 +115,11 @@ export const GeoSpatialPage: React.FC = () => {
       state: 'India',
     };
   }, [
-    focusedStationLocation,
+    lockedMatrixState,
     stateMappedLocation,
+    focusedStationLocation,
     state.data.locationData,
     rawStationFocus,
-    lockedMatrixState,
   ]);
 
   useEffect(() => {
