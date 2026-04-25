@@ -102,7 +102,13 @@ export const GeoSpatialPage: React.FC = () => {
       return state.data.locationData;
     }
 
-    return null;
+    // Fallback to a default location if no resolved location is found
+    return {
+      lat: 20.5937, // Default latitude (India)
+      lon: 78.9629, // Default longitude (India)
+      name: 'Default Location',
+      state: 'India',
+    };
   }, [
     state.data.locationData,
     state.form.data.state,
