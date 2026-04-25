@@ -54,20 +54,23 @@ export const GeoSpatialPage: React.FC = () => {
     const focusedLocation = resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station);
     if (focusedLocation) return focusedLocation;
 
+    const stateMappedLocation = resolveGeoCoordinate(
+      state.prediction.selectedState,
+      state.form.data.state,
+    );
+
     if (stationFocus) {
       if (locationMatchesCandidate(state.data.locationData, stationFocus)) {
         return state.data.locationData;
       }
 
+      // Keep the state matrix as the primary geo lock when station-level text can't be resolved.
+      if (stateMappedLocation) return stateMappedLocation;
+
       return null;
     }
 
-    const mappedLocation = resolveGeoCoordinate(
-      state.prediction.selectedState,
-      state.form.data.state,
-    );
-
-    if (mappedLocation) return mappedLocation;
+    if (stateMappedLocation) return stateMappedLocation;
 
     if (state.data.locationData?.lat && state.data.locationData?.lon) {
       return state.data.locationData;
