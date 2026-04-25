@@ -508,6 +508,10 @@ const DashboardPage: React.FC = () => {
       state.prediction.selectedCity,
       state.form.data.station,
     );
+    const stateLocation = resolveGeoCoordinate(
+      state.prediction.selectedState,
+      state.form.data.state,
+    );
 
     if (focusedLocation) {
       return { lat: focusedLocation.lat, lon: focusedLocation.lon };
@@ -522,13 +526,12 @@ const DashboardPage: React.FC = () => {
         };
       }
 
+      if (stateLocation) {
+        return { lat: stateLocation.lat, lon: stateLocation.lon };
+      }
+
       return undefined;
     }
-
-    const stateLocation = resolveGeoCoordinate(
-      state.prediction.selectedState,
-      state.form.data.state,
-    );
 
     if (stateLocation) {
       return { lat: stateLocation.lat, lon: stateLocation.lon };
