@@ -14,6 +14,7 @@ import {
 import { useAppState } from '../context/AppContext';
 import type { LocationData, WeatherData } from '../weatherWidget';
 import { apiUrl } from '../config/api';
+import { normalizeGeoKey, resolveGeoCoordinate } from '../data/geoCoordinates';
 import WeatherService from '../weatherService';
 import { formatTemperatureScale } from '../utils/temperature';
 import {
@@ -73,11 +74,30 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
   const coordinateLon = coordinates?.lon;
   const [proxyStatus, setProxyStatus] = useState<WeatherProxyStatus>('CHECKING');
   const [resolvedDestination, setResolvedDestination] = useState<LocationData | null>(null);
+  const specificLocationLock = (state.prediction.selectedCity || state.form.data.station || '').trim();
+  const resolvedSpecificLocationLock = useMemo(
+    () => resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station),
+    [state.form.data.station, state.prediction.selectedCity],
+  );
+  const resolvedStateLock = useMemo(
+    () => resolveGeoCoordinate(state.prediction.selectedState, state.form.data.state),
+    [state.form.data.state, state.prediction.selectedState],
+  );
+  const shouldUseSpecificLocationLock = useMemo(() => {
+    if (!specificLocationLock || !resolvedSpecificLocationLock) {
+      return false;
+    }
+
+    if (!resolvedStateLock?.state || !resolvedSpecificLocationLock.state) {
+      return true;
+    }
+
+    return normalizeGeoKey(resolvedSpecificLocationLock.state) === normalizeGeoKey(resolvedStateLock.state);
+  }, [resolvedSpecificLocationLock, resolvedStateLock?.state, specificLocationLock]);
   const destinationCandidates = useMemo(
     () =>
       [
-        state.prediction.selectedCity,
-        state.form.data.station,
+        shouldUseSpecificLocationLock ? specificLocationLock : '',
         state.prediction.selectedState,
         state.form.data.state,
         target,
@@ -92,14 +112,13 @@ export const WeatherConsolePanel: React.FC<WeatherConsolePanelProps> = ({
       state.form.data.station,
       state.prediction.selectedCity,
       state.prediction.selectedState,
+      shouldUseSpecificLocationLock,
+      specificLocationLock,
       target,
     ],
   );
   const lockedDestination = (destinationCandidates[0] || target || 'Selected Region').trim();
-  const hasSpecificLocationLock = Boolean(
-    (state.prediction.selectedCity && state.prediction.selectedCity.trim()) ||
-      (state.form.data.station && state.form.data.station.trim()),
-  );
+  const hasSpecificLocationLock = shouldUseSpecificLocationLock;
   const resolvedNodeLabel = resolvedDestination?.name?.trim() || null;
   const normalizedResolvedNodeLabel = resolvedNodeLabel?.toLowerCase() || '';
   const normalizedLockedDestination = normalizeWeatherLabel(lockedDestination);

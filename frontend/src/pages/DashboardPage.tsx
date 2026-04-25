@@ -36,7 +36,7 @@ import {
 import { getScopedSensorSelection, getSelectedRiverLocationLabel } from '../utils/regionReadings';
 import { deriveProbabilityLanes, getDominantProbabilityLane } from '../utils/probabilityLanes';
 import type { SensorData } from '../types';
-import { locationMatchesCandidate, resolveGeoCoordinate } from '../data/geoCoordinates';
+import { locationMatchesCandidate, normalizeGeoKey, resolveGeoCoordinate } from '../data/geoCoordinates';
 
 // ==========================================
 // DYNAMIC STATE GEOGRAPHY MAPPING
@@ -513,13 +513,25 @@ const DashboardPage: React.FC = () => {
       state.form.data.state,
     );
 
-    if (focusedLocation) {
+    const focusTarget = state.prediction.selectedCity || state.form.data.station;
+    const focusLocationMatchesState = Boolean(
+      !focusTarget ||
+      !focusedLocation ||
+      !stateLocation?.state ||
+      !focusedLocation.state ||
+      normalizeGeoKey(focusedLocation.state) === normalizeGeoKey(stateLocation.state),
+    );
+
+    if (focusedLocation && focusLocationMatchesState) {
       return { lat: focusedLocation.lat, lon: focusedLocation.lon };
     }
 
-    const focusTarget = state.prediction.selectedCity || state.form.data.station;
     if (focusTarget) {
-      if (locationMatchesCandidate(currentLocationData, focusTarget) && currentLocationData) {
+      if (
+        focusLocationMatchesState &&
+        locationMatchesCandidate(currentLocationData, focusTarget) &&
+        currentLocationData
+      ) {
         return {
           lat: currentLocationData.lat,
           lon: currentLocationData.lon,
