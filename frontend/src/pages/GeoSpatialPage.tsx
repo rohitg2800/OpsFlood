@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo } from 'react';
+/// <reference types="react" />
 import { Crosshair, Map as MapIcon, MapPin, Navigation2, Radar, Waves } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
 import { PageShell, PageHero } from '../components/PageShell';
 import { CWCLiveDataDisplay } from '../components/CWCLiveDataDisplay';
-import { locationMatchesCandidate, resolveGeoCoordinate } from '../data/geoCoordinates';
+import { locationMatchesCandidate, normalizeGeoKey, resolveGeoCoordinate } from '../data/geoCoordinates';
 import { WeatherConsolePanel } from '../components/WeatherConsolePanel';
 import { LayeredNeuralGraph } from '../components/LayeredNeuralGraph';
 import { ProbabilityHeartbeatSparkline } from '../components/ProbabilityLaneHeartbeat';
@@ -17,6 +18,15 @@ import {
   StatusBadge,
   opsLabelClass,
 } from '../components/OpsPrimitives';
+
+type LaneConfig = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  value: number;
+  fill: string;
+  tone: 'success' | 'info' | 'warning' | 'danger';
+};
 
 const clampCoordinate = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -37,37 +47,53 @@ const buildOpenStreetMapLaunchHref = (lat: number, lon: number) =>
 export const GeoSpatialPage: React.FC = () => {
   const { state, dispatch } = useAppState();
 
-  const inputLocationLabel =
-    state.prediction.selectedCity ||
-    state.form.data.station ||
-    state.prediction.selectedState ||
-    state.form.data.state ||
-    'Awaiting input';
   const lockedMatrixState =
     state.prediction.selectedState ||
     state.form.data.state ||
     'Awaiting input';
-  const stationFocus = state.prediction.selectedCity || state.form.data.station || '';
+  const rawStationFocus = state.prediction.selectedCity || state.form.data.station || '';
+  const stateMappedLocation = useMemo(
+    () =>
+      resolveGeoCoordinate(
+        state.prediction.selectedState,
+        state.form.data.state,
+      ),
+    [state.form.data.state, state.prediction.selectedState],
+  );
+  const focusedStationLocation = useMemo(
+    () => resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station),
+    [state.form.data.station, state.prediction.selectedCity],
+  );
+  const stationFocus = useMemo(() => {
+    if (!rawStationFocus || !focusedStationLocation) {
+      return '';
+    }
+
+    if (!stateMappedLocation?.state || !focusedStationLocation.state) {
+      return rawStationFocus;
+    }
+
+    return normalizeGeoKey(focusedStationLocation.state) === normalizeGeoKey(stateMappedLocation.state)
+      ? rawStationFocus
+      : '';
+  }, [focusedStationLocation, rawStationFocus, stateMappedLocation?.state]);
+  const inputLocationLabel =
+    stationFocus ||
+    lockedMatrixState ||
+    'Awaiting input';
   const targetLocationLabel = stationFocus || inputLocationLabel;
 
   const resolvedLocation = useMemo(() => {
-    const focusedLocation = resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station);
-    if (focusedLocation) return focusedLocation;
+    if (stationFocus && focusedStationLocation) {
+      return focusedStationLocation;
+    }
 
-    const stateMappedLocation = resolveGeoCoordinate(
-      state.prediction.selectedState,
-      state.form.data.state,
-    );
-
-    if (stationFocus) {
-      if (locationMatchesCandidate(state.data.locationData, stationFocus)) {
+    if (rawStationFocus && locationMatchesCandidate(state.data.locationData, rawStationFocus)) {
+      const currentLocationState = normalizeGeoKey(state.data.locationData?.state || '');
+      const mappedState = normalizeGeoKey(stateMappedLocation?.state || '');
+      if (!mappedState || !currentLocationState || mappedState === currentLocationState) {
         return state.data.locationData;
       }
-
-      // Keep the state matrix as the primary geo lock when station-level text can't be resolved.
-      if (stateMappedLocation) return stateMappedLocation;
-
-      return null;
     }
 
     if (stateMappedLocation) return stateMappedLocation;
@@ -83,6 +109,9 @@ export const GeoSpatialPage: React.FC = () => {
     state.form.data.station,
     state.prediction.selectedCity,
     state.prediction.selectedState,
+    focusedStationLocation,
+    rawStationFocus,
+    stateMappedLocation,
     stationFocus,
   ]);
 

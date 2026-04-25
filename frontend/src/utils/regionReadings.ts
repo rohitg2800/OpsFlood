@@ -107,7 +107,31 @@ export function getSelectedRiverLocationLabel(
   station?: string,
   selectedState?: string,
 ): string {
-  return station || selectedCity || selectedState || 'Active Region';
+  const lockedNode = (station || selectedCity || '').trim();
+  const lockedState = (selectedState || '').trim();
+
+  if (!lockedNode) {
+    return lockedState || 'Active Region';
+  }
+
+  const resolvedNode = resolveGeoCoordinate(station, selectedCity);
+  if (!resolvedNode) {
+    return lockedState || lockedNode || 'Active Region';
+  }
+
+  if (!lockedState) {
+    return lockedNode;
+  }
+
+  const resolvedState = resolveGeoCoordinate(selectedState);
+  const expectedState = normalize(resolvedState?.state || lockedState);
+  const nodeState = normalize(resolvedNode.state);
+
+  if (expectedState && nodeState && expectedState !== nodeState) {
+    return lockedState;
+  }
+
+  return lockedNode;
 }
 
 export function getScopedSensorSelection(
