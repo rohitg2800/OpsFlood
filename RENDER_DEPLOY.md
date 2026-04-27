@@ -13,6 +13,8 @@ This repo is now configured to run as a single Render web service.
 Use the included [render.yaml](render.yaml) blueprint or create the service manually with these values:
 
 - Environment: `Docker`
+- Root directory: repository root (`.`)
+- Docker context: `.`
 - Dockerfile path: `./Dockerfile`
 - Health check path: `/health`
 
@@ -37,7 +39,7 @@ That keeps the current Docker deploy flow intact while still validating:
 - `CORS_ORIGINS`
 - `MODEL_ARTIFACTS_DIR=artifacts/dvc/models`
 - `MODEL_ARTIFACTS_BACKEND=DVC`
-- `ENABLE_DATA_INGESTION_SCHEDULER=1`
+- `ENABLE_DATA_INGESTION_SCHEDULER=0` (recommended for free-tier web services)
 - `DATA_INGESTION_INTERVAL_MINUTES=60`
 
 `CORS_ORIGINS` is usually not needed for the single-service deploy because the frontend and backend share the same origin.
@@ -50,3 +52,14 @@ docker run --rm -p 10000:10000 -e OPENWEATHER_API_KEY=your_key opsflood
 ```
 
 Then open `http://localhost:10000`.
+
+## If the Render URL is not showing the app
+
+1. Confirm the service type is **Web Service** (not Static Site or Background Worker).
+2. Confirm runtime is **Docker** and Dockerfile path is exactly `./Dockerfile`.
+3. Confirm the service is connected to your repository (the blueprint no longer hard-codes a different repo).
+4. Open Render logs and verify container startup reaches:
+   - `Application startup complete`
+5. Check `https://<your-service>.onrender.com/health`:
+   - If this fails, deployment/startup is broken.
+   - If this works but `/` is not the app, the wrong root directory/runtime was selected.
