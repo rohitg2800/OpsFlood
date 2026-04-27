@@ -1,6 +1,7 @@
 import os
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
+
 
 try:
     import psycopg
@@ -10,6 +11,7 @@ except ImportError:  # pragma: no cover - optional until dependency is installed
     psycopg = None
     dict_row = None
     Jsonb = None
+
 
 
 SCHEMA_SQL = """
@@ -35,8 +37,10 @@ CREATE TABLE IF NOT EXISTS predictions (
     prediction_payload JSONB NOT NULL
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON predictions (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_predictions_state_station ON predictions (state_name, station_name, created_at DESC);
+
 
 CREATE TABLE IF NOT EXISTS telemetry_snapshots (
     id BIGSERIAL PRIMARY KEY,
@@ -51,8 +55,10 @@ CREATE TABLE IF NOT EXISTS telemetry_snapshots (
     payload JSONB NOT NULL
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_telemetry_snapshots_created_at ON telemetry_snapshots (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_snapshots_state_station ON telemetry_snapshots (state_name, station_name, created_at DESC);
+
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id BIGSERIAL PRIMARY KEY,
@@ -66,9 +72,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     details JSONB NOT NULL
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_route_event ON audit_logs (route, event_type, created_at DESC);
 """
+
 
 
 class PostgresOperationalStore:
@@ -77,11 +85,13 @@ class PostgresOperationalStore:
         self.enabled = bool(self.database_url)
         self.driver_available = psycopg is not None
         self.ready = False
-        self.last_error: str | None = None
+        self.last_error: Optional[str] = None
+
 
     @property
     def configured(self) -> bool:
         return self.enabled
+
 
     @contextmanager
     def connection(self) -> Iterator[Any]:
@@ -89,6 +99,7 @@ class PostgresOperationalStore:
             raise RuntimeError("DATABASE_URL is not configured.")
         if not self.driver_available or psycopg is None or dict_row is None:
             raise RuntimeError("psycopg is not installed.")
+
 
         connection = psycopg.connect(self.database_url, row_factory=dict_row)
         try:
@@ -100,16 +111,19 @@ class PostgresOperationalStore:
         finally:
             connection.close()
 
+
     def initialize(self) -> Dict[str, Any]:
         if not self.enabled:
             self.ready = False
             self.last_error = None
             return self.status()
 
+
         if not self.driver_available:
             self.ready = False
             self.last_error = "psycopg dependency is unavailable."
             return self.status()
+
 
         try:
             with self.connection() as conn:
@@ -122,6 +136,7 @@ class PostgresOperationalStore:
             self.last_error = str(exc)
         return self.status()
 
+
     def status(self) -> Dict[str, Any]:
         if not self.enabled:
             return {
@@ -131,6 +146,7 @@ class PostgresOperationalStore:
                 "message": "DATABASE_URL is not configured.",
             }
 
+
         if not self.driver_available:
             return {
                 "backend": "postgresql",
@@ -139,6 +155,7 @@ class PostgresOperationalStore:
                 "message": "psycopg dependency is unavailable.",
             }
 
+
         return {
             "backend": "postgresql",
             "configured": True,
@@ -146,14 +163,17 @@ class PostgresOperationalStore:
             "message": self.last_error or ("ready" if self.ready else "initializing"),
         }
 
+
     def _jsonb(self, payload: Dict[str, Any]) -> Any:
         if Jsonb is None:
             raise RuntimeError("psycopg JSON adapter is unavailable.")
         return Jsonb(payload)
 
-    def save_prediction(self, payload: Dict[str, Any]) -> int | None:
+
+    def save_prediction(self, payload: Dict[str, Any]) -> Optional[int]:
         if not self.ready:
             return None
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
@@ -208,9 +228,11 @@ class PostgresOperationalStore:
                 row = cur.fetchone()
                 return int(row["id"]) if row else None
 
-    def save_telemetry_snapshot(self, payload: Dict[str, Any]) -> int | None:
+
+    def save_telemetry_snapshot(self, payload: Dict[str, Any]) -> Optional[int]:
         if not self.ready:
             return None
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
@@ -246,9 +268,11 @@ class PostgresOperationalStore:
                 row = cur.fetchone()
                 return int(row["id"]) if row else None
 
-    def save_audit_log(self, payload: Dict[str, Any]) -> int | None:
+
+    def save_audit_log(self, payload: Dict[str, Any]) -> Optional[int]:
         if not self.ready:
             return None
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
@@ -282,12 +306,15 @@ class PostgresOperationalStore:
                 row = cur.fetchone()
                 return int(row["id"]) if row else None
 
-    def list_predictions(self, *, limit: int = 100, state_name: str | None = None, station_name: str | None = None) -> List[Dict[str, Any]]:
+
+    def list_predictions(self, *, limit: int = 100, state_name: Optional[str] = None, station_name: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.ready:
             return []
 
+
         where_clauses = []
         params: Dict[str, Any] = {"limit": max(1, min(limit, 500))}
+
 
         if state_name:
             where_clauses.append("state_name = %(state_name)s")
@@ -296,7 +323,9 @@ class PostgresOperationalStore:
             where_clauses.append("(station_name = %(station_name)s OR city_name = %(station_name)s)")
             params["station_name"] = station_name
 
+
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
@@ -329,12 +358,15 @@ class PostgresOperationalStore:
                 )
                 return list(cur.fetchall())
 
-    def list_telemetry_snapshots(self, *, limit: int = 50, state_name: str | None = None, station_name: str | None = None) -> List[Dict[str, Any]]:
+
+    def list_telemetry_snapshots(self, *, limit: int = 50, state_name: Optional[str] = None, station_name: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.ready:
             return []
 
+
         where_clauses = []
         params: Dict[str, Any] = {"limit": max(1, min(limit, 500))}
+
 
         if state_name:
             where_clauses.append("state_name = %(state_name)s")
@@ -343,7 +375,9 @@ class PostgresOperationalStore:
             where_clauses.append("station_name = %(station_name)s")
             params["station_name"] = station_name
 
+
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
@@ -368,9 +402,11 @@ class PostgresOperationalStore:
                 )
                 return list(cur.fetchall())
 
+
     def list_audit_logs(self, *, limit: int = 50) -> List[Dict[str, Any]]:
         if not self.ready:
             return []
+
 
         with self.connection() as conn:
             with conn.cursor() as cur:
