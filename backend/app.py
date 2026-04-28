@@ -2802,10 +2802,6 @@ async def serve_frontend(path_name: str):
 async def catch_all(path_name: str):
     return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
 
-# 🖥️ FRONTEND STATIC FILES (mounted LAST after ALL API routes)
-if os.path.isdir(FRONTEND_DIST_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=False), name="frontend")
-
 if __name__ == "__main__":
     print(" Starting INDIA_FLOODS ML Backend...")
     port = int(os.environ.get("PORT", 8000))
