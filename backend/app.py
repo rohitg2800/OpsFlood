@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.staticfiles import StaticFiles
 import asyncio
 import copy
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 import numpy as np
 import joblib
@@ -1144,6 +1145,10 @@ class FloodPredictionInput(BaseModel):
 
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
+
+# 🖥️ FRONTEND STATIC FILES
+if os.path.isdir(FRONTEND_DIST_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=False), name="frontend")
 
 # 🛡️ SECURE PRODUCTION CORS
 origins = configured_cors_origins()
