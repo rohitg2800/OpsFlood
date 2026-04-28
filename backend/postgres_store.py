@@ -428,3 +428,4 @@ class PostgresOperationalStore:
                     {"limit": max(1, min(limit, 500))},
                 )
                 return list(cur.fetchall())
+            

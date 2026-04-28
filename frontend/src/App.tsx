@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { Radio, ChevronRight } from 'lucide-react';
 import { useAppState } from './context/AppContext';
@@ -7,10 +7,10 @@ import { AnimatedBackground } from './components/AnimatedBackground';
 import { WaterWaveBackground } from './components/WaterWaveBackground';
 import './index.css'; // Import global styles
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const GeoSpatialPage = lazy(() => import('./pages/GeoSpatialPage'));
-const TelemetryPage = lazy(() => import('./pages/TelemetryPage'));
-const ArchivesPage = lazy(() => import('./pages/ArchivesPage'));
+import DashboardPage from './pages/DashboardPage';
+import GeoSpatialPage from './pages/GeoSpatialPage';
+import TelemetryPage from './pages/TelemetryPage';
+import ArchivesPage from './pages/ArchivesPage';
 
 // ==========================================
 // MAIN APPLICATION
