@@ -1146,10 +1146,6 @@ class FloodPredictionInput(BaseModel):
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
 
-# 🖥️ FRONTEND STATIC FILES
-if os.path.isdir(FRONTEND_DIST_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=False), name="frontend")
-
 # 🛡️ SECURE PRODUCTION CORS
 origins = configured_cors_origins()
 
@@ -2805,6 +2801,10 @@ async def serve_frontend(path_name: str):
 @app.api_route("/{path_name:path}", methods=["POST", "PUT", "DELETE", "PATCH", "OPTIONS"], include_in_schema=False)
 async def catch_all(path_name: str):
     return JSONResponse(status_code=404, content={"error": f"The path '{path_name}' was not found."})
+
+# 🖥️ FRONTEND STATIC FILES (mounted LAST after ALL API routes)
+if os.path.isdir(FRONTEND_DIST_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=False), name="frontend")
 
 if __name__ == "__main__":
     print(" Starting INDIA_FLOODS ML Backend...")
