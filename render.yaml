@@ -1,4 +1,12 @@
 services:
+- type: pserv
+  name: opsflood-db
+  ipAddress: 10.0.0.1
+  databaseName: opsflood_db
+  postgresMajorVersion: 15
+  plan: free
+  region: oregon
+
 - type: web
   name: opsflood
   runtime: docker
@@ -19,8 +27,12 @@ services:
   - key: OPENWEATHER_API_KEY
     sync: false
   - key: DATABASE_URL
-    sync: false
+    fromDatabase:
+      name: opsflood-db
+      property: connectionString
   - key: FLOOD_SOURCE_POLICY
     value: OFFICIAL_VIEW_ONLY
   - key: ENABLE_DATA_INGESTION_SCHEDULER
     value: "0"
+  depends_on:
+  - opsflood-db
