@@ -1,22 +1,46 @@
 # Render Docker Deployment
 
-This repo is now configured to run as a single Render web service.
+This repo is now configured to run on Render with a Docker web service and PostgreSQL database.
 
 ## What gets deployed
 
-- `frontend/` is built in the Docker image with Node.
-- `backend/app.py` serves the built SPA from `frontend/dist`.
-- Render only needs one web service using the root `Dockerfile`.
+- **Web Service**: `frontend/` is built in the Docker image with Node. `backend/app.py` serves the built SPA from `frontend/dist`.
+- **PostgreSQL Database**: Operational store for predictions, telemetry snapshots, and audit logs (automatically provisioned via render.yaml).
+- Single root `Dockerfile` handles the entire application.
 
 ## Render setup
 
-Use the included [render.yaml](render.yaml) blueprint or create the service manually with these values:
+Use the included [render.yaml](render.yaml) blueprint which automatically provisions:
 
-- Environment: `Docker`
-- Root directory: repository root (`.`)
-- Docker context: `.`
-- Dockerfile path: `./Dockerfile`
-- Health check path: `/health`
+1. **PostgreSQL Service** (`opsflood-db`)
+   - Database: `opsflood_db`
+   - PostgreSQL 15
+   - Free tier
+   - Region: Oregon
+
+2. **Web Service** (`opsflood`)
+   - Environment: `Docker`
+   - Root directory: repository root (`.`)
+   - Docker context: `.`
+   - Dockerfile path: `./Dockerfile`
+   - Health check path: `/health`
+   - Linked to PostgreSQL database via `DATABASE_URL` environment variable
+   - Depends on database service startup
+
+## Deploying with render.yaml blueprint
+
+1. Push this repository to GitHub
+2. Go to [Render Dashboard](https://dashboard.render.com)
+3. Click **Create** → **Create from YAML**
+4. Select this GitHub repository
+5. Render will automatically read [render.yaml](render.yaml) and create both the PostgreSQL service and web service
+6. Set `OPENWEATHER_API_KEY` in the Render dashboard (required for weather data)
+7. Commit and push changes to trigger auto-deploy (or manually deploy from Render dashboard)
+
+The blueprint automatically:
+- Provisions a PostgreSQL 15 database with schemas for predictions, telemetry, and audit logs
+- Configures the web service to connect via `DATABASE_URL`
+- Sets up service dependencies so the database is ready before the web service starts
 
 ## CI gate before auto-deploy
 
@@ -30,8 +54,8 @@ That keeps the current Docker deploy flow intact while still validating:
 
 ## Required env vars
 
-- `OPENWEATHER_API_KEY`
-- `DATABASE_URL`
+- `OPENWEATHER_API_KEY` — Your OpenWeather API key (set manually in Render dashboard)
+- `DATABASE_URL` — **Auto-provisioned** by the PostgreSQL service in render.yaml (no manual setup needed)
 
 ## Optional env vars
 
@@ -43,6 +67,34 @@ That keeps the current Docker deploy flow intact while still validating:
 - `DATA_INGESTION_INTERVAL_MINUTES=60`
 
 `CORS_ORIGINS` is usually not needed for the single-service deploy because the frontend and backend share the same origin.
+
+## Database management
+
+### Accessing your PostgreSQL database
+
+After deployment, you can access your PostgreSQL database:
+
+1. **From Render Dashboard**:
+   - Go to the `opsflood-db` service in your Render dashboard
+   - Find the **External Database URL** (looks like `postgresql://user:pass@host:port/opsflood_db`)
+   - Use this URL with any PostgreSQL client (psql, DBeaver, pgAdmin, etc.)
+
+2. **Database tables created automatically**:
+   - `predictions` — Flood prediction records with confidence scores
+   - `telemetry_snapshots` — System telemetry and monitoring data
+   - `audit_logs` — Event audit trail for compliance
+
+3. **Local database connection (during development)**:
+   ```bash
+   # Connect to the remote Render database from your local machine
+   psql postgresql://user:password@host.render.com:5432/opsflood_db
+   ```
+
+### Monitoring database usage
+
+- Render free-tier PostgreSQL: 1GB storage limit
+- Monitor usage in Render dashboard under the `opsflood-db` service
+- If you exceed limits, upgrade to a paid tier or implement data archival
 
 ## Local Docker check
 
