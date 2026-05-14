@@ -159,6 +159,55 @@ curl -X POST "https://ep-your-endpoint.apirest.c-2.ap-southeast-1.aws.neon.tech/
 
 Your backend currently uses PostgreSQL connection pooling (recommended for web services). The REST API is available if you need serverless-optimized queries in the future.
 
+## GitHub Actions: Neon PR Branching
+
+This project includes a GitHub Actions workflow (`.github/workflows/neon-branch.yml`) that automatically creates isolated Neon database branches for pull requests. This allows testing database schema changes safely without affecting production.
+
+### How it works
+
+1. **On PR open/update**: Creates a temporary Neon branch named `preview/pr-{number}-{branch-name}`
+2. **Test in isolation**: Run tests and database migrations against the isolated branch
+3. **On PR close**: Automatically deletes the temporary branch (expires in 2 weeks if not closed)
+
+### Setup GitHub Secrets and Variables
+
+1. Go to your GitHub repository **Settings** → **Secrets and variables** → **Actions**
+
+2. Add the following **Repository Secrets**:
+   - `NEON_API_KEY` — Your Neon API key (from [Neon Account Settings](https://console.neon.tech/app/settings/api-keys))
+
+3. Add the following **Repository Variables**:
+   - `NEON_PROJECT_ID` — Your Neon project ID (from [Neon Console](https://console.neon.tech) → Project settings)
+
+### Using the Neon PR branch in tests
+
+The workflow outputs the temporary database URL. You can uncomment the example steps in `.github/workflows/neon-branch.yml` to:
+
+```yaml
+- name: Run Migrations
+  run: npm run db:migrate
+  env:
+    DATABASE_URL: "${{ steps.create_neon_branch.outputs.db_url_with_pooler }}"
+```
+
+Or run schema diff checks to see what changed:
+
+```yaml
+- name: Post Schema Diff Comment to PR
+  uses: neondatabase/schema-diff-action@v1
+  with:
+    project_id: ${{ vars.NEON_PROJECT_ID }}
+    compare_branch: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
+    api_key: ${{ secrets.NEON_API_KEY }}
+```
+
+### Benefits
+
+- **Isolated testing**: Each PR gets its own database
+- **Safe schema changes**: Test migrations without affecting production
+- **Automatic cleanup**: Branches auto-delete when PR closes
+- **Free tier compatible**: Uses Neon's branch feature included in free tier
+
 ## Local Docker check
 
 ```bash
