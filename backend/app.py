@@ -52,11 +52,13 @@ try:
         severity_from_entry,
     )
     from backend.postgres_store import PostgresOperationalStore
+    from backend.model_metrics import evaluate_and_log_metrics
 except ImportError:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
     from postgres_store import PostgresOperationalStore
+    from model_metrics import evaluate_and_log_metrics
 
 warnings.filterwarnings('ignore')
 operational_store = PostgresOperationalStore()
@@ -2183,6 +2185,9 @@ class KolhapurFloodPredictor:
         
         X_train_scaled = self.scaler.fit_transform(X_train)
         self.model.fit(X_train_scaled, y_train)
+
+        # Evaluate and log model metrics
+        evaluate_and_log_metrics(self.model, self.scaler, X_test, y_test)
 
         self.is_trained = True
         fallback_model_path, fallback_scaler_path = default_model_artifact_paths()
