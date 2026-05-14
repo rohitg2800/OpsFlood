@@ -1,46 +1,61 @@
 # Render Docker Deployment
 
-This repo is now configured to run on Render with a Docker web service and PostgreSQL database.
+This repo is now configured to run on Render with a Docker web service connected to a Neon serverless PostgreSQL database.
 
 ## What gets deployed
 
 - **Web Service**: `frontend/` is built in the Docker image with Node. `backend/app.py` serves the built SPA from `frontend/dist`.
-- **PostgreSQL Database**: Operational store for predictions, telemetry snapshots, and audit logs (automatically provisioned via render.yaml).
+- **Neon PostgreSQL Database**: Serverless PostgreSQL with connection pooling for predictions, telemetry snapshots, and audit logs.
 - Single root `Dockerfile` handles the entire application.
 
 ## Render setup
 
-Use the included [render.yaml](render.yaml) blueprint which automatically provisions:
+Use the included [render.yaml](render.yaml) blueprint with a Neon database connection.
 
-1. **PostgreSQL Service** (`opsflood-db`)
-   - Database: `opsflood_db`
-   - PostgreSQL 15
-   - Free tier
-   - Region: Oregon
+### Web Service (`opsflood`)
+- Environment: `Docker`
+- Root directory: repository root (`.`)
+- Docker context: `.`
+- Dockerfile path: `./Dockerfile`
+- Health check path: `/health`
+- Connected to Neon database via `DATABASE_URL` environment variable
 
-2. **Web Service** (`opsflood`)
-   - Environment: `Docker`
-   - Root directory: repository root (`.`)
-   - Docker context: `.`
-   - Dockerfile path: `./Dockerfile`
-   - Health check path: `/health`
-   - Linked to PostgreSQL database via `DATABASE_URL` environment variable
-   - Depends on database service startup
+## Setting up Neon database
 
-## Deploying with render.yaml blueprint
+### Step 1: Create Neon account and database
+
+1. Go to [Neon Console](https://console.neon.tech)
+2. Sign up or log in
+3. Click **Create a new project**
+4. Choose:
+   - **PostgreSQL version**: 15
+   - **Region**: Select closest to your Render region (e.g., us-east-1)
+   - **Database name**: `opsflood_db` (optional, can use default `neondb`)
+5. Click **Create project**
+
+### Step 2: Get your connection string
+
+1. In Neon console, click your project
+2. Click **Connection string** tab
+3. Select **Connection pooling** (important for serverless)
+4. Select **Pooler** (not Direct)
+5. Copy the connection string (looks like `postgresql://user:password@host.neon.tech/opsflood_db?sslmode=require`)
+
+### Step 3: Deploy to Render
 
 1. Push this repository to GitHub
 2. Go to [Render Dashboard](https://dashboard.render.com)
 3. Click **Create** → **Create from YAML**
 4. Select this GitHub repository
-5. Render will automatically read [render.yaml](render.yaml) and create both the PostgreSQL service and web service
-6. Set `OPENWEATHER_API_KEY` in the Render dashboard (required for weather data)
-7. Commit and push changes to trigger auto-deploy (or manually deploy from Render dashboard)
+5. Render will read [render.yaml](render.yaml) and create the web service
+6. Set environment variables in Render dashboard:
+   - **`DATABASE_URL`**: Paste your Neon connection pooling string from step 2
+   - **`NEON_DATABASE_API`**: Paste your Neon HTTP REST API endpoint (e.g., `https://ep-floral-hall-aogcv3y0.apirest.c-2.ap-southeast-1.aws.neon.tech/neondb/rest/v1`)
+   - **`NEON_API_KEY`**: Paste your Neon API authentication key
+   - **`OPENWEATHER_API_KEY`**: Your OpenWeather API key
+7. Commit and push to trigger auto-deploy
 
-The blueprint automatically:
-- Provisions a PostgreSQL 15 database with schemas for predictions, telemetry, and audit logs
-- Configures the web service to connect via `DATABASE_URL`
-- Sets up service dependencies so the database is ready before the web service starts
+The schema (predictions, telemetry_snapshots, audit_logs tables) will be created automatically on first connection.
 
 ## CI gate before auto-deploy
 
@@ -54,8 +69,10 @@ That keeps the current Docker deploy flow intact while still validating:
 
 ## Required env vars
 
-- `OPENWEATHER_API_KEY` — Your OpenWeather API key (set manually in Render dashboard)
-- `DATABASE_URL` — **Auto-provisioned** by the PostgreSQL service in render.yaml (no manual setup needed)
+- `OPENWEATHER_API_KEY` — Your OpenWeather API key (set in Render dashboard)
+- `DATABASE_URL` — Your Neon connection pooling string (set in Render dashboard)
+- `NEON_DATABASE_API` — Your Neon HTTP REST API endpoint (set in Render dashboard)
+- `NEON_API_KEY` — Your Neon API authentication key (set in Render dashboard)
 
 ## Optional env vars
 
@@ -68,16 +85,15 @@ That keeps the current Docker deploy flow intact while still validating:
 
 `CORS_ORIGINS` is usually not needed for the single-service deploy because the frontend and backend share the same origin.
 
-## Database management
+## Database management (Neon)
 
-### Accessing your PostgreSQL database
+### Accessing your Neon database
 
-After deployment, you can access your PostgreSQL database:
-
-1. **From Render Dashboard**:
-   - Go to the `opsflood-db` service in your Render dashboard
-   - Find the **External Database URL** (looks like `postgresql://user:pass@host:port/opsflood_db`)
-   - Use this URL with any PostgreSQL client (psql, DBeaver, pgAdmin, etc.)
+1. **From Neon Console**:
+   - Go to [Neon Console](https://console.neon.tech)
+   - Click your project
+   - Find the **SQL Editor** or **Connection string** tab
+   - Use **Connection pooling** endpoint for serverless connections
 
 2. **Database tables created automatically**:
    - `predictions` — Flood prediction records with confidence scores
@@ -86,15 +102,62 @@ After deployment, you can access your PostgreSQL database:
 
 3. **Local database connection (during development)**:
    ```bash
-   # Connect to the remote Render database from your local machine
-   psql postgresql://user:password@host.render.com:5432/opsflood_db
+   # Use the connection pooling string from Neon console
+   psql "postgresql://user:password@host.neon.tech/opsflood_db?sslmode=require"
    ```
 
-### Monitoring database usage
+4. **Visual database management**:
+   - Use Neon's built-in SQL editor in the console
+   - Or connect with DBeaver, pgAdmin using the connection string
 
-- Render free-tier PostgreSQL: 1GB storage limit
-- Monitor usage in Render dashboard under the `opsflood-db` service
-- If you exceed limits, upgrade to a paid tier or implement data archival
+### Benefits of Neon
+
+- **Serverless**: No idle charges, scales automatically
+- **Connection pooling**: Built-in PgBouncer for high connection volumes
+- **Free tier**: Generous free tier with 3GB storage
+- **Branching**: Create isolated database branches for testing
+- **Auto-suspend**: Pauses databases after 5 min of inactivity (free tier)
+
+### Monitoring usage
+
+- Neon free tier: 3GB storage, 3 projects, 10 branches
+- Monitor in Neon console under **Project settings** → **Billing**
+- Upgrade to paid tier if you need more storage or higher limits
+
+## Neon HTTP REST API
+
+Neon provides an HTTP REST API for serverless database queries. You can use this as an alternative to direct PostgreSQL connections.
+
+### Getting your API credentials
+
+1. Go to [Neon Console](https://console.neon.tech)
+2. Click **API keys** in the left sidebar
+3. Create a new API key and copy it
+4. For `NEON_DATABASE_API`, use the REST API endpoint provided in your Neon project settings (format: `https://ep-*.apirest.c-*.region.aws.neon.tech/database-name/rest/v1`)
+
+### Using the REST API in your backend
+
+Set these environment variables in Render:
+- `NEON_DATABASE_API` — Your HTTP REST API endpoint
+- `NEON_API_KEY` — Your Neon API authentication key
+
+Example API usage:
+```bash
+# Query data via HTTP
+curl -X POST "https://ep-your-endpoint.apirest.c-2.ap-southeast-1.aws.neon.tech/neondb/rest/v1/query" \
+  -H "Authorization: Bearer YOUR_NEON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "SELECT * FROM predictions LIMIT 10"
+  }'
+```
+
+### When to use REST API vs PostgreSQL connection
+
+- **PostgreSQL connection** (DATABASE_URL): Better for frequent/transactional queries, connection pooling
+- **REST API**: Better for serverless functions, AWS Lambda, edge computing, stateless APIs
+
+Your backend currently uses PostgreSQL connection pooling (recommended for web services). The REST API is available if you need serverless-optimized queries in the future.
 
 ## Local Docker check
 
