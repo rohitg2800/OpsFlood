@@ -1,6 +1,8 @@
-import numpy as np
-import joblib
 import os
+from pathlib import Path
+
+import joblib
+import numpy as np
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -83,14 +85,21 @@ model.fit(X_train_scaled, y_train, verbose=False)
 # ── EVALUATE ─────────────────────────────────────────────────────────────────
 y_pred = model.predict(X_test_scaled)
 print(f"\n✅ XGBoost Bundle Accuracy: {accuracy_score(y_test, y_pred)*100:.2f}%")
-print(classification_report(
-    y_test, y_pred,
-    target_names=["LOW", "MODERATE", "SEVERE"]
-))
+print(classification_report(y_test, y_pred, target_names=["LOW", "MODERATE", "SEVERE"]))
 
 # ── SAVE AS NEW BUNDLE ───────────────────────────────────────────────────────
-os.makedirs("artifacts", exist_ok=True)
-joblib.dump(model,  "artifacts/xgboost_model.pkl")
-joblib.dump(scaler, "artifacts/xgboost_scaler.pkl")
-print("✅ Saved → artifacts/xgboost_model.pkl")
-print("✅ Saved → artifacts/xgboost_scaler.pkl")
+REPO_DIR = Path(__file__).resolve().parents[1]
+ARTIFACT_DIR = REPO_DIR / "artifacts" / "dvc" / "models"
+ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+
+model_path = ARTIFACT_DIR / "xgboost_flood_model.pkl"
+scaler_path = ARTIFACT_DIR / "xgboost_flood_scaler.pkl"
+features_path = ARTIFACT_DIR / "xgboost_flood_features.txt"
+
+joblib.dump(model, model_path)
+joblib.dump(scaler, scaler_path)
+features_path.write_text("\n".join(FEATURES) + "\n", encoding="utf-8")
+
+print(f"✅ Saved → {model_path}")
+print(f"✅ Saved → {scaler_path}")
+print(f"✅ Saved → {features_path}")

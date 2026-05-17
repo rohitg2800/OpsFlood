@@ -11,6 +11,7 @@ from .dependencies import (
     get_model_artifact_root,
     repo_relative_path,
     INDOFLOODS_STATE_KEYS,
+    REPO_DIR,
 )
 
 # ============= ARTIFACT CLASSIFICATION =============
@@ -77,6 +78,27 @@ def discover_model_artifacts() -> list[Dict[str, Any]]:
             artifacts.append(artifact)
 
     return sorted(artifacts, key=lambda artifact: artifact["relative_path"])
+
+def discover_legacy_artifacts_outside_store() -> list[str]:
+    """Discover artifact-like files under /artifacts that are outside active model store."""
+    artifact_root = os.path.abspath(get_model_artifact_root())
+    repo_artifacts_root = os.path.abspath(os.path.join(REPO_DIR, "artifacts"))
+    if not os.path.isdir(repo_artifacts_root):
+        return []
+
+    ignored: list[str] = []
+    for current_root, _dirs, filenames in os.walk(repo_artifacts_root):
+        current_root_abs = os.path.abspath(current_root)
+        if current_root_abs == artifact_root or current_root_abs.startswith(f"{artifact_root}{os.sep}"):
+            continue
+
+        for filename in sorted(filenames):
+            lower_name = filename.lower()
+            if not any(keyword in lower_name for keyword in FLOOD_ARTIFACT_KEYWORDS):
+                continue
+            ignored.append(repo_relative_path(os.path.join(current_root_abs, filename)))
+
+    return sorted(ignored)
 
 # ============= ARTIFACT BUNDLING =============
 def artifact_bundle_key(filename: str) -> str:
