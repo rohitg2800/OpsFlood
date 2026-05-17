@@ -27,7 +27,6 @@ This file is the routing table for frontend documentation.
 - [src/pages/GeoSpatialPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GeoSpatialPage.tsx)
 - [src/pages/TelemetryPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/TelemetryPage.tsx)
 - [src/pages/ArchivesPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/ArchivesPage.tsx)
-- [src/pages/GradientGeneratorPage.tsx](/Users/rohitraj/Desktop/flood-app-new/frontend/src/pages/GradientGeneratorPage.tsx)
 
 ## Component Map (High-use)
 

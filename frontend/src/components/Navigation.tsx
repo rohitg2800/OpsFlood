@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Activity, MapIcon, Radio, Database, ShieldCheck, AlertTriangle, Server, Waves, Palette } from 'lucide-react';
+import { Activity, MapIcon, Radio, Database, ShieldCheck, AlertTriangle, Server, Waves } from 'lucide-react';
 import clsx from 'clsx';
 import { useAppState } from '../context/AppContext';
 import { StatusBadge } from './OpsPrimitives';
@@ -35,7 +35,6 @@ export const Navigation: React.FC<NavigationProps> = ({ apiStatus }) => {
     { id: 'geo', label: 'Geo-Spatial', icon: MapIcon, path: '/geo' },
     { id: 'telemetry', label: 'Telemetry', icon: Radio, path: '/telemetry' },
     { id: 'archives', label: 'Archives', icon: Database, path: '/archives' },
-    { id: 'gradient', label: 'Gradient Lab', icon: Palette, path: '/gradient' },
   ];
   const currentSeverity = state.prediction.currentPrediction?.severity || 'LOW';
   const severityTone =
