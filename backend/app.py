@@ -73,8 +73,13 @@ def get_source_policy_mode() -> str:
     return configured if configured in SOURCE_POLICY_MODES else "OFFICIAL_VIEW_ONLY"
 
 
+def live_cwc_enabled() -> bool:
+    return env_flag("ENABLE_LIVE_CWC_IN_APP", default=True)
+
+
 def get_source_policy_payload() -> Dict[str, Any]:
     mode = get_source_policy_mode()
+    allow_live_cwc = live_cwc_enabled() and mode != "FALLBACK"
     base_sources = [
         {
             "label": "Open Data",
@@ -100,10 +105,12 @@ def get_source_policy_payload() -> Dict[str, Any]:
         return {
             "mode": mode,
             "label": "Open Data",
-            "description": "Use open/publicly reusable datasets as the legal default. Live in-app CWC scraping is disabled.",
-            "allow_live_cwc_in_app": False,
-            "telemetry_mode": "OPEN_DATA_CONTEXT",
-            "prediction_data_source": "Open Data Context + Manual Input",
+            "description": "Use open/publicly reusable datasets as the legal default. Live CWC telemetry is enabled for automatic operational monitoring."
+            if allow_live_cwc
+            else "Use open/publicly reusable datasets as the legal default. Live in-app CWC scraping is disabled.",
+            "allow_live_cwc_in_app": allow_live_cwc,
+            "telemetry_mode": "LIVE_CWC_CONTEXT" if allow_live_cwc else "OPEN_DATA_CONTEXT",
+            "prediction_data_source": "Live CWC + Open Data Context" if allow_live_cwc else "Open Data Context + Manual Input",
             "public_sources": base_sources,
         }
 
@@ -121,10 +128,12 @@ def get_source_policy_payload() -> Dict[str, Any]:
     return {
         "mode": "OFFICIAL_VIEW_ONLY",
         "label": "Official View Only",
-        "description": "Use official CWC portals for public monitoring, but keep in-app telemetry on manual or tactical context unless explicit reuse rights are obtained.",
-        "allow_live_cwc_in_app": False,
-        "telemetry_mode": "OFFICIAL_VIEW_ONLY",
-        "prediction_data_source": "Official View Only + Manual Input",
+        "description": "Official CWC telemetry is enabled for fully automatic in-app danger-level detection."
+        if allow_live_cwc
+        else "Use official CWC portals for public monitoring, but keep in-app telemetry on manual or tactical context unless explicit reuse rights are obtained.",
+        "allow_live_cwc_in_app": allow_live_cwc,
+        "telemetry_mode": "OFFICIAL_LIVE_IN_APP" if allow_live_cwc else "OFFICIAL_VIEW_ONLY",
+        "prediction_data_source": "Live CWC Detection + Manual Input" if allow_live_cwc else "Official View Only + Manual Input",
         "public_sources": base_sources,
     }
 
@@ -264,7 +273,21 @@ def persist_telemetry_record(state_name: str, station_name: str, limit: int, tel
 
 def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: str = "Kolhapur", limit: int = 6) -> Dict[str, Any]:
     policy = get_source_policy_payload()
-    tactical_fallback = cwc_scraper._build_tactical_telemetry(state_name=state_name, station_name=station_name, limit=limit)
+    if policy.get("allow_live_cwc_in_app"):
+        live_payload = cwc_scraper.get_live_telemetry(
+            state_name=state_name,
+            station_name=station_name,
+            limit=limit,
+        )
+        if isinstance(live_payload, dict):
+            live_payload["source_policy"] = policy
+            return live_payload
+
+    tactical_fallback = cwc_scraper._build_tactical_telemetry(
+        state_name=state_name,
+        station_name=station_name,
+        limit=limit,
+    )
 
     return {
         "status": "POLICY_LOCKED",

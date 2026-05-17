@@ -253,14 +253,21 @@ async def get_live_telemetry(
             "timestamp": current_timestamp_iso(),
         }
     
-    telemetry = {
-        "status": "POLICY_LOCKED",
-        "message": get_source_policy_payload()["description"],
-        "data_source": "TACTICAL_REGISTRY",
-        "source_policy": get_source_policy_payload(),
-        "timestamp": current_timestamp_iso(),
-        "data": cwc_scraper._build_tactical_telemetry(state_name=state, station_name=station, limit=limit),
-    }
+    source_policy = get_source_policy_payload()
+    if source_policy.get("allow_live_cwc_in_app"):
+        telemetry = cwc_scraper.get_live_telemetry(state_name=state, station_name=station, limit=limit)
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        telemetry["source_policy"] = source_policy
+    else:
+        telemetry = {
+            "status": "POLICY_LOCKED",
+            "message": source_policy["description"],
+            "data_source": "TACTICAL_REGISTRY",
+            "source_policy": source_policy,
+            "timestamp": current_timestamp_iso(),
+            "data": cwc_scraper._build_tactical_telemetry(state_name=state, station_name=station, limit=limit),
+        }
     
     snapshot_id = persist_telemetry_record(state, station, limit, telemetry, "/api/live-telemetry")
     telemetry["snapshot_id"] = snapshot_id
