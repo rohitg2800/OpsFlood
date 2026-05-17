@@ -213,6 +213,17 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       if (state.form.errors[action.payload.field] === action.payload.error) {
         return state;
       }
+      if (!action.payload.error) {
+        const nextErrors = { ...state.form.errors };
+        delete nextErrors[action.payload.field];
+        return {
+          ...state,
+          form: {
+            ...state.form,
+            errors: nextErrors
+          }
+        };
+      }
       return {
         ...state,
         form: {

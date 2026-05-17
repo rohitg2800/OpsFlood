@@ -82,6 +82,8 @@ class CWCRiverScraper:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
+        self.connect_timeout_seconds = max(1.0, float(os.getenv("CWC_CONNECT_TIMEOUT_SECONDS") or 3))
+        self.read_timeout_seconds = max(1.0, float(os.getenv("CWC_READ_TIMEOUT_SECONDS") or 8))
         self._last_telemetry_error_message = ""
         self._last_telemetry_error_log_at = None
         self._station_feed_retry_after = None
@@ -138,6 +140,21 @@ class CWCRiverScraper:
     def _build_update_time(self, offset_ms: float) -> str:
         timestamp = datetime.datetime.now() - datetime.timedelta(milliseconds=float(offset_ms))
         return timestamp.isoformat()
+
+    def _format_request_error(self, exc: requests.RequestException) -> str:
+        if isinstance(exc, requests.ConnectTimeout):
+            return "connect timeout"
+        if isinstance(exc, requests.ReadTimeout):
+            return "read timeout"
+        if isinstance(exc, requests.SSLError):
+            return "tls error"
+        if isinstance(exc, requests.ConnectionError):
+            return "connection error"
+
+        compact = " ".join(str(exc).split())
+        if len(compact) > 180:
+            compact = f"{compact[:177]}..."
+        return f"{exc.__class__.__name__}: {compact}"
 
     def _build_tactical_station_profiles(self, state_name: str, station_name: str):
         state_entry = get_state_severity_entry(state_name)
@@ -230,13 +247,14 @@ class CWCRiverScraper:
             "/warning-station",
         ]
         failures = []
+        host_connect_timeout = False
 
         for path in candidate_paths:
             try:
                 response = requests.get(
                     f"{self.cwc_api_base}{path}",
                     headers=self.headers,
-                    timeout=8,
+                    timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
                 )
                 if response.status_code == 404:
                     failures.append(f"{path}: 404")
@@ -249,17 +267,26 @@ class CWCRiverScraper:
                     return path, payload
 
                 failures.append(f"{path}: unexpected payload {type(payload).__name__}")
+            except requests.ConnectTimeout:
+                failures.append(f"{path}: connect timeout")
+                host_connect_timeout = True
+                break
+            except requests.RequestException as exc:
+                failures.append(f"{path}: {self._format_request_error(exc)}")
             except Exception as exc:
-                failures.append(f"{path}: {exc}")
+                failures.append(f"{path}: unexpected {exc.__class__.__name__}")
 
         failure_summary = " ; ".join(failures)
-        cooldown_seconds = 900 if failures and all(": 404" in failure for failure in failures) else 180
+        if host_connect_timeout:
+            cooldown_seconds = 300
+        else:
+            cooldown_seconds = 900 if failures and all(": 404" in failure for failure in failures) else 180
         self._remember_station_feed_failure(failure_summary, cooldown_seconds)
         raise RuntimeError(failure_summary)
 
     def _remember_station_feed_failure(self, message: str, cooldown_seconds: int):
         self._station_feed_failure_message = message
-        self._station_feed_retry_after = datetime.datetime.now() + datetime.timedelta(seconds=cooldown_seconds)
+        self._station_feed_retry_after = datetime.datetime.now() + datetime.timedelta(seconds=max(30, cooldown_seconds))
 
     def _clear_station_feed_failure(self):
         self._station_feed_failure_message = ""

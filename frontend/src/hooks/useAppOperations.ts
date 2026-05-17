@@ -290,49 +290,45 @@ export const useSystemInit = () => {
  */
 export const useFormValidation = (formData: any) => {
   const { dispatch } = useAppState();
+  const PEAK_LEVEL_MIN = 0;
+  const PEAK_LEVEL_MAX = 100;
+  const RAINFALL_7D_MIN = 0;
+  const RAINFALL_7D_MAX = 5000;
 
   const validateField = useCallback((field: string, value: any) => {
     let hasError = false;
     let errorMessage = '';
 
     if (field === 'Peak_Flood_Level_m') {
-      if (value < 0 || value > 25) {
+      if (value < PEAK_LEVEL_MIN || value > PEAK_LEVEL_MAX) {
         hasError = true;
-        errorMessage = 'Must be between 0 and 25 meters';
+        errorMessage = `Must be between ${PEAK_LEVEL_MIN} and ${PEAK_LEVEL_MAX} meters`;
       }
     }
 
     if (field === 'T7d') {
-      if (value < 0 || value > 1000) {
+      if (value < RAINFALL_7D_MIN || value > RAINFALL_7D_MAX) {
         hasError = true;
-        errorMessage = 'Must be between 0 and 1000 mm';
+        errorMessage = `Must be between ${RAINFALL_7D_MIN} and ${RAINFALL_7D_MAX} mm`;
       }
     }
 
-    if (hasError) {
-      dispatch({
-        type: 'SET_FORM_ERROR',
-        payload: { field, error: errorMessage }
-      });
-    }
+    dispatch({
+      type: 'SET_FORM_ERROR',
+      payload: { field, error: hasError ? errorMessage : '' }
+    });
 
     return !hasError;
-  }, [dispatch]);
+  }, [dispatch, PEAK_LEVEL_MAX, PEAK_LEVEL_MIN, RAINFALL_7D_MAX, RAINFALL_7D_MIN]);
 
   const validateAllFields = useCallback(() => {
-    let isValid = true;
-
-    if (formData.Peak_Flood_Level_m < 0 || formData.Peak_Flood_Level_m > 25) {
-      isValid = false;
-    }
-
-    if (formData.T7d < 0 || formData.T7d > 1000) {
-      isValid = false;
-    }
+    const peakValid = validateField('Peak_Flood_Level_m', Number(formData.Peak_Flood_Level_m || 0));
+    const rainfallValid = validateField('T7d', Number(formData.T7d || 0));
+    const isValid = peakValid && rainfallValid;
 
     dispatch({ type: 'SET_FORM_VALID', payload: isValid });
     return isValid;
-  }, [formData, dispatch]);
+  }, [formData, dispatch, validateField]);
 
   return { validateField, validateAllFields };
 };
@@ -630,9 +626,15 @@ export const useEnhancedPrediction = () => {
         });
       }
 
+      const peakLevelForPrediction =
+        typeof cwcData?.currentLevel === 'number'
+          ? cwcData.currentLevel
+          : Number(state.form.data.Peak_Flood_Level_m || 0);
+
       // Make prediction with state-specific model
       const predictionPayload = {
         ...state.form.data,
+        Peak_Flood_Level_m: peakLevelForPrediction,
         state: selectedState
       };
 

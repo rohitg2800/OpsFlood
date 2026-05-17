@@ -5,7 +5,7 @@ import {
   Waves, Radio, Brain, Target, Network
 } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
-import { useEnhancedPrediction, useSystemInit, useAlertNotifications, useFormValidation, useSensorAPI, useAutoRefresh } from '../hooks/useAppOperations';
+import { useEnhancedPrediction, useSystemInit, useAlertNotifications, useFormValidation, useSensorAPI, useAutoRefresh, useCWCIntegration } from '../hooks/useAppOperations';
 import { StateSelector } from '../components/StateSelector';
 import { CWCLiveDataDisplay } from '../components/CWCLiveDataDisplay';
 import { MonitoringProtocolAlert } from '../components/MonitoringProtocolAlert';
@@ -335,6 +335,7 @@ const DashboardPage: React.FC = () => {
   const { notifyUser } = useAlertNotifications();
   const { validateAllFields } = useFormValidation(state.form.data);
   const { fetchSensors, isLoading: sensorsLoading } = useSensorAPI();
+  const { fetchCWCData } = useCWCIntegration();
   const apiStatus = state.system.apiStatus;
 
   // STATE MANAGEMENT PRESERVED
@@ -350,6 +351,12 @@ const DashboardPage: React.FC = () => {
   const pendingMonitoringScrollRef = useRef(false);
   const monitoringAlertPulseTimeoutRef = useRef<number | null>(null);
   const [monitoringAlertPulse, setMonitoringAlertPulse] = useState(false);
+  const lastStateTelemetrySyncRef = useRef('');
+
+  const pushToast = useCallback((toast: Omit<Toast, 'id'>) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((prev) => [...prev, { ...toast, id }]);
+  }, []);
 
   const removeToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -675,6 +682,50 @@ const DashboardPage: React.FC = () => {
   }, [state.form.data.station, state.prediction.selectedCity]);
 
   useEffect(() => {
+    const selectedState = (state.prediction.selectedState || state.form.data.state || '').trim();
+    if (!selectedState) {
+      lastStateTelemetrySyncRef.current = '';
+      return;
+    }
+    if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
+    if (lastStateTelemetrySyncRef.current === selectedState) return;
+
+    lastStateTelemetrySyncRef.current = selectedState;
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const [cwcNode] = await Promise.all([
+            fetchCWCData({ force: true }),
+            fetchSensors({ force: true }),
+          ]);
+
+          if (!cancelled && typeof cwcNode?.currentLevel === 'number') {
+            dispatch({
+              type: 'SET_FORM_DATA',
+              payload: { Peak_Flood_Level_m: cwcNode.currentLevel },
+            });
+          }
+        } catch {
+          // Keep dashboard usable even when upstream telemetry is delayed.
+        }
+      })();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    apiStatus,
+    dispatch,
+    fetchCWCData,
+    fetchSensors,
+    state.form.data.state,
+    state.prediction.selectedState,
+  ]);
+
+  useEffect(() => {
     if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
 
     const timeoutId = window.setTimeout(() => {
@@ -762,7 +813,17 @@ const DashboardPage: React.FC = () => {
   const handlePredict = useCallback(async () => {
     const isValid = validateAllFields();
     if (!isValid) {
-      dispatch({ type: 'SET_ERROR', payload: 'Please fix input errors before inference.' });
+      const validationSummary = Object.values(state.form.errors || {})
+        .filter(Boolean)
+        .join(' ');
+      const message = validationSummary || 'Please fix input errors before inference.';
+      dispatch({ type: 'SET_ERROR', payload: message });
+      pushToast({
+        type: 'warning',
+        title: 'Validation required',
+        message,
+        duration: 4800,
+      });
       return;
     }
     pendingMonitoringScrollRef.current = true;
@@ -784,8 +845,14 @@ const DashboardPage: React.FC = () => {
       dispatch({ type: 'SET_LATENCY', payload: latency });
       const errorMessage = error instanceof Error ? error.message : 'Prediction failed.';
       dispatch({ type: 'SET_ERROR', payload: `Prediction failed: ${errorMessage}` });
+      pushToast({
+        type: 'error',
+        title: 'Execution failed',
+        message: errorMessage,
+        duration: 5500,
+      });
     }
-  }, [state.form.data, predictWithFullModel, dispatch, notifyUser, validateAllFields, rainfallTotalNow]);
+  }, [state.form.data, state.form.errors, predictWithFullModel, dispatch, notifyUser, validateAllFields, rainfallTotalNow, pushToast]);
 
 
   return (
@@ -820,6 +887,13 @@ const DashboardPage: React.FC = () => {
           </>
         }
       />
+      {state.system.errorMessage ? (
+        <ConsolePanel intensity="tertiary" className="mt-4 border border-[rgba(255,110,133,0.32)] bg-[rgba(255,110,133,0.1)]">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--ops-danger-soft)]">
+            {state.system.errorMessage}
+          </div>
+        </ConsolePanel>
+      ) : null}
 
       <ConsolePanel intensity="primary" frameTone="olive" className="reveal-seq">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
