@@ -1,6 +1,13 @@
 import type { CWCSensorData, SensorData } from '../types';
 
 type BasinRegistryEntry = { r: string; st: string; w: number; d: number };
+export type FloodProneLocation = {
+  state: string;
+  station: string;
+  river: string;
+  warningLevel: number;
+  dangerLevel: number;
+};
 
 const UNKNOWN_STATE_FALLBACK: BasinRegistryEntry[] = [
   { r: 'Unknown Sector Alpha', st: 'Telemetry Node 1', w: 13.5, d: 15.0 },
@@ -245,6 +252,45 @@ function buildUpdateTime(offsetMs: number): string {
 
 export function getHydrologyBasinsForState(stateName: string): BasinRegistryEntry[] {
   return INDIA_RIVER_BASIN_REGISTRY[normalizeStateKey(stateName)] || UNKNOWN_STATE_FALLBACK;
+}
+
+export function getFloodProneLocations(stateName?: string): FloodProneLocation[] {
+  const stateKey = normalizeStateKey(stateName);
+  const sourceEntries = stateKey
+    ? { [stateKey]: INDIA_RIVER_BASIN_REGISTRY[stateKey] || UNKNOWN_STATE_FALLBACK }
+    : INDIA_RIVER_BASIN_REGISTRY;
+
+  const locations: FloodProneLocation[] = [];
+  const seen = new Set<string>();
+
+  Object.entries(sourceEntries).forEach(([state, basins]) => {
+    (basins || []).forEach((basin) => {
+      const station = String(basin.st || '').trim();
+      const river = String(basin.r || '').trim();
+      if (!station || !river) return;
+
+      const dedupeKey = `${normalizeKey(state)}|${normalizeKey(station)}|${normalizeKey(river)}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+
+      locations.push({
+        state,
+        station,
+        river,
+        warningLevel: Number(basin.w || 0),
+        dangerLevel: Number(basin.d || 0),
+      });
+    });
+  });
+
+  return locations.sort((left, right) => {
+    const leftState = normalizeKey(left.state);
+    const rightState = normalizeKey(right.state);
+    if (leftState !== rightState) {
+      return leftState.localeCompare(rightState);
+    }
+    return normalizeKey(left.station).localeCompare(normalizeKey(right.station));
+  });
 }
 
 export function getPreferredHydrologyNode(
