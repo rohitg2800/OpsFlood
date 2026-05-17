@@ -571,13 +571,21 @@ const DashboardPage: React.FC = () => {
     state.prediction.selectedCity,
     state.prediction.selectedState,
   ]);
-  const dashboardDangerLevel =
+  const liveDangerLevel =
     Number(leadRegionSensor?.danger_level || 0) ||
     Number(state.cwc.liveData.dangerLevel || 0) ||
+    0;
+  const dashboardDangerLevel =
+    liveDangerLevel ||
     state.prediction.currentPrediction?.danger_level ||
     state.prediction.dangerLevel ||
     effectiveStateMatrix?.danger_level_m ||
     13.5;
+  const dangerLevelSourceLabel = liveDangerLevel
+    ? `Live CWC · ${leadRegionSensor?.station || state.cwc.liveData.station || selectedRiverLocationLabel}`
+    : effectiveStateMatrix
+    ? 'State matrix threshold'
+    : 'Model baseline threshold';
   const nearbyWaterSourcesNote =
     selectedRegionSensorScope.mode === 'city_exact'
       ? `Direct station match found for ${selectedRiverLocationLabel}.`
@@ -997,7 +1005,7 @@ const DashboardPage: React.FC = () => {
         <MetricTile
           label="Risk score"
           value={state.prediction.currentPrediction ? currentRiskScore : '--'}
-          hint={effectiveStateMatrix ? `Danger level ${Number(effectiveStateMatrix.danger_level_m || dashboardDangerLevel).toFixed(1)}m` : `Danger level ${dashboardDangerLevel.toFixed(1)}m`}
+          hint={`Danger level ${dashboardDangerLevel.toFixed(1)}m · ${dangerLevelSourceLabel}`}
           icon={Droplets}
           tone={monitoringTone}
           mono={false}
@@ -1016,6 +1024,9 @@ const DashboardPage: React.FC = () => {
                 <StatusBadge tone="info">Model profile Alpha 4.2</StatusBadge>
                 <StatusBadge tone={stateMatrixStatus === 'ready' ? 'success' : stateMatrixStatus === 'error' ? 'danger' : 'warning'}>
                   Matrix {stateMatrixStatus}
+                </StatusBadge>
+                <StatusBadge tone={liveDangerLevel ? 'warning' : 'neutral'}>
+                  {liveDangerLevel ? `Live danger ${dashboardDangerLevel.toFixed(2)}m` : `Danger ${dashboardDangerLevel.toFixed(2)}m`}
                 </StatusBadge>
               </>
             }
