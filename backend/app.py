@@ -275,7 +275,47 @@ def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: 
         "data": tactical_fallback[:limit],
     }
 
-FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo")
+FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo", "xgboost")
+CLASS_LABEL_MAP = {
+    0: "LOW",
+    1: "MODERATE",
+    2: "SEVERE",
+    3: "CRITICAL",
+    "LOW": "LOW",
+    "MODERATE": "MODERATE",
+    "SEVERE": "SEVERE",
+    "CRITICAL": "CRITICAL",
+}
+EXPECTED_FEATURE_COLUMNS = [
+    "Peak_Flood_Level_m",
+    "Event_Duration_days",
+    "Time_to_Peak_days",
+    "Recession_Time_day",
+    "T1d",
+    "T2d",
+    "T3d",
+    "T4d",
+    "T5d",
+    "T6d",
+    "T7d",
+]
+_FEATURE_ALIAS_MAP = {
+    "peakfloodlevelm": "Peak_Flood_Level_m",
+    "peakfloodlevel": "Peak_Flood_Level_m",
+    "eventdurationdays": "Event_Duration_days",
+    "eventdurationday": "Event_Duration_days",
+    "timetopeakdays": "Time_to_Peak_days",
+    "timetopeakday": "Time_to_Peak_days",
+    "recessiontimeday": "Recession_Time_day",
+    "recessiontimedays": "Recession_Time_day",
+    "t1d": "T1d",
+    "t2d": "T2d",
+    "t3d": "T3d",
+    "t4d": "T4d",
+    "t5d": "T5d",
+    "t6d": "T6d",
+    "t7d": "T7d",
+}
 INDOFLOODS_STATE_KEYS = {
     "andhra_pradesh",
     "karnataka",
@@ -463,6 +503,16 @@ WEATHER_CACHE_TTL_SECONDS = 20 * 60
 WEATHER_TIMEZONE_OFFSET = 19800
 WEATHER_TIMEZONE_NAME = "Asia/Kolkata"
 WEATHER_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def canonical_feature_name(value: Any) -> str:
+    raw_value = str(value or "").strip().lower()
+    compact = re.sub(r"[^a-z0-9]", "", raw_value)
+    return _FEATURE_ALIAS_MAP.get(compact, "")
+
+
+def canonical_feature_set(values: list[Any]) -> set[str]:
+    return {feature for feature in (canonical_feature_name(item) for item in values) if feature}
 
 
 def backend_path(*parts: str) -> str:
@@ -1083,6 +1133,27 @@ def discover_model_artifacts() -> list[Dict[str, Any]]:
             artifacts.append(artifact)
 
     return sorted(artifacts, key=lambda artifact: artifact["relative_path"])
+
+
+def discover_legacy_artifacts_outside_store() -> list[str]:
+    artifact_root = os.path.abspath(get_model_artifact_root())
+    repo_artifacts_root = os.path.abspath(os.path.join(REPO_DIR, "artifacts"))
+    if not os.path.isdir(repo_artifacts_root):
+        return []
+
+    ignored: list[str] = []
+    for current_root, _dirs, filenames in os.walk(repo_artifacts_root):
+        current_root_abs = os.path.abspath(current_root)
+        if current_root_abs == artifact_root or current_root_abs.startswith(f"{artifact_root}{os.sep}"):
+            continue
+
+        for filename in sorted(filenames):
+            lower_name = filename.lower()
+            if not any(keyword in lower_name for keyword in FLOOD_ARTIFACT_KEYWORDS):
+                continue
+            ignored.append(repo_relative_path(os.path.join(current_root_abs, filename)))
+
+    return sorted(ignored)
 
 
 def artifact_bundle_key(filename: str) -> str:
@@ -1733,6 +1804,35 @@ class KolhapurFloodPredictor:
     def resolve_model_artifact(self, relative_path: str) -> str:
         return resolve_model_artifact_path(relative_path)
 
+    def expected_feature_count(self) -> int:
+        return len(EXPECTED_FEATURE_COLUMNS)
+
+    def _load_bundle_feature_manifest(self, bundle: Dict[str, Any]) -> list[str]:
+        feature_entries: list[str] = []
+        for feature_path_rel in bundle.get("features", []) or []:
+            try:
+                resolved_path = self.resolve_model_artifact(feature_path_rel)
+            except Exception:
+                continue
+            preview = read_model_artifact_preview(resolved_path)
+            if isinstance(preview, list):
+                feature_entries.extend(preview)
+            elif isinstance(preview, dict):
+                feature_entries.extend(preview.keys())
+        return [str(item).strip() for item in feature_entries if str(item).strip()]
+
+    def _bundle_features_match_expected(self, bundle: Dict[str, Any]) -> bool:
+        manifest = self._load_bundle_feature_manifest(bundle)
+        if not manifest:
+            return True
+
+        expected_set = canonical_feature_set(EXPECTED_FEATURE_COLUMNS)
+        manifest_set = canonical_feature_set(manifest)
+        if not manifest_set:
+            return False
+
+        return expected_set.issubset(manifest_set) or manifest_set.issubset(expected_set)
+
     def _resolve_default_bundle_key(self) -> str:
         flood_bundle = self.artifact_bundles.get("flood")
         if flood_bundle and flood_bundle.get("is_complete"):
@@ -1787,19 +1887,30 @@ class KolhapurFloodPredictor:
         return self.default_bundle_key, default_bundle
     
     def load_pretrained_model(self):
+        loaded = self.load_bundle_model(self.default_bundle_key)
+        if loaded:
+            self.model, self.scaler = loaded
+            self.is_trained = True
+            print("✅ ML model loaded successfully from artifact storage!")
+            return
+
         model_path = self.resolve_model_artifact(self.default_model_paths[0])
         scaler_path = self.resolve_model_artifact(self.default_model_paths[1])
         if os.path.exists(model_path) and os.path.exists(scaler_path):
             try:
                 self.model = joblib.load(model_path)
                 self.scaler = joblib.load(scaler_path)
+                expected_feature_count = self.expected_feature_count()
+                if int(getattr(self.scaler, "n_features_in_", expected_feature_count)) != expected_feature_count:
+                    raise ValueError("Fallback scaler feature count does not match expected inference schema.")
                 self.bundle_models[self.default_bundle_key] = (self.model, self.scaler)
                 self.is_trained = True
-                print("✅ ML model loaded successfully from artifact storage!")
-            except Exception:
-                self.train_with_real_data()
-        else:
-            self.train_with_real_data()
+                print("✅ ML model loaded successfully from default fallback artifacts!")
+                return
+            except Exception as exc:
+                print(f"⚠️ Failed loading fallback artifacts: {exc}")
+
+        self.train_with_real_data()
 
     def load_bundle_model(self, bundle_key: str) -> tuple[Any, Any] | None:
         if bundle_key in self.bundle_models:
@@ -1818,9 +1929,26 @@ class KolhapurFloodPredictor:
             self.bundle_models[bundle_key] = None
             return None
 
+        if not self._bundle_features_match_expected(bundle):
+            print(f"⚠️ Bundle '{bundle_key}' feature manifest is incompatible with expected inference schema.")
+            self.bundle_models[bundle_key] = None
+            return None
+
         try:
             mdl = joblib.load(model_path)
             sclr = joblib.load(scaler_path)
+
+            expected_feature_count = self.expected_feature_count()
+            scaler_feature_count = int(getattr(sclr, "n_features_in_", expected_feature_count))
+            model_feature_count = int(getattr(mdl, "n_features_in_", expected_feature_count))
+            if scaler_feature_count != expected_feature_count or model_feature_count != expected_feature_count:
+                print(
+                    f"⚠️ Bundle '{bundle_key}' rejected due to feature dimension mismatch: "
+                    f"model={model_feature_count}, scaler={scaler_feature_count}, expected={expected_feature_count}",
+                )
+                self.bundle_models[bundle_key] = None
+                return None
+
             self.bundle_models[bundle_key] = (mdl, sclr)
             return mdl, sclr
         except Exception as exc:
@@ -1904,19 +2032,9 @@ class KolhapurFloodPredictor:
         probs = model.predict_proba(features_scaled)[0]
         classes = list(getattr(model, "classes_", []))
 
-        label_map = {
-            0: "LOW",
-            1: "MODERATE",
-            2: "SEVERE",
-            "LOW": "LOW",
-            "MODERATE": "MODERATE",
-            "SEVERE": "SEVERE",
-            "CRITICAL": "CRITICAL",
-        }
-
         probability_map = {"LOW": 0.0, "MODERATE": 0.0, "SEVERE": 0.0, "CRITICAL": 0.0}
         for cls, prob in zip(classes, probs):
-            label = label_map.get(cls)
+            label = CLASS_LABEL_MAP.get(cls)
             if label:
                 probability_map[label] = float(prob)
 
@@ -1953,7 +2071,9 @@ class KolhapurFloodPredictor:
         rain_severe_ratio = total_rainfall / max(float(rain_thresholds["severe"]), 0.001)
         rain_critical_ratio = total_rainfall / max(float(rain_thresholds["critical"]), 0.001)
 
-        danger_ratio = peak / max(float(state_entry["danger_level_m"]), 0.001)
+        # Use critical threshold instead of danger_level_m because danger_level_m maps to severe
+        # in the current state matrix and would duplicate peak_severe_ratio.
+        danger_ratio = peak / max(float(peak_thresholds["critical"]), 0.001)
         concentration_ratio = max_daily_rainfall / max(avg_rainfall, 1.0)
         duration_ratio = float(input_data.Event_Duration_days) / 4.0
         flash_ratio = max(0.0, (2.5 - float(input_data.Time_to_Peak_days)) / 2.5)
@@ -2154,6 +2274,7 @@ class KolhapurFloodPredictor:
         }
     
     def get_training_data(self):
+        rng = np.random.default_rng(42)
         real_events = [
             [13.5, 5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 2],
             [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2],
@@ -2164,16 +2285,29 @@ class KolhapurFloodPredictor:
         ]
         synthetic_data = []
         for _ in range(1000): 
-            rand = np.random.random()
+            rand = float(rng.random())
             if rand > 0.66: 
-                peak, rain_7d, dur, label = np.random.uniform(12.2, 14.5), np.random.uniform(450, 700), np.random.uniform(3, 7), 2
+                peak, rain_7d, dur, label = float(rng.uniform(12.2, 14.5)), float(rng.uniform(450, 700)), float(rng.uniform(3, 7)), 2
             elif rand > 0.33: 
-                peak, rain_7d, dur, label = np.random.uniform(10.5, 12.1), np.random.uniform(250, 449), np.random.uniform(2, 4), 1
+                peak, rain_7d, dur, label = float(rng.uniform(10.5, 12.1)), float(rng.uniform(250, 449)), float(rng.uniform(2, 4)), 1
             else: 
-                peak, rain_7d, dur, label = np.random.uniform(5.0, 10.4), np.random.uniform(50, 249), np.random.uniform(0, 2), 0
+                peak, rain_7d, dur, label = float(rng.uniform(5.0, 10.4)), float(rng.uniform(50, 249)), float(rng.uniform(0, 2)), 0
             
-            rain_dist = np.random.dirichlet(np.ones(7), size=1)[0] * rain_7d
-            synthetic_data.append([peak, dur, np.random.uniform(1, 3), np.random.uniform(1, 4), rain_dist[0], rain_dist[1], rain_dist[2], rain_dist[3], rain_dist[4], rain_dist[5], rain_dist[6], label])
+            rain_dist = rng.dirichlet(np.ones(7), size=1)[0] * rain_7d
+            synthetic_data.append([
+                peak,
+                dur,
+                float(rng.uniform(1, 3)),
+                float(rng.uniform(1, 4)),
+                float(rain_dist[0]),
+                float(rain_dist[1]),
+                float(rain_dist[2]),
+                float(rain_dist[3]),
+                float(rain_dist[4]),
+                float(rain_dist[5]),
+                float(rain_dist[6]),
+                label,
+            ])
         
         all_data = real_events + synthetic_data
         return np.array([event[:-1] for event in all_data]), np.array([event[-1] for event in all_data])
@@ -2221,7 +2355,12 @@ class KolhapurFloodPredictor:
         return {
             "severity": sev,
             "confidence_percent": conf,
-            "probabilities": {"SEVERE": conf if sev in ["SEVERE", "CRITICAL"] else 5, "MODERATE": conf if sev=="MODERATE" else 15, "LOW": conf if sev=="LOW" else 5},
+            "probabilities": {
+                "CRITICAL": conf if sev == "CRITICAL" else 0,
+                "SEVERE": conf if sev == "SEVERE" else 5,
+                "MODERATE": conf if sev == "MODERATE" else 15,
+                "LOW": conf if sev == "LOW" else 5,
+            },
             "alert": "🚨" if sev in ["SEVERE", "CRITICAL"] else "⚠️" if sev == "MODERATE" else "🟢",
             "algorithm": "Python Heuristic Fallback",
             "data_source": "Manual Input",
@@ -2297,6 +2436,7 @@ async def run_ingestion_now():
 @app.get("/model-artifacts")
 async def get_model_artifacts():
     predictor.refresh_artifact_catalog()
+    ignored_legacy_artifacts = discover_legacy_artifacts_outside_store()
     return {
         "status": "success",
         "base_dir": repo_relative_path(predictor.artifact_store_dir),
@@ -2310,6 +2450,7 @@ async def get_model_artifacts():
         },
         "bundles": predictor.artifact_bundles,
         "artifacts": predictor.artifact_catalog,
+        "ignored_legacy_artifacts": ignored_legacy_artifacts,
     }
 
 

@@ -20,7 +20,17 @@ import numpy as np
 from typing import Any, Dict
 
 
-CLASS_NAMES = ["LOW", "MODERATE", "SEVERE"]
+CLASS_LABEL_MAP = {
+    0: "LOW",
+    1: "MODERATE",
+    2: "SEVERE",
+    3: "CRITICAL",
+    "LOW": "LOW",
+    "MODERATE": "MODERATE",
+    "SEVERE": "SEVERE",
+    "CRITICAL": "CRITICAL",
+}
+CLASS_NAMES = ["LOW", "MODERATE", "SEVERE", "CRITICAL"]
 
 
 def evaluate_and_log_metrics(
@@ -48,19 +58,21 @@ def evaluate_and_log_metrics(
     macro_f1    = round(f1_score(y_test, y_pred, average="macro"), 4)
     per_f1_raw  = f1_score(y_test, y_pred, average=None)
     accuracy    = round(accuracy_score(y_test, y_pred), 4)
-    cm          = confusion_matrix(y_test, y_pred).tolist()
-
-    classes = list(getattr(model, "classes_", range(len(per_f1_raw))))
-    label_map = {0: "LOW", 1: "MODERATE", 2: "SEVERE"}
+    labels = sorted(set(np.unique(y_test)).union(set(np.unique(y_pred))))
+    cm = confusion_matrix(y_test, y_pred, labels=labels).tolist()
+    classes = list(getattr(model, "classes_", labels))
     per_class_f1 = {
-        label_map.get(cls, str(cls)): round(float(score), 4)
+        CLASS_LABEL_MAP.get(cls, str(cls)): round(float(score), 4)
         for cls, score in zip(classes, per_f1_raw)
     }
+
+    report_target_names = [CLASS_LABEL_MAP.get(label, str(label)) for label in labels]
 
     report_str = classification_report(
         y_test,
         y_pred,
-        target_names=class_names,
+        labels=labels,
+        target_names=report_target_names,
         zero_division=0,
     )
 

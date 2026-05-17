@@ -15,7 +15,7 @@ from .dependencies import (
     STATE_SEVERITY_MATRIX,
     get_state_severity_entry,
 )
-from .model_artifacts import discover_model_artifacts, discover_model_bundles
+from .model_artifacts import discover_model_artifacts, discover_model_bundles, discover_legacy_artifacts_outside_store
 
 router = APIRouter(tags=["prediction"])
 
@@ -89,6 +89,7 @@ def persist_prediction_record(input_data, result):
 @router.get("/model-artifacts")
 async def get_model_artifacts(predictor = None):
     """Get available model artifacts."""
+    ignored_legacy_artifacts = discover_legacy_artifacts_outside_store()
     if predictor:
         predictor.refresh_artifact_catalog()
         return {
@@ -104,6 +105,7 @@ async def get_model_artifacts(predictor = None):
             },
             "bundles": predictor.artifact_bundles,
             "artifacts": predictor.artifact_catalog,
+            "ignored_legacy_artifacts": ignored_legacy_artifacts,
         }
     
     # Fallback if predictor not initialized
@@ -115,6 +117,7 @@ async def get_model_artifacts(predictor = None):
         "bundle_count": len(bundles),
         "bundles": bundles,
         "artifacts": artifacts,
+        "ignored_legacy_artifacts": ignored_legacy_artifacts,
     }
 
 @router.get("/model-artifacts/{state_name}")
