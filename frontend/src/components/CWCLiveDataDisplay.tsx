@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -11,7 +11,7 @@ import {
   Waves,
 } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
-import { useCWCIntegration } from '../hooks/useAppOperations';
+import { useAutoRefresh, useCWCIntegration } from '../hooks/useAppOperations';
 import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
 import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 import {
@@ -109,6 +109,13 @@ export function CWCLiveDataDisplay() {
 
     return () => window.clearTimeout(timeoutId);
   }, [fetchCWCData, state.system.apiStatus]);
+
+  const refreshCWCTelemetry = useCallback(() => {
+    if (state.system.apiStatus === 'OFFLINE' || state.system.apiStatus === 'INITIALIZING') return;
+    void fetchCWCData({ force: true });
+  }, [fetchCWCData, state.system.apiStatus]);
+
+  useAutoRefresh(refreshCWCTelemetry);
 
   const fillWidth = typeof cwcLevel === 'number' ? Math.min((cwcLevel / dangerLevel) * 100, 100) : 0;
   const distanceToDanger = typeof cwcLevel === 'number' ? dangerLevel - cwcLevel : null;

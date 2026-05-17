@@ -337,7 +337,14 @@ export function mergeSensorTelemetry(
 ): SensorData[] {
   const merged = new Map<string, SensorData>();
 
-  [...primarySensors, ...tacticalSensors].forEach((sensor) => {
+  tacticalSensors.forEach((sensor) => {
+    const key = normalizeKey(sensor.station);
+    if (!key) return;
+
+    merged.set(key, sensor);
+  });
+
+  primarySensors.forEach((sensor) => {
     const key = normalizeKey(sensor.station);
     if (!key) return;
 
@@ -348,6 +355,7 @@ export function mergeSensorTelemetry(
 
     const existing = merged.get(key)!;
     merged.set(key, {
+      ...existing,
       ...sensor,
       river_level: sensor.river_level ?? existing.river_level,
       rainfall_last_hour: sensor.rainfall_last_hour ?? existing.rainfall_last_hour,
