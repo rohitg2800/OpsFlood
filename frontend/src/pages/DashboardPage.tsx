@@ -5,7 +5,7 @@ import {
   Waves, Radio, Brain, Target, Network
 } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
-import { useEnhancedPrediction, useSystemInit, useAlertNotifications, useFormValidation, useSensorAPI } from '../hooks/useAppOperations';
+import { useEnhancedPrediction, useSystemInit, useAlertNotifications, useFormValidation, useSensorAPI, useAutoRefresh } from '../hooks/useAppOperations';
 import { StateSelector } from '../components/StateSelector';
 import { CWCLiveDataDisplay } from '../components/CWCLiveDataDisplay';
 import { MonitoringProtocolAlert } from '../components/MonitoringProtocolAlert';
@@ -668,6 +668,13 @@ const DashboardPage: React.FC = () => {
 
     return () => window.clearTimeout(timeoutId);
   }, [apiStatus, fetchSensors]);
+
+  const refreshDashboardTelemetry = useCallback(() => {
+    if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
+    void fetchSensors({ force: true });
+  }, [apiStatus, fetchSensors]);
+
+  useAutoRefresh(refreshDashboardTelemetry);
 
   useEffect(() => {
     if (!pendingMonitoringScrollRef.current) return;
