@@ -379,7 +379,20 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       }
       return {
         ...state,
-        prediction: { ...state.prediction, selectedState: action.payload }
+        prediction: {
+          ...state.prediction,
+          selectedState: action.payload,
+          // State lock change invalidates any previous city/station lock.
+          selectedCity: ''
+        },
+        form: {
+          ...state.form,
+          data: {
+            ...state.form.data,
+            state: action.payload,
+            station: ''
+          }
+        }
       };
     
     case 'SET_SELECTED_CITY':
