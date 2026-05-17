@@ -23,6 +23,8 @@ function App() {
   const location = useLocation();
   const apiStatus = state.system.apiStatus;
   const severity = state.prediction.currentPrediction?.severity || 'LOW';
+  const footerTelemetryNodes = (state.cwc.liveData.regionalData || []).slice(0, 3);
+  const fallbackFooterNode = state.cwc.liveData.station || state.prediction.selectedCity || state.form.data.station || state.prediction.selectedState || state.form.data.state || 'Selected Region';
   const backgroundRainIntensity = severity === 'CRITICAL' ? 36 : severity === 'SEVERE' ? 24 : 12;
   const backgroundWaveHeight = severity === 'CRITICAL' ? 42 : severity === 'SEVERE' ? 30 : 18;
 
@@ -76,9 +78,28 @@ function App() {
       <footer className="fixed bottom-0 left-0 right-0 z-40 hidden border-t border-[color:var(--ops-border)] bg-[rgba(10,15,22,0.78)] px-4 py-3 text-white shadow-[0_-18px_48px_rgba(0,0,0,0.2)] backdrop-blur-xl lg:block">
          <div className="mx-auto flex max-w-[1400px] items-center justify-between text-[10px] font-semibold text-[color:var(--ops-text-soft)]">
             <div className="flex items-center gap-6">
-               <span className="inline-flex items-center gap-2"><Radio size={12} className="animate-pulse text-[color:var(--ops-info)]"/> Irwin Bridge stable</span>
-               <span className="inline-flex items-center gap-2"><Radio size={12} className="text-[color:var(--ops-warning)]"/> Shirol rising</span>
-               <span className="inline-flex items-center gap-2"><Radio size={12} className="text-[color:var(--ops-success)]"/> Kagal network online</span>
+               {footerTelemetryNodes.length ? (
+                 footerTelemetryNodes.map((node, index) => {
+                   const status = (node.status || 'ACTIVE').toUpperCase();
+                   const dotClass =
+                     status === 'CRITICAL'
+                       ? 'text-[color:var(--ops-danger-soft)]'
+                       : status === 'WARNING'
+                       ? 'text-[color:var(--ops-warning)]'
+                       : 'text-[color:var(--ops-success)]';
+                   return (
+                     <span key={`${node.station}-${index}`} className="inline-flex items-center gap-2">
+                       <Radio size={12} className={`${index === 0 ? 'animate-pulse ' : ''}${dotClass}`} />
+                       {node.station} {status.toLowerCase()}
+                     </span>
+                   );
+                 })
+               ) : (
+                 <span className="inline-flex items-center gap-2">
+                   <Radio size={12} className="animate-pulse text-[color:var(--ops-info)]" />
+                   {fallbackFooterNode} telemetry syncing
+                 </span>
+               )}
             </div>
             <div className="flex items-center gap-2 text-[color:var(--ops-text-dim)]">
                Theatre engine v4.2 <ChevronRight size={12}/> Regional flood readiness

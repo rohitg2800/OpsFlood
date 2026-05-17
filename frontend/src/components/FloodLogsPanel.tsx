@@ -61,7 +61,6 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     predictionSource: state.prediction.cwcDataSource,
     sourcePolicyMode: state.system.sourcePolicy.mode,
   });
-  const fallbackDatasetCity = 'Kolhapur';
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -114,7 +113,7 @@ export const FloodLogsPanel: React.FC<FloodLogsPanelProps> = ({ onLogLoaded, bor
     return {
       title: `No mapped historical dataset for ${selectedCity}`,
       body: `This location does not currently ship with packaged historical flood rows in the demo dataset, so the table stays intentionally empty instead of falling back to fake records.`,
-      note: `You can continue with live telemetry, review persisted prediction history, or switch to ${fallbackDatasetCity} to review the included real dataset sample.`,
+      note: 'You can continue with live telemetry, review persisted prediction history, or switch to another region with a packaged archive sample.',
     };
   }, [historicalMessage, logs.length, selectedCity]);
 
