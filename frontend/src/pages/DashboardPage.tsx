@@ -738,6 +738,7 @@ const DashboardPage: React.FC = () => {
     ) {
       return;
     }
+    dispatch({ type: 'SET_FORM_DATA', payload: { station: nextCity } });
     dispatch({ type: 'SET_SELECTED_CITY', payload: nextCity });
   }, [customCity, dispatch, state.form.data.station, state.prediction.selectedCity]);
 
