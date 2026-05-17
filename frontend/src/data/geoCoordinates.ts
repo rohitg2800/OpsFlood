@@ -1,3 +1,5 @@
+import { INDIA_RIVER_BASIN_REGISTRY } from './hydrologyRegistry';
+
 export interface GeoCoordinate {
   name: string;
   state?: string;
@@ -56,7 +58,25 @@ export function normalizeGeoKey(value: string): string {
     .trim();
 }
 
-const GEO_INDEX = GEO_ENTRIES.reduce<Record<string, GeoCoordinate>>((acc, entry) => {
+const ENRICHED_GEO_ENTRIES = GEO_ENTRIES.map((entry) => {
+  const basinAliases =
+    INDIA_RIVER_BASIN_REGISTRY[normalizeGeoKey(entry.state || '')]?.flatMap((basin) => [
+      basin.st,
+      basin.r,
+    ]) || [];
+
+  const aliases = Array.from(
+    new Set(
+      [entry.name, entry.state || '', ...entry.aliases, ...basinAliases]
+        .map((alias) => String(alias || '').trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return { ...entry, aliases };
+});
+
+const GEO_INDEX = ENRICHED_GEO_ENTRIES.reduce<Record<string, GeoCoordinate>>((acc, entry) => {
   for (const alias of entry.aliases) {
     acc[normalizeGeoKey(alias)] = {
       name: entry.name,

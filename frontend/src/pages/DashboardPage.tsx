@@ -37,24 +37,23 @@ import { getScopedSensorSelection, getSelectedRiverLocationLabel } from '../util
 import { deriveProbabilityLanes, getDominantProbabilityLane } from '../utils/probabilityLanes';
 import type { SensorData } from '../types';
 import { locationMatchesCandidate, normalizeGeoKey, resolveGeoCoordinate } from '../data/geoCoordinates';
+import { getFloodProneLocations, getHydrologyBasinsForState } from '../data/hydrologyRegistry';
 
 // ==========================================
 // DYNAMIC STATE GEOGRAPHY MAPPING
 // ==========================================
 const getStrategicLocations = (stateName: string) => {
-  const s = (stateName || '').toLowerCase();
-  if (s.includes('maharashtra')) return ['Shirol Sector', 'Irwin Bridge', 'Kagal High-Ground'];
-  if (s.includes('bihar')) return ['Koshi Barrage', 'Darbhanga Sector', 'Patna Lowlands'];
-  if (s.includes('assam')) return ['Majuli Island', 'Kaziranga Sector', 'Brahmaputra Banks'];
-  if (s.includes('kerala')) return ['Kuttanad Region', 'Vembanad Lowlands', 'Periyar Banks'];
-  if (s.includes('uttarakhand')) return ['Joshimath Sector', 'Rishikesh Ghats', 'Mandakini Basin'];
-  if (s.includes('gujarat')) return ['Surat Lowlands', 'Ukai Dam Sector', 'Tapi River Banks'];
-  if (s.includes('odisha') || s.includes('orissa')) return ['Mahanadi Delta', 'Cuttack Sector', 'Puri Coastal'];
-  if (s.includes('west bengal')) return ['Sundarbans Delta', 'Hooghly Banks', 'Siliguri Sector'];
-  if (s.includes('uttar pradesh')) return ['Varanasi Ghats', 'Prayagraj Lowlands', 'Ghaghara Basin'];
-  if (s.includes('punjab')) return ['Sutlej Banks', 'Ludhiana Sector', 'Ravi Basin'];
-  if (s.includes('tamil nadu')) return ['Chennai Lowlands', 'Kaveri Delta', 'Madurai Sector'];
-  // Default Generic Fallback for unmapped states
+  const basins = getHydrologyBasinsForState(stateName || '');
+  const stationLabels = Array.from(
+    new Set(
+      (basins || [])
+        .map((entry) => String(entry.st || '').trim())
+        .filter(Boolean),
+    ),
+  );
+  if (stationLabels.length) {
+    return stationLabels.slice(0, 3);
+  }
   return ['Sector Alpha', 'Central Barrage', 'Low-Elevation Zones'];
 };
 
@@ -445,6 +444,14 @@ const DashboardPage: React.FC = () => {
   // DYNAMIC STRATEGIC RESPONSE LOGIC
   // -----------------------------------------------------
   const dynamicLocations = getStrategicLocations(state.prediction.selectedState);
+  const floodProneLocationSuggestions = useMemo(() => {
+    const scopedState = state.prediction.selectedState || state.form.data.state || '';
+    const scoped = getFloodProneLocations(scopedState);
+    if (scoped.length) {
+      return scoped.slice(0, 180);
+    }
+    return getFloodProneLocations().slice(0, 180);
+  }, [state.form.data.state, state.prediction.selectedState]);
   
   const strategicResponses = dynamicLocations.map((area, index) => {
     if (severity === 'CRITICAL' || severity === 'SEVERE') {
@@ -873,6 +880,7 @@ const DashboardPage: React.FC = () => {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <input
                   type="text"
+                  list="flood-prone-location-options"
                   value={customCity}
                   onChange={(e) => setCustomCity(e.target.value)}
                   onKeyDown={(e) => {
@@ -888,9 +896,21 @@ const DashboardPage: React.FC = () => {
                   Lock target
                 </ActionButton>
               </div>
+              <datalist id="flood-prone-location-options">
+                {floodProneLocationSuggestions.map((location) => (
+                  <option
+                    key={`${location.state}-${location.station}-${location.river}`}
+                    value={location.station}
+                    label={`${location.station} · ${location.river} · ${location.state}`}
+                  />
+                ))}
+              </datalist>
               <div className="flex flex-wrap gap-2">
                 <StatusBadge tone="info">
                   Active target {(state.prediction.selectedCity || state.form.data.station || 'None').toUpperCase()}
+                </StatusBadge>
+                <StatusBadge tone="neutral">
+                  {floodProneLocationSuggestions.length} flood-prone nodes indexed
                 </StatusBadge>
               </div>
             </div>
