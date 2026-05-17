@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Activity, MapIcon, Radio, Database, ShieldCheck, AlertTriangle, Server, Waves } from 'lucide-react';
+import { Activity, MapIcon, Radio, Database, ShieldCheck, AlertTriangle, Server, Waves, Palette } from 'lucide-react';
 import clsx from 'clsx';
 import { useAppState } from '../context/AppContext';
 import { StatusBadge } from './OpsPrimitives';
@@ -35,6 +35,7 @@ export const Navigation: React.FC<NavigationProps> = ({ apiStatus }) => {
     { id: 'geo', label: 'Geo-Spatial', icon: MapIcon, path: '/geo' },
     { id: 'telemetry', label: 'Telemetry', icon: Radio, path: '/telemetry' },
     { id: 'archives', label: 'Archives', icon: Database, path: '/archives' },
+    { id: 'gradient', label: 'Gradient Lab', icon: Palette, path: '/gradient' },
   ];
   const currentSeverity = state.prediction.currentPrediction?.severity || 'LOW';
   const severityTone =
@@ -85,7 +86,10 @@ export const Navigation: React.FC<NavigationProps> = ({ apiStatus }) => {
             </div>
           </div>
 
-          <nav className="mt-5 hidden grid-cols-4 gap-3 rounded-xl bg-[rgba(9,13,18,0.48)] p-2.5 lg:grid">
+          <nav
+            className="mt-5 hidden gap-3 rounded-xl bg-[rgba(9,13,18,0.48)] p-2.5 lg:grid"
+            style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}
+          >
             {navItems.map((item) => (
               <NavLink
                 key={item.id}
@@ -120,7 +124,10 @@ export const Navigation: React.FC<NavigationProps> = ({ apiStatus }) => {
       </header>
 
       <nav className="fixed inset-x-3 bottom-3 z-50 rounded-[1.35rem] ops-frame frame-neutral border-0 bg-[rgba(12,17,24,0.96)] px-2.5 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+10px)] shadow-[0_26px_80px_rgba(0,0,0,0.42)] backdrop-blur-xl lg:hidden">
-        <div className="grid grid-cols-4 gap-3">
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}
+        >
           {navItems.map((item) => (
             <NavLink
               key={item.id}

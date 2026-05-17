@@ -11,6 +11,7 @@ import DashboardPage from './pages/DashboardPage';
 import GeoSpatialPage from './pages/GeoSpatialPage';
 import TelemetryPage from './pages/TelemetryPage';
 import ArchivesPage from './pages/ArchivesPage';
+import { GradientGeneratorPage } from './pages/GradientGeneratorPage';
 
 // ==========================================
 // MAIN APPLICATION
@@ -66,6 +67,7 @@ function App() {
             <Route path="/geo" element={<GeoSpatialPage />} />
             <Route path="/telemetry" element={<TelemetryPage />} />
             <Route path="/archives" element={<ArchivesPage />} />
+            <Route path="/gradient" element={<GradientGeneratorPage />} />
           </Routes>
         </Suspense>
       </main>
