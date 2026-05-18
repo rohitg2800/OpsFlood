@@ -58,7 +58,7 @@ const getStrategicLocations = (stateName: string) => {
 };
 
 // ==========================================
-// LUXE SUB-COMPONENTS (EMS STYLED)
+// LUXE SUB-COMPONENTS
 // ==========================================
 
 const LuxeCard = ({
@@ -86,9 +86,9 @@ const LuxeInput = ({
       {label}
     </label>
     <div className="relative">
-      <input 
-        {...props} 
-        className={`${opsFieldClass} font-mono text-base font-bold`} 
+      <input
+        {...props}
+        className={`${opsFieldClass} font-mono text-base font-bold`}
       />
       <div className="absolute right-3 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[color:var(--ops-primary)]/50" />
     </div>
@@ -103,37 +103,23 @@ const chipButtonClass =
 
 const getTrendMeta = (trend?: string) => {
   if (trend === 'RISING') {
-    return {
-      icon: TrendingUp,
-      tone: 'border-sky-400/28 bg-sky-400/10 text-sky-200',
-    };
+    return { icon: TrendingUp, tone: 'border-sky-400/28 bg-sky-400/10 text-sky-200' };
   }
   if (trend === 'FALLING') {
-    return {
-      icon: TrendingDown,
-      tone: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
-    };
+    return { icon: TrendingDown, tone: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' };
   }
-  return {
-    icon: Minus,
-    tone: 'border-white/12 bg-white/[0.05] text-[color:var(--ops-text-soft)]',
-  };
+  return { icon: Minus, tone: 'border-white/12 bg-white/[0.05] text-[color:var(--ops-text-soft)]' };
 };
 
 const getSensorStatusTone = (status: string) => {
-  if (status === 'CRITICAL') {
-    return 'border-[rgba(255,110,133,0.35)] bg-[rgba(255,110,133,0.12)] text-[color:var(--ops-danger-soft)]';
-  }
-  if (status === 'WARNING') {
-    return 'border-amber-400/28 bg-amber-400/10 text-amber-100';
-  }
+  if (status === 'CRITICAL') return 'border-[rgba(255,110,133,0.35)] bg-[rgba(255,110,133,0.12)] text-[color:var(--ops-danger-soft)]';
+  if (status === 'WARNING') return 'border-amber-400/28 bg-amber-400/10 text-amber-100';
   return 'border-emerald-400/28 bg-emerald-400/10 text-emerald-200';
 };
 
 const RegionSensorCard = ({ sensor }: { sensor: SensorData }) => {
   const trendMeta = getTrendMeta(sensor.trend);
   const TrendIcon = trendMeta.icon;
-
   return (
     <div className="space-y-4 rounded-[1rem] bg-[rgba(11,16,21,0.62)] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -177,12 +163,8 @@ interface NeuralNetworkGraphProps {
   matrixRegion?: string;
   matrixVerdict?: string | null;
   matrixStatus: 'idle' | 'loading' | 'ready' | 'error';
-  probabilityLanes: {
-    low: number;
-    moderate: number;
-    severe: number;
-    critical: number;
-  };
+  probabilityLanes: { low: number; moderate: number; severe: number; critical: number };
+  // FIX #5: dominantLane is a string (we pass dominantProbabilityLane[0] at call site)
   dominantLane: string;
 }
 
@@ -220,13 +202,7 @@ const NeuralNetworkGraph: React.FC<NeuralNetworkGraphProps> = ({
         action={
           <>
             <StatusBadge tone={matrixStatus === 'ready' ? 'success' : matrixStatus === 'error' ? 'danger' : 'warning'}>
-              {matrixStatus === 'ready'
-                ? 'Matrix linked'
-                : matrixStatus === 'loading'
-                ? 'Matrix syncing'
-                : matrixStatus === 'error'
-                ? 'Matrix error'
-                : 'Matrix standby'}
+              {matrixStatus === 'ready' ? 'Matrix linked' : matrixStatus === 'loading' ? 'Matrix syncing' : matrixStatus === 'error' ? 'Matrix error' : 'Matrix standby'}
             </StatusBadge>
             <StatusBadge tone="info">Lane {dominantLane}</StatusBadge>
             <StatusBadge tone={matrixVerdict === 'CRITICAL' ? 'danger' : matrixVerdict === 'SEVERE' ? 'warning' : matrixVerdict === 'MODERATE' ? 'info' : 'success'}>
@@ -262,10 +238,7 @@ const NeuralNetworkGraph: React.FC<NeuralNetworkGraphProps> = ({
             <div className="h-2 overflow-hidden rounded-full bg-black/30">
               <div
                 className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${Math.max(4, lane.value)}%`,
-                  backgroundColor: lane.fill,
-                }}
+                style={{ width: `${Math.max(4, lane.value)}%`, backgroundColor: lane.fill }}
               />
             </div>
           </InsetPanel>
@@ -274,15 +247,13 @@ const NeuralNetworkGraph: React.FC<NeuralNetworkGraphProps> = ({
 
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className={opsLabelClass}>Preferred-state nodes</div>
-        <div className="text-xs text-[color:var(--ops-text-faint)]">
-          Mean signal {averageSignal.toFixed(1)}%
-        </div>
+        <div className="text-xs text-[color:var(--ops-text-faint)]">Mean signal {averageSignal.toFixed(1)}%</div>
       </div>
 
       <div className="relative flex h-48 w-full items-center justify-between rounded-[1rem] bg-black/20 px-10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
         {layers.map((count, lIdx) => (
           <div key={lIdx} className="flex flex-col gap-2 z-10">
-            {Array.from({length: count}).map((_, nIdx) => (
+            {Array.from({ length: count }).map((_, nIdx) => (
               <div
                 key={nIdx}
                 className={`w-2.5 h-2.5 rounded-full transition-all hover:scale-150 ${
@@ -292,15 +263,15 @@ const NeuralNetworkGraph: React.FC<NeuralNetworkGraphProps> = ({
                   lIdx === 0
                     ? { boxShadow: '0 0 15px #bc9437' }
                     : lIdx === 3
-                      ? {
-                          backgroundColor: dominantConfig.fill,
-                          boxShadow: `0 0 ${16 + dominantConfig.value / 6}px ${dominantConfig.fill}`,
-                          transform: `scale(${0.95 + dominantConfig.value / 260})`,
-                        }
-                      : {
-                          opacity: hiddenNodeOpacity,
-                          boxShadow: `0 0 ${6 + averageSignal / 12}px rgba(255,255,255,0.08)`,
-                        }
+                    ? {
+                        backgroundColor: dominantConfig.fill,
+                        boxShadow: `0 0 ${16 + dominantConfig.value / 6}px ${dominantConfig.fill}`,
+                        transform: `scale(${0.95 + dominantConfig.value / 260})`,
+                      }
+                    : {
+                        opacity: hiddenNodeOpacity,
+                        boxShadow: `0 0 ${6 + averageSignal / 12}px rgba(255,255,255,0.08)`,
+                      }
                 }
               />
             ))}
@@ -308,9 +279,7 @@ const NeuralNetworkGraph: React.FC<NeuralNetworkGraphProps> = ({
         ))}
         <div
           className="absolute inset-0 -z-10 blur-3xl transition-all duration-500"
-          style={{
-            background: `linear-gradient(90deg, rgba(90,143,255,0.08), transparent, ${dominantConfig.fill}22)`,
-          }}
+          style={{ background: `linear-gradient(90deg, rgba(90,143,255,0.08), transparent, ${dominantConfig.fill}22)` }}
         />
       </div>
     </ConsolePanel>
@@ -329,7 +298,6 @@ function normalizeStateKey(stateName: string): string {
 // ==========================================
 
 const DashboardPage: React.FC = () => {
-  // HOOKS PRESERVED
   const { state, dispatch } = useAppState();
   const { predictWithFullModel } = useEnhancedPrediction();
   const { notifyUser } = useAlertNotifications();
@@ -338,7 +306,6 @@ const DashboardPage: React.FC = () => {
   const { fetchCWCData } = useCWCIntegration();
   const apiStatus = state.system.apiStatus;
 
-  // STATE MANAGEMENT PRESERVED
   const [stateFilter, setStateFilter] = useState('');
   const [customCity, setCustomCity] = useState('');
   const [selectedScenarioPreset, setSelectedScenarioPreset] = useState<string | null>(null);
@@ -359,7 +326,7 @@ const DashboardPage: React.FC = () => {
   }, []);
 
   const removeToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const stateKeyToDisplayName = useMemo(() => {
@@ -397,7 +364,7 @@ const DashboardPage: React.FC = () => {
 
   const rainfallTotalNow = [
     state.form.data.T1d, state.form.data.T2d, state.form.data.T3d, state.form.data.T4d,
-    state.form.data.T5d, state.form.data.T6d, state.form.data.T7d
+    state.form.data.T5d, state.form.data.T6d, state.form.data.T7d,
   ].reduce((a, b) => a + (Number(b) || 0), 0);
 
   const selectedStateKey = normalizeStateKey(state.prediction.selectedState);
@@ -434,52 +401,44 @@ const DashboardPage: React.FC = () => {
   })();
 
   const probabilityLanes = useMemo(() => deriveProbabilityLanes(state.prediction.currentPrediction), [state.prediction.currentPrediction]);
-  const dominantProbabilityLane = useMemo(() => getDominantProbabilityLane(probabilityLanes), [probabilityLanes]);
+  // FIX #5 & #8: getDominantProbabilityLane returns [string, number]. Extract [0] for string label.
+  const dominantProbabilityLaneTuple = useMemo(() => getDominantProbabilityLane(probabilityLanes), [probabilityLanes]);
+  const dominantProbabilityLane = dominantProbabilityLaneTuple[0]; // string only
+
   const severity = state.prediction.currentPrediction?.severity || 'LOW';
   const shouldEmphasizeMonitoringAlert = severity === 'CRITICAL' || severity === 'SEVERE';
   const currentConfidence = Number(state.prediction.currentPrediction?.confidence_percent || 0);
   const currentRiskScore = Number(state.prediction.currentPrediction?.risk_score || 0);
   const monitoringTone =
-    severity === 'CRITICAL'
-      ? 'danger'
-      : severity === 'SEVERE'
-      ? 'warning'
-      : severity === 'MODERATE'
-      ? 'info'
-      : 'success';
-  // -----------------------------------------------------
-  // DYNAMIC STRATEGIC RESPONSE LOGIC
-  // -----------------------------------------------------
+    severity === 'CRITICAL' ? 'danger' :
+    severity === 'SEVERE' ? 'warning' :
+    severity === 'MODERATE' ? 'info' : 'success';
+
   const dynamicLocations = getStrategicLocations(state.prediction.selectedState);
+
   const floodProneLocationSuggestions = useMemo(() => {
     const scopedState = state.prediction.selectedState || state.form.data.state || '';
     const scoped = getFloodProneLocations(scopedState);
-    if (scoped.length) {
-      return scoped.slice(0, 180);
-    }
+    if (scoped.length) return scoped.slice(0, 180);
     return getFloodProneLocations().slice(0, 180);
   }, [state.form.data.state, state.prediction.selectedState]);
-  
+
   const strategicResponses = dynamicLocations.map((area, index) => {
     if (severity === 'CRITICAL' || severity === 'SEVERE') {
       return {
         area,
         status: index === 0 ? 'EVACUATE' : index === 1 ? 'CRITICAL' : 'STAGING',
-        color: index === 0 ? 'text-[#ff0037]' : index === 1 ? 'text-orange-500' : 'text-blue-500'
+        color: index === 0 ? 'text-[#ff0037]' : index === 1 ? 'text-orange-500' : 'text-blue-500',
       };
     }
     if (severity === 'MODERATE') {
       return {
         area,
         status: index === 0 ? 'WARNING' : index === 1 ? 'MONITOR' : 'PREPARE',
-        color: index === 0 ? 'text-amber-500' : index === 1 ? 'text-amber-400' : 'text-blue-400'
+        color: index === 0 ? 'text-amber-500' : index === 1 ? 'text-amber-400' : 'text-blue-400',
       };
     }
-    return {
-      area,
-      status: 'SECURE',
-      color: 'text-emerald-500'
-    };
+    return { area, status: 'SECURE', color: 'text-emerald-500' };
   });
 
   const selectedRegionSensorScope = useMemo(() => {
@@ -489,8 +448,8 @@ const DashboardPage: React.FC = () => {
       selectedState: state.prediction.selectedState,
     });
   }, [state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.sensors.data]);
-  const selectedRegionSensors = selectedRegionSensorScope.sensors;
 
+  const selectedRegionSensors = selectedRegionSensorScope.sensors;
   const leadRegionSensor = selectedRegionSensors[0] || null;
   const leadTrendMeta = leadRegionSensor ? getTrendMeta(leadRegionSensor.trend) : null;
   const LeadTrendIcon = leadTrendMeta?.icon ?? Minus;
@@ -500,6 +459,7 @@ const DashboardPage: React.FC = () => {
     state.prediction.selectedState,
   );
   const dashboardWeatherTarget = selectedRiverLocationLabel || state.form.data.state || 'Selected Region';
+
   const currentLocationData = useMemo(
     () =>
       state.data.locationData?.lat && state.data.locationData?.lon
@@ -517,16 +477,10 @@ const DashboardPage: React.FC = () => {
       state.data.locationData?.state,
     ],
   );
-  const dashboardWeatherCoordinates = useMemo(() => {
-    const focusedLocation = resolveGeoCoordinate(
-      state.prediction.selectedCity,
-      state.form.data.station,
-    );
-    const stateLocation = resolveGeoCoordinate(
-      state.prediction.selectedState,
-      state.form.data.state,
-    );
 
+  const dashboardWeatherCoordinates = useMemo(() => {
+    const focusedLocation = resolveGeoCoordinate(state.prediction.selectedCity, state.form.data.station);
+    const stateLocation = resolveGeoCoordinate(state.prediction.selectedState, state.form.data.state);
     const focusTarget = state.prediction.selectedCity || state.form.data.station;
     const focusLocationMatchesState = Boolean(
       !focusTarget ||
@@ -535,41 +489,18 @@ const DashboardPage: React.FC = () => {
       !focusedLocation.state ||
       normalizeGeoKey(focusedLocation.state) === normalizeGeoKey(stateLocation.state),
     );
-
     if (focusedLocation && focusLocationMatchesState) {
       return { lat: focusedLocation.lat, lon: focusedLocation.lon };
     }
-
     if (focusTarget) {
-      if (
-        focusLocationMatchesState &&
-        locationMatchesCandidate(currentLocationData, focusTarget) &&
-        currentLocationData
-      ) {
-        return {
-          lat: currentLocationData.lat,
-          lon: currentLocationData.lon,
-        };
+      if (focusLocationMatchesState && locationMatchesCandidate(currentLocationData, focusTarget) && currentLocationData) {
+        return { lat: currentLocationData.lat, lon: currentLocationData.lon };
       }
-
-      if (stateLocation) {
-        return { lat: stateLocation.lat, lon: stateLocation.lon };
-      }
-
+      if (stateLocation) return { lat: stateLocation.lat, lon: stateLocation.lon };
       return undefined;
     }
-
-    if (stateLocation) {
-      return { lat: stateLocation.lat, lon: stateLocation.lon };
-    }
-
-    if (currentLocationData) {
-      return {
-        lat: currentLocationData.lat,
-        lon: currentLocationData.lon,
-      };
-    }
-
+    if (stateLocation) return { lat: stateLocation.lat, lon: stateLocation.lon };
+    if (currentLocationData) return { lat: currentLocationData.lat, lon: currentLocationData.lon };
     return undefined;
   }, [
     currentLocationData,
@@ -579,10 +510,6 @@ const DashboardPage: React.FC = () => {
     state.prediction.selectedState,
   ]);
 
-  // -------------------------------------------------------------------
-  // FIX 1: Live danger level — prefer lead sensor, then CWC, then state
-  // matrix. No hardcoded 13.5 fallback.
-  // -------------------------------------------------------------------
   const liveDangerLevel =
     Number(leadRegionSensor?.danger_level || 0) ||
     Number(state.cwc.liveData.dangerLevel || 0) ||
@@ -590,22 +517,16 @@ const DashboardPage: React.FC = () => {
 
   const dashboardDangerLevel: number | null =
     liveDangerLevel ||
-    (state.prediction.currentPrediction?.danger_level
-      ? Number(state.prediction.currentPrediction.danger_level)
-      : null) ||
-    (state.prediction.dangerLevel
-      ? Number(state.prediction.dangerLevel)
-      : null) ||
-    (effectiveStateMatrix?.danger_level_m
-      ? Number(effectiveStateMatrix.danger_level_m)
-      : null);
-  // null = no authoritative data yet; display '--' instead of a stale value.
+    (state.prediction.currentPrediction?.danger_level ? Number(state.prediction.currentPrediction.danger_level) : null) ||
+    (state.prediction.dangerLevel ? Number(state.prediction.dangerLevel) : null) ||
+    (effectiveStateMatrix?.danger_level_m ? Number(effectiveStateMatrix.danger_level_m) : null);
 
   const dangerLevelSourceLabel = liveDangerLevel
     ? `Live CWC · ${leadRegionSensor?.station || state.cwc.liveData.station || selectedRiverLocationLabel}`
     : effectiveStateMatrix
     ? 'State matrix threshold'
     : 'Model baseline threshold';
+
   const nearbyWaterSourcesNote =
     selectedRegionSensorScope.mode === 'city_exact'
       ? `Direct station match found for ${selectedRiverLocationLabel}.`
@@ -618,7 +539,6 @@ const DashboardPage: React.FC = () => {
   const heatmapData = useMemo(() => {
     const cityFocused = Boolean(state.prediction.selectedCity || state.form.data.station);
     const effectiveDanger = dashboardDangerLevel ?? 13.5;
-
     if (cityFocused && selectedRegionSensors.length) {
       return selectedRegionSensors.slice(0, 6).map((sensor) => {
         const level = Number(sensor.river_level || 0);
@@ -631,13 +551,7 @@ const DashboardPage: React.FC = () => {
               (sensor.status === 'CRITICAL' ? 18 : sensor.status === 'WARNING' ? 8 : 0),
           ),
         );
-
-        const severityBand =
-          risk >= 80 ? 'CRITICAL' :
-          risk >= 60 ? 'SEVERE' :
-          risk >= 40 ? 'MODERATE' :
-          'LOW';
-
+        const severityBand = risk >= 80 ? 'CRITICAL' : risk >= 60 ? 'SEVERE' : risk >= 40 ? 'MODERATE' : 'LOW';
         return {
           label: sensor.station,
           subLabel: selectedRiverLocationLabel,
@@ -646,21 +560,10 @@ const DashboardPage: React.FC = () => {
         };
       });
     }
-
-    const baseRisk =
-      severity === 'CRITICAL' ? 88 :
-      severity === 'SEVERE' ? 70 :
-      severity === 'MODERATE' ? 52 :
-      26;
-
+    const baseRisk = severity === 'CRITICAL' ? 88 : severity === 'SEVERE' ? 70 : severity === 'MODERATE' ? 52 : 26;
     return dynamicLocations.slice(0, 6).map((area, index) => {
       const risk = Math.max(12, Math.min(100, baseRisk - index * 8));
-      const severityBand =
-        risk >= 80 ? 'CRITICAL' :
-        risk >= 60 ? 'SEVERE' :
-        risk >= 40 ? 'MODERATE' :
-        'LOW';
-
+      const severityBand = risk >= 80 ? 'CRITICAL' : risk >= 60 ? 'SEVERE' : risk >= 40 ? 'MODERATE' : 'LOW';
       return {
         label: area,
         subLabel: state.prediction.selectedState,
@@ -686,26 +589,16 @@ const DashboardPage: React.FC = () => {
   }, [reloadStateMatrixIndex, stateMatrixStatus]);
 
   useEffect(() => {
-    if (apiStatus === 'ONLINE' && stateMatrixStatus === 'error') {
-      reloadStateMatrixIndex();
-    }
+    if (apiStatus === 'ONLINE' && stateMatrixStatus === 'error') reloadStateMatrixIndex();
   }, [apiStatus, reloadStateMatrixIndex, stateMatrixStatus]);
 
   useEffect(() => {
     setCustomCity(state.prediction.selectedCity || state.form.data.station || '');
   }, [state.form.data.station, state.prediction.selectedCity]);
 
-  // -------------------------------------------------------------------
-  // FIX 2: When a station is selected, auto-feed the live danger level
-  // of that station into the form's Peak_Flood_Level_m and into the
-  // prediction danger level state so the gauge and sidebar are in sync.
-  // -------------------------------------------------------------------
   useEffect(() => {
     const selectedState = (state.prediction.selectedState || state.form.data.state || '').trim();
-    if (!selectedState) {
-      lastStateTelemetrySyncRef.current = '';
-      return;
-    }
+    if (!selectedState) { lastStateTelemetrySyncRef.current = ''; return; }
     if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
     if (lastStateTelemetrySyncRef.current === selectedState) return;
 
@@ -718,18 +611,10 @@ const DashboardPage: React.FC = () => {
             fetchCWCData({ force: true }),
             fetchSensors({ force: true }),
           ]);
-
           if (cancelled) return;
 
-          // Resolve the best matching sensor for the selected station/city
-          const targetKey = (
-            state.prediction.selectedCity ||
-            state.form.data.station ||
-            ''
-          ).trim().toLowerCase();
-
+          const targetKey = (state.prediction.selectedCity || state.form.data.station || '').trim().toLowerCase();
           const sensors: any[] = Array.isArray(sensorList) ? sensorList : [];
-
           const leadSensor = targetKey
             ? sensors.find((s: any) =>
                 (s.station || '').toLowerCase().includes(targetKey) ||
@@ -737,32 +622,16 @@ const DashboardPage: React.FC = () => {
               ) ?? sensors[0]
             : sensors[0];
 
-          // Feed live danger level of matched station into prediction state
-          const liveSensorDanger = leadSensor?.danger_level
-            ? Number(leadSensor.danger_level)
-            : null;
-
+          const liveSensorDanger = leadSensor?.danger_level ? Number(leadSensor.danger_level) : null;
           if (liveSensorDanger && liveSensorDanger > 0) {
-            dispatch({
-              type: 'SET_DANGER_LEVEL',
-              payload: liveSensorDanger,
-            });
+            // FIX #1: SET_DANGER_LEVEL doesn't exist. Use SET_FORM_DATA to update Peak_Flood_Level_m.
+            dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: liveSensorDanger } });
           }
-
-          // Auto-apply CWC current river level only if form is untouched
           if (!state.form.isDirty) {
-            // Prefer live sensor danger level as the starting peak input
-            // so the form reflects realistic station thresholds.
             if (liveSensorDanger && liveSensorDanger > 0) {
-              dispatch({
-                type: 'SET_FORM_DATA',
-                payload: { Peak_Flood_Level_m: liveSensorDanger },
-              });
+              dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: liveSensorDanger } });
             } else if (typeof cwcNode?.currentLevel === 'number') {
-              dispatch({
-                type: 'SET_FORM_DATA',
-                payload: { Peak_Flood_Level_m: cwcNode.currentLevel },
-              });
+              dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: cwcNode.currentLevel } });
             }
           }
         } catch {
@@ -771,29 +640,16 @@ const DashboardPage: React.FC = () => {
       })();
     }, 120);
 
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
+    return () => { cancelled = true; window.clearTimeout(timeoutId); };
   }, [
-    apiStatus,
-    dispatch,
-    fetchCWCData,
-    fetchSensors,
-    state.form.data.state,
-    state.form.data.station,
-    state.form.isDirty,
-    state.prediction.selectedCity,
-    state.prediction.selectedState,
+    apiStatus, dispatch, fetchCWCData, fetchSensors,
+    state.form.data.state, state.form.data.station, state.form.isDirty,
+    state.prediction.selectedCity, state.prediction.selectedState,
   ]);
 
   useEffect(() => {
     if (apiStatus === 'OFFLINE' || apiStatus === 'INITIALIZING') return;
-
-    const timeoutId = window.setTimeout(() => {
-      void fetchSensors();
-    }, 180);
-
+    const timeoutId = window.setTimeout(() => { void fetchSensors(); }, 180);
     return () => window.clearTimeout(timeoutId);
   }, [apiStatus, fetchSensors]);
 
@@ -813,22 +669,13 @@ const DashboardPage: React.FC = () => {
     window.requestAnimationFrame(() => {
       const alertNode = monitoringAlertRef.current;
       if (!alertNode) return;
-
       const rect = alertNode.getBoundingClientRect();
-      const isOutsideViewport =
-        rect.top < 96 || rect.bottom > window.innerHeight - 96;
-
-      if (isOutsideViewport) {
-        alertNode.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-        });
-      }
+      const isOutsideViewport = rect.top < 96 || rect.bottom > window.innerHeight - 96;
+      if (isOutsideViewport) alertNode.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
       if (monitoringAlertPulseTimeoutRef.current !== null) {
         window.clearTimeout(monitoringAlertPulseTimeoutRef.current);
       }
-
       setMonitoringAlertPulse(false);
       if (shouldEmphasizeMonitoringAlert) {
         window.requestAnimationFrame(() => {
@@ -856,11 +703,7 @@ const DashboardPage: React.FC = () => {
     if (
       nextCity === (state.prediction.selectedCity || '').trim() &&
       nextCity === (state.form.data.station || '').trim()
-    ) {
-      return;
-    }
-    // Reset the telemetry sync ref so the useEffect re-runs and fetches
-    // the danger level for the newly locked station.
+    ) return;
     lastStateTelemetrySyncRef.current = '';
     dispatch({ type: 'SET_FORM_DATA', payload: { station: nextCity } });
     dispatch({ type: 'SET_SELECTED_CITY', payload: nextCity });
@@ -868,27 +711,17 @@ const DashboardPage: React.FC = () => {
 
   const scrollToPredictionInput = useCallback(() => {
     window.requestAnimationFrame(() => {
-      predictionInputRef.current?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
+      predictionInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
 
   const handlePredict = useCallback(async () => {
     const isValid = validateAllFields();
     if (!isValid) {
-      const validationSummary = Object.values(state.form.errors || {})
-        .filter(Boolean)
-        .join(' ');
+      const validationSummary = Object.values(state.form.errors || {}).filter(Boolean).join(' ');
       const message = validationSummary || 'Please fix input errors before inference.';
       dispatch({ type: 'SET_ERROR', payload: message });
-      pushToast({
-        type: 'warning',
-        title: 'Validation required',
-        message,
-        duration: 4800,
-      });
+      pushToast({ type: 'warning', title: 'Validation required', message, duration: 4800 });
       return;
     }
     pendingMonitoringScrollRef.current = true;
@@ -901,7 +734,7 @@ const DashboardPage: React.FC = () => {
         notifyUser({
           title: `⚠️ ${result.severity} FLOOD ALERT`,
           message: result.alert,
-          type: result.severity === 'CRITICAL' ? 'critical' : 'warning'
+          type: result.severity === 'CRITICAL' ? 'critical' : 'warning',
         });
       }
     } catch (error) {
@@ -910,15 +743,9 @@ const DashboardPage: React.FC = () => {
       dispatch({ type: 'SET_LATENCY', payload: latency });
       const errorMessage = error instanceof Error ? error.message : 'Prediction failed.';
       dispatch({ type: 'SET_ERROR', payload: `Prediction failed: ${errorMessage}` });
-      pushToast({
-        type: 'error',
-        title: 'Execution failed',
-        message: errorMessage,
-        duration: 5500,
-      });
+      pushToast({ type: 'error', title: 'Execution failed', message: errorMessage, duration: 5500 });
     }
-  }, [state.form.data, state.form.errors, predictWithFullModel, dispatch, notifyUser, validateAllFields, rainfallTotalNow, pushToast]);
-
+  }, [state.form.data, state.form.errors, predictWithFullModel, dispatch, notifyUser, validateAllFields, pushToast]);
 
   return (
     <PageShell>
@@ -939,9 +766,7 @@ const DashboardPage: React.FC = () => {
             >
               {state.prediction.isLoading ? 'Running inference' : 'Execute inference'}
             </ActionButton>
-            <StatusBadge tone={monitoringTone}>
-              Active severity {severity}
-            </StatusBadge>
+            <StatusBadge tone={monitoringTone}>Active severity {severity}</StatusBadge>
             <ActionButton
               onClick={reloadStateMatrixIndex}
               icon={RefreshCw}
@@ -952,6 +777,7 @@ const DashboardPage: React.FC = () => {
           </>
         }
       />
+
       {state.system.errorMessage ? (
         <ConsolePanel intensity="tertiary" className="mt-4 border border-[rgba(255,110,133,0.32)] bg-[rgba(255,110,133,0.1)]">
           <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--ops-danger-soft)]">
@@ -960,6 +786,7 @@ const DashboardPage: React.FC = () => {
         </ConsolePanel>
       ) : null}
 
+      {/* Status strip */}
       <ConsolePanel intensity="primary" frameTone="olive" className="reveal-seq">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -971,9 +798,7 @@ const DashboardPage: React.FC = () => {
             </InsetPanel>
             <InsetPanel className="space-y-1">
               <div className={opsLabelClass}>Location lock</div>
-              <div className="text-base font-semibold text-[color:var(--ops-text)]">
-                {selectedRiverLocationLabel}
-              </div>
+              <div className="text-base font-semibold text-[color:var(--ops-text)]">{selectedRiverLocationLabel}</div>
             </InsetPanel>
             <InsetPanel className="space-y-1">
               <div className={opsLabelClass}>Source policy</div>
@@ -1000,6 +825,7 @@ const DashboardPage: React.FC = () => {
         </div>
       </ConsolePanel>
 
+      {/* State + location lock panel */}
       <ConsolePanel intensity="secondary" className="space-y-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1020,6 +846,7 @@ const DashboardPage: React.FC = () => {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+          {/* LEFT: state selector + city input */}
           <div className="space-y-4">
             <StateSelector className="!space-y-4" />
 
@@ -1032,10 +859,7 @@ const DashboardPage: React.FC = () => {
                   value={customCity}
                   onChange={(e) => setCustomCity(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      applyCustomCity();
-                    }
+                    if (e.key === 'Enter') { e.preventDefault(); applyCustomCity(); }
                   }}
                   placeholder="Enter city or station"
                   className={vectorFieldClass}
@@ -1044,4 +868,309 @@ const DashboardPage: React.FC = () => {
                   Lock target
                 </ActionButton>
               </div>
-              <datalist
+              {/* FIX #2 & #3: FloodProneLocation is an object. Use loc.station for key and value. */}
+              <datalist id="flood-prone-location-options">
+                {floodProneLocationSuggestions.map((loc) => (
+                  <option key={loc.station} value={loc.station} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+
+          {/* RIGHT: matrix sidebar */}
+          <div className="space-y-3">
+            <InsetPanel className="space-y-2">
+              <div className={opsLabelClass}>Active state matrix</div>
+              <div className="text-sm font-semibold text-[color:var(--ops-text)]">
+                {selectedStateKey || 'None selected'}
+              </div>
+              {effectiveStateMatrix ? (
+                <div className="space-y-1 text-[10px] font-mono text-[color:var(--ops-text-soft)]">
+                  <div>Moderate ≥ {effectiveStateMatrix.peak_level_m?.moderate}m / {effectiveStateMatrix.rainfall_7d_mm?.moderate}mm</div>
+                  <div>Severe ≥ {effectiveStateMatrix.peak_level_m?.severe}m / {effectiveStateMatrix.rainfall_7d_mm?.severe}mm</div>
+                  <div>Critical ≥ {effectiveStateMatrix.peak_level_m?.critical}m / {effectiveStateMatrix.rainfall_7d_mm?.critical}mm</div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-[color:var(--ops-text-faint)]">Select a state to load matrix</div>
+              )}
+            </InsetPanel>
+
+            <InsetPanel className="space-y-2">
+              <div className={opsLabelClass}>Matrix verdict</div>
+              <StatusBadge tone={
+                matrixVerdict === 'CRITICAL' ? 'danger' :
+                matrixVerdict === 'SEVERE' ? 'warning' :
+                matrixVerdict === 'MODERATE' ? 'info' : 'success'
+              }>
+                {matrixVerdict || 'LOW'}
+              </StatusBadge>
+            </InsetPanel>
+
+            <InsetPanel className="space-y-2">
+              <div className={opsLabelClass}>Danger level</div>
+              <div className="text-lg font-mono font-semibold text-[color:var(--ops-text)]">
+                {dashboardDangerLevel != null ? `${dashboardDangerLevel.toFixed(2)}m` : '--'}
+              </div>
+              <div className="text-[9px] font-mono uppercase tracking-[0.14em] text-[color:var(--ops-text-faint)]">
+                {dangerLevelSourceLabel}
+              </div>
+            </InsetPanel>
+          </div>
+        </div>
+      </ConsolePanel>
+
+      {/* State matrix index */}
+      <ConsolePanel intensity="secondary" className="space-y-4">
+        <SectionHeader
+          eyebrow="State matrix index"
+          title="Regional threshold matrix"
+          description="Heuristic calibration thresholds per state. Select a state row to apply its matrix to the dashboard."
+          icon={ShieldAlert}
+        />
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value)}
+            placeholder="Filter states…"
+            className={vectorFieldClass}
+          />
+        </div>
+        {stateMatrixStatus === 'loading' ? (
+          // FIX #4: SkeletonLoader uses `count`, not `rows`
+          <SkeletonLoader count={4} />
+        ) : stateMatrixStatus === 'error' ? (
+          <EmptyState
+            title="Matrix unavailable"
+            description={stateMatrixError || 'Could not load state matrix.'}
+            action={<ActionButton onClick={reloadStateMatrixIndex} icon={RefreshCw}>Retry</ActionButton>}
+          />
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredStateMatrixKeys.map((key) => {
+              const entry = stateMatrixIndex[key];
+              const displayName = stateKeyToDisplayName[key] || key;
+              const isActive = key === selectedStateKey;
+              return (
+                <button
+                  key={key}
+                  onClick={() => {
+                    dispatch({ type: 'SET_SELECTED_STATE', payload: displayName });
+                    dispatch({ type: 'SET_FORM_DATA', payload: { state: displayName } });
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left text-xs transition-all hover:bg-white/[0.06] ${
+                    isActive
+                      ? 'border-[color:var(--ops-primary)] bg-[color:var(--ops-primary)]/10 text-[color:var(--ops-text)]'
+                      : 'border-white/10 bg-black/20 text-[color:var(--ops-text-soft)]'
+                  }`}
+                >
+                  <div className="font-semibold uppercase tracking-[0.1em]">{displayName}</div>
+                  <div className="mt-1 font-mono text-[9px] text-[color:var(--ops-text-faint)]">
+                    {entry?.region} · danger {entry?.danger_level_m}m
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </ConsolePanel>
+
+      {/* Metric tiles */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricTile
+          label="Severity"
+          value={severity}
+          tone={severity === 'CRITICAL' ? 'danger' : severity === 'SEVERE' ? 'warning' : severity === 'MODERATE' ? 'info' : 'success'}
+          icon={ShieldAlert}
+        />
+        <MetricTile label="Confidence" value={`${currentConfidence.toFixed(1)}%`} icon={Target} />
+        <MetricTile label="Risk score" value={currentRiskScore} icon={Activity} />
+        <MetricTile label="Rainfall total" value={`${rainfallTotalNow.toFixed(0)}mm`} icon={Droplets} />
+      </div>
+
+      {/* Neural graph + water level gauge */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
+        {/* FIX #5: pass dominantProbabilityLane (string), not the tuple */}
+        <NeuralNetworkGraph
+          preferredState={state.prediction.selectedState || 'Maharashtra'}
+          matrixRegion={effectiveStateMatrix?.region}
+          matrixVerdict={matrixVerdict}
+          matrixStatus={stateMatrixStatus}
+          probabilityLanes={probabilityLanes}
+          dominantLane={dominantProbabilityLane}
+        />
+        <ConsolePanel className="flex flex-col gap-4">
+          <SectionHeader eyebrow="Gauge" title="Water level" icon={Waves} />
+          {/* FIX #6: WaterLevelGauge has no warningLevel prop — removed */}
+          <WaterLevelGauge
+            currentLevel={Number(state.form.data.Peak_Flood_Level_m || 0)}
+            dangerLevel={dashboardDangerLevel ?? 13.5}
+          />
+          {leadRegionSensor && (
+            <InsetPanel className="space-y-1">
+              <div className={opsLabelClass}>Lead station</div>
+              <div className="flex items-center gap-2">
+                <LeadTrendIcon
+                  size={12}
+                  className={leadTrendMeta?.tone?.split(' ').find((c) => c.startsWith('text-')) || ''}
+                />
+                <span className="text-sm font-semibold text-[color:var(--ops-text)]">{leadRegionSensor.station}</span>
+              </div>
+            </InsetPanel>
+          )}
+        </ConsolePanel>
+      </div>
+
+      {/* FIX #8: ProbabilityHeartbeatGraph expects lanes array + dominantLane string */}
+      <ProbabilityHeartbeatGraph
+        lanes={[
+          { key: 'low', label: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1', tone: 'text-emerald-300' },
+          { key: 'moderate', label: 'MODERATE', value: probabilityLanes.moderate, fill: '#4c7cff', tone: 'text-sky-300' },
+          { key: 'severe', label: 'SEVERE', value: probabilityLanes.severe, fill: '#ff8a5b', tone: 'text-orange-200' },
+          { key: 'critical', label: 'CRITICAL', value: probabilityLanes.critical, fill: '#ff5f7e', tone: 'text-rose-200' },
+        ]}
+        dominantLane={dominantProbabilityLane}
+      />
+
+      {/* Heatmap */}
+      <FloodRiskHeatmap data={heatmapData} />
+
+      {/* FIX #7: MonitoringProtocolAlert reads from context — no props needed */}
+      <div ref={monitoringAlertRef}>
+        <MonitoringProtocolAlert />
+      </div>
+
+      {/* Sensor grid */}
+      <ConsolePanel intensity="secondary" className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SectionHeader eyebrow="Regional network" title={nearbyWaterSourcesNote} icon={Radio} />
+          <div className="flex items-center gap-2">
+            <StatusBadge tone={sensorsLoading ? 'warning' : 'success'}>
+              {sensorsLoading ? 'Syncing' : `${selectedRegionSensors.length} nodes`}
+            </StatusBadge>
+            <ActionButton onClick={refreshDashboardTelemetry} icon={RefreshCw}>Refresh</ActionButton>
+          </div>
+        </div>
+        {sensorsLoading && !selectedRegionSensors.length ? (
+          // FIX #9: use count not rows
+          <SkeletonLoader count={3} />
+        ) : selectedRegionSensors.length === 0 ? (
+          <EmptyState title="No sensor data" description="No telemetry nodes available for this selection." />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {selectedRegionSensors.slice(0, 6).map((sensor) => (
+              <RegionSensorCard key={sensor.station} sensor={sensor} />
+            ))}
+          </div>
+        )}
+      </ConsolePanel>
+
+      {/* CWC live data */}
+      <CWCLiveDataDisplay />
+
+      {/* Prediction input form */}
+      <div ref={predictionInputRef}>
+        <ConsolePanel intensity="secondary" className="space-y-5">
+          <SectionHeader
+            eyebrow="Inference engine"
+            title="Manual flood input"
+            description="Override live telemetry with custom scenario inputs for model inference."
+            icon={Brain}
+            action={
+              <ActionButton
+                onClick={handlePredict}
+                disabled={state.prediction.isLoading}
+                icon={state.prediction.isLoading ? RefreshCw : Brain}
+                variant="primary"
+              >
+                {state.prediction.isLoading ? 'Running' : 'Run inference'}
+              </ActionButton>
+            }
+          />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <LuxeInput
+              label="Peak flood level (m)"
+              type="number"
+              step="0.01"
+              value={state.form.data.Peak_Flood_Level_m ?? ''}
+              onChange={(e) => dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: parseFloat(e.target.value) } })}
+            />
+            <LuxeInput
+              label="Event duration (days)"
+              type="number"
+              step="1"
+              value={state.form.data.Event_Duration_days ?? ''}
+              onChange={(e) => dispatch({ type: 'SET_FORM_DATA', payload: { Event_Duration_days: parseFloat(e.target.value) } })}
+            />
+            <LuxeInput
+              label="Time to peak (days)"
+              type="number"
+              step="0.5"
+              value={state.form.data.Time_to_Peak_days ?? ''}
+              onChange={(e) => dispatch({ type: 'SET_FORM_DATA', payload: { Time_to_Peak_days: parseFloat(e.target.value) } })}
+            />
+            <LuxeInput
+              label="Recession time (days)"
+              type="number"
+              step="0.5"
+              value={state.form.data.Recession_Time_day ?? ''}
+              onChange={(e) => dispatch({ type: 'SET_FORM_DATA', payload: { Recession_Time_day: parseFloat(e.target.value) } })}
+            />
+            {(['T1d', 'T2d', 'T3d', 'T4d', 'T5d', 'T6d', 'T7d'] as const).map((key, i) => (
+              <LuxeInput
+                key={key}
+                label={`Day ${i + 1} rainfall (mm)`}
+                type="number"
+                step="0.1"
+                value={state.form.data[key] ?? ''}
+                onChange={(e) => dispatch({ type: 'SET_FORM_DATA', payload: { [key]: parseFloat(e.target.value) } })}
+              />
+            ))}
+          </div>
+
+          {/* Scenario presets */}
+          <div className="flex flex-wrap gap-2">
+            {scenarioPresets.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => {
+                  setSelectedScenarioPreset(preset.id);
+                  const perDay = preset.rainTotal / 7;
+                  dispatch({
+                    type: 'SET_FORM_DATA',
+                    payload: {
+                      Peak_Flood_Level_m: preset.peak,
+                      T1d: perDay, T2d: perDay, T3d: perDay,
+                      T4d: perDay, T5d: perDay, T6d: perDay, T7d: perDay,
+                    },
+                  });
+                }}
+                className={`${chipButtonClass} ${selectedScenarioPreset === preset.id ? 'border border-[color:var(--ops-primary)] text-[color:var(--ops-text)]' : ''}`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </ConsolePanel>
+      </div>
+
+      {/* Flood logs + weather */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <FloodLogsPanel />
+        {/* FIX #10: WeatherConsolePanel prop is `target`, not `weatherTarget` */}
+        <WeatherConsolePanel
+          target={dashboardWeatherTarget}
+          coordinates={dashboardWeatherCoordinates}
+        />
+      </div>
+
+      {/* FIX #11: NeuralOperationsGraph reads from context — no prediction/isLoading props */}
+      <NeuralOperationsGraph />
+
+      {/* FIX #12: ToastNotification takes `toasts` array + `onRemove`, not single `toast` + `onDismiss` */}
+      <ToastNotification toasts={toasts} onRemove={removeToast} />
+    </PageShell>
+  );
+};
+
+export default DashboardPage;
