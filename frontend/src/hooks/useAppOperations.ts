@@ -306,7 +306,7 @@ export const useFormValidation = (formData: any) => {
       }
     }
 
-    if (field === 'T7d') {
+    if (/^T[1-7]d$/.test(field)) {
       if (value < RAINFALL_7D_MIN || value > RAINFALL_7D_MAX) {
         hasError = true;
         errorMessage = `Must be between ${RAINFALL_7D_MIN} and ${RAINFALL_7D_MAX} mm`;
@@ -323,9 +323,13 @@ export const useFormValidation = (formData: any) => {
 
   const validateAllFields = useCallback(() => {
     const peakValid = validateField('Peak_Flood_Level_m', Number(formData.Peak_Flood_Level_m || 0));
-    const rainfallValid = validateField('T7d', Number(formData.T7d || 0));
-    const isValid = peakValid && rainfallValid;
 
+    const rainfallKeys = ['T1d', 'T2d', 'T3d', 'T4d', 'T5d', 'T6d', 'T7d'];
+    const rainfallValid = rainfallKeys.every((key) =>
+      validateField(key, Number((formData as any)[key] || 0))
+    );
+
+    const isValid = peakValid && rainfallValid;
     dispatch({ type: 'SET_FORM_VALID', payload: isValid });
     return isValid;
   }, [formData, dispatch, validateField]);
