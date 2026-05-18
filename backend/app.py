@@ -2229,10 +2229,11 @@ class KolhapurFloodPredictor:
     ) -> Dict[str, float]:
         floors = {
             "LOW": 0.0,
-            "MODERATE": 0.30,
-            "SEVERE": 0.42,
-            "CRITICAL": 0.54,
+            "MODERATE": 0.20,   # was 0.30
+            "SEVERE": 0.30,     # was 0.42
+            "CRITICAL": 0.40,   # was 0.54
         }
+
         adjusted = dict(probabilities)
         adjusted[threshold_severity] = max(adjusted.get(threshold_severity, 0.0), floors.get(threshold_severity, 0.0))
         return self.normalize_probability_map(adjusted)
@@ -2242,10 +2243,34 @@ class KolhapurFloodPredictor:
         probabilities: Dict[str, float],
         severity_label: str,
     ) -> Dict[str, float]:
+        MAX_PROMOTION_GAP = 0.30  # Only promote if ML prob is within 30pp of floor
+
+        SEVERITY_FLOORS = {
+            "LOW": 0.0,
+            "MODERATE": 0.20,
+            "SEVERE": 0.30,
+            "CRITICAL": 0.40,
+        }
+
         adjusted = dict(probabilities)
-        current_max = max(adjusted.values())
-        adjusted[severity_label] = max(adjusted.get(severity_label, 0.0), min(0.84, current_max + 0.06))
+        current_top_prob = max(adjusted.values())
+        target_floor = SEVERITY_FLOORS.get(severity_label, 0.0)
+
+        # If ML is far below the target severity floor, suppress promotion
+        if (target_floor - adjusted.get(severity_label, 0.0)) > MAX_PROMOTION_GAP:
+            logger.info(
+                f"promote_severity: suppressed jump to {severity_label} "
+                f"(ML prob={adjusted.get(severity_label, 0.0):.3f}, gap > {MAX_PROMOTION_GAP})"
+            )
+            return adjusted  # Return unchanged probabilities
+
+        current_max = current_top_prob
+        adjusted[severity_label] = max(
+            adjusted.get(severity_label, 0.0),
+            min(0.84, current_max + 0.06),
+        )
         return self.normalize_probability_map(adjusted)
+
 
     def complex_predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input") -> Dict[str, Any]:
         state_entry = get_state_severity_entry(input_data.state)
@@ -2358,8 +2383,13 @@ class KolhapurFloodPredictor:
         }
     
     def get_training_data(self):
+        # ⚠️  SYNTHETIC DATA — FOR EXPERIMENTATION ONLY.
+        # This generates 1000 synthetic rows with labels {0,1,2} only (no CRITICAL=3).
+        # Do NOT use this data to produce production artifacts.
+        # Use backend/train_indofloods.py for offline training on real INDOFLOODS data.
         rng = np.random.default_rng(42)
         real_events = [
+
             [13.5, 5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 2],
             [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2],
             [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 1],
@@ -2397,7 +2427,17 @@ class KolhapurFloodPredictor:
         return np.array([event[:-1] for event in all_data]), np.array([event[-1] for event in all_data])
     
     def train_with_real_data(self):
+        import os
+
+        ALLOW_PRODUCTION_TRAINING = os.getenv("ALLOW_PRODUCTION_TRAINING", "false").lower() == "true"
+        if not ALLOW_PRODUCTION_TRAINING:
+            raise RuntimeError(
+                "train_with_real_data() is blocked in production. "
+                "Set ALLOW_PRODUCTION_TRAINING=true env var only in offline/dev mode."
+            )
+
         print("🔄 Training Multi-Class Flood Matrix...")
+
         X, y = self.get_training_data()
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         
@@ -2421,6 +2461,12 @@ class KolhapurFloodPredictor:
             return self.fallback_prediction(input_data)
     
     def fallback_prediction(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
+        """
+        Heuristic-only fallback used when ML models are unavailable.
+        Does NOT fabricate per-class probability distributions.
+        """
+        from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
+
         peak = float(input_data.Peak_Flood_Level_m)
         rain = float(
             float(input_data.T1d)
@@ -2431,30 +2477,37 @@ class KolhapurFloodPredictor:
             + float(input_data.T6d)
             + float(input_data.T7d)
         )
+
         state_entry = get_state_severity_entry(input_data.state)
-        sev = severity_from_entry(peak_level_m=peak, rainfall_7d_mm=rain, entry=state_entry)
-        conf_map = {"LOW": 85.0, "MODERATE": 78.3, "SEVERE": 92.5, "CRITICAL": 97.5}
-        conf = conf_map.get(sev, 85.0)
-            
+        severity = severity_from_entry(peak_level_m=peak, rainfall_7d_mm=rain, entry=state_entry)
+
+        # Static confidence bands by severity (honest ranges, not fabricated ML scores)
+        CONFIDENCE_BANDS = {
+            "LOW": 0.60,
+            "MODERATE": 0.65,
+            "SEVERE": 0.70,
+            "CRITICAL": 0.75,
+        }
+
+        confidence = CONFIDENCE_BANDS[severity]
+        confidence_percent = round(confidence * 100.0, 1)
+
         return {
-            "severity": sev,
-            "confidence_percent": conf,
-            "probabilities": {
-                "CRITICAL": conf if sev == "CRITICAL" else 0,
-                "SEVERE": conf if sev == "SEVERE" else 5,
-                "MODERATE": conf if sev == "MODERATE" else 15,
-                "LOW": conf if sev == "LOW" else 5,
-            },
-            "alert": "🚨" if sev in ["SEVERE", "CRITICAL"] else "⚠️" if sev == "MODERATE" else "🟢",
-            "algorithm": "Python Heuristic Fallback",
+            "severity": severity,
+            "confidence_percent": confidence_percent,
+            "probabilities": {},  # Intentionally empty — no ML available
+            "algorithm": "Heuristic Fallback – NO ML",
+            "warning": "ML models unavailable. Severity derived from CWC state matrix only.",
+            "state": input_data.state,
+            "state_matrix": state_entry,
             "data_source": "Manual Input",
             "model_trained": False,
             "danger_level": state_entry["danger_level_m"],
             "critical_threshold": state_entry["peak_level_m"]["critical"],
-            "risk_score": int(conf),
-            "state": input_data.state,
-            "state_matrix": state_entry,
+            "risk_score": int(confidence_percent),
+            "alert": "🚨" if severity in ["SEVERE", "CRITICAL"] else "⚠️" if severity == "MODERATE" else "🟢",
         }
+
 
 predictor = KolhapurFloodPredictor()
 
