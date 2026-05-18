@@ -4,7 +4,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 
 ## What the app does
 
-- Generates flood-risk predictions across four severity bands: `LOW`, `MODERATE`, `SEVERE`, and `CRITICAL`
+- Generates flood-risk predictions across four severity bands: `LOW`, `MODERATE`, `SEVERE`, `CRITICAL`
 - Uses state-specific severity matrices and multi-bundle ML artifact selection
 - Displays scoped telemetry for a selected state, city, or station
 - Shows weather context with live API support and deterministic local fallbacks
@@ -62,6 +62,20 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 - Audit: `/audit-logs`
 - Weather: `/weather/status`, `/weather/current`, `/weather/search`, `/weather/reverse-geocode`, `/weather/forecast`, `/weather/air-quality`, `/weather/uv`, `/weather/historical`, `/weather/alerts`
 
+## Backend improvements (OpsFlood safety + metrics)
+
+- **Production training freeze**: `KolhapurFloodPredictor.train_with_real_data()` is blocked by default. Only runs when `ALLOW_PRODUCTION_TRAINING=true`.
+- **Offline canonical INDOFLOODS training**: added `backend/train_indofloods.py` which:
+  - validates CRITICAL label alignment via a proxy check
+  - computes **macro AUROC**
+  - persists `artifacts/metrics/indofloods_metrics.json`
+  - overwrites `indofloods_production_model.pkl` only when the new model beats current on **macro F1 AND macro AUROC**
+- **Honest heuristic fallback**: when ML artifacts are missing/unavailable, `/predict` returns:
+  - `algorithm: "Heuristic Fallback – NO ML"`
+  - `probabilities: {}` (no fabricated ML probability distribution)
+- **Durable metric persistence**: `backend/model_metrics.py` now computes macro AUROC and writes metric JSON to `artifacts/metrics/{model_name}_metrics.json` (and attempts non-fatal Postgres persistence).
+- **Datum warning documentation**: `backend/state_severity_matrix.py` includes a top-of-file warning about Delhi/Mizoram datum mismatch when interpreting peak-level values for CRITICAL labeling.
+
 ## Documentation map
 
 - [FEATURES.md](FEATURES.md): complete feature inventory and capability breakdown
@@ -96,12 +110,9 @@ frontend/
 
 ## Notes
 
-- Model artifacts now live outside the app package in `artifacts/dvc/models/`.
-- Override the artifact location with `MODEL_ARTIFACTS_DIR`; label the storage type with `MODEL_ARTIFACTS_BACKEND` if needed.
+- Model artifacts live in `artifacts/dvc/models/`.
+- Override artifact location with `MODEL_ARTIFACTS_DIR`; label storage type with `MODEL_ARTIFACTS_BACKEND` if needed.
 - Set `DATABASE_URL` to enable PostgreSQL persistence for predictions, telemetry snapshots, and audit logs.
 - Set `ENABLE_DATA_INGESTION_SCHEDULER=1` to run scheduled weather and water-level ingestion in the backend process.
 - Tune ingestion cadence with `DATA_INGESTION_INTERVAL_MINUTES` and targets with `DATA_INGESTION_TARGETS`.
-- GitHub Actions now provides CI gates for backend tests, frontend build, and Docker build validation before merges to the Render deploy branch.
-- The frontend currently exposes four primary routes in navigation: dashboard, geo-spatial, telemetry, and archives.
-- A gradient utility page also exists in the codebase but is not wired into the main navigation.
-- Historical packaged flood logs are currently mapped for Kolhapur aliases; other locations fall back to an explanatory empty state.
+

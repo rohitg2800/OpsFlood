@@ -15,9 +15,11 @@ from sklearn.metrics import (
     f1_score,
     accuracy_score,
     confusion_matrix,
+    roc_auc_score,
 )
 import numpy as np
 from typing import Any, Dict
+
 
 
 CLASS_LABEL_MAP = {
@@ -38,6 +40,7 @@ def evaluate_and_log_metrics(
     scaler: Any,
     X_test: np.ndarray,
     y_test: np.ndarray,
+    model_name: str = "model",
     class_names: list[str] = CLASS_NAMES,
 ) -> Dict[str, Any]:
     """
@@ -53,6 +56,12 @@ def evaluate_and_log_metrics(
     """
     X_test_scaled = scaler.transform(X_test)
     y_pred = model.predict(X_test_scaled)
+    y_proba = None
+    try:
+        y_proba = model.predict_proba(X_test_scaled)
+    except Exception:
+        y_proba = None
+
 
     weighted_f1 = round(f1_score(y_test, y_pred, average="weighted"), 4)
     macro_f1    = round(f1_score(y_test, y_pred, average="macro"), 4)
@@ -76,6 +85,20 @@ def evaluate_and_log_metrics(
         zero_division=0,
     )
 
+    # ── Macro AUROC (one-vs-rest) ────────────────────────────────────────────
+    macro_auroc = None
+    if y_proba is not None:
+        try:
+            macro_auroc = roc_auc_score(
+                y_test,
+                y_proba,
+                multi_class="ovr",
+                average="macro",
+            )
+        except Exception as e:
+            print(f"[WARN] AUROC computation failed: {e}")
+
+
     # ── Console output (visible in server logs) ──────────────────────────────
     print("\n" + "=" * 55)
     print("  OpsFlood Model Evaluation Report")
@@ -90,11 +113,74 @@ def evaluate_and_log_metrics(
     print(report_str)
     print("=" * 55 + "\n")
 
-    return {
+    metrics = {
         "weighted_f1": weighted_f1,
         "macro_f1": macro_f1,
+        "macro_auroc": round(float(macro_auroc), 4) if macro_auroc is not None else None,
         "per_class_f1": per_class_f1,
         "accuracy": accuracy,
         "confusion_matrix": cm,
         "report": report_str,
     }
+
+    # ── Persist metrics to artifacts/metrics/ ────────────────────────────────
+    try:
+        import json
+        from pathlib import Path
+
+        METRICS_DIR = Path("artifacts/metrics")
+        METRICS_DIR.mkdir(parents=True, exist_ok=True)
+        metrics_path = METRICS_DIR / f"{model_name}_metrics.json"
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2, default=str)
+        print(f"[METRICS] Saved to {metrics_path}")
+    except Exception as e:
+        print(f"[WARN] Metrics JSON persistence failed (non-fatal): {e}")
+
+    # ── Optional Postgres persistence (non-fatal) ────────────────────────────
+    try:
+        from backend.postgres_store import PostgresOperationalStore
+
+        store = PostgresOperationalStore()
+        store.execute(
+            """
+            CREATE TABLE IF NOT EXISTS model_metrics (
+                id           SERIAL PRIMARY KEY,
+                model_name   TEXT NOT NULL,
+                recorded_at  TIMESTAMPTZ DEFAULT NOW(),
+                weighted_f1  FLOAT,
+                macro_f1     FLOAT,
+                macro_auroc  FLOAT,
+                n_train      INT,
+                n_test       INT,
+                raw_json     JSONB
+            );
+            """
+        )
+
+        # infer n_train/n_test not always known in this helper
+        n_train = None
+        n_test = int(len(y_test)) if y_test is not None else None
+
+        store.execute(
+            """
+            INSERT INTO model_metrics
+                (model_name, weighted_f1, macro_f1, macro_auroc, n_train, n_test, raw_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                model_name,
+                metrics.get("weighted_f1"),
+                metrics.get("macro_f1"),
+                metrics.get("macro_auroc"),
+                n_train,
+                n_test,
+                json.dumps(metrics),
+            ),
+        )
+        print("[METRICS] Persisted to Postgres model_metrics table")
+    except Exception as e:
+        print(f"[WARN] DB persistence failed (non-fatal): {e}")
+
+    return metrics
+

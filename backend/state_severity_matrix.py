@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+# ⚠️  DATUM WARNING
+# Delhi's `peak_level_m` thresholds use MSL gauge values (e.g., 203–206 m MSL).
+# Mizoram's `danger_level_m` / `warning_level_m` use MSL values (~97–120 m).
+# All other states use relative above-riverbed gauge metres (~9–15 m).
+#
+# When labelling CRITICAL from INDOFLOODS training data:
+# - For Delhi rows: compare Peak_Flood_Level_m to the MSL-based thresholds (203–206).
+# - For all other states: compare to the relative thresholds (9–14 m range).
+# Do NOT mix MSL and relative values in the same feature column.
+
 from typing import Dict, Literal, TypedDict
+
 
 SeverityLevel = Literal["LOW", "MODERATE", "SEVERE", "CRITICAL"]
 
