@@ -578,16 +578,29 @@ const DashboardPage: React.FC = () => {
     state.prediction.selectedCity,
     state.prediction.selectedState,
   ]);
+
+  // -------------------------------------------------------------------
+  // FIX 1: Live danger level — prefer lead sensor, then CWC, then state
+  // matrix. No hardcoded 13.5 fallback.
+  // -------------------------------------------------------------------
   const liveDangerLevel =
     Number(leadRegionSensor?.danger_level || 0) ||
     Number(state.cwc.liveData.dangerLevel || 0) ||
     0;
-  const dashboardDangerLevel =
+
+  const dashboardDangerLevel: number | null =
     liveDangerLevel ||
-    state.prediction.currentPrediction?.danger_level ||
-    state.prediction.dangerLevel ||
-    effectiveStateMatrix?.danger_level_m ||
-    13.5;
+    (state.prediction.currentPrediction?.danger_level
+      ? Number(state.prediction.currentPrediction.danger_level)
+      : null) ||
+    (state.prediction.dangerLevel
+      ? Number(state.prediction.dangerLevel)
+      : null) ||
+    (effectiveStateMatrix?.danger_level_m
+      ? Number(effectiveStateMatrix.danger_level_m)
+      : null);
+  // null = no authoritative data yet; display '--' instead of a stale value.
+
   const dangerLevelSourceLabel = liveDangerLevel
     ? `Live CWC · ${leadRegionSensor?.station || state.cwc.liveData.station || selectedRiverLocationLabel}`
     : effectiveStateMatrix
@@ -604,6 +617,7 @@ const DashboardPage: React.FC = () => {
 
   const heatmapData = useMemo(() => {
     const cityFocused = Boolean(state.prediction.selectedCity || state.form.data.station);
+    const effectiveDanger = dashboardDangerLevel ?? 13.5;
 
     if (cityFocused && selectedRegionSensors.length) {
       return selectedRegionSensors.slice(0, 6).map((sensor) => {
@@ -612,7 +626,7 @@ const DashboardPage: React.FC = () => {
         const risk = Math.min(
           100,
           Math.round(
-            (dashboardDangerLevel > 0 ? (level / dashboardDangerLevel) * 68 : 0) +
+            (effectiveDanger > 0 ? (level / effectiveDanger) * 68 : 0) +
               Math.min(rain * 4, 18) +
               (sensor.status === 'CRITICAL' ? 18 : sensor.status === 'WARNING' ? 8 : 0),
           ),
@@ -681,6 +695,11 @@ const DashboardPage: React.FC = () => {
     setCustomCity(state.prediction.selectedCity || state.form.data.station || '');
   }, [state.form.data.station, state.prediction.selectedCity]);
 
+  // -------------------------------------------------------------------
+  // FIX 2: When a station is selected, auto-feed the live danger level
+  // of that station into the form's Peak_Flood_Level_m and into the
+  // prediction danger level state so the gauge and sidebar are in sync.
+  // -------------------------------------------------------------------
   useEffect(() => {
     const selectedState = (state.prediction.selectedState || state.form.data.state || '').trim();
     if (!selectedState) {
@@ -695,17 +714,56 @@ const DashboardPage: React.FC = () => {
     const timeoutId = window.setTimeout(() => {
       void (async () => {
         try {
-          const [cwcNode] = await Promise.all([
+          const [cwcNode, sensorList] = await Promise.all([
             fetchCWCData({ force: true }),
             fetchSensors({ force: true }),
           ]);
 
-          // Only auto-apply CWC level if the user has not manually edited the form
-          if (!cancelled && typeof cwcNode?.currentLevel === 'number' && !state.form.isDirty) {
+          if (cancelled) return;
+
+          // Resolve the best matching sensor for the selected station/city
+          const targetKey = (
+            state.prediction.selectedCity ||
+            state.form.data.station ||
+            ''
+          ).trim().toLowerCase();
+
+          const sensors: any[] = Array.isArray(sensorList) ? sensorList : [];
+
+          const leadSensor = targetKey
+            ? sensors.find((s: any) =>
+                (s.station || '').toLowerCase().includes(targetKey) ||
+                (s.river || '').toLowerCase().includes(targetKey)
+              ) ?? sensors[0]
+            : sensors[0];
+
+          // Feed live danger level of matched station into prediction state
+          const liveSensorDanger = leadSensor?.danger_level
+            ? Number(leadSensor.danger_level)
+            : null;
+
+          if (liveSensorDanger && liveSensorDanger > 0) {
             dispatch({
-              type: 'SET_FORM_DATA',
-              payload: { Peak_Flood_Level_m: cwcNode.currentLevel },
+              type: 'SET_DANGER_LEVEL',
+              payload: liveSensorDanger,
             });
+          }
+
+          // Auto-apply CWC current river level only if form is untouched
+          if (!state.form.isDirty) {
+            // Prefer live sensor danger level as the starting peak input
+            // so the form reflects realistic station thresholds.
+            if (liveSensorDanger && liveSensorDanger > 0) {
+              dispatch({
+                type: 'SET_FORM_DATA',
+                payload: { Peak_Flood_Level_m: liveSensorDanger },
+              });
+            } else if (typeof cwcNode?.currentLevel === 'number') {
+              dispatch({
+                type: 'SET_FORM_DATA',
+                payload: { Peak_Flood_Level_m: cwcNode.currentLevel },
+              });
+            }
           }
         } catch {
           // Keep dashboard usable even when upstream telemetry is delayed.
@@ -723,6 +781,9 @@ const DashboardPage: React.FC = () => {
     fetchCWCData,
     fetchSensors,
     state.form.data.state,
+    state.form.data.station,
+    state.form.isDirty,
+    state.prediction.selectedCity,
     state.prediction.selectedState,
   ]);
 
@@ -798,6 +859,9 @@ const DashboardPage: React.FC = () => {
     ) {
       return;
     }
+    // Reset the telemetry sync ref so the useEffect re-runs and fetches
+    // the danger level for the newly locked station.
+    lastStateTelemetrySyncRef.current = '';
     dispatch({ type: 'SET_FORM_DATA', payload: { station: nextCity } });
     dispatch({ type: 'SET_SELECTED_CITY', payload: nextCity });
   }, [customCity, dispatch, state.form.data.station, state.prediction.selectedCity]);
@@ -980,671 +1044,4 @@ const DashboardPage: React.FC = () => {
                   Lock target
                 </ActionButton>
               </div>
-              <datalist id="flood-prone-location-options">
-                {floodProneLocationSuggestions.map((location) => (
-                  <option
-                    key={`${location.state}-${location.station}-${location.river}`}
-                    value={location.station}
-                    label={`${location.station} · ${location.river} · ${location.state}`}
-                  />
-                ))}
-              </datalist>
-              <div className="flex flex-wrap gap-2">
-                <StatusBadge tone="info">
-                  Active target {(state.prediction.selectedCity || state.form.data.station || 'None').toUpperCase()}
-                </StatusBadge>
-                <StatusBadge tone="neutral">
-                  {floodProneLocationSuggestions.length} flood-prone nodes indexed
-                </StatusBadge>
-              </div>
-            </div>
-          </div>
-
-          {(state.prediction.selectedCity || state.form.data.station) ? (
-            <InsetPanel variant="soft" className="space-y-3">
-              <div className={opsLabelClass}>Nearby water sources</div>
-              <p className="text-sm leading-relaxed text-[color:var(--ops-text-soft)]">
-                {nearbyWaterSourcesNote}
-              </p>
-              <div className="space-y-2">
-                {selectedRegionSensors.length ? (
-                  selectedRegionSensors.slice(0, 4).map((sensor) => (
-                    <div
-                      key={`${sensor.station}-${sensor.river || 'river'}`}
-                      className="flex items-center justify-between gap-3 rounded-xl bg-black/20 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold uppercase tracking-[0.08em] text-[color:var(--ops-text)]">
-                          {sensor.station}
-                        </div>
-                        <div className="truncate text-xs text-[color:var(--ops-text-faint)]">
-                          {sensor.river || 'Active basin'}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold font-mono text-[color:var(--ops-text)]">
-                          {Number(sensor.river_level || 0).toFixed(2)}m
-                        </div>
-                        <div className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--ops-text-faint)]">
-                          {sensor.status}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyState
-                    title="Telemetry nodes are still resolving"
-                    description="The city lock is active, but the nearby monitored sources have not been returned yet. The dashboard will keep the location lock intact while those nodes sync."
-                    icon={Radio}
-                    className="!p-4"
-                  />
-                )}
-              </div>
-            </InsetPanel>
-          ) : (
-            <InsetPanel variant="soft" className="flex items-center justify-center">
-              <div className="text-sm text-[color:var(--ops-text-soft)]">
-                Lock a city or station to pin nearby monitored sources.
-              </div>
-            </InsetPanel>
-          )}
-        </div>
-      </ConsolePanel>
-
-      <div className="reveal-seq grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricTile
-          label="System state"
-          value={apiStatus}
-          hint={state.system.sourcePolicy.label}
-          icon={Activity}
-          tone={apiStatus === 'ONLINE' ? 'success' : apiStatus === 'DEGRADED' ? 'warning' : apiStatus === 'OFFLINE' ? 'danger' : 'neutral'}
-          framed
-          frameTone={apiStatus === 'ONLINE' ? 'olive' : apiStatus === 'DEGRADED' ? 'amber' : apiStatus === 'OFFLINE' ? 'danger' : 'neutral'}
-        />
-        <MetricTile
-          label="Current severity"
-          value={severity}
-          hint={state.prediction.monitoringAction || 'Run inference to generate the current operating posture.'}
-          icon={ShieldAlert}
-          tone={monitoringTone}
-          framed
-          frameTone={monitoringTone === 'danger' ? 'danger' : monitoringTone === 'warning' ? 'amber' : monitoringTone === 'info' ? 'cyan' : 'olive'}
-        />
-        <MetricTile
-          label="Confidence"
-          value={`${currentConfidence.toFixed(1)}%`}
-          hint={state.prediction.currentPrediction ? `Dominant lane ${dominantProbabilityLane[0]}` : 'Awaiting inference output'}
-          icon={Brain}
-          tone="info"
-        />
-        <MetricTile
-          label="Risk score"
-          value={state.prediction.currentPrediction ? currentRiskScore : '--'}
-          hint={`Danger level ${dashboardDangerLevel.toFixed(1)}m · ${dangerLevelSourceLabel}`}
-          icon={Droplets}
-          tone={monitoringTone}
-          mono={false}
-        />
-      </div>
-
-      <div ref={predictionInputRef}>
-        <LuxeCard className="space-y-6" intensity="primary" frameTone="olive">
-          <SectionHeader
-            eyebrow="Prediction controls"
-            title="Run flood-risk inference"
-            description="Configure the current scenario, lock the geographic context, and execute the model with live telemetry and state-matrix guidance."
-            icon={Target}
-            action={
-              <>
-                <StatusBadge tone="info">Model profile Alpha 4.2</StatusBadge>
-                <StatusBadge tone={stateMatrixStatus === 'ready' ? 'success' : stateMatrixStatus === 'error' ? 'danger' : 'warning'}>
-                  Matrix {stateMatrixStatus}
-                </StatusBadge>
-                <StatusBadge tone={liveDangerLevel ? 'warning' : 'neutral'}>
-                  {liveDangerLevel ? `Live danger ${dashboardDangerLevel.toFixed(2)}m` : `Danger ${dashboardDangerLevel.toFixed(2)}m`}
-                </StatusBadge>
-              </>
-            }
-            className="mb-8"
-          />
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_23rem]">
-            <div className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <LuxeInput
-                    label="Peak River Level (m)"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.1}
-                    value={state.form.data.Peak_Flood_Level_m}
-                    onChange={(e: any) => {
-                      const raw = parseFloat(e.target.value);
-                      const v = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0;
-                      dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: v } });
-                    }}
-                  />
-                  {state.form.errors?.Peak_Flood_Level_m ? (
-                    <p className="pl-1 text-[11px] font-semibold tracking-wide text-[color:var(--ops-danger-soft)]">
-                      {state.form.errors.Peak_Flood_Level_m}
-                    </p>
-                  ) : Number(state.form.data.Peak_Flood_Level_m) >= dashboardDangerLevel ? (
-                    <StatusBadge tone="danger" className="mt-1">
-                      ⚠ Exceeds danger level ({dashboardDangerLevel.toFixed(1)}m)
-                    </StatusBadge>
-                  ) : null}
-                </div>
-                <InsetPanel className="flex flex-col justify-between gap-4">
-                  <div>
-                    <div className={opsLabelClass}>Inference context</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--ops-text)]">
-                      {selectedRiverLocationLabel}
-                    </div>
-                    <div className="mt-1 text-sm leading-relaxed text-[color:var(--ops-text-soft)]">
-                      7-day rainfall total {rainfallTotalNow.toFixed(1)}mm across the active scenario.
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className={`${opsInsetClass} p-3`}>
-                      <div className={opsLabelClass}>Verdict</div>
-                      <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">{matrixVerdict || 'LOW'}</div>
-                    </div>
-                    <div className={`${opsInsetClass} p-3`}>
-                      <div className={opsLabelClass}>Nodes</div>
-                      <div className="mt-2 text-lg font-semibold text-[color:var(--ops-text)]">{selectedRegionSensors.length}</div>
-                    </div>
-                  </div>
-                </InsetPanel>
-              </div>
-
-              <InsetPanel className="space-y-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className={opsLabelClass}>Event timing</div>
-                    <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                      Shape the event window so the dashboard can interpret peak timing and recovery more cleanly.
-                    </div>
-                  </div>
-                  <StatusBadge tone="neutral">Hydrology timing</StatusBadge>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="space-y-2">
-                    <label className={`block text-left ${opsLabelClass}`}>Event days</label>
-                    <input
-                      type="number"
-                      value={state.form.data.Event_Duration_days}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        dispatch({ type: 'SET_FORM_DATA', payload: { Event_Duration_days: Number.isFinite(v) ? v : 0 } });
-                      }}
-                      className={vectorFieldClass}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className={`block text-left ${opsLabelClass}`}>Time to peak</label>
-                    <input
-                      type="number"
-                      value={state.form.data.Time_to_Peak_days}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        dispatch({ type: 'SET_FORM_DATA', payload: { Time_to_Peak_days: Number.isFinite(v) ? v : 0 } });
-                      }}
-                      className={vectorFieldClass}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className={`block text-left ${opsLabelClass}`}>Recession days</label>
-                    <input
-                      type="number"
-                      value={state.form.data.Recession_Time_day}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        dispatch({ type: 'SET_FORM_DATA', payload: { Recession_Time_day: Number.isFinite(v) ? v : 0 } });
-                      }}
-                      className={vectorFieldClass}
-                    />
-                  </div>
-                </div>
-              </InsetPanel>
-
-              <InsetPanel className="space-y-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className={opsLabelClass}>Daily hydrology inputs</div>
-                    <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                      Enter rainfall distribution across the last 7 days for the current scenario.
-                    </div>
-                  </div>
-                  <StatusBadge tone="info">{rainfallTotalNow.toFixed(1)}mm total</StatusBadge>
-                </div>
-
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
-                    {[
-                      { key: 'T1d', label: 'Day 1' },
-                      { key: 'T2d', label: 'Day 2' },
-                      { key: 'T3d', label: 'Day 3' },
-                      { key: 'T4d', label: 'Day 4' },
-                      { key: 'T5d', label: 'Day 5' },
-                      { key: 'T6d', label: 'Day 6' },
-                      { key: 'T7d', label: 'Day 7' },
-                    ].map((field) => (
-                      <div key={field.key} className="space-y-2 min-w-0">
-                        <label className={`block text-left ${opsLabelClass}`}>{field.label}</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={5000}
-                          value={(state.form.data as any)[field.key]}
-                          onChange={(e) => {
-                            const raw = parseFloat(e.target.value);
-                            const nextValue = Number.isFinite(raw) ? Math.min(5000, Math.max(0, raw)) : 0;
-                            const nextData = { [field.key]: nextValue } as any;
-                            const rainfall = {
-                              T1d: field.key === 'T1d' ? nextValue : state.form.data.T1d || 0,
-                              T2d: field.key === 'T2d' ? nextValue : state.form.data.T2d || 0,
-                              T3d: field.key === 'T3d' ? nextValue : state.form.data.T3d || 0,
-                              T4d: field.key === 'T4d' ? nextValue : state.form.data.T4d || 0,
-                              T5d: field.key === 'T5d' ? nextValue : state.form.data.T5d || 0,
-                              T6d: field.key === 'T6d' ? nextValue : state.form.data.T6d || 0,
-                              T7d: field.key === 'T7d' ? nextValue : state.form.data.T7d || 0,
-                            };
-                            const total = Object.values(rainfall).reduce((sum, item) => sum + Number(item || 0), 0);
-                            const distribution = Object.values(rainfall).map((mm, idx) => ({
-                              day: idx + 1,
-                              mm: Math.round(Number(mm) * 10) / 10,
-                            }));
-                            dispatch({ type: 'SET_FORM_DATA', payload: nextData });
-                            dispatch({
-                              type: 'UPDATE_RAINFALL_STATS',
-                              payload: {
-                                total,
-                                average: total / 7,
-                                distribution,
-                              }
-                            });
-                          }}
-                          className={vectorFieldClass}
-                        />
-                        {(state.form.errors as any)?.[field.key] ? (
-                          <p className="text-[10px] font-semibold tracking-wide text-[color:var(--ops-danger-soft)]">
-                            {(state.form.errors as any)[field.key]}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-              </InsetPanel>
-
-              <InsetPanel className="space-y-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className={opsLabelClass}>Scenario presets</div>
-                    <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                      Start from a dry, monsoon, or extreme profile and then fine-tune the numbers if needed.
-                    </div>
-                  </div>
-                  <StatusBadge tone="neutral">Preset vectors</StatusBadge>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  {scenarioPresets.map((s) => {
-                    const isSelected = selectedScenarioPreset === s.id;
-                    const presetTone =
-                      s.id === 'dry'
-                        ? 'border-sky-400/24 bg-sky-400/10'
-                        : s.id === 'monsoon'
-                        ? 'border-amber-400/24 bg-amber-400/10'
-                        : 'border-[rgba(255,110,133,0.3)] bg-[rgba(255,110,133,0.1)]';
-
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => {
-                          const dailyRounded = Math.round((s.rainTotal / 7) * 10) / 10;
-                          const day7 = Math.round((s.rainTotal - dailyRounded * 6) * 10) / 10;
-                          const distribution = [
-                            ...Array.from({ length: 6 }).map((_, idx) => ({ day: idx + 1, mm: dailyRounded })),
-                            { day: 7, mm: day7 },
-                          ];
-                          dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: s.peak, T1d: dailyRounded, T2d: dailyRounded, T3d: dailyRounded, T4d: dailyRounded, T5d: dailyRounded, T6d: dailyRounded, T7d: day7 } });
-                          dispatch({ type: 'UPDATE_RAINFALL_STATS', payload: { total: s.rainTotal, average: s.rainTotal / 7, distribution } });
-                          setSelectedScenarioPreset(s.id);
-                        }}
-                        className={`rounded-2xl border p-5 text-left transition-all hover:-translate-y-0.5 ${presetTone} ${
-                          isSelected ? 'ring-1 ring-[color:var(--ops-border-strong)] shadow-[0_18px_36px_rgba(0,0,0,0.22)]' : 'hover:border-[color:var(--ops-border-strong)]'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className={opsLabelClass}>{s.label}</div>
-                          {isSelected ? <StatusBadge tone="neutral" className="!px-2 !py-1">Active</StatusBadge> : null}
-                        </div>
-                        <div className="mt-3 text-xl font-semibold text-[color:var(--ops-text)]">
-                          {s.peak.toFixed(1)}m
-                        </div>
-                        <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                          {s.rainTotal}mm over 7 days
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </InsetPanel>
-            </div>
-
-            <div className="space-y-6">
-              <InsetPanel className="space-y-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className={opsLabelClass}>Regional severity matrix</div>
-                    <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                      Search and bind a state profile when you need to switch threshold behavior quickly.
-                    </div>
-                  </div>
-                  <ActionButton
-                    onClick={reloadStateMatrixIndex}
-                    icon={RefreshCw}
-                    variant="ghost"
-                    className={stateMatrixStatus === 'loading' ? 'opacity-70' : ''}
-                  >
-                    {stateMatrixStatus === 'loading' ? 'Syncing' : 'Sync'}
-                  </ActionButton>
-                </div>
-
-                <input
-                  value={stateFilter}
-                  onChange={(e) => setStateFilter(e.target.value)}
-                  placeholder="Search state matrix..."
-                  className={opsFieldClass}
-                />
-
-                {stateMatrixError ? (
-                  <div className="rounded-xl border border-[rgba(255,110,133,0.35)] bg-[rgba(255,110,133,0.12)] px-4 py-3 text-sm text-[color:var(--ops-danger-soft)]">
-                    {stateMatrixError}
-                  </div>
-                ) : null}
-
-                <div className="flex max-h-64 flex-wrap gap-2 overflow-auto pr-1">
-                  {filteredStateMatrixKeys.map((k) => {
-                    const displayName = stateKeyToDisplayName[k] || k;
-                    const active = selectedStateKey === k;
-
-                    return (
-                      <button
-                        key={k}
-                        onClick={() => dispatch({ type: 'SET_SELECTED_STATE', payload: displayName })}
-                        className={`${chipButtonClass} ${active ? 'border-[color:var(--ops-border-accent)] bg-[rgba(90,143,255,0.12)] text-[color:var(--ops-text)]' : ''}`}
-                      >
-                        {displayName}
-                      </button>
-                    );
-                  })}
-                </div>
-              </InsetPanel>
-
-              <InsetPanel className="space-y-5">
-                <div>
-                  <div className={opsLabelClass}>Inference summary</div>
-                  <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-                    The current run uses the selected state matrix, rainfall distribution, and the latest telemetry context.
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className={`${opsInsetClass} p-3`}>
-                    <div className={opsLabelClass}>Selected state</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--ops-text)]">{state.prediction.selectedState || 'Not selected'}</div>
-                  </div>
-                  <div className={`${opsInsetClass} p-3`}>
-                    <div className={opsLabelClass}>Matrix verdict</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--ops-text)]">{matrixVerdict || 'LOW'}</div>
-                  </div>
-                  <div className={`${opsInsetClass} p-3`}>
-                    <div className={opsLabelClass}>Danger level</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--ops-text)]">{dashboardDangerLevel.toFixed(1)}m</div>
-                  </div>
-                  <div className={`${opsInsetClass} p-3`}>
-                    <div className={opsLabelClass}>Telemetry nodes</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--ops-text)]">{selectedRegionSensors.length}</div>
-                  </div>
-                </div>
-
-                <ActionButton
-                  onClick={handlePredict}
-                  disabled={state.prediction.isLoading}
-                  icon={state.prediction.isLoading ? RefreshCw : Brain}
-                  variant="primary"
-                  className="min-h-[3.5rem] w-full text-xs tracking-[0.2em]"
-                >
-                  {state.prediction.isLoading ? 'Running inference' : 'Execute model inference'}
-                </ActionButton>
-              </InsetPanel>
-            </div>
-          </div>
-        </LuxeCard>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <MetricTile
-          label="Model fidelity"
-          value={`${state.prediction.accuracy.toFixed(1)}%`}
-          hint="Observed prediction accuracy for the current workspace profile."
-          icon={Activity}
-          tone="info"
-          framed
-          frameTone="cyan"
-        />
-        <MetricTile
-          label="Inference latency"
-          value={`${Math.max(0, Math.round(state.prediction.latency / 10))}ms`}
-          hint="Latest end-to-end inference turnaround."
-          icon={Clock}
-          tone="neutral"
-        />
-        <MetricTile
-          label="Scoped nodes"
-          value={selectedRegionSensors.length}
-          hint={selectedRiverLocationLabel}
-          icon={Radio}
-          tone="success"
-          mono={false}
-        />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {state.prediction.currentPrediction ? (
-          <div
-            ref={monitoringAlertRef}
-            className={`rounded-2xl transition-all ${monitoringAlertPulse ? 'ring-1 ring-[rgba(255,110,133,0.32)]' : ''}`}
-          >
-            <MonitoringProtocolAlert />
-          </div>
-        ) : (
-          <EmptyState
-            title="Monitoring protocol will appear after inference"
-            description="Run the model to generate a severity-specific operating posture, recommended action, and prioritized zones."
-            icon={ShieldAlert}
-          />
-        )}
-
-        <WeatherConsolePanel
-          target={dashboardWeatherTarget}
-          coordinates={dashboardWeatherCoordinates}
-          subtitle={
-            state.prediction.currentPrediction
-              ? `Atmospheric conditions for ${selectedRiverLocationLabel} aligned with the current monitoring level.`
-              : `Atmospheric conditions for ${selectedRiverLocationLabel} feeding the active dashboard view.`
-          }
-        />
-      </div>
-
-      <LuxeCard intensity="primary" frameTone="cyan">
-        <SectionHeader
-          eyebrow="Telemetry snapshot"
-          title="Selected region water levels"
-          description={
-            selectedRegionSensorScope.mode === 'city_nearby'
-              ? `Nearby monitored water sources for ${selectedRiverLocationLabel}, ranked from the active regional network.`
-              : `Live gauge levels for ${selectedRiverLocationLabel} and linked regional stations only.`
-          }
-          icon={Droplets}
-          action={
-            <StatusBadge tone={sensorsLoading ? 'warning' : 'info'} icon={Radio}>
-              {sensorsLoading ? 'Syncing levels' : `${selectedRegionSensors.length} region nodes`}
-            </StatusBadge>
-          }
-          className="mb-6"
-        />
-
-        {sensorsLoading && !leadRegionSensor ? (
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
-            <SkeletonLoader type="gauge" />
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <SkeletonLoader type="card" count={4} />
-            </div>
-          </div>
-        ) : leadRegionSensor ? (
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
-            <div className="space-y-4">
-              <WaterLevelGauge
-                currentLevel={Number(leadRegionSensor.river_level || 0)}
-                dangerLevel={Number(dashboardDangerLevel || 13.5)}
-                maxLevel={Math.max(Number(dashboardDangerLevel || 13.5) + 4, Number(leadRegionSensor.river_level || 0) + 2, 18)}
-                severity={severity}
-              />
-              <InsetPanel className="space-y-4">
-                <div>
-                  <div className={opsLabelClass}>Lead station</div>
-                  <div className="mt-2 text-lg font-semibold uppercase tracking-[0.08em] text-[color:var(--ops-text)]">{leadRegionSensor.station}</div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 py-1.5 text-[9px] font-mono uppercase tracking-[0.16em] text-[color:var(--ops-text-soft)]">
-                    <Waves size={10} className="shrink-0 text-[color:var(--ops-info)]" />
-                    <span className="truncate">{leadRegionSensor.river || 'Active Basin'}</span>
-                  </div>
-                  <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-[9px] font-mono uppercase tracking-[0.18em] ${leadTrendMeta?.tone || 'border-white/12 bg-white/[0.05] text-[color:var(--ops-text-soft)]'}`}>
-                    <LeadTrendIcon size={10} className="shrink-0" />
-                    <span>{leadRegionSensor.trend || 'STEADY'}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-sm text-[color:var(--ops-text-soft)]">
-                  <span>Danger Level</span>
-                  <span className="font-mono text-[color:var(--ops-text)]">{dashboardDangerLevel.toFixed(1)}m</span>
-                </div>
-              </InsetPanel>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {selectedRegionSensors.slice(0, 4).map((sensor) => (
-                <RegionSensorCard key={sensor.station} sensor={sensor} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            title="No selected region water levels yet"
-            description="Pick a state or city and the dashboard will load live water levels only for that selected region."
-            icon={Droplets}
-          />
-        )}
-      </LuxeCard>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-7">
-          <NeuralNetworkGraph
-            preferredState={state.prediction.selectedState}
-            matrixRegion={effectiveStateMatrix?.region}
-            matrixVerdict={matrixVerdict}
-            matrixStatus={stateMatrixStatus}
-            probabilityLanes={probabilityLanes}
-            dominantLane={dominantProbabilityLane[0]}
-          />
-        </div>
-        <div className="lg:col-span-5"><CWCLiveDataDisplay /></div>
-      </div>
-
-      <NeuralOperationsGraph />
-
-      {state.prediction.currentPrediction && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          <LuxeCard frameTone="amber">
-            <SectionHeader
-              eyebrow="Probability lanes"
-              title="Risk lane heartbeat"
-              description="The current distribution shows how the model is weighting low, moderate, severe, and critical outputs."
-              icon={Activity}
-              action={
-                <>
-                  <StatusBadge tone="info">Dominant {dominantProbabilityLane[0]}</StatusBadge>
-                  <StatusBadge tone="neutral">Peak {dominantProbabilityLane[1].toFixed(1)}%</StatusBadge>
-                </>
-              }
-              className="mb-6"
-            />
-            <div className="mb-5 flex flex-wrap gap-2">
-              {[
-                { key: 'low', label: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1' },
-                { key: 'moderate', label: 'MODERATE', value: probabilityLanes.moderate, fill: '#bc9437' },
-                { key: 'severe', label: 'SEVERE', value: probabilityLanes.severe, fill: '#ff8a5b' },
-                { key: 'critical', label: 'CRITICAL', value: probabilityLanes.critical, fill: '#ff0037' },
-              ].map((lane) => (
-                <StatusBadge key={lane.key} tone="neutral" className="!rounded-xl !px-3 !py-2">
-                  <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: lane.fill }} />
-                  {lane.label} {lane.value.toFixed(1)}%
-                </StatusBadge>
-              ))}
-            </div>
-            <div className="h-44 min-h-[11rem] min-w-0">
-              <ProbabilityHeartbeatGraph
-                dominantLane={dominantProbabilityLane[0]}
-                lanes={[
-                  { key: 'low', label: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1' },
-                  { key: 'moderate', label: 'MODERATE', value: probabilityLanes.moderate, fill: '#bc9437' },
-                  { key: 'severe', label: 'SEVERE', value: probabilityLanes.severe, fill: '#ff8a5b' },
-                  { key: 'critical', label: 'CRITICAL', value: probabilityLanes.critical, fill: '#ff0037' },
-                ]}
-                className="h-full w-full"
-              />
-            </div>
-          </LuxeCard>
-
-          <LuxeCard frameTone="olive">
-            <SectionHeader
-              eyebrow="Strategic response"
-              title="Priority action by zone"
-              description="These zone directives are derived from the active severity and the configured strategic location map."
-              icon={ShieldAlert}
-              className="mb-6"
-            />
-            <div className="space-y-5">
-              {strategicResponses.map((item, i) => (
-                <InsetPanel key={i} className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-[color:var(--ops-text-soft)]">{item.area}</span>
-                  <StatusBadge tone={item.status === 'EVACUATE' || item.status === 'CRITICAL' ? 'danger' : item.status === 'WARNING' || item.status === 'PREPARE' || item.status === 'STAGING' ? 'warning' : item.status === 'MONITOR' ? 'info' : 'success'}>
-                    {item.status}
-                  </StatusBadge>
-                </InsetPanel>
-              ))}
-            </div>
-          </LuxeCard>
-        </div>
-      )}
-
-      <FloodRiskHeatmap
-        data={heatmapData}
-        title={isCityHotspotView ? 'City hotspot heatmap' : 'State risk heatmap'}
-        caption={
-          isCityHotspotView
-            ? `Linked hotspots for ${selectedRiverLocationLabel}`
-            : `Sector-linked hotspots for ${state.prediction.selectedState || 'active state'}`
-        }
-      />
-
-      <FloodLogsPanel onLogLoaded={scrollToPredictionInput} borderless />
-
-      <ToastNotification toasts={toasts} onRemove={removeToast} />
-    </PageShell>
-  );
-};
-
-export default DashboardPage;
+              <datalist
