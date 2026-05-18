@@ -253,16 +253,26 @@ STATE_SEVERITY_MATRIX: Dict[str, StateSeverityMatrixEntry] = {
     },
 
     # ── MIZORAM ──────────────────────────────────────────────────────────────────
+    # LIVE CWC · AIZAWL — Tlawng River gauge, MSL datum
+    # Moderate ≥ 10 m / 210 mm  |  Severe ≥ 11 m / 360 mm  |  Critical ≥ 12 m / 500 mm
+    # CWC danger level: 115.10 m (MSL)  |  Matrix verdict threshold: CRITICAL at ≥ 12 m
     "mizoram": {
         "region": "NORTHEAST",
         "peak_level_m": {"moderate": 10.0, "severe": 11.0, "critical": 12.0},
         "rainfall_7d_mm": {"moderate": 210.0, "severe": 360.0, "critical": 500.0},
-        "danger_level_m": 11.0,
-        "warning_level_m": 9.4,
-        "hfl_m": 12.8,
-        "primary_rivers": ["Tlawng", "Tuirial", "Kolodyne"],
-        "vulnerable_districts": ["Aizawl", "Lunglei", "Champhai"],
-        "notes": "Steep hilly terrain with thin soil cover. Landslide-coupled flooding is primary hazard. Bamboo flowering (mautam) historically causes unusual ecosystem disruptions during flood years.",
+        "danger_level_m": 115.10,
+        "warning_level_m": 97.84,
+        "hfl_m": 120.50,
+        "primary_rivers": ["Tlawng", "Tuirial", "Kolodyne", "Chhimtuipui"],
+        "vulnerable_districts": ["Aizawl", "Lunglei", "Champhai", "Serchhip", "Kolasib"],
+        "notes": (
+            "LIVE CWC · AIZAWL — Tlawng River at Aizawl gauge; CWC official danger level 115.10 m (MSL datum). "
+            "Warning level ~97.84 m (MSL). HFL 120.50 m. "
+            "Steep hilly terrain with thin soil cover; landslide-coupled flooding is primary hazard. "
+            "Matrix verdict: CRITICAL when peak ≥ 12 m above gauge bed or 7-day rainfall ≥ 500 mm. "
+            "Bamboo flowering (mautam) historically causes unusual ecosystem disruptions during flood years. "
+            "Typical flood season: June–September."
+        ),
     },
 
     # ── NAGALAND ─────────────────────────────────────────────────────────────────
