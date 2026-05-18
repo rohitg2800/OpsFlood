@@ -287,11 +287,13 @@ export const useSystemInit = () => {
 
 /**
  * Hook for managing form validation
+ * PEAK_LEVEL_MAX raised to 999 to support MSL-datum CWC gauges
+ * (e.g. Aizawl/Mizoram 115.10 m, Delhi Yamuna 204.83 m)
  */
 export const useFormValidation = (formData: any) => {
   const { dispatch } = useAppState();
   const PEAK_LEVEL_MIN = 0;
-  const PEAK_LEVEL_MAX = 100;
+  const PEAK_LEVEL_MAX = 999;  // raised from 100 — supports high MSL-datum gauges
   const RAINFALL_7D_MIN = 0;
   const RAINFALL_7D_MAX = 5000;
 
