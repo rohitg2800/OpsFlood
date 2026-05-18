@@ -19,6 +19,7 @@ import re
 import hashlib
 import json
 from dotenv import load_dotenv
+from cachetools import TTLCache
 
 # Resolve data/model paths relative to this backend folder (works regardless of CWD)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -53,12 +54,22 @@ try:
     )
     from backend.postgres_store import PostgresOperationalStore
     from backend.model_metrics import evaluate_and_log_metrics
+    from backend.routers.core import router as core_router
+    from backend.routers.predict import router as predict_router
+    from backend.routers.weather import router as weather_router
+    from backend.routers.telemetry import router as telemetry_router
+    from backend.routers.ingestion import router as ingestion_router
 except ImportError:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
     from postgres_store import PostgresOperationalStore
     from model_metrics import evaluate_and_log_metrics
+    from routers.core import router as core_router
+    from routers.predict import router as predict_router
+    from routers.weather import router as weather_router
+    from routers.telemetry import router as telemetry_router
+    from routers.ingestion import router as ingestion_router
 
 warnings.filterwarnings('ignore')
 operational_store = PostgresOperationalStore()
@@ -523,9 +534,10 @@ WEATHER_LOCATION_HINTS = [
     },
 ]
 WEATHER_CACHE_TTL_SECONDS = 20 * 60
+WEATHER_CACHE_MAX_SIZE = 1000  # Limit to 1000 cached entries
 WEATHER_TIMEZONE_OFFSET = 19800
 WEATHER_TIMEZONE_NAME = "Asia/Kolkata"
-WEATHER_CACHE: Dict[str, Dict[str, Any]] = {}
+WEATHER_CACHE: TTLCache = TTLCache(maxsize=WEATHER_CACHE_MAX_SIZE, ttl=WEATHER_CACHE_TTL_SECONDS)
 
 
 def canonical_feature_name(value: Any) -> str:
@@ -671,16 +683,16 @@ def _weather_cache_key(path: str, params: Dict[str, Any]) -> str:
 
 
 def get_cached_weather_response(path: str, params: Dict[str, Any], max_age: int = WEATHER_CACHE_TTL_SECONDS) -> Any | None:
-    entry = WEATHER_CACHE.get(_weather_cache_key(path, params))
+    cache_key = _weather_cache_key(path, params)
+    if cache_key not in WEATHER_CACHE:
+        return None
+
+    entry = WEATHER_CACHE.get(cache_key)
     if not entry:
         return None
 
-    age_seconds = int((datetime.datetime.utcnow() - entry["timestamp"]).total_seconds())
-    if age_seconds > max_age:
-        WEATHER_CACHE.pop(_weather_cache_key(path, params), None)
-        return None
-
     cached_payload = copy.deepcopy(entry["data"])
+    age_seconds = int((datetime.datetime.utcnow() - entry["timestamp"]).total_seconds())
     if isinstance(cached_payload, dict):
         cached_payload.setdefault("_weather_meta", {})
         cached_payload["_weather_meta"].update(
@@ -1238,6 +1250,7 @@ class FloodPredictionInput(BaseModel):
     T6d: float = 384.4
     T7d: float = 455.6
     state: str = "Maharashtra"
+    station: str | None = None
 
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
@@ -1260,6 +1273,15 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"message": "Internal Server Error", "detail": str(exc)}
     )
+
+
+# ============= REGISTER ROUTERS =============
+# Include all modular routers into the main FastAPI app
+app.include_router(core_router)
+app.include_router(predict_router)
+app.include_router(weather_router)
+app.include_router(telemetry_router)
+app.include_router(ingestion_router)
 
 
 @app.on_event("startup")
@@ -1529,7 +1551,7 @@ class CWCRiverScraper:
     def _beautifulsoup_fallback(self, station_name):
         try:
             fallback_url = "https://ffs.india-water.gov.in/iam/api/report/state/Maharashtra"
-            res = requests.get(fallback_url, headers=self.headers, verify=False, timeout=5)
+            res = requests.get(fallback_url, headers=self.headers, timeout=5)
             soup = BeautifulSoup(res.text, 'html.parser')
             rows = soup.find_all('tr')
             for row in rows:
@@ -1960,7 +1982,13 @@ class KolhapurFloodPredictor:
             except Exception as exc:
                 print(f"⚠️ Failed loading fallback artifacts: {exc}")
 
-        self.train_with_real_data()
+        # Raise an error instead of training in-app
+        raise RuntimeError(
+            "❌ ML model artifacts not found. Please train the model first:\n"
+            "   python -m backend.train\n"
+            "   or from backend/: python train.py\n"
+            "Model artifacts should be in: artifacts/dvc/models/"
+        )
 
     def load_bundle_model(self, bundle_key: str) -> tuple[Any, Any] | None:
         if bundle_key in self.bundle_models:
@@ -2559,7 +2587,7 @@ async def predict_flood(input_data: FloodPredictionInput):
         if result["severity"] == "CRITICAL":
             result["monitoring"] = {"level": "CRITICAL EMERGENCY", "action": "Evacuate vulnerable river basins immediately.", "priority_zones": ["Primary Catchment", "Downstream Villages", "Low-lying urban zones"]}
         elif result["severity"] == "SEVERE":
-            result["monitoring"] = {"level": "CRITICAL EMERGENCY", "action": "Evacuate vulnerable river basins immediately.", "priority_zones": ["Primary Catchment", "Downstream Villages", "Low-lying urban zones"]}
+            result["monitoring"] = {"level": "HIGH ALERT", "action": "Deploy monitoring teams & prepare contingency measures.", "priority_zones": ["Primary Catchment", "Downstream Villages"]}
         elif result["severity"] == "MODERATE":
             result["monitoring"] = {"level": "ELEVATED ALERT", "action": "Deploy monitoring teams & prep pumps.", "priority_zones": ["Drainage bottlenecks", "Main river gauge"]}
         else:
