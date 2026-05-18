@@ -54,6 +54,7 @@ try:
     )
     from backend.postgres_store import PostgresOperationalStore
     from backend.model_metrics import evaluate_and_log_metrics
+    from backend.cwc_scraper import CWCRiverScraper
     from backend.routers.core import router as core_router
     from backend.routers.predict import router as predict_router
     from backend.routers.weather import router as weather_router
@@ -65,6 +66,7 @@ except ImportError:
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
     from postgres_store import PostgresOperationalStore
     from model_metrics import evaluate_and_log_metrics
+    from cwc_scraper import CWCRiverScraper
     from routers.core import router as core_router
     from routers.predict import router as predict_router
     from routers.weather import router as weather_router
@@ -1295,7 +1297,11 @@ async def shutdown_ingestion_scheduler():
     data_ingestion_scheduler.stop()
 
 # ============= 3. DATA ACQUISITION (CWC SCRAPER) =============
-class CWCRiverScraper:
+# Import CWCRiverScraper from dedicated module to avoid duplication
+cwc_scraper = CWCRiverScraper()
+
+
+def get_openweather_api_key() -> str:
     def __init__(self):
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
