@@ -700,7 +700,8 @@ const DashboardPage: React.FC = () => {
             fetchSensors({ force: true }),
           ]);
 
-          if (!cancelled && typeof cwcNode?.currentLevel === 'number') {
+          // Only auto-apply CWC level if the user has not manually edited the form
+          if (!cancelled && typeof cwcNode?.currentLevel === 'number' && !state.form.isDirty) {
             dispatch({
               type: 'SET_FORM_DATA',
               payload: { Peak_Flood_Level_m: cwcNode.currentLevel },
@@ -1109,15 +1110,30 @@ const DashboardPage: React.FC = () => {
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_23rem]">
             <div className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
-                <LuxeInput
-                  label="Peak River Level (m)"
-                  type="number"
-                  value={state.form.data.Peak_Flood_Level_m}
-                  onChange={(e: any) => {
-                    const v = parseFloat(e.target.value);
-                    dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: Number.isFinite(v) ? v : 0 } });
-                  }}
-                />
+                <div className="space-y-1">
+                  <LuxeInput
+                    label="Peak River Level (m)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={state.form.data.Peak_Flood_Level_m}
+                    onChange={(e: any) => {
+                      const raw = parseFloat(e.target.value);
+                      const v = Number.isFinite(raw) ? Math.min(100, Math.max(0, raw)) : 0;
+                      dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: v } });
+                    }}
+                  />
+                  {state.form.errors?.Peak_Flood_Level_m ? (
+                    <p className="pl-1 text-[11px] font-semibold tracking-wide text-[color:var(--ops-danger-soft)]">
+                      {state.form.errors.Peak_Flood_Level_m}
+                    </p>
+                  ) : Number(state.form.data.Peak_Flood_Level_m) >= dashboardDangerLevel ? (
+                    <StatusBadge tone="danger" className="mt-1">
+                      ⚠ Exceeds danger level ({dashboardDangerLevel.toFixed(1)}m)
+                    </StatusBadge>
+                  ) : null}
+                </div>
                 <InsetPanel className="flex flex-col justify-between gap-4">
                   <div>
                     <div className={opsLabelClass}>Inference context</div>
@@ -1203,54 +1219,61 @@ const DashboardPage: React.FC = () => {
                   <StatusBadge tone="info">{rainfallTotalNow.toFixed(1)}mm total</StatusBadge>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
-                  {[
-                    { key: 'T1d', label: 'Day 1' },
-                    { key: 'T2d', label: 'Day 2' },
-                    { key: 'T3d', label: 'Day 3' },
-                    { key: 'T4d', label: 'Day 4' },
-                    { key: 'T5d', label: 'Day 5' },
-                    { key: 'T6d', label: 'Day 6' },
-                    { key: 'T7d', label: 'Day 7' },
-                  ].map((field) => (
-                    <div key={field.key} className="space-y-2 min-w-0">
-                      <label className={`block text-left ${opsLabelClass}`}>{field.label}</label>
-                      <input
-                        type="number"
-                        value={(state.form.data as any)[field.key]}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          const nextValue = Number.isFinite(v) ? v : 0;
-                          const nextData = { [field.key]: nextValue } as any;
-                          const rainfall = {
-                            T1d: field.key === 'T1d' ? nextValue : state.form.data.T1d || 0,
-                            T2d: field.key === 'T2d' ? nextValue : state.form.data.T2d || 0,
-                            T3d: field.key === 'T3d' ? nextValue : state.form.data.T3d || 0,
-                            T4d: field.key === 'T4d' ? nextValue : state.form.data.T4d || 0,
-                            T5d: field.key === 'T5d' ? nextValue : state.form.data.T5d || 0,
-                            T6d: field.key === 'T6d' ? nextValue : state.form.data.T6d || 0,
-                            T7d: field.key === 'T7d' ? nextValue : state.form.data.T7d || 0,
-                          };
-                          const total = Object.values(rainfall).reduce((sum, item) => sum + Number(item || 0), 0);
-                          const distribution = Object.values(rainfall).map((mm, idx) => ({
-                            day: idx + 1,
-                            mm: Math.round(Number(mm) * 10) / 10,
-                          }));
-                          dispatch({ type: 'SET_FORM_DATA', payload: nextData });
-                          dispatch({
-                            type: 'UPDATE_RAINFALL_STATS',
-                            payload: {
-                              total,
-                              average: total / 7,
-                              distribution,
-                            }
-                          });
-                        }}
-                        className={vectorFieldClass}
-                      />
-                    </div>
-                  ))}
-                </div>
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
+                    {[
+                      { key: 'T1d', label: 'Day 1' },
+                      { key: 'T2d', label: 'Day 2' },
+                      { key: 'T3d', label: 'Day 3' },
+                      { key: 'T4d', label: 'Day 4' },
+                      { key: 'T5d', label: 'Day 5' },
+                      { key: 'T6d', label: 'Day 6' },
+                      { key: 'T7d', label: 'Day 7' },
+                    ].map((field) => (
+                      <div key={field.key} className="space-y-2 min-w-0">
+                        <label className={`block text-left ${opsLabelClass}`}>{field.label}</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={5000}
+                          value={(state.form.data as any)[field.key]}
+                          onChange={(e) => {
+                            const raw = parseFloat(e.target.value);
+                            const nextValue = Number.isFinite(raw) ? Math.min(5000, Math.max(0, raw)) : 0;
+                            const nextData = { [field.key]: nextValue } as any;
+                            const rainfall = {
+                              T1d: field.key === 'T1d' ? nextValue : state.form.data.T1d || 0,
+                              T2d: field.key === 'T2d' ? nextValue : state.form.data.T2d || 0,
+                              T3d: field.key === 'T3d' ? nextValue : state.form.data.T3d || 0,
+                              T4d: field.key === 'T4d' ? nextValue : state.form.data.T4d || 0,
+                              T5d: field.key === 'T5d' ? nextValue : state.form.data.T5d || 0,
+                              T6d: field.key === 'T6d' ? nextValue : state.form.data.T6d || 0,
+                              T7d: field.key === 'T7d' ? nextValue : state.form.data.T7d || 0,
+                            };
+                            const total = Object.values(rainfall).reduce((sum, item) => sum + Number(item || 0), 0);
+                            const distribution = Object.values(rainfall).map((mm, idx) => ({
+                              day: idx + 1,
+                              mm: Math.round(Number(mm) * 10) / 10,
+                            }));
+                            dispatch({ type: 'SET_FORM_DATA', payload: nextData });
+                            dispatch({
+                              type: 'UPDATE_RAINFALL_STATS',
+                              payload: {
+                                total,
+                                average: total / 7,
+                                distribution,
+                              }
+                            });
+                          }}
+                          className={vectorFieldClass}
+                        />
+                        {(state.form.errors as any)?.[field.key] ? (
+                          <p className="text-[10px] font-semibold tracking-wide text-[color:var(--ops-danger-soft)]">
+                            {(state.form.errors as any)[field.key]}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
               </InsetPanel>
 
               <InsetPanel className="space-y-5">
@@ -1278,10 +1301,14 @@ const DashboardPage: React.FC = () => {
                       <button
                         key={s.id}
                         onClick={() => {
-                          const daily = s.rainTotal / 7;
-                          const distribution = Array.from({ length: 7 }).map((_, idx) => ({ day: idx + 1, mm: Math.round(daily * 10) / 10 }));
-                          dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: s.peak, T1d: daily, T2d: daily, T3d: daily, T4d: daily, T5d: daily, T6d: daily, T7d: daily } });
-                          dispatch({ type: 'UPDATE_RAINFALL_STATS', payload: { total: s.rainTotal, average: daily, distribution } });
+                          const dailyRounded = Math.round((s.rainTotal / 7) * 10) / 10;
+                          const day7 = Math.round((s.rainTotal - dailyRounded * 6) * 10) / 10;
+                          const distribution = [
+                            ...Array.from({ length: 6 }).map((_, idx) => ({ day: idx + 1, mm: dailyRounded })),
+                            { day: 7, mm: day7 },
+                          ];
+                          dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: s.peak, T1d: dailyRounded, T2d: dailyRounded, T3d: dailyRounded, T4d: dailyRounded, T5d: dailyRounded, T6d: dailyRounded, T7d: day7 } });
+                          dispatch({ type: 'UPDATE_RAINFALL_STATS', payload: { total: s.rainTotal, average: s.rainTotal / 7, distribution } });
                           setSelectedScenarioPreset(s.id);
                         }}
                         className={`rounded-2xl border p-5 text-left transition-all hover:-translate-y-0.5 ${presetTone} ${
