@@ -9,3 +9,8 @@ python-dotenv
 requests
 beautifulsoup4
 psycopg[binary]
+cachetools
+xgboost
+cachetools
+python-dateutil
+soupsieve
