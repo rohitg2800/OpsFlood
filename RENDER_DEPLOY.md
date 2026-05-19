@@ -295,3 +295,29 @@ Then rollback is just switching `MODEL_ARTIFACTS_DIR` to the previous production
 - [ ] Run one smoke `/predict` call and confirm ML vs `Heuristic Fallback – NO ML`
 - [ ] After service is stable, investigate root cause (training data, feature drift, label alignment, etc.)
 
+### Model versioning validation (recommended safeguard)
+
+Add an explicit “artifact hash check” before you trust a rollout.
+
+1. Generate hashes locally for the pinned artifact files you consider production-good.
+2. Set these Render env vars on the web service:
+   - `MODEL_ARTIFACTS_EXPECTED_SHA256`: SHA256 of the *artifact set digest* (computed across the expected files)
+   - `MODEL_ARTIFACTS_EXPECTED_FILES`: comma-separated relative paths to expected artifact files (from the configured `MODEL_ARTIFACTS_DIR` root)
+
+The repository includes a small helper script:
+
+- `backend/verify_model_artifact_version.py`
+
+It computes the actual artifact-set digest from the running container’s configured `MODEL_ARTIFACTS_DIR` and compares it to `MODEL_ARTIFACTS_EXPECTED_SHA256`.
+
+Example usage (locally or in a one-off container run):
+
+```bash
+MODEL_ARTIFACTS_EXPECTED_SHA256=<digest> \
+MODEL_ARTIFACTS_EXPECTED_FILES="flood_model.pkl,flood_scaler.pkl" \
+python backend/verify_model_artifact_version.py
+```
+
+If it exits non-zero (mismatch), treat the deploy as suspect and rollback via the steps above.
+
+
