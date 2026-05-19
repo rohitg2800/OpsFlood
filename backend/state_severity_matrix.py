@@ -39,6 +39,29 @@ class StateSeverityMatrixEntry(TypedDict):
     notes: str
 
 
+# Region-level 7-day rainfall thresholds (mm) grounded in IMD heavy/very-heavy
+# rainfall definitions but adjusted for regional flood sensitivity.
+REGION_RAINFALL_THRESHOLDS: Dict[str, Thresholds] = {
+    "PLAINS":    {"moderate": 150.0, "severe": 300.0, "critical": 450.0},
+    "COASTAL":   {"moderate": 200.0, "severe": 400.0, "critical": 600.0},
+    "HIMALAYAN": {"moderate": 150.0, "severe": 300.0, "critical": 500.0},
+    "NORTHEAST": {"moderate": 200.0, "severe": 400.0, "critical": 600.0},
+    "ARID":      {"moderate": 100.0, "severe": 200.0, "critical": 350.0},
+    "ISLAND":    {"moderate": 200.0, "severe": 400.0, "critical": 600.0},
+    "URBAN_UT":  {"moderate": 100.0, "severe": 200.0, "critical": 350.0},
+}
+
+
+def get_region_rainfall_thresholds(region: str) -> Thresholds:
+    """Return canonical 7-day rainfall thresholds for a region.
+
+    This makes rainfall severity consistent across states that share a
+    hydrometeorological regime (e.g., PLAINS, COASTAL) instead of
+    hand-tuning every state entry.
+    """
+    return REGION_RAINFALL_THRESHOLDS.get(region.upper(), REGION_RAINFALL_THRESHOLDS["PLAINS"])
+
+
 def normalize_state_name(state: str) -> str:
     key = (state or "").strip().lower()
     if key == "orissa":
@@ -571,12 +594,35 @@ def severity_from_entry(
     rainfall_7d_mm: float,
     entry: StateSeverityMatrixEntry,
 ) -> SeverityLevel:
+    """Derive LOW/MODERATE/SEVERE/CRITICAL from state matrix entry.
+
+    Depth severity still uses the per-state peak_level_m thresholds (useful for
+    offline labelling / training), but rainfall severity now comes from
+    region-level 7-day thresholds so that all PLAINS / COASTAL / HIMALAYAN
+    states behave consistently.
+    """
     p = entry["peak_level_m"]
-    r = entry["rainfall_7d_mm"]
-    if peak_level_m >= p["critical"] or rainfall_7d_mm >= r["critical"]:
-        return "CRITICAL"
-    if peak_level_m >= p["severe"] or rainfall_7d_mm >= r["severe"]:
-        return "SEVERE"
-    if peak_level_m >= p["moderate"] or rainfall_7d_mm >= r["moderate"]:
-        return "MODERATE"
-    return "LOW"
+    r = get_region_rainfall_thresholds(entry["region"])
+
+    # Depth axis
+    if peak_level_m >= p["critical"]:
+        depth_sev: SeverityLevel = "CRITICAL"
+    elif peak_level_m >= p["severe"]:
+        depth_sev = "SEVERE"
+    elif peak_level_m >= p["moderate"]:
+        depth_sev = "MODERATE"
+    else:
+        depth_sev = "LOW"
+
+    # Rainfall axis
+    if rainfall_7d_mm >= r["critical"]:
+        rain_sev: SeverityLevel = "CRITICAL"
+    elif rainfall_7d_mm >= r["severe"]:
+        rain_sev = "SEVERE"
+    elif rainfall_7d_mm >= r["moderate"]:
+        rain_sev = "MODERATE"
+    else:
+        rain_sev = "LOW"
+
+    order = {"LOW": 0, "MODERATE": 1, "SEVERE": 2, "CRITICAL": 3}
+    return depth_sev if order[depth_sev] >= order[rain_sev] else rain_sev
