@@ -41,7 +41,7 @@ WEATHER_QUERY_NOISE_PATTERN = re.compile(
 )
 
 # ============= MODEL ARTIFACTS =============
-FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo", "xgboost")
+FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo")
 INDOFLOODS_STATE_KEYS = {
     "andhra_pradesh",
     "karnataka",

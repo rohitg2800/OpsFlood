@@ -311,7 +311,7 @@ def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: 
         "data": tactical_fallback[:limit],
     }
 
-FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo", "xgboost")
+FLOOD_ARTIFACT_KEYWORDS = ("flood", "scaler", "feature", "indo")
 CLASS_LABEL_MAP = {
     0: "LOW",
     1: "MODERATE",
