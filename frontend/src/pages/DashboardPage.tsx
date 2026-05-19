@@ -19,6 +19,7 @@ import { SkeletonLoader } from '../components/SkeletonLoader';
 import { WeatherConsolePanel } from '../components/WeatherConsolePanel';
 import { apiUrl } from '../config/api';
 import { PageShell, PageHero } from '../components/PageShell';
+
 import {
   ActionButton,
   ConsolePanel,
@@ -994,7 +995,9 @@ const DashboardPage: React.FC = () => {
       </ConsolePanel>
 
       {/* Metric tiles */}
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 auto-rows-fr items-stretch">
+
+
         <MetricTile
           label="Severity"
           value={severity}

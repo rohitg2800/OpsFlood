@@ -156,8 +156,9 @@ async def get_state_severity_matrix_for_state(state_name: str):
     }
 
 # ============= PREDICTION ENDPOINT =============
-@router.post("/predict")
-async def predict_flood(input_data: FloodPredictionInput, predictor = None, cwc_scraper = None):
+@router.post("/predict/legacy")
+async def predict_flood_legacy(input_data: FloodPredictionInput, predictor = None, cwc_scraper = None):
+
     """Predict flood risk for given input."""
     try:
         source_policy = get_source_policy_payload()

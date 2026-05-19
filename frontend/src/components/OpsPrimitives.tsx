@@ -277,16 +277,16 @@ export function MetricTile({
     <div
       className={clsx(
         framed ? [opsInsetClass, 'ops-frame', frameToneClass[frameTone]] : opsInsetQuietClass,
-        'p-4 sm:p-5',
+        'flex h-full flex-col p-4 sm:p-5',
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col justify-center space-y-1">
           <div className={opsLabelClass}>{label}</div>
           <div
             className={clsx(
-              'text-2xl font-semibold tracking-[-0.03em] text-[color:var(--ops-text)] sm:text-3xl',
+              'text-2xl font-semibold leading-none tracking-[-0.03em] text-[color:var(--ops-text)] sm:text-3xl',
               mono ? 'font-mono tracking-[-0.02em]' : '',
             )}
           >
@@ -299,7 +299,9 @@ export function MetricTile({
           </span>
         ) : null}
       </div>
-      {hint ? <div className="mt-3 text-sm leading-relaxed text-[color:var(--ops-text-soft)]">{hint}</div> : null}
+      <div className="mt-auto">
+        {hint ? <div className="mt-3 text-sm leading-relaxed text-[color:var(--ops-text-soft)]">{hint}</div> : null}
+      </div>
     </div>
   );
 }
