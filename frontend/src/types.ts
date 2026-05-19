@@ -64,7 +64,9 @@ export interface Prediction {
   // Risk Assessment
   risk_score?: number;           // 0-100 risk percentage
   danger_level?: number;         // Absolute danger level (e.g., 12.0m)
+  proximity_to_danger_m?: number; // +m => below danger, -m => above danger
   critical_threshold?: number;   // Level at which CRITICAL is triggered
+
   
   // Monitoring & Response
   monitoring?: {
@@ -506,7 +508,7 @@ export const INITIAL_STATE: AppState = {
     accuracy: 95.2,
     latency: 1200,
     modelVersion: 'RandomForest v4.2',
-    selectedState: 'Maharashtra',
+    selectedState: 'Bihar',
     selectedCity: '',
     monitoringLevel: 'STANDARD' as const,
     monitoringAction: 'Maintain normal surveillance.',
@@ -605,7 +607,7 @@ export const INITIAL_STATE: AppState = {
       'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
       'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry'
     ],
-    currentStateModel: 'Maharashtra',
+    currentStateModel: 'Bihar',
     isMultiStateCapable: true,
   },
 };

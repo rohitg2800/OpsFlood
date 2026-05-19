@@ -994,7 +994,7 @@ const DashboardPage: React.FC = () => {
       </ConsolePanel>
 
       {/* Metric tiles */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile
           label="Severity"
           value={severity}
@@ -1003,8 +1003,18 @@ const DashboardPage: React.FC = () => {
         />
         <MetricTile label="Confidence" value={`${currentConfidence.toFixed(1)}%`} icon={Target} />
         <MetricTile label="Risk score" value={currentRiskScore} icon={Activity} />
-        <MetricTile label="Rainfall total" value={`${rainfallTotalNow.toFixed(0)}mm`} icon={Droplets} />
+        <MetricTile
+          label="Proximity to danger"
+          value={`${(() => {
+            const raw = Number(state.prediction.currentPrediction?.proximity_to_danger_m);
+            if (!Number.isFinite(raw)) return '--';
+            const abs = Math.abs(raw);
+            const direction = raw >= 0 ? 'below danger' : 'above danger';
+            return `${abs.toFixed(2)} m ${direction}`;
+          })()}`}
+        />
       </div>
+
 
       {/* Neural graph + water level gauge */}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
