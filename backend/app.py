@@ -2172,6 +2172,7 @@ class KolhapurFloodPredictor:
             peak_level_m=peak,
             rainfall_7d_mm=total_rainfall,
             entry=state_entry,
+            river_level_m=river_level_m,
         )
 
         scores = {
@@ -2276,7 +2277,7 @@ class KolhapurFloodPredictor:
         return self.normalize_probability_map(adjusted)
 
 
-    def complex_predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input") -> Dict[str, Any]:
+    def complex_predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input", river_level_m: float | None = None) -> Dict[str, Any]:
         state_entry = get_state_severity_entry(input_data.state)
         features = self.build_feature_vector(input_data)
         bundle_keys = self.candidate_bundle_keys_for_state(input_data.state)
@@ -2469,9 +2470,9 @@ class KolhapurFloodPredictor:
         self.refresh_artifact_catalog()
         print("✅ ML Matrix trained and saved to artifact storage!")
     
-    def predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input") -> Dict[str, Any]:
+    def predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input", river_level_m: float | None = None) -> Dict[str, Any]:
         try:
-            return self.complex_predict_flood(input_data, source=source)
+            return self.complex_predict_flood(input_data, source=source, river_level_m=river_level_m)
         except Exception as e:
             return self.fallback_prediction(input_data)
     
@@ -2624,8 +2625,9 @@ async def get_state_severity_matrix():
     return {
         "status": "success",
         "states": STATE_SEVERITY_MATRIX,
-        "note": "Heuristic calibration thresholds (not official CWC danger levels).",
+        "note": "CWC-calibrated thresholds with Option-A danger_level_override_guard active.",
     }
+
 
 @app.get("/state-severity-matrix/{state_name}")
 async def get_state_severity_matrix_for_state(state_name: str):
@@ -2633,8 +2635,9 @@ async def get_state_severity_matrix_for_state(state_name: str):
         "status": "success",
         "state": state_name,
         "matrix": get_state_severity_entry(state_name),
-        "note": "Heuristic calibration thresholds (not official CWC danger levels).",
+        "note": "CWC-calibrated thresholds with Option-A danger_level_override_guard active.",
     }
+
 
 @app.post("/predict")
 async def predict_flood(input_data: FloodPredictionInput):
@@ -2651,15 +2654,24 @@ async def predict_flood(input_data: FloodPredictionInput):
                 live_level = live_data.get("current_level_m")
                 if live_level is not None:
                     input_data.Peak_Flood_Level_m = float(live_level)
+                    river_level_m = float(live_level)
                     data_source = f"Live CWC Sensor ({live_data['source']})"
                     print(f"🌊 OVERRIDE: Using Authentic Live CWC Level: {input_data.Peak_Flood_Level_m}m")
+
             else:
                 print("⚠️ CWC Servers unavailable. Proceeding with user's manual input.")
         else:
             print(f"ℹ️ Source policy {source_policy['mode']} blocks in-app live CWC ingestion. Using manual/tactical context.")
 
         # Get ML Response (run blocking ML inference in thread)
-        result = await asyncio.to_thread(predictor.predict_flood, input_data, source=data_source)
+        # NOTE: river_level_m is required for Option-A guard activation inside severity_from_entry().
+        result = await asyncio.to_thread(
+            predictor.predict_flood,
+            input_data,
+            source=data_source,
+            river_level_m=river_level_m,
+        )
+
         result["source_policy"] = source_policy
         result["timestamp"] = current_timestamp_iso()
 

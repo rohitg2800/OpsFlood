@@ -142,8 +142,9 @@ async def get_state_severity_matrix():
     return {
         "status": "success",
         "states": STATE_SEVERITY_MATRIX,
-        "note": "Heuristic calibration thresholds (not official CWC danger levels).",
+        "note": "CWC-calibrated thresholds with Option-A danger_level_override_guard active.",
     }
+
 
 @router.get("/state-severity-matrix/{state_name}")
 async def get_state_severity_matrix_for_state(state_name: str):
@@ -152,8 +153,9 @@ async def get_state_severity_matrix_for_state(state_name: str):
         "status": "success",
         "state": state_name,
         "matrix": get_state_severity_entry(state_name),
-        "note": "Heuristic calibration thresholds (not official CWC danger levels).",
+        "note": "CWC-calibrated thresholds with Option-A danger_level_override_guard active.",
     }
+
 
 # ============= PREDICTION ENDPOINT =============
 @router.post("/predict/legacy")
@@ -168,13 +170,22 @@ async def predict_flood_legacy(input_data: FloodPredictionInput, predictor = Non
             print("🔄 Fetching live data from Central Water Commission...")
             try:
                 live_data = await asyncio.to_thread(cwc_scraper.get_live_river_level, input_data.station or "Kolhapur")
+                live_river_level = None
                 if live_data.get("status") in ["success", "success_fallback"]:
                     data_source = "Live CWC Data"
+                    # CWC scraper returns current_level_m; map to river_level_m for Option-A guard.
+                    live_river_level = live_data.get("current_level_m")
             except Exception as e:
                 print(f"⚠️ Live CWC fetch failed, falling back: {e}")
 
         if predictor:
-            result = await asyncio.to_thread(predictor.predict, input_data, source=data_source)
+            river_level_m = locals().get("live_river_level")
+            result = await asyncio.to_thread(
+                predictor.predict,
+                input_data,
+                source=data_source,
+                river_level_m=river_level_m,
+            )
         else:
             # Fallback to simple prediction if predictor not available
             result = {
