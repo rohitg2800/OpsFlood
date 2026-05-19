@@ -546,6 +546,14 @@ const DashboardPage: React.FC = () => {
     ? 'State matrix threshold'
     : 'Model baseline threshold';
 
+  const proximityToDangerM: number | null = useMemo(() => {
+    if (!dashboardDangerLevel) return null;
+    const peak = Number(state.form.data.Peak_Flood_Level_m || 0);
+    const delta = dashboardDangerLevel - peak;
+    // Positive delta = below danger, negative = above danger.
+    return Number.isFinite(delta) ? delta : null;
+  }, [dashboardDangerLevel, state.form.data.Peak_Flood_Level_m]);
+
   const nearbyWaterSourcesNote =
     selectedRegionSensorScope.mode === 'city_exact'
       ? `Direct station match found for ${selectedRiverLocationLabel}.`
@@ -642,10 +650,6 @@ const DashboardPage: React.FC = () => {
             : sensors[0];
 
           const liveSensorDanger = leadSensor?.danger_level ? Number(leadSensor.danger_level) : null;
-          if (liveSensorDanger && liveSensorDanger > 0) {
-            // FIX #1: SET_DANGER_LEVEL doesn't exist. Use SET_FORM_DATA to update Peak_Flood_Level_m.
-            dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: liveSensorDanger } });
-          }
           if (!state.form.isDirty) {
             if (liveSensorDanger && liveSensorDanger > 0) {
               dispatch({ type: 'SET_FORM_DATA', payload: { Peak_Flood_Level_m: liveSensorDanger } });
@@ -766,6 +770,10 @@ const DashboardPage: React.FC = () => {
     }
   }, [state.form.data, state.form.errors, predictWithFullModel, dispatch, notifyUser, validateAllFields, pushToast]);
 
+  const canonicalSeverity = severity; // single source of truth for UI
+  const canonicalRiskScore = currentRiskScore; // use backend risk_score directly
+  const canonicalVerdict = canonicalSeverity; // CURRENT VERDICT mirrors severity
+
   return (
     <PageShell>
       <PageHero
@@ -785,7 +793,7 @@ const DashboardPage: React.FC = () => {
             >
               {state.prediction.isLoading ? 'Running inference' : 'Execute inference'}
             </ActionButton>
-            <StatusBadge tone={monitoringTone}>Active severity {severity}</StatusBadge>
+            <StatusBadge tone={monitoringTone}>Active severity {canonicalSeverity}</StatusBadge>
             <ActionButton
               onClick={reloadStateMatrixIndex}
               icon={RefreshCw}
@@ -887,7 +895,6 @@ const DashboardPage: React.FC = () => {
                   Lock target
                 </ActionButton>
               </div>
-              {/* FIX #2 & #3: FloodProneLocation is an object. Use loc.station for key and value. */}
               <datalist id="flood-prone-location-options">
                 {floodProneLocationSuggestions.map((loc) => (
                   <option key={loc.station} value={loc.station} />
@@ -956,7 +963,6 @@ const DashboardPage: React.FC = () => {
           />
         </div>
         {stateMatrixStatus === 'loading' ? (
-          // FIX #4: SkeletonLoader uses `count`, not `rows`
           <SkeletonLoader count={4} />
         ) : stateMatrixStatus === 'error' ? (
           <EmptyState
@@ -996,32 +1002,27 @@ const DashboardPage: React.FC = () => {
 
       {/* Metric tiles */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 auto-rows-fr items-stretch">
-
-
         <MetricTile
           label="Severity"
-          value={severity}
-          tone={severity === 'CRITICAL' ? 'danger' : severity === 'SEVERE' ? 'warning' : severity === 'MODERATE' ? 'info' : 'success'}
+          value={canonicalSeverity}
+          tone={canonicalSeverity === 'CRITICAL' ? 'danger' : canonicalSeverity === 'SEVERE' ? 'warning' : canonicalSeverity === 'MODERATE' ? 'info' : 'success'}
           icon={ShieldAlert}
         />
         <MetricTile label="Confidence" value={`${currentConfidence.toFixed(1)}%`} icon={Target} />
-        <MetricTile label="Risk score" value={currentRiskScore} icon={Activity} />
+        <MetricTile label="Risk score" value={canonicalRiskScore} icon={Activity} />
         <MetricTile
           label="Proximity to danger"
-          value={`${(() => {
-            const raw = Number(state.prediction.currentPrediction?.proximity_to_danger_m);
-            if (!Number.isFinite(raw)) return '--';
-            const abs = Math.abs(raw);
-            const direction = raw >= 0 ? 'below danger' : 'above danger';
+          value={(() => {
+            if (proximityToDangerM == null) return '--';
+            const abs = Math.abs(proximityToDangerM);
+            const direction = proximityToDangerM >= 0 ? 'below danger' : 'above danger';
             return `${abs.toFixed(2)} m ${direction}`;
-          })()}`}
+          })()}
         />
       </div>
 
-
       {/* Neural graph + water level gauge */}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
-        {/* FIX #5: pass dominantProbabilityLane (string), not the tuple */}
         <NeuralNetworkGraph
           preferredState={state.prediction.selectedState || 'Maharashtra'}
           matrixRegion={effectiveStateMatrix?.region}
@@ -1032,7 +1033,6 @@ const DashboardPage: React.FC = () => {
         />
         <ConsolePanel className="flex flex-col gap-4">
           <SectionHeader eyebrow="Gauge" title="Water level" icon={Waves} />
-          {/* FIX #6: WaterLevelGauge has no warningLevel prop — removed */}
           <WaterLevelGauge
             currentLevel={Number(state.form.data.Peak_Flood_Level_m || 0)}
             dangerLevel={dashboardDangerLevel ?? 13.5}
@@ -1052,7 +1052,6 @@ const DashboardPage: React.FC = () => {
         </ConsolePanel>
       </div>
 
-      {/* FIX #8: ProbabilityHeartbeatGraph expects lanes array + dominantLane string */}
       <ProbabilityHeartbeatGraph
         lanes={[
           { key: 'low', label: 'LOW', value: probabilityLanes.low, fill: '#8ff0c1', tone: 'text-emerald-300' },
@@ -1063,15 +1062,12 @@ const DashboardPage: React.FC = () => {
         dominantLane={dominantProbabilityLane}
       />
 
-      {/* Heatmap */}
       <FloodRiskHeatmap data={heatmapData} />
 
-      {/* FIX #7: MonitoringProtocolAlert reads from context — no props needed */}
       <div ref={monitoringAlertRef}>
         <MonitoringProtocolAlert />
       </div>
 
-      {/* Sensor grid */}
       <ConsolePanel intensity="secondary" className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionHeader eyebrow="Regional network" title={nearbyWaterSourcesNote} icon={Radio} />
@@ -1083,7 +1079,6 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
         {sensorsLoading && !selectedRegionSensors.length ? (
-          // FIX #9: use count not rows
           <SkeletonLoader count={3} />
         ) : selectedRegionSensors.length === 0 ? (
           <EmptyState title="No sensor data" description="No telemetry nodes available for this selection." />
@@ -1096,10 +1091,8 @@ const DashboardPage: React.FC = () => {
         )}
       </ConsolePanel>
 
-      {/* CWC live data */}
       <CWCLiveDataDisplay />
 
-      {/* Prediction input form */}
       <div ref={predictionInputRef}>
         <ConsolePanel intensity="secondary" className="space-y-5">
           <SectionHeader
@@ -1159,7 +1152,6 @@ const DashboardPage: React.FC = () => {
             ))}
           </div>
 
-          {/* Scenario presets */}
           <div className="flex flex-wrap gap-2">
             {scenarioPresets.map((preset) => (
               <button
@@ -1185,20 +1177,16 @@ const DashboardPage: React.FC = () => {
         </ConsolePanel>
       </div>
 
-      {/* Flood logs + weather */}
       <div className="grid gap-4 xl:grid-cols-2">
         <FloodLogsPanel />
-        {/* FIX #10: WeatherConsolePanel prop is `target`, not `weatherTarget` */}
         <WeatherConsolePanel
           target={dashboardWeatherTarget}
           coordinates={dashboardWeatherCoordinates}
         />
       </div>
 
-      {/* FIX #11: NeuralOperationsGraph reads from context — no prediction/isLoading props */}
       <NeuralOperationsGraph />
 
-      {/* FIX #12: ToastNotification takes `toasts` array + `onRemove`, not single `toast` + `onDismiss` */}
       <ToastNotification toasts={toasts} onRemove={removeToast} />
     </PageShell>
   );
