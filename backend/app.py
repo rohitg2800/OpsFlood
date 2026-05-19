@@ -2642,35 +2642,68 @@ async def get_state_severity_matrix_for_state(state_name: str):
 @app.post("/predict")
 async def predict_flood(input_data: FloodPredictionInput):
     """Endpoint consumed by the frontend"""
+
+    source_policy = get_source_policy_payload()
+    data_source = str(source_policy["prediction_data_source"])
+
+    # Ensure river_level_m always exists (used by Option-A guard in severity_from_entry)
+    river_level_m: float | None = None
+
     try:
-        source_policy = get_source_policy_payload()
-        data_source = str(source_policy["prediction_data_source"])
-
         if source_policy.get("allow_live_cwc_in_app"):
-            print("🔄 Fetching live data from Central Water Commission...")
-            live_data = await asyncio.to_thread(cwc_scraper.get_live_river_level, input_data.station or "Kolhapur")
+            try:
+                print("🔄 Fetching live data from Central Water Commission...")
+                live_data = await asyncio.to_thread(
+                    cwc_scraper.get_live_river_level,
+                    input_data.station or "Kolhapur",
+                )
 
-            if live_data.get("status") in ["success", "success_fallback"]:
-                live_level = live_data.get("current_level_m")
-                if live_level is not None:
-                    input_data.Peak_Flood_Level_m = float(live_level)
-                    river_level_m = float(live_level)
-                    data_source = f"Live CWC Sensor ({live_data['source']})"
-                    print(f"🌊 OVERRIDE: Using Authentic Live CWC Level: {input_data.Peak_Flood_Level_m}m")
+                if live_data.get("status") in ["success", "success_fallback"]:
+                    live_level = live_data.get("current_level_m")
+                    if live_level is not None:
+                        input_data.Peak_Flood_Level_m = float(live_level)
+                        river_level_m = float(live_level)
+                        data_source = f"Live CWC Sensor ({live_data['source']})"
+                        print(f"🌊 OVERRIDE: Using Authentic Live CWC Level: {input_data.Peak_Flood_Level_m}m")
+                else:
+                    print("⚠️ CWC Servers unavailable. Proceeding with user's manual input.")
 
-            else:
-                print("⚠️ CWC Servers unavailable. Proceeding with user's manual input.")
+            except Exception as cwc_exc:
+                print(f"❌ CWC fetch failed: {cwc_exc}")
+                write_audit_log(
+                    event_type="prediction.cwc_fetch",
+                    route="/predict",
+                    event_status="error",
+                    state_name=str(getattr(input_data, "state", "Maharashtra") or "Maharashtra"),
+                    station_name=str(getattr(input_data, "station", None) or "").strip() or None,
+                    details={"error": str(cwc_exc)},
+                )
         else:
-            print(f"ℹ️ Source policy {source_policy['mode']} blocks in-app live CWC ingestion. Using manual/tactical context.")
+            print(
+                f"ℹ️ Source policy {source_policy['mode']} blocks in-app live CWC ingestion. Using manual/tactical context.",
+            )
 
-        # Get ML Response (run blocking ML inference in thread)
-        # NOTE: river_level_m is required for Option-A guard activation inside severity_from_entry().
-        result = await asyncio.to_thread(
-            predictor.predict_flood,
-            input_data,
-            source=data_source,
-            river_level_m=river_level_m,
-        )
+        # If ML fails, still return heuristic fallback (HTTP 200).
+        try:
+            result = await asyncio.to_thread(
+                predictor.predict_flood,
+                input_data,
+                source=data_source,
+                river_level_m=river_level_m,
+            )
+        except Exception as ml_exc:
+            print(f"⚠️ ML inference failed, using heuristic fallback: {ml_exc}")
+            write_audit_log(
+                event_type="prediction.ml_inference",
+                route="/predict",
+                event_status="error",
+                state_name=str(getattr(input_data, "state", "Maharashtra") or "Maharashtra"),
+                station_name=str(getattr(input_data, "station", None) or "").strip() or None,
+                details={"error": str(ml_exc)},
+            )
+            result = predictor.fallback_prediction(input_data)
+            result["data_source"] = f"Fallback after ML error ({type(ml_exc).__name__})"
+            result["ml_error"] = str(ml_exc)
 
         result["source_policy"] = source_policy
         result["timestamp"] = current_timestamp_iso()
@@ -2685,21 +2718,52 @@ async def predict_flood(input_data: FloodPredictionInput):
         else:
             result["monitoring"] = {"level": "STANDARD PROTOCOL", "action": "Maintain normal surveillance.", "priority_zones": ["None"]}
 
-        prediction_id = persist_prediction_record(input_data, result)
-        result["prediction_id"] = prediction_id
+        # Persistence must never break the request
+        try:
+            prediction_id = persist_prediction_record(input_data, result)
+            result["prediction_id"] = prediction_id
+        except Exception as db_exc:
+            print(f"⚠️ Prediction persistence failed (ignored for API response): {db_exc}")
+            write_audit_log(
+                event_type="prediction.persistence",
+                route="/predict",
+                event_status="error",
+                state_name=str(getattr(input_data, "state", "Maharashtra") or "Maharashtra"),
+                station_name=str(getattr(input_data, "station", None) or "").strip() or None,
+                severity=str(result.get("severity") or "UNKNOWN"),
+                details={"error": str(db_exc)},
+            )
+            result["prediction_id"] = None
+
+        result.setdefault("response_mode", "OK")
+        if result.get("model_trained") is False:
+            result["response_mode"] = "FALLBACK_MODEL"
+
         return result
-        
+
     except Exception as e:
+        # Last-resort: return a safe heuristic response rather than HTTP 500.
+        print(f"CRITICAL /predict handler failure: {e}")
         input_payload = model_to_dict(input_data)
-        write_audit_log(
-            event_type="prediction.inference",
-            route="/predict",
-            event_status="error",
-            state_name=str(input_payload.get("state") or "Maharashtra"),
-            station_name=str(input_payload.get("station") or "").strip() or None,
-            details={"error": str(e)},
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+        try:
+            write_audit_log(
+                event_type="prediction.inference",
+                route="/predict",
+                event_status="error",
+                state_name=str(input_payload.get("state") or "Maharashtra"),
+                station_name=str(input_payload.get("station") or "").strip() or None,
+                details={"error": str(e)},
+            )
+        except Exception:
+            pass
+
+        result = predictor.fallback_prediction(input_data)
+        result["source_policy"] = source_policy
+        result["timestamp"] = current_timestamp_iso()
+        result["response_mode"] = "FALLBACK_MODEL"
+        result["handler_error"] = str(e)
+        return result
+
 
 
 @app.get("/prediction-history")
