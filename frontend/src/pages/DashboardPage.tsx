@@ -369,7 +369,25 @@ const DashboardPage: React.FC = () => {
 
   const selectedStateKey = normalizeStateKey(state.prediction.selectedState);
   const selectedStateMatrix = stateMatrixIndex[selectedStateKey] || null;
-  const effectiveStateMatrix = selectedStateMatrix || state.prediction.currentPrediction?.state_matrix || null;
+
+  // Keep active state-matrix in sync with the selected station.
+  // Station->state is resolved via geoCoordinates; if mismatch, we still compute matrix using resolved state.
+  const resolvedStationState = useMemo(() => {
+    // station resolver expects (station, city) first, but for state mapping we only need selectedState.
+    // We use resolveGeoCoordinate on the station token and fall back to current selectedState.
+    const stationToken = state.form.data.station || state.prediction.selectedCity || '';
+    const resolved = resolveGeoCoordinate(stationToken, state.prediction.selectedCity);
+    return resolved?.state || state.prediction.selectedState || state.form.data.state || '';
+  }, [state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.form.data.state]);
+
+  const resolvedStationStateKey = normalizeStateKey(resolvedStationState);
+  const resolvedStationStateMatrix = stateMatrixIndex[resolvedStationStateKey] || null;
+
+  const effectiveStateMatrix =
+    resolvedStationStateMatrix ||
+    selectedStateMatrix ||
+    state.prediction.currentPrediction?.state_matrix ||
+    null;
 
   const stateMatrixKeys = useMemo(() => {
     const keys = Object.keys(stateMatrixIndex || {});
