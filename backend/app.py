@@ -20,6 +20,10 @@ import hashlib
 import json
 from dotenv import load_dotenv
 from cachetools import TTLCache
+import logging  # add near other imports
+
+logger = logging.getLogger("opsflood")
+
 
 # Resolve data/model paths relative to this backend folder (works regardless of CWD)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2476,7 +2480,13 @@ class KolhapurFloodPredictor:
         Heuristic-only fallback used when ML models are unavailable.
         Does NOT fabricate per-class probability distributions.
         """
-        from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
+        try:
+            # package mode: uvicorn backend.app:app
+            from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
+        except ImportError:
+            # standalone mode: uvicorn app:app from backend/
+            from state_severity_matrix import get_state_severity_entry, severity_from_entry
+
 
         peak = float(input_data.Peak_Flood_Level_m)
         rain = float(

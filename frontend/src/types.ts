@@ -65,6 +65,9 @@ export interface Prediction {
   risk_score?: number;           // 0-100 risk percentage
   danger_level?: number;         // Absolute danger level (e.g., 12.0m)
   proximity_to_danger_m?: number; // +m => below danger, -m => above danger
+  // (Aliases kept for older code paths / inconsistent naming)
+  proximity_to_danger?: number;
+
   critical_threshold?: number;   // Level at which CRITICAL is triggered
 
   
