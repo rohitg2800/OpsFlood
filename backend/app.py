@@ -2320,6 +2320,15 @@ class KolhapurFloodPredictor:
             str(rule_signals["threshold_severity"]),
         )
 
+        # ------------------------------
+        # Derive proximity to danger
+        # ------------------------------
+        # Using state matrix CWC danger level as the primary reference.
+        current_level = float(input_data.Peak_Flood_Level_m)
+        danger_level_m = float(state_entry["danger_level_m"])
+        proximity_to_danger_m = round(danger_level_m - current_level, 2)  # +m => below danger
+
+
         severity_rank = {"LOW": 0, "MODERATE": 1, "SEVERE": 2, "CRITICAL": 3}
         severity = max(final_probabilities, key=final_probabilities.get)
         threshold_severity = str(rule_signals["threshold_severity"])
@@ -2342,7 +2351,9 @@ class KolhapurFloodPredictor:
             "danger_level": state_entry["danger_level_m"],
             "critical_threshold": state_entry["peak_level_m"]["critical"],
             "risk_score": int(max(0, min(100, risk_score))),
+            "proximity_to_danger_m": float(proximity_to_danger_m),
             "state": input_data.state,
+
             "state_matrix": state_entry,
             "ensemble": {
                 "primary_bundle": bundle_keys[0] if bundle_keys else self.default_bundle_key,
