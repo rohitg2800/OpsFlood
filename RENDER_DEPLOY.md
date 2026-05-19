@@ -227,3 +227,71 @@ Then open `http://localhost:10000`.
 5. Check `https://<your-service>.onrender.com/health`:
    - If this fails, deployment/startup is broken.
    - If this works but `/` is not the app, the wrong root directory/runtime was selected.
+
+## Rollback strategy (bad model / bad deploy)
+
+This deployment serves ML artifacts from a versioned artifact store under:
+
+- `artifacts/dvc/models/` (default)
+
+and can be redirected via Render env vars:
+
+- `MODEL_ARTIFACTS_DIR` (path to an artifact directory)
+- `MODEL_ARTIFACTS_BACKEND` (defaults to `DVC`)
+
+### Goal
+
+If a new deploy introduces a “bad model” (worse predictions, broken deserialization, wrong features), rollback quickly by switching to a known-good artifact set without needing to rebuild the whole app.
+
+### Strategy A (recommended): pin a known-good DVC revision + switch artifacts dir
+
+1. Choose the last known-good artifact revision
+   - In DVC terms, keep a revision/commit hash for the model artifacts that were validated.
+   - Record it in a file in the repo (example: `artifacts/dvc/models/.pinned_revision`) or in your release notes.
+
+2. Ensure the pinned artifact directory is present in the deployed image
+   - Common options:
+     - Keep multiple pinned directories in the repo, e.g.:
+       - `artifacts/dvc/models/_pinned/rev_<HASH>/...`
+     - OR fetch artifacts at build/start time from DVC using the pinned revision.
+
+3. Rollback on Render (fast switch)
+   - In Render dashboard for the web service `opsflood`, update:
+     - `MODEL_ARTIFACTS_DIR` → the pinned directory for the last-good revision
+   - Trigger a redeploy (or restart the service if Render supports it for env changes).
+
+4. Verify rollback
+   - Confirm the API sees the expected artifact set:
+     - `curl https://<your-service>.onrender.com/model-artifacts`
+   - Smoke test prediction behavior:
+     - `curl -X POST https://<your-service>.onrender.com/predict ...`
+   - Expected behavior:
+     - If artifacts are present: algorithm should be ML-based.
+     - If artifacts are missing/unavailable: backend returns `Heuristic Fallback – NO ML` with `probabilities: {}` (no fabricated ML probabilities).
+
+### Strategy B: git rollback (revert commit + redeploy)
+
+If the bad change is not only the model artifacts but also code/config:
+
+1. Revert the GitHub commit that introduced the bad behavior (or re-deploy the previous tag).
+2. Let Render auto-deploy / redeploy from YAML.
+3. Keep `MODEL_ARTIFACTS_DIR` pointed at the default `artifacts/dvc/models/` unless you also need to swap artifact sets.
+
+### Strategy C: keep “previous production model” artifact alongside the new one
+
+If you use an artifact promotion flow (train → validate → promote), ensure your repo always includes:
+
+- current production artifacts (default)
+- previous production artifacts (rollback candidate)
+
+Then rollback is just switching `MODEL_ARTIFACTS_DIR` to the previous production directory.
+
+### Practical checklist for incident response
+
+- [ ] Capture symptom + time window (did latency spike, did predictions degrade, did errors appear?)
+- [ ] Confirm artifact set in production via `/model-artifacts`
+- [ ] Switch `MODEL_ARTIFACTS_DIR` to last-good pinned revision (Strategy A)
+- [ ] Redeploy/restart Render service
+- [ ] Run one smoke `/predict` call and confirm ML vs `Heuristic Fallback – NO ML`
+- [ ] After service is stable, investigate root cause (training data, feature drift, label alignment, etc.)
+
