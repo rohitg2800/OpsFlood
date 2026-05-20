@@ -2132,6 +2132,7 @@ class KolhapurFloodPredictor:
         self,
         input_data: FloodPredictionInput,
         state_entry: Dict[str, Any],
+        river_level_m: float | None,
     ) -> tuple[Dict[str, float], Dict[str, float]]:
         daily_rainfall = [
             float(input_data.T1d),
@@ -2310,7 +2311,11 @@ class KolhapurFloodPredictor:
             raise RuntimeError("No loadable ML model bundles available for ensemble prediction.")
 
         ml_probabilities = self.normalize_probability_map(ml_probabilities)
-        rule_probabilities, rule_signals = self.rule_engine_probability_map(input_data, state_entry)
+        rule_probabilities, rule_signals = self.rule_engine_probability_map(
+            input_data,
+            state_entry,
+            river_level_m=river_level_m,
+        )
 
         ml_total_weight = min(0.75, 0.5 + 0.1 * len(bundle_predictions))
         rule_weight = 1.0 - ml_total_weight
@@ -2474,9 +2479,10 @@ class KolhapurFloodPredictor:
         try:
             return self.complex_predict_flood(input_data, source=source, river_level_m=river_level_m)
         except Exception as e:
-            return self.fallback_prediction(input_data)
+            return self.fallback_prediction(input_data, river_level_m=river_level_m)
     
-    def fallback_prediction(self, input_data: FloodPredictionInput) -> Dict[str, Any]:
+    
+    def fallback_prediction(self, input_data: FloodPredictionInput, river_level_m: float | None = None) -> Dict[str, Any]:
         """
         Heuristic-only fallback used when ML models are unavailable.
         Does NOT fabricate per-class probability distributions.
@@ -2501,7 +2507,12 @@ class KolhapurFloodPredictor:
         )
 
         state_entry = get_state_severity_entry(input_data.state)
-        severity = severity_from_entry(peak_level_m=peak, rainfall_7d_mm=rain, entry=state_entry)
+        severity = severity_from_entry(
+            peak_level_m=peak,
+            rainfall_7d_mm=rain,
+            entry=state_entry,
+            river_level_m=river_level_m,
+        )
 
         # Static confidence bands by severity (honest ranges, not fabricated ML scores)
         CONFIDENCE_BANDS = {
@@ -2701,7 +2712,7 @@ async def predict_flood(input_data: FloodPredictionInput):
                 station_name=str(getattr(input_data, "station", None) or "").strip() or None,
                 details={"error": str(ml_exc)},
             )
-            result = predictor.fallback_prediction(input_data)
+            result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
             result["data_source"] = f"Fallback after ML error ({type(ml_exc).__name__})"
             result["ml_error"] = str(ml_exc)
 
@@ -2757,7 +2768,7 @@ async def predict_flood(input_data: FloodPredictionInput):
         except Exception:
             pass
 
-        result = predictor.fallback_prediction(input_data)
+        result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
         result["source_policy"] = source_policy
         result["timestamp"] = current_timestamp_iso()
         result["response_mode"] = "FALLBACK_MODEL"
