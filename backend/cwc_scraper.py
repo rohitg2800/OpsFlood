@@ -213,52 +213,77 @@ class CWCRiverScraper:
 
         return telemetry
 
+    def _parse_station_feed_payload(self, payload: Any) -> list[Dict[str, Any]]:
+        """Extract station list from the NEW CWC JSON payload.
+
+        Observed formats from FFS frontend:
+        - Wrapped: {"data": [ ... ]}
+        - Direct list: [ {..station..}, {..station..} ]
+
+        Unknown fields are ignored.
+        """
+        if isinstance(payload, list):
+            return [s for s in payload if isinstance(s, dict)]
+
+        if isinstance(payload, dict):
+            stations = payload.get("data")
+            if isinstance(stations, list):
+                return [s for s in stations if isinstance(s, dict)]
+
+        return []
+
+
     def _fetch_live_station_feed(self):
-        """Fetch live station feed from CWC API with retry logic."""
+        """Fetch live station feed from CWC API with retry logic.
+
+        Uses the NEW JSON endpoint consumed by the FFS frontend.
+        """
         if self._station_feed_retry_after and datetime.datetime.now() < self._station_feed_retry_after:
             raise RuntimeError(self._station_feed_failure_message or "CWC live telemetry endpoints are temporarily unavailable.")
 
-        candidate_paths = [
-            "/new-warning-station",
-            "/warning-station",
-        ]
-        failures = []
+        # NOTE: The URL template must match DevTools → Network exactly.
+        cwc_endpoint_url_template = "https://ffs.india-water.gov.in/ffm/api/station-water-level-above-warning/"
+
+        failures: list[str] = []
         host_connect_timeout = False
 
-        for path in candidate_paths:
-            try:
-                response = requests.get(
-                    f"{self.cwc_api_base}{path}",
-                    headers=self.headers,
-                    timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
-                )
-                if response.status_code == 404:
-                    failures.append(f"{path}: 404")
-                    continue
+        try:
+            response = requests.get(
+                cwc_endpoint_url_template,
+                headers=self.headers,
+                timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
+            )
 
+            if response.status_code == 404:
+                failures.append("new_cwc_endpoint: 404")
+                # Do not clear cooldown; fall through to cooldown logic below.
+            else:
                 response.raise_for_status()
                 payload = response.json()
-                if isinstance(payload, list):
+                stations = self._parse_station_feed_payload(payload)
+                if stations:
                     self._clear_station_feed_failure()
-                    return path, payload
+                    # endpoint_path is used only as metadata in the output
+                    return cwc_endpoint_url_template, stations
 
-                failures.append(f"{path}: unexpected payload {type(payload).__name__}")
-            except requests.ConnectTimeout:
-                failures.append(f"{path}: connect timeout")
-                host_connect_timeout = True
-                break
-            except requests.RequestException as exc:
-                failures.append(f"{path}: {self._format_request_error(exc)}")
-            except Exception as exc:
-                failures.append(f"{path}: unexpected {exc.__class__.__name__}")
+                failures.append("new_cwc_endpoint: empty/unexpected schema")
+        except requests.ConnectTimeout:
+            failures.append("new_cwc_endpoint: connect timeout")
+            host_connect_timeout = True
+        except requests.RequestException as exc:
+            failures.append(f"new_cwc_endpoint: {self._format_request_error(exc)}")
+        except Exception as exc:
+            failures.append(f"new_cwc_endpoint: unexpected {exc.__class__.__name__}")
 
-        failure_summary = " ; ".join(failures)
+        failure_summary = " ; ".join(failures) or "new_cwc_endpoint: unknown error"
         if host_connect_timeout:
             cooldown_seconds = 300
         else:
-            cooldown_seconds = 900 if failures and all(": 404" in failure for failure in failures) else 180
+            # 404 tends to be a stable break; backoff longer.
+            cooldown_seconds = 900 if any("404" in f for f in failures) else 180
         self._remember_station_feed_failure(failure_summary, cooldown_seconds)
         raise RuntimeError(failure_summary)
+
 
     def _site_priority(self, site: Dict[str, Any], target_state: str, target_station: str) -> int:
         """Rank site priority for station/state matching."""
@@ -327,9 +352,15 @@ class CWCRiverScraper:
 
             formatted_telemetry = []
             for site in raw_data:
-                water_level = self._safe_float(site.get("waterLevel"))
-                danger_level = self._safe_float(site.get("dangerLevel"))
-                warning_level = self._safe_float(site.get("warningLevel"))
+                # NEW endpoint sample provides value=level-above-warning.
+                # Older internal schema expects: waterLevel, warningLevel, dangerLevel.
+                # We derive water_level and fill unknowns as 0.0.
+                warning_level = self._safe_float(site.get("warningLevel") or site.get("warning_level"))
+                danger_level = self._safe_float(site.get("dangerLevel") or site.get("danger_level"))
+
+                above_warning = self._safe_float(site.get("value"))
+                water_level = round(warning_level + above_warning, 2) if warning_level != 0.0 else above_warning
+
                 rainfall_last_hour = self._safe_float(
                     site.get("rainfall")
                     or site.get("rainfallLastHour")
