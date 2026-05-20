@@ -55,6 +55,8 @@ try:
         STATE_SEVERITY_MATRIX,
         get_state_severity_entry,
         severity_from_entry,
+        build_effective_state_entry,
+        select_best_station_node,
     )
     from backend.postgres_store import PostgresOperationalStore
     from backend.model_metrics import evaluate_and_log_metrics
@@ -67,7 +69,13 @@ try:
 except ImportError:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
-    from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
+    from state_severity_matrix import (
+        STATE_SEVERITY_MATRIX,
+        get_state_severity_entry,
+        severity_from_entry,
+        build_effective_state_entry,
+        select_best_station_node,
+    )
     from postgres_store import PostgresOperationalStore
     from model_metrics import evaluate_and_log_metrics
     from cwc_scraper import CWCRiverScraper
@@ -2134,6 +2142,7 @@ class KolhapurFloodPredictor:
         state_entry: Dict[str, Any],
         river_level_m: float | None,
     ) -> tuple[Dict[str, float], Dict[str, float]]:
+
         daily_rainfall = [
             float(input_data.T1d),
             float(input_data.T2d),
@@ -2278,8 +2287,15 @@ class KolhapurFloodPredictor:
         return self.normalize_probability_map(adjusted)
 
 
-    def complex_predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input", river_level_m: float | None = None) -> Dict[str, Any]:
-        state_entry = get_state_severity_entry(input_data.state)
+    def complex_predict_flood(
+        self,
+        input_data: FloodPredictionInput,
+        source: str = "Manual Input",
+        river_level_m: float | None = None,
+        state_entry_override: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        state_entry = state_entry_override or get_state_severity_entry(input_data.state)
+
         features = self.build_feature_vector(input_data)
         bundle_keys = self.candidate_bundle_keys_for_state(input_data.state)
         bundle_weights = self.bundle_weight_plan(bundle_keys)
@@ -2482,12 +2498,18 @@ class KolhapurFloodPredictor:
             return self.fallback_prediction(input_data, river_level_m=river_level_m)
     
     
-    def fallback_prediction(self, input_data: FloodPredictionInput, river_level_m: float | None = None) -> Dict[str, Any]:
+    def fallback_prediction(
+        self,
+        input_data: FloodPredictionInput,
+        river_level_m: float | None = None,
+        state_entry_override: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         """
         Heuristic-only fallback used when ML models are unavailable.
         Does NOT fabricate per-class probability distributions.
         """
         try:
+
             # package mode: uvicorn backend.app:app
             from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
         except ImportError:
@@ -2506,13 +2528,14 @@ class KolhapurFloodPredictor:
             + float(input_data.T7d)
         )
 
-        state_entry = get_state_severity_entry(input_data.state)
+        state_entry = state_entry_override or get_state_severity_entry(input_data.state)
         severity = severity_from_entry(
             peak_level_m=peak,
             rainfall_7d_mm=rain,
             entry=state_entry,
             river_level_m=river_level_m,
         )
+
 
         # Static confidence bands by severity (honest ranges, not fabricated ML scores)
         CONFIDENCE_BANDS = {
@@ -2659,6 +2682,9 @@ async def predict_flood(input_data: FloodPredictionInput):
 
     # Ensure river_level_m always exists (used by Option-A guard in severity_from_entry)
     river_level_m: float | None = None
+    station_node: Dict[str, Any] | None = None
+    state_entry_override: Dict[str, Any] | None = None
+
 
     try:
         if source_policy.get("allow_live_cwc_in_app"):
@@ -2694,6 +2720,41 @@ async def predict_flood(input_data: FloodPredictionInput):
                 f"ℹ️ Source policy {source_policy['mode']} blocks in-app live CWC ingestion. Using manual/tactical context.",
             )
 
+        # Station-aware effective thresholds (if we have telemetry)
+        #  - station_node picked for selected (state, station)
+        #  - effective_state_entry merges CWC warning/danger into state defaults
+        try:
+            if source_policy.get("allow_live_cwc_in_app"):
+                telemetry_payload = await asyncio.to_thread(
+                    build_policy_bound_telemetry,
+                    state_name=str(input_data.state),
+                    station_name=str(input_data.station or ""),
+                    limit=6,
+                )
+            else:
+                telemetry_payload = None
+
+            station_node = select_best_station_node(
+                state_name=str(input_data.state),
+                station_name=str(input_data.station or ""),
+                telemetry_payload=telemetry_payload,
+            )
+
+            if station_node and isinstance(station_node, dict):
+                state_entry_override = build_effective_state_entry(str(input_data.state), station_node)
+
+                node_level = station_node.get("river_level")
+                if node_level is not None:
+                    try:
+                        river_level_m = float(node_level)
+                        input_data.Peak_Flood_Level_m = river_level_m
+                        data_source = f"CWC Sensor Node ({station_node.get('source') or 'CWC'})"
+                    except Exception:
+                        pass
+        except Exception:
+            # Hard fail should never break prediction
+            state_entry_override = None
+
         # If ML fails, still return heuristic fallback (HTTP 200).
         try:
             result = await asyncio.to_thread(
@@ -2701,6 +2762,7 @@ async def predict_flood(input_data: FloodPredictionInput):
                 input_data,
                 source=data_source,
                 river_level_m=river_level_m,
+                state_entry_override=state_entry_override,
             )
         except Exception as ml_exc:
             print(f"⚠️ ML inference failed, using heuristic fallback: {ml_exc}")

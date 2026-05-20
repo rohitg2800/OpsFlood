@@ -21,7 +21,8 @@ from __future__ import annotations
 # still below warning — consistent with CWC Flood Bulletin language.
 # Activated automatically when severity_from_entry() receives river_level_m.
 
-from typing import Dict, Literal, Optional, TypedDict
+from typing import Any, Dict, Literal, Optional, TypedDict
+
 
 
 SeverityLevel = Literal["LOW", "MODERATE", "SEVERE", "CRITICAL"]
@@ -877,6 +878,129 @@ DEFAULT_STATE_ENTRY: StateSeverityMatrixEntry = {
 def get_state_severity_entry(state: str) -> StateSeverityMatrixEntry:
     key = normalize_state_name(state)
     return STATE_SEVERITY_MATRIX.get(key, DEFAULT_STATE_ENTRY)
+
+
+def _telemetry_level(value: Any) -> float:
+    """Extract a telemetry level (warning/danger/river) as float; returns 0.0 on missing/invalid."""
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def select_best_station_node(
+    state_name: str,
+    station_name: str | None,
+    telemetry_payload: Dict[str, Any] | None,
+) -> Optional[Dict[str, Any]]:
+    """Pick the best telemetry node for the selected (state, station).
+
+    Heuristics:
+      - Prefer exact/partial match on station_name against node['station'] and node['river']
+      - Prefer nodes in the same state (node['state_name'] / node['state'])
+      - Otherwise pick the highest river_level within the same state
+      - Return None if nothing usable
+    """
+    if not telemetry_payload:
+        return None
+
+    nodes = telemetry_payload.get("data") if isinstance(telemetry_payload, dict) else None
+    if not isinstance(nodes, list) or not nodes:
+        return None
+
+    target_state = normalize_state_name(state_name)
+    target_station = normalize_state_name(station_name or "")
+
+    def node_state_match(node: Dict[str, Any]) -> bool:
+        node_state_raw = node.get("state_name") or node.get("state") or ""
+        return bool(target_state) and target_state in normalize_state_name(str(node_state_raw))
+
+    def node_station_match(node: Dict[str, Any]) -> bool:
+        if not target_station:
+            return False
+        station_raw = node.get("station") or ""
+        river_raw = node.get("river") or ""
+        return (
+            target_station in normalize_state_name(str(station_raw))
+            or target_station in normalize_state_name(str(river_raw))
+        )
+
+    ranked: list[tuple[int, float, Dict[str, Any]]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if not node_state_match(node):
+            continue
+        river_level = _telemetry_level(node.get("river_level"))
+
+        if node_station_match(node):
+            # Best: station match in same state
+            score = 0
+        else:
+            score = 2
+
+        ranked.append((score, -river_level, node))
+
+    if ranked:
+        ranked.sort()
+        return ranked[0][2]
+
+    # Second pass: if state keys are inconsistent, still try station match globally.
+    if target_station:
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            station_raw = node.get("station") or ""
+            river_raw = node.get("river") or ""
+            if (
+                target_station in normalize_state_name(str(station_raw))
+                or target_station in normalize_state_name(str(river_raw))
+            ):
+                return node
+
+    return None
+
+
+def build_effective_state_entry(
+    state_name: str,
+    station_telemetry: Optional[Dict[str, Any]],
+) -> StateSeverityMatrixEntry:
+    """Build an effective severity entry merging state defaults with station-specific CWC thresholds.
+
+    - Always starts from the state matrix entry.
+    - If telemetry provides non-zero/sane warning/danger levels, they override the state's warning/danger.
+    - If base HFL is lower than overridden danger, approximate HFL as (danger + 1.0).
+
+    Telemetry override is only applied when values are > 0.
+    """
+    base_entry = get_state_severity_entry(state_name)
+    entry: StateSeverityMatrixEntry = dict(base_entry)  # shallow copy is sufficient: we only override numeric fields
+
+    if not station_telemetry:
+        return entry
+
+    warning = _telemetry_level(station_telemetry.get("warning_level"))
+    danger = _telemetry_level(station_telemetry.get("danger_level"))
+
+    # Override only if CWC values are non-zero and sane
+    if warning > 0.0:
+        entry["warning_level_m"] = warning
+    if danger > 0.0:
+        entry["danger_level_m"] = danger
+
+    hfl = _telemetry_level(entry.get("hfl_m"))
+    if danger > 0.0 and hfl < danger:
+        entry["hfl_m"] = danger + 1.0
+
+    # Defensive: keep ordering consistent when both values are provided.
+    # (If CWC warning > danger due to noise, clamp warning down.)
+    if danger > 0.0 and warning > 0.0 and float(entry.get("warning_level_m", 0.0)) > float(entry.get("danger_level_m", 0.0)):
+        entry["warning_level_m"] = float(entry["danger_level_m"]) * 0.86
+
+    return entry
+
 
 
 def severity_from_entry(
