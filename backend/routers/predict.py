@@ -19,21 +19,10 @@ from .model_artifacts import discover_model_artifacts, discover_model_bundles, d
 
 router = APIRouter(tags=["prediction"])
 
+from backend.app import FloodPredictionInput
+
 # ============= PYDANTIC SCHEMA =============
-class FloodPredictionInput(BaseModel):
-    Peak_Flood_Level_m: float = 12.74
-    Event_Duration_days: float = 3
-    Time_to_Peak_days: float = 2
-    Recession_Time_day: float = 2
-    T1d: float = 156.4
-    T2d: float = 299.2
-    T3d: float = 384.4
-    T4d: float = 384.4
-    T5d: float = 384.4
-    T6d: float = 384.4
-    T7d: float = 455.6
-    state: str = "Maharashtra"
-    station: str | None = None
+
 
 def persist_prediction_record(input_data, result):
     """Persist prediction record to storage."""
