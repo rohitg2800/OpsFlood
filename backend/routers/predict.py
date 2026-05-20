@@ -170,7 +170,7 @@ async def predict_flood_legacy(input_data: FloodPredictionInput, predictor = Non
         if predictor:
             river_level_m = locals().get("live_river_level")
             result = await asyncio.to_thread(
-                predictor.predict,
+                predictor.predict_flood,
                 input_data,
                 source=data_source,
                 river_level_m=river_level_m,
