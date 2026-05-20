@@ -2517,82 +2517,44 @@ class KolhapurFloodPredictor:
         joblib.dump(self.scaler, self.resolve_model_artifact(fallback_scaler_path))
         self.refresh_artifact_catalog()
         print("✅ ML Matrix trained and saved to artifact storage!")
-    
-    def predict_flood(self, input_data: FloodPredictionInput, source: str = "Manual Input", river_level_m: float | None = None) -> Dict[str, Any]:
-        try:
-            return self.complex_predict_flood(input_data, source=source, river_level_m=river_level_m)
-        except Exception as e:
-            return self.fallback_prediction(input_data, river_level_m=river_level_m)
-    
-    
+
+    # FIXED — add state_entry_override
     def fallback_prediction(
         self,
         input_data: FloodPredictionInput,
-        river_level_m: float | None = None,
-        state_entry_override: Dict[str, Any] | None = None,
+        source: str = "Heuristic Fallback",
+        state_entry_override=None,
+        ml_error: str = "",
     ) -> Dict[str, Any]:
-        """
-        Heuristic-only fallback used when ML models are unavailable.
-        Does NOT fabricate per-class probability distributions.
-        """
-        try:
-
-            # package mode: uvicorn backend.app:app
-            from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
-        except ImportError:
-            # standalone mode: uvicorn app:app from backend/
-            from state_severity_matrix import get_state_severity_entry, severity_from_entry
-
-
-        peak = float(input_data.Peak_Flood_Level_m)
-        rain = float(
-            float(input_data.T1d)
-            + float(input_data.T2d)
-            + float(input_data.T3d)
-            + float(input_data.T4d)
-            + float(input_data.T5d)
-            + float(input_data.T6d)
-            + float(input_data.T7d)
-        )
+        """Heuristic fallback when ML model is unavailable."""
+        from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
 
         state_entry = state_entry_override or get_state_severity_entry(input_data.state)
+        rainfall_7d = sum([
+        input_data.T1d, input_data.T2d, input_data.T3d,
+        input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
+        ])
         severity = severity_from_entry(
-            peak_level_m=peak,
-            rainfall_7d_mm=rain,
-            entry=state_entry,
-            river_level_m=river_level_m,
+        peak_level_m=input_data.Peak_Flood_Level_m,
+        rainfall_7d_mm=rainfall_7d,
+        entry=state_entry,
         )
-
-
-        # Static confidence bands by severity (honest ranges, not fabricated ML scores)
-        CONFIDENCE_BANDS = {
-            "LOW": 0.60,
-            "MODERATE": 0.65,
-            "SEVERE": 0.70,
-            "CRITICAL": 0.75,
-        }
-
-        confidence = CONFIDENCE_BANDS[severity]
-        confidence_percent = round(confidence * 100.0, 1)
-
+        risk_map = {"LOW": 20, "MODERATE": 45, "SEVERE": 70, "CRITICAL": 90}
         return {
-            "severity": severity,
-            "confidence_percent": confidence_percent,
-            "probabilities": {},  # Intentionally empty — no ML available
-            "algorithm": "Heuristic Fallback – NO ML",
-            "warning": "ML models unavailable. Severity derived from CWC state matrix only.",
-            "state": input_data.state,
-            "state_matrix": state_entry,
-            "data_source": "Manual Input",
-            "model_trained": False,
-            "danger_level": state_entry["danger_level_m"],
-            "critical_threshold": state_entry["peak_level_m"]["critical"],
-            "risk_score": int(confidence_percent),
-            "alert": "🚨" if severity in ["SEVERE", "CRITICAL"] else "⚠️" if severity == "MODERATE" else "🟢",
+        "severity": severity,
+        "confidence_percent": 70.0,
+        "probabilities": {},
+        "algorithm": "Heuristic Fallback – NO ML",
+        "warning": "ML models unavailable. Severity derived from CWC state matrix only.",
+        "state": input_data.state,
+        "state_matrix": state_entry,
+        "data_source": f"Fallback after ML error ({ml_error})" if ml_error else source,
+        "model_trained": False,
+        "danger_level": state_entry["danger_level_m"],
+        "critical_threshold": state_entry["peak_level_m"]["critical"],
+        "risk_score": risk_map.get(severity, 50),
+        "alert": "🚨" if severity in ("SEVERE", "CRITICAL") else "⚠️",
         }
-
-
-predictor = KolhapurFloodPredictor()
 
 # ============= 5. API ENDPOINTS =============
 @app.get("/")
