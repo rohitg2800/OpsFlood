@@ -1252,19 +1252,22 @@ def discover_model_bundles(artifacts: list[Dict[str, Any]]) -> Dict[str, Dict[st
 
 # ============= 1. PYDANTIC SCHEMA =============
 class FloodPredictionInput(BaseModel):
-    Peak_Flood_Level_m: float = 12.74
-    Event_Duration_days: float = 3
-    Time_to_Peak_days: float = 2
-    Recession_Time_day: float = 2
-    T1d: float = 156.4
-    T2d: float = 299.2
-    T3d: float = 384.4
-    T4d: float = 384.4
-    T5d: float = 384.4
-    T6d: float = 384.4
-    T7d: float = 455.6
+    # Defaults tuned to represent LOW/MODERATE input conditions
+    # (prevents UI default from immediately biasing toward SEVERE).
+    Peak_Flood_Level_m: float = 8.5
+    Event_Duration_days: float = 1
+    Time_to_Peak_days: float = 1
+    Recession_Time_day: float = 1
+    T1d: float = 10.0
+    T2d: float = 15.0
+    T3d: float = 20.0
+    T4d: float = 18.0
+    T5d: float = 12.0
+    T6d: float = 8.0
+    T7d: float = 7.0
     state: str = "Maharashtra"
     station: str | None = None
+
 
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
@@ -2210,14 +2213,17 @@ class KolhapurFloodPredictor:
             ),
         }
 
+        # Reduce hard bias toward SEVERE/CRITICAL coming from the rule engine.
+        # Keep only a small nudge so ML can still win when appropriate.
         threshold_boost = {
             "LOW": ("LOW", 0.0),
-            "MODERATE": ("MODERATE", 0.22),
-            "SEVERE": ("SEVERE", 0.32),
-            "CRITICAL": ("CRITICAL", 0.42),
+            "MODERATE": ("MODERATE", 0.10),
+            "SEVERE": ("SEVERE", 0.10),
+            "CRITICAL": ("CRITICAL", 0.12),
         }
         boosted_label, boost_value = threshold_boost[threshold_severity]
         scores[boosted_label] += boost_value
+
 
         signals = {
             "peak_moderate_ratio": round(peak_moderate_ratio, 3),
@@ -2243,11 +2249,14 @@ class KolhapurFloodPredictor:
         threshold_severity: str,
     ) -> Dict[str, float]:
         floors = {
+            # Lower severity floors to prevent systematic over-promotion
+            # when ML probabilities are weak.
             "LOW": 0.0,
-            "MODERATE": 0.20,   # was 0.30
-            "SEVERE": 0.30,     # was 0.42
-            "CRITICAL": 0.40,   # was 0.54
+            "MODERATE": 0.15,
+            "SEVERE": 0.18,
+            "CRITICAL": 0.22,
         }
+
 
         adjusted = dict(probabilities)
         adjusted[threshold_severity] = max(adjusted.get(threshold_severity, 0.0), floors.get(threshold_severity, 0.0))
@@ -2358,9 +2367,27 @@ class KolhapurFloodPredictor:
         severity_rank = {"LOW": 0, "MODERATE": 1, "SEVERE": 2, "CRITICAL": 3}
         severity = max(final_probabilities, key=final_probabilities.get)
         threshold_severity = str(rule_signals["threshold_severity"])
+
+        # Safety guard: if we have a CWC river level and it's below the CWC warning level,
+        # suppress SEVERE/CRITICAL regardless of rule-engine nudges.
+        if river_level_m is not None:
+            try:
+                warning_m = float(state_entry["warning_level_m"])
+                if float(river_level_m) < warning_m and severity in {"SEVERE", "CRITICAL"}:
+                    # Downgrade to at most MODERATE.
+                    suppressed = {k: v for k, v in final_probabilities.items()}
+                    suppressed["SEVERE"] = 0.0
+                    suppressed["CRITICAL"] = 0.0
+                    final_probabilities = self.normalize_probability_map(suppressed)
+                    severity = max(final_probabilities, key=final_probabilities.get)
+            except Exception:
+                # Never break prediction because of the guard.
+                pass
+
         if severity_rank.get(threshold_severity, 0) > severity_rank.get(severity, 0):
             final_probabilities = self.promote_severity(final_probabilities, threshold_severity)
             severity = threshold_severity
+
 
         confidence = round(final_probabilities[severity] * 100, 1)
         risk_weights = {"LOW": 16, "MODERATE": 46, "SEVERE": 78, "CRITICAL": 96}
