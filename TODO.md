@@ -1,35 +1,24 @@
-# OpsFlood Backend Improvements — Implementation Tracker
+# TODO - OpsFlood critical rainfall threshold inconsistency
 
-## Task 1 — Freeze synthetic in-app training (make it offline-only)
-- [x] 1a: Add production guard in `KolhapurFloodPredictor.train_with_real_data()` (backend/app.py)
-- [x] 1b: Add docstring-warning comments at top of `get_training_data()` (backend/app.py)
-- [x] 1c: Create `backend/train_indofloods.py` (new)
+## Step 1: Fix severity_from_entry rainfall threshold source
+- Update `backend/state_severity_matrix.py` in `severity_from_entry()`:
+  - Replace `r = get_region_rainfall_thresholds(entry["region"])`
+  - With `r = entry["rainfall_7d_mm"]`
+- Keep `get_region_rainfall_thresholds()` intact for `danger_level_override_guard()` cap logic.
 
+## Step 2: Validate training/label generation for hardcoded thresholds
+- Review `backend/train.py` (and any related label logic) to confirm there’s no hardcoded LOW/MODERATE/SEVERE/CRITICAL rainfall threshold mapping that conflicts with per-state `rainfall_7d_mm`.
+- If any hardcoding exists, align it to per-state calibrated values (e.g., Bihar thresholds: 240/390/560).
 
-## Task 2 — Calibrate hybrid rule engine in backend/app.py
-- [x] 2a: Update `apply_threshold_floor()` constants (backend/app.py)
-- [x] 2b: Add `MAX_PROMOTION_GAP` guard in `promote_severity()` (backend/app.py)
-- [x] 2c: Rewrite `fallback_prediction()` to honest heuristic-only version (backend/app.py)
+## Step 3: Add/confirm tests (if failing)
+- Run backend tests.
+- If needed, update/add tests under `backend/tests/` to assert Bihar rainfall mapping uses per-state thresholds.
 
+## Step 4: Retrain and deploy
+- Run: `python -m backend.train`
+- Restart FastAPI server
 
-## Task 3 — Add AUROC + durable metrics persistence
-- [x] 3a: Compute `macro_auroc` in `backend/model_metrics.py`
-- [x] 3b: Persist metrics JSON into `artifacts/metrics/`
-- [x] 3c: Persist metrics to Postgres non-fatally (optional but requested)
-
-
-## Task 4 — CRITICAL class alignment
-- [x] 4a: Add `validate_critical_labels()` and call it after dataset load (backend/train_indofloods.py)
-- [x] 4b: Add Delhi/Mizoram datum warning comment block (backend/state_severity_matrix.py, comment-only)
-
-
-## Verification Checklist
-- [ ] Start backend; confirm no in-app training overwrites artifacts
-- [ ] /predict with ML artifacts present => algorithm != "Heuristic Fallback – NO ML"
-- [ ] Temporarily remove ML artifacts; /predict => algorithm == "Heuristic Fallback – NO ML" and probabilities == {}
-- [ ] Run offline training: `python backend/train_indofloods.py --dataset data/indofloods.csv`
-- [ ] Confirm `artifacts/dvc/models/indofloods_production_model.pkl` updated
-- [ ] Confirm `artifacts/metrics/indofloods_metrics.json` includes `macro_auroc`
-- [ ] Confirm gating prevents overwrite when worse
-- [ ] Confirm `model_metrics` Postgres table receives a new row (if DB reachable)
+## Step 5: Manual verification cases
+- Bihar: peak=13.5m, 7d_rain=580mm => expected CRITICAL
+- Bihar: peak=10.5m, 7d_rain=200mm => expected LOW
 
