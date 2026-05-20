@@ -65,6 +65,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
 ## Backend improvements (OpsFlood safety + metrics)
 
 - **Production training freeze**: `KolhapurFloodPredictor.train_with_real_data()` is blocked by default. Only runs when `ALLOW_PRODUCTION_TRAINING=true`.
+- **Hybrid ML + CWC guard wiring fix (SEVERE/CRITICAL bug)**: `/predict` now consistently applies the Option-A CWC danger-level guard (`danger_level_override_guard`) in **both** the hybrid ML+rules path and the heuristic fallback path by correctly threading `river_level_m` into `severity_from_entry(..., river_level_m=...)`.
 - **Offline canonical INDOFLOODS training**: added `backend/train_indofloods.py` which:
   - validates CRITICAL label alignment via a proxy check
   - computes **macro AUROC**
@@ -75,6 +76,7 @@ INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platfor
   - `probabilities: {}` (no fabricated ML probability distribution)
 - **Durable metric persistence**: `backend/model_metrics.py` now computes macro AUROC and writes metric JSON to `artifacts/metrics/{model_name}_metrics.json` (and attempts non-fatal Postgres persistence).
 - **Datum warning documentation**: `backend/state_severity_matrix.py` includes a top-of-file warning about Delhi/Mizoram datum mismatch when interpreting peak-level values for CRITICAL labeling.
+
 
 ## Documentation map
 
