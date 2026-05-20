@@ -1861,6 +1861,7 @@ async def get_weather_status():
 
 # ============= 4. MACHINE LEARNING CORE =============
 class KolhapurFloodPredictor:
+
     def __init__(self):
         self.base_dir = BASE_DIR
         self.model = RandomForestClassifier(n_estimators=150, max_depth=12, min_samples_split=5, min_samples_leaf=2, random_state=42, class_weight='balanced')
@@ -2384,9 +2385,13 @@ class KolhapurFloodPredictor:
                 # Never break prediction because of the guard.
                 pass
 
-        if severity_rank.get(threshold_severity, 0) > severity_rank.get(severity, 0):
+        # Promote only up to +1 rank above the ML-selected severity.
+        if severity_rank.get(threshold_severity, 0) > severity_rank.get(severity, 0) + 1:
+            pass
+        elif severity_rank.get(threshold_severity, 0) > severity_rank.get(severity, 0):
             final_probabilities = self.promote_severity(final_probabilities, threshold_severity)
             severity = threshold_severity
+
 
 
         confidence = round(final_probabilities[severity] * 100, 1)
@@ -2419,6 +2424,20 @@ class KolhapurFloodPredictor:
             },
         }
 
+    def predict_flood(
+        self,
+        input_data,
+        source="Manual Input",
+        river_level_m=None,
+        state_entry_override=None,
+    ):
+        return self.complex_predict_flood(
+            input_data,
+            source=source,
+            river_level_m=river_level_m,
+            state_entry_override=state_entry_override,
+        )
+
     def describe_state_model_artifacts(self, state_name: str) -> Dict[str, Any]:
         key = (state_name or '').strip().lower()
         bundle_key, bundle = self.resolve_bundle_for_state(state_name)
@@ -2448,8 +2467,6 @@ class KolhapurFloodPredictor:
     
     def get_training_data(self):
         # ⚠️  SYNTHETIC DATA — FOR EXPERIMENTATION ONLY.
-        # This generates 1000 synthetic rows with labels {0,1,2} only (no CRITICAL=3).
-        # Do NOT use this data to produce production artifacts.
         # Use backend/train_indofloods.py for offline training on real INDOFLOODS data.
         rng = np.random.default_rng(42)
         real_events = [
@@ -2464,13 +2481,35 @@ class KolhapurFloodPredictor:
         synthetic_data = []
         for _ in range(1000): 
             rand = float(rng.random())
-            if rand > 0.66: 
-                peak, rain_7d, dur, label = float(rng.uniform(12.2, 14.5)), float(rng.uniform(450, 700)), float(rng.uniform(3, 7)), 2
-            elif rand > 0.33: 
-                peak, rain_7d, dur, label = float(rng.uniform(10.5, 12.1)), float(rng.uniform(250, 449)), float(rng.uniform(2, 4)), 1
-            else: 
-                peak, rain_7d, dur, label = float(rng.uniform(5.0, 10.4)), float(rng.uniform(50, 249)), float(rng.uniform(0, 2)), 0
-            
+            if rand > 0.75:
+                peak, rain_7d, dur, label = (
+                    float(rng.uniform(14.0, 18.0)),
+                    float(rng.uniform(650, 1000)),
+                    float(rng.uniform(3, 7)),
+                    3,
+                )
+            elif rand > 0.50:
+                peak, rain_7d, dur, label = (
+                    float(rng.uniform(12.0, 14.0)),
+                    float(rng.uniform(420, 650)),
+                    float(rng.uniform(2, 4)),
+                    2,
+                )
+            elif rand > 0.25:
+                peak, rain_7d, dur, label = (
+                    float(rng.uniform(10.0, 12.0)),
+                    float(rng.uniform(250, 420)),
+                    float(rng.uniform(1, 3)),
+                    1,
+                )
+            else:
+                peak, rain_7d, dur, label = (
+                    float(rng.uniform(4.0, 10.0)),
+                    float(rng.uniform(30, 250)),
+                    float(rng.uniform(0, 2)),
+                    0,
+                )
+
             rain_dist = rng.dirichlet(np.ones(7), size=1)[0] * rain_7d
             synthetic_data.append([
                 peak,
@@ -2486,10 +2525,10 @@ class KolhapurFloodPredictor:
                 float(rain_dist[6]),
                 label,
             ])
-        
+
         all_data = real_events + synthetic_data
         return np.array([event[:-1] for event in all_data]), np.array([event[-1] for event in all_data])
-    
+
     def train_with_real_data(self):
         import os
 
@@ -2529,21 +2568,20 @@ class KolhapurFloodPredictor:
         """Heuristic fallback when ML model is unavailable."""
         from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
 
-
-    state_entry = state_entry_override or get_state_severity_entry(input_data.state)
-    rainfall_7d = sum([
-        input_data.T1d, input_data.T2d, input_data.T3d,
-        input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
-    ])
-    severity = severity_from_entry(
-        peak_level_m=input_data.Peak_Flood_Level_m,
-        rainfall_7d_mm=rainfall_7d,
-        entry=state_entry,
-    )
-    risk_map = {"LOW": 20, "MODERATE": 45, "SEVERE": 70, "CRITICAL": 90}
-    return {
-        "severity": severity,
-        "confidence_percent": 70.0,
+        state_entry = state_entry_override or get_state_severity_entry(input_data.state)
+        rainfall_7d = sum([
+            input_data.T1d, input_data.T2d, input_data.T3d,
+            input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
+        ])
+        severity = severity_from_entry(
+            peak_level_m=input_data.Peak_Flood_Level_m,
+            rainfall_7d_mm=rainfall_7d,
+            entry=state_entry,
+        )
+        risk_map = {"LOW": 20, "MODERATE": 45, "SEVERE": 70, "CRITICAL": 90}
+        return {
+            "severity": severity,
+            "confidence_percent": 70.0,
         "probabilities": {},
         "algorithm": "Heuristic Fallback – NO ML",
         "warning": "ML models unavailable. Severity derived from CWC state matrix only.",
@@ -2734,10 +2772,9 @@ async def predict_flood(input_data: FloodPredictionInput):
                 state_entry_override = build_effective_state_entry(str(input_data.state), station_node)
 
                 node_level = station_node.get("river_level")
-                if node_level is not None:
+                if node_level is not None and source_policy.get("allow_live_cwc_in_app"):
                     try:
                         river_level_m = float(node_level)
-                        input_data.Peak_Flood_Level_m = river_level_m
                         data_source = f"CWC Sensor Node ({station_node.get('source') or 'CWC'})"
                     except Exception:
                         pass
