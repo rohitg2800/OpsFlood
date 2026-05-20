@@ -2529,18 +2529,19 @@ class KolhapurFloodPredictor:
         """Heuristic fallback when ML model is unavailable."""
         from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
 
-        state_entry = state_entry_override or get_state_severity_entry(input_data.state)
-        rainfall_7d = sum([
+
+    state_entry = state_entry_override or get_state_severity_entry(input_data.state)
+    rainfall_7d = sum([
         input_data.T1d, input_data.T2d, input_data.T3d,
         input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
-        ])
-        severity = severity_from_entry(
+    ])
+    severity = severity_from_entry(
         peak_level_m=input_data.Peak_Flood_Level_m,
         rainfall_7d_mm=rainfall_7d,
         entry=state_entry,
-        )
-        risk_map = {"LOW": 20, "MODERATE": 45, "SEVERE": 70, "CRITICAL": 90}
-        return {
+    )
+    risk_map = {"LOW": 20, "MODERATE": 45, "SEVERE": 70, "CRITICAL": 90}
+    return {
         "severity": severity,
         "confidence_percent": 70.0,
         "probabilities": {},
@@ -2554,7 +2555,7 @@ class KolhapurFloodPredictor:
         "critical_threshold": state_entry["peak_level_m"]["critical"],
         "risk_score": risk_map.get(severity, 50),
         "alert": "🚨" if severity in ("SEVERE", "CRITICAL") else "⚠️",
-        }
+    }
 
 # ============= 5. API ENDPOINTS =============
 @app.get("/")
