@@ -2632,6 +2632,14 @@ async def root():
 
 predictor: Any = None
 
+# Initialize the predictor at module load time
+try:
+    predictor = KolhapurFloodPredictor()
+    print("✅ KolhapurFloodPredictor initialized successfully")
+except Exception as e:
+    print(f"❌ Failed to initialize KolhapurFloodPredictor: {e}")
+    predictor = None
+
 
 @app.get("/health")
 def health():
@@ -2813,27 +2821,45 @@ async def predict_flood(input_data: FloodPredictionInput):
             state_entry_override = None
 
         # If ML fails, still return heuristic fallback (HTTP 200).
-        try:
-            result = await asyncio.to_thread(
-                predictor.predict_flood,
-                input_data,
-                source=data_source,
-                river_level_m=river_level_m,
-                state_entry_override=state_entry_override,
-            )
-        except Exception as ml_exc:
-            print(f"⚠️ ML inference failed, using heuristic fallback: {ml_exc}")
-            write_audit_log(
-                event_type="prediction.ml_inference",
-                route="/predict",
-                event_status="error",
-                state_name=str(getattr(input_data, "state", "Maharashtra") or "Maharashtra"),
-                station_name=str(getattr(input_data, "station", None) or "").strip() or None,
-                details={"error": str(ml_exc)},
-            )
-            result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
-            result["data_source"] = f"Fallback after ML error ({type(ml_exc).__name__})"
-            result["ml_error"] = str(ml_exc)
+        if predictor is None:
+            print("⚠️ Predictor not initialized, using heuristic fallback")
+            result = {
+                "severity": "MODERATE",
+                "confidence_percent": 0.0,
+                "probabilities": {},
+                "algorithm": "Heuristic Fallback – Predictor Unavailable",
+                "warning": "ML predictor not initialized. Using default state thresholds only.",
+                "state": input_data.state,
+                "state_matrix": get_state_severity_entry(input_data.state),
+                "data_source": "Fallback (Predictor Unavailable)",
+                "model_trained": False,
+                "danger_level": get_state_severity_entry(input_data.state)["danger_level_m"],
+                "critical_threshold": get_state_severity_entry(input_data.state)["peak_level_m"]["critical"],
+                "risk_score": 50,
+                "alert": "⚠️",
+            }
+        else:
+            try:
+                result = await asyncio.to_thread(
+                    predictor.predict_flood,
+                    input_data,
+                    source=data_source,
+                    river_level_m=river_level_m,
+                    state_entry_override=state_entry_override,
+                )
+            except Exception as ml_exc:
+                print(f"⚠️ ML inference failed, using heuristic fallback: {ml_exc}")
+                write_audit_log(
+                    event_type="prediction.ml_inference",
+                    route="/predict",
+                    event_status="error",
+                    state_name=str(getattr(input_data, "state", "Maharashtra") or "Maharashtra"),
+                    station_name=str(getattr(input_data, "station", None) or "").strip() or None,
+                    details={"error": str(ml_exc)},
+                )
+                result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
+                result["data_source"] = f"Fallback after ML error ({type(ml_exc).__name__})"
+                result["ml_error"] = str(ml_exc)
 
         result["source_policy"] = source_policy
         result["timestamp"] = current_timestamp_iso()
@@ -2887,7 +2913,27 @@ async def predict_flood(input_data: FloodPredictionInput):
         except Exception:
             pass
 
-        result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
+        # If predictor is None, create a minimal fallback response
+        if predictor is None:
+            state_entry = get_state_severity_entry(str(input_data.state))
+            result = {
+                "severity": "MODERATE",
+                "confidence_percent": 0.0,
+                "probabilities": {},
+                "algorithm": "Critical Fallback – Predictor Unavailable",
+                "warning": "ML predictor failed to initialize. Using default state thresholds only.",
+                "state": str(input_data.state),
+                "state_matrix": state_entry,
+                "data_source": "Critical Fallback (No Predictor)",
+                "model_trained": False,
+                "danger_level": state_entry["danger_level_m"],
+                "critical_threshold": state_entry["peak_level_m"]["critical"],
+                "risk_score": 50,
+                "alert": "⚠️",
+            }
+        else:
+            result = predictor.fallback_prediction(input_data, river_level_m=river_level_m)
+        
         result["source_policy"] = source_policy
         result["timestamp"] = current_timestamp_iso()
         result["response_mode"] = "FALLBACK_MODEL"
