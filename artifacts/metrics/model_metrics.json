@@ -5,25 +5,35 @@
   "per_class_f1": {
     "LOW": 1.0,
     "MODERATE": 1.0,
-    "SEVERE": 1.0
+    "SEVERE": 1.0,
+    "CRITICAL": 1.0
   },
   "accuracy": 1.0,
   "confusion_matrix": [
     [
-      69,
+      53,
+      0,
       0,
       0
     ],
     [
       0,
-      63,
+      47,
+      0,
       0
     ],
     [
       0,
       0,
-      70
+      54,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      48
     ]
   ],
-  "report": "              precision    recall  f1-score   support\n\n         LOW       1.00      1.00      1.00        69\n    MODERATE       1.00      1.00      1.00        63\n      SEVERE       1.00      1.00      1.00        70\n\n    accuracy                           1.00       202\n   macro avg       1.00      1.00      1.00       202\nweighted avg       1.00      1.00      1.00       202\n"
+  "report": "              precision    recall  f1-score   support\n\n         LOW       1.00      1.00      1.00        53\n    MODERATE       1.00      1.00      1.00        47\n      SEVERE       1.00      1.00      1.00        54\n    CRITICAL       1.00      1.00      1.00        48\n\n    accuracy                           1.00       202\n   macro avg       1.00      1.00      1.00       202\nweighted avg       1.00      1.00      1.00       202\n"
 }
