@@ -39,19 +39,30 @@ def get_training_data():
         [12.8, 4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 2],
         [11.8, 3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 1],
         [11.2, 2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 1],
+        # CRITICAL rows
+        [15.6, 7, 3, 4, 220, 380, 520, 600, 650, 690, 780, 3],
+        [16.2, 6, 3, 3, 240, 400, 560, 620, 680, 710, 820, 3],
         [9.5,  1, 1, 1,  50,  80, 100, 120, 150, 160, 180, 0],
         [8.0,  0, 0, 1,  10,  20,  30,  40,  50,  60,  80, 0],
     ]
+
     
     synthetic_data = []
     for _ in range(1000):
         rand = float(rng.random())
-        if rand > 0.66:
-            peak, rain_7d, dur, label = float(rng.uniform(12.2, 14.5)), float(rng.uniform(450, 700)), float(rng.uniform(3, 7)), 2
-        elif rand > 0.33:
+        if rand > 0.75:
+            # 25% -> CRITICAL (label 3)
+            peak, rain_7d, dur, label = float(rng.uniform(14.5, 17.0)), float(rng.uniform(700, 950)), float(rng.uniform(5, 9)), 3
+        elif rand > 0.50:
+            # 25% -> SEVERE (label 2)
+            peak, rain_7d, dur, label = float(rng.uniform(12.2, 14.4)), float(rng.uniform(450, 699)), float(rng.uniform(3, 7)), 2
+        elif rand > 0.25:
+            # 25% -> MODERATE (label 1)
             peak, rain_7d, dur, label = float(rng.uniform(10.5, 12.1)), float(rng.uniform(250, 449)), float(rng.uniform(2, 4)), 1
         else:
+            # 25% -> LOW (label 0)
             peak, rain_7d, dur, label = float(rng.uniform(5.0, 10.4)), float(rng.uniform(50, 249)), float(rng.uniform(0, 2)), 0
+
         
         rain_dist = rng.dirichlet(np.ones(7), size=1)[0] * rain_7d
         synthetic_data.append([
