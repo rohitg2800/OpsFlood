@@ -1020,7 +1020,7 @@ def severity_from_entry(
     thresholds. Pass river_level_m=None for training/offline use.
     """
     p = entry["peak_level_m"]
-    r = get_region_rainfall_thresholds(entry["region"])
+    r = entry["rainfall_7d_mm"]
 
     # Depth axis
     if peak_level_m >= p["critical"]:
