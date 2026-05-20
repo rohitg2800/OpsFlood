@@ -54,7 +54,6 @@ pytest-randomly==3.0.0
 pytest-forked==1.4.0
 pytest-order==1.0.0
 pytest-dependency==0.5.0
-pytest-cov-append==0.1.0
 pytest-cov-merge==0.1.0
 pytest-cov-xml==0.1.0
 pytest-cov-html==0.1.0
@@ -69,13 +68,6 @@ pytest-cov-merge-json==0.1.0
 pytest-cov-xml-merge==0.1.0
 pytest-cov-html-merge==0.1.0
 pytest-cov-json-merge==0.1.0
-pytest-cov-append-xml==0.1.0
-pytest-cov-append-html==0.1.0
-pytest-cov-append-json==0.1.0
-pytest-cov-append-merge==0.1.0
-pytest-cov-append-xml-merge==0.1.0
-pytest-cov-append-html-merge==0.1.0
-pytest-cov-append-json-merge==0.1.0
 pytest-cov-merge-xml-append==0.1.0
 pytest-cov-merge-html-append==0.1.0
 pytest-cov-merge-json-append==0.1.0
@@ -85,12 +77,6 @@ pytest-cov-json-append-merge==0.1.0
 pytest-cov-xml-merge-append==0.1.0
 pytest-cov-html-merge-append==0.1.0
 pytest-cov-json-merge-append==0.1.0
-pytest-cov-append-xml-merge==0.1.0
-pytest-cov-append-html-merge==0.1.0
-pytest-cov-append-json-merge==0.1.0
-pytest-cov-append-merge-xml==0.1.0
-pytest-cov-append-merge-html==0.1.0
-pytest-cov-append-merge-json==0.1.0
 pytest-cov-merge-append-xml==0.1.0
 pytest-cov-merge-append-html==0.1.0
 pytest-cov-merge-append-json==0.1.0
@@ -104,7 +90,6 @@ pytest-cov-json-merge==0.1.0
 pytest-cov-xml-merge==0.1.0
 pytest-cov-html-merge==0.1.0
 pytest-cov-json-merge==0.1.0
-pytest-cov-append==0.1.0
 pytest-cov-merge==0.1.0
 pytest-cov-xml==0.1.0
 pytest-cov-html==0.1.0
@@ -119,13 +104,6 @@ pytest-cov-merge-json==0.1.0
 pytest-cov-xml-merge==0.1.0
 pytest-cov-html-merge==0.1.0
 pytest-cov-json-merge==0.1.0
-pytest-cov-append-xml==0.1.0
-pytest-cov-append-html==0.1.0
-pytest-cov-append-json==0.1.0
-pytest-cov-append-merge==0.1.0
-pytest-cov-append-xml-merge==0.1.0
-pytest-cov-append-html-merge==0.1.0
-pytest-cov-append-json-merge==0.1.0
 pytest-cov-merge-xml-append==0.1.0
 pytest-cov-merge-html-append==0.1.0
 pytest-cov-merge-json-append==0.1.0
