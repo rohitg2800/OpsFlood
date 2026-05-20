@@ -2618,11 +2618,14 @@ async def root():
         "source_policy": get_source_policy_payload(),
     }
 
+predictor: Any = None
+
+
 @app.get("/health")
 def health():
     # predictor is instantiated at module import-time, but keep this guard
     # so unit tests / import-time failures don't crash the health endpoint.
-    predictor_local = globals().get("predictor")
+    predictor_local = globals().get("predictor") or predictor
     return {
         "status": "ok",
         "service": "INDIA_FLOODS ML Server",
