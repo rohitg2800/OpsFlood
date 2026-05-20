@@ -1886,7 +1886,11 @@ class KolhapurFloodPredictor:
         self.default_bundle_key = "flood"
         self.default_model_paths = default_model_artifact_paths()
         self.refresh_artifact_catalog()
-        self.load_pretrained_model()
+        try:
+            self.load_pretrained_model()
+        except RuntimeError as exc:
+            print(f"⚠️ Model not loaded at startup: {exc}")
+            self.is_trained = False
 
     def refresh_artifact_catalog(self):
         self.artifact_store_dir = get_model_artifact_root()
@@ -2440,6 +2444,13 @@ class KolhapurFloodPredictor:
         river_level_m=None,
         state_entry_override=None,
     ):
+        if not self.is_trained:
+            return self.fallback_prediction(
+                input_data,
+                source=source,
+                state_entry_override=state_entry_override,
+                ml_error="Model artifacts not found",
+            )
         return self.complex_predict_flood(
             input_data,
             source=source,
@@ -2571,6 +2582,7 @@ class KolhapurFloodPredictor:
         self,
         input_data: FloodPredictionInput,
         source: str = "Heuristic Fallback",
+        river_level_m: float | None = None,
         state_entry_override=None,
         ml_error: str = "",
     ) -> Dict[str, Any]:

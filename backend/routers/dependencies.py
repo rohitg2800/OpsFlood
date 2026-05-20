@@ -14,6 +14,7 @@ import re
 import hashlib
 import json
 import datetime
+import importlib.util as _importlib_util
 import requests
 from typing import Dict, Any, Tuple
 from dotenv import load_dotenv
@@ -64,7 +65,7 @@ def refresh_backend_env(override: bool = False):
 refresh_backend_env(override=False)
 
 # ============= IMPORTS AFTER ENV SETUP =============
-try:
+if _importlib_util.find_spec("backend") is not None:
     from backend.data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from backend.state_severity_matrix import (
         STATE_SEVERITY_MATRIX,
@@ -73,7 +74,7 @@ try:
     )
     from backend.postgres_store import PostgresOperationalStore
     from backend.model_metrics import evaluate_and_log_metrics
-except ImportError:
+else:
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import STATE_SEVERITY_MATRIX, get_state_severity_entry, severity_from_entry
     from postgres_store import PostgresOperationalStore
