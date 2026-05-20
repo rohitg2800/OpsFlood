@@ -19,7 +19,27 @@ from .model_artifacts import discover_model_artifacts, discover_model_bundles, d
 
 router = APIRouter(tags=["prediction"])
 
-from backend.app import FloodPredictionInput
+# Importing FloodPredictionInput from backend.app creates a circular import
+# (backend.app imports this router at module import-time). Define a local
+# compatible Pydantic model instead.
+from pydantic import BaseModel
+
+
+class FloodPredictionInput(BaseModel):
+    Peak_Flood_Level_m: float = 8.5
+    Event_Duration_days: float = 1
+    Time_to_Peak_days: float = 1
+    Recession_Time_day: float = 1
+    T1d: float = 10.0
+    T2d: float = 15.0
+    T3d: float = 20.0
+    T4d: float = 18.0
+    T5d: float = 12.0
+    T6d: float = 8.0
+    T7d: float = 7.0
+    state: str = "Maharashtra"
+    station: str | None = None
+
 
 # ============= PYDANTIC SCHEMA =============
 

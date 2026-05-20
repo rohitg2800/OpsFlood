@@ -48,8 +48,15 @@ import requests
 from bs4 import BeautifulSoup
 import datetime
 
-try:
-    # When running as a package (recommended): `uvicorn backend.app:app`
+import importlib.util as _importlib_util
+
+
+def _is_package_context() -> bool:
+    """True when running as `uvicorn backend.app:app` (Render/production)."""
+    return _importlib_util.find_spec("backend") is not None
+
+
+if _is_package_context():
     from backend.data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from backend.state_severity_matrix import (
         STATE_SEVERITY_MATRIX,
@@ -63,10 +70,11 @@ try:
     from backend.cwc_scraper import CWCRiverScraper
     from backend.routers.core import router as core_router
     from backend.routers.predict import router as predict_router
+
     from backend.routers.weather import router as weather_router
     from backend.routers.telemetry import router as telemetry_router
     from backend.routers.ingestion import router as ingestion_router
-except ImportError:
+else:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import (
@@ -84,6 +92,7 @@ except ImportError:
     from routers.weather import router as weather_router
     from routers.telemetry import router as telemetry_router
     from routers.ingestion import router as ingestion_router
+
 
 warnings.filterwarnings('ignore')
 operational_store = PostgresOperationalStore()
@@ -2566,9 +2575,10 @@ class KolhapurFloodPredictor:
         ml_error: str = "",
     ) -> Dict[str, Any]:
         """Heuristic fallback when ML model is unavailable."""
-        from backend.state_severity_matrix import get_state_severity_entry, severity_from_entry
 
         state_entry = state_entry_override or get_state_severity_entry(input_data.state)
+
+
         rainfall_7d = sum([
             input_data.T1d, input_data.T2d, input_data.T3d,
             input_data.T4d, input_data.T5d, input_data.T6d, input_data.T7d
@@ -2610,15 +2620,20 @@ async def root():
 
 @app.get("/health")
 def health():
+    # predictor is instantiated at module import-time, but keep this guard
+    # so unit tests / import-time failures don't crash the health endpoint.
+    predictor_local = globals().get("predictor")
     return {
         "status": "ok",
         "service": "INDIA_FLOODS ML Server",
-        "model_ready": predictor.is_trained,
+        "model_ready": bool(getattr(predictor_local, "is_trained", False)),
+
         "database": operational_store.status(),
         "ingestion": data_ingestion_scheduler.status(),
-        "artifact_count": len(predictor.artifact_catalog),
-        "bundle_count": len(predictor.artifact_bundles),
+        "artifact_count": len(getattr(predictor_local, "artifact_catalog", []) or []),
+        "bundle_count": len(getattr(predictor_local, "artifact_bundles", {}) or {}),
         "version": app.version,
+
         "source_policy": get_source_policy_payload(),
         "time": datetime.datetime.now().isoformat(),
     }
