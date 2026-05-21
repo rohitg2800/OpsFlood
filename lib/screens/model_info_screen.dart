@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import '../ml/flood_engine.dart';
 
 class ModelInfoScreen extends StatelessWidget {
   const ModelInfoScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E1A),
       appBar: AppBar(
@@ -261,8 +259,7 @@ class ModelInfoScreen extends StatelessWidget {
 
   Widget _cwcGuardCard() {
     return _card([
-      _guardRow('Below Warning', 'Cap SEVERE/CRITICAL → MODERATE
-Unless 7d rainfall ≥ severe threshold',
+      _guardRow('Below Warning', 'Cap SEVERE/CRITICAL → MODERATE unless 7d rainfall >= severe threshold',
           const Color(0xFF2ECC71)),
       const SizedBox(height: 10),
       _guardRow('At Warning Level', 'Model probabilities trusted as-is',

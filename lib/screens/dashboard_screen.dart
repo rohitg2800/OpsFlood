@@ -2,7 +2,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../services/api_service.dart';

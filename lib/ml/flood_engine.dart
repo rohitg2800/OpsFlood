@@ -81,7 +81,6 @@ class FloodResult {
 // SEVERITY CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 const _severityOrder = {'LOW': 0, 'MODERATE': 1, 'SEVERE': 2, 'CRITICAL': 3};
-const _severityFromOrder = {0: 'LOW', 1: 'MODERATE', 2: 'SEVERE', 3: 'CRITICAL'};
 
 // CLASS_LABEL_MAP from app.py
 const Map<int, String> classLabelMap = {
@@ -375,13 +374,6 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     danger: 11.0, warning: 9.0, hfl: 13.5,
     rivers: ['Mandovi', 'Zuari', 'Sal'],
     districts: ['North Goa', 'South Goa'],
-  ),
-  'punjab': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Sutlej', 'Beas', 'Ravi'],
-    districts: ['Ludhiana', 'Jalandhar', 'Amritsar'],
   ),
   // UTs
   'chandigarh': _entry(

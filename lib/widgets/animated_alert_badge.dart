@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 class AnimatedAlertBadge extends StatefulWidget {
@@ -37,8 +39,7 @@ class _AnimatedAlertBadgeState extends State<AnimatedAlertBadge>
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        widget.isCritical ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
+    final color = widget.isCritical ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
 
     return AnimatedBuilder(
       animation: _pulse,
@@ -73,7 +74,7 @@ class _AnimatedAlertBadgeState extends State<AnimatedAlertBadge>
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '${widget.label}: ${widget.count}',
+                  '$latin1: ${widget.count}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
