@@ -6,6 +6,12 @@
 ///   FloodPrediction       — result with all getters the screen reads
 ///   PredictionException   — typed error the screen catches
 ///   PredictionService     — const-constructible facade over the singleton
+///
+/// HYBRID MERGE STRATEGY (v2)
+/// ─────────────────────────────────────────────────────────────────────
+/// Online:  Backend ML (60%) + Local Rule-Engine (40%) → blended result
+/// Offline: Local Rule-Engine (100%) with live CWC level if available
+/// ─────────────────────────────────────────────────────────────────────
 library;
 
 import 'dart:math' as math;
@@ -17,7 +23,6 @@ export 'prediction_service.dart'
     show MonitoringProtocol, PredictionInput;
 
 // ─── Input ────────────────────────────────────────────────────────────────────
-// Matches exactly what _PredictScreenState._buildInput() constructs.
 
 class FloodPredictionInput {
   final double peakFloodLevelM;
@@ -41,7 +46,6 @@ class FloodPredictionInput {
 
   double get rainfall7d => t1d + t2d + t3d + t4d + t5d + t6d + t7d;
 
-  /// Converts to the internal PredictionInput used by PredictionServiceImpl.
   PredictionInput toPredictionInput() => PredictionInput(
     peakFloodLevelM:    peakFloodLevelM,
     eventDurationDays:  eventDurationDays,
@@ -64,8 +68,6 @@ class PredictionException implements Exception {
 }
 
 // ─── Result ───────────────────────────────────────────────────────────────────
-// Wraps the core FloodPrediction from prediction_service.dart and adds
-// the extra getters that predict_screen.dart reads.
 
 class FloodPrediction {
   final String severity;
@@ -80,7 +82,7 @@ class FloodPrediction {
   final Map<String, dynamic> ensembleDetails;
   final bool fromBackend;
   final DateTime timestamp;
-  final double? liveRiverLevelM; // null when no live CWC data was available
+  final double? liveRiverLevelM;
 
   const FloodPrediction({
     required this.severity,
@@ -98,38 +100,32 @@ class FloodPrediction {
     this.liveRiverLevelM,
   });
 
-  // ── Convenience getters used by predict_screen.dart ──────────────────────
-
-  /// Emoji alert indicator shown next to severity label.
   String get alert =>
       severity == 'CRITICAL' || severity == 'SEVERE' ? '🚨' :
       severity == 'MODERATE' ? '⚠️' : '🟢';
 
-  /// True when the result came from the on-device rule engine (no backend).
   bool get isOfflineFallback => !fromBackend;
-
-  /// Short label for the monitoring card header.
-  String get monitoringLevel => monitoring.level;
-
-  /// Recommended action text shown in the monitoring card.
+  String get monitoringLevel  => monitoring.level;
   String get monitoringAction => monitoring.action;
 
-  // ── Factory: lift from internal core result ───────────────────────────────
   factory FloodPrediction.fromCore(
     CoreFloodPrediction core, {
     double? liveRiverLevelM,
+    String? overrideAlgorithm,
+    String? overrideDataSource,
+    Map<String, dynamic>? overrideEnsemble,
   }) =>
       FloodPrediction(
         severity:           core.severity,
         confidencePercent:  core.confidencePercent,
         probabilities:      core.probabilities,
-        algorithm:          core.algorithm,
-        dataSource:         core.dataSource,
+        algorithm:          overrideAlgorithm   ?? core.algorithm,
+        dataSource:         overrideDataSource  ?? core.dataSource,
         riskScore:          core.riskScore,
         dangerLevel:        core.dangerLevel,
         proximityToDangerM: core.proximityToDangerM,
         monitoring:         core.monitoring,
-        ensembleDetails:    core.ensembleDetails,
+        ensembleDetails:    overrideEnsemble    ?? core.ensembleDetails,
         fromBackend:        core.fromBackend,
         timestamp:          core.timestamp,
         liveRiverLevelM:    liveRiverLevelM,
@@ -137,41 +133,162 @@ class FloodPrediction {
 }
 
 // ─── Service facade ───────────────────────────────────────────────────────────
-// const-constructible so predict_screen can do `const PredictionService()`.
-// All work delegates to PredictionServiceImpl.instance.
 
 class PredictionService {
   const PredictionService();
 
-  // ── Live prediction (backend ML + CWC via proxy) ──────────────────────────
+  // ── Hybrid predict: backend ML (60%) + rule engine (40%) ─────────────────
   Future<FloodPrediction> predict(FloodPredictionInput input) async {
-    // Attempt to fetch live CWC river level via the backend proxy.
-    // This replaces the old direct CwcService call (CORS-blocked on device).
-    double? liveLevel = await _fetchLiveLevel(input.station, input.state);
-
+    final double? liveLevel = await _fetchLiveLevel(input.station, input.state);
     final core = input.toPredictionInput();
+
+    // Always run local rule engine (instant, no network needed)
+    final CoreFloodPrediction localResult =
+        PredictionServiceImpl.instance.localRuleEnginePredict(core, liveLevel: liveLevel);
+
+    CoreFloodPrediction? backendResult;
     try {
-      final result = await PredictionServiceImpl.instance
+      backendResult = await PredictionServiceImpl.instance
           .backendPredict(core, liveLevel: liveLevel);
-      return FloodPrediction.fromCore(result, liveRiverLevelM: liveLevel);
-    } catch (e) {
-      // Backend unavailable — fall through to offline rule engine.
-      return predictOffline(input, liveLevel: liveLevel);
+    } catch (_) {
+      // Backend unreachable — pure offline mode
+      backendResult = null;
     }
+
+    if (backendResult == null) {
+      // OFFLINE MODE: rule engine only
+      return FloodPrediction.fromCore(
+        localResult,
+        liveRiverLevelM: liveLevel,
+        overrideAlgorithm:  'Offline Rule-Engine',
+        overrideDataSource: liveLevel != null
+            ? 'CWC Live + Rule Engine (offline)'
+            : 'Rule Engine (offline)',
+      );
+    }
+
+    // HYBRID MODE: blend backend (60%) + rule engine (40%)
+    return _mergeResults(
+      backend: backendResult,
+      local:   localResult,
+      liveLevel: liveLevel,
+      backendWeight: 0.60,
+      localWeight:   0.40,
+    );
   }
 
-  // ── Offline prediction (on-device rule engine only) ───────────────────────
+  // ── Offline-only prediction ───────────────────────────────────────────────
   FloodPrediction predictOffline(
     FloodPredictionInput input, {
     double? liveLevel,
   }) {
     final core = PredictionServiceImpl.instance
         .localRuleEnginePredict(input.toPredictionInput(), liveLevel: liveLevel);
-    return FloodPrediction.fromCore(core, liveRiverLevelM: liveLevel);
+    return FloodPrediction.fromCore(
+      core,
+      liveRiverLevelM: liveLevel,
+      overrideAlgorithm:  'Offline Rule-Engine',
+      overrideDataSource: 'Rule Engine (offline)',
+    );
+  }
+
+  // ── Hybrid merge logic ────────────────────────────────────────────────────
+  // Blends probabilities from backend ML + rule engine using configurable weights.
+  // Final severity is taken from the highest blended probability.
+  // Confidence = weighted average of both confidences.
+  // Risk score  = weighted average of both risk scores.
+  FloodPrediction _mergeResults({
+    required CoreFloodPrediction backend,
+    required CoreFloodPrediction local,
+    required double backendWeight,
+    required double localWeight,
+    double? liveLevel,
+  }) {
+    const labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
+
+    // Normalise both probability maps to 0-1 scale
+    Map<String, double> _norm(Map<String, double> p) {
+      final sum = p.values.fold(0.0, (s, v) => s + v);
+      if (sum <= 0) return {for (final l in labels) l: 0.25};
+      // If already 0-1, keep; if 0-100, divide by 100
+      final scale = sum > 2.0 ? 100.0 : 1.0;
+      return {for (final l in labels) l: (p[l] ?? 0) / scale};
+    }
+
+    final bp = _norm(backend.probabilities);
+    final lp = _norm(local.probabilities);
+
+    // Weighted blend
+    final blended = <String, double>{
+      for (final l in labels)
+        l: bp[l]! * backendWeight + lp[l]! * localWeight
+    };
+
+    // Re-normalise to sum = 1.0
+    final total = blended.values.fold(0.0, (s, v) => s + v);
+    final normed = total > 0
+        ? blended.map((k, v) => MapEntry(k, v / total))
+        : {for (final l in labels) l: 0.25};
+
+    // Pick winner
+    final severity = normed.entries
+        .reduce((a, b) => a.value >= b.value ? a : b)
+        .key;
+
+    final confidence = (normed[severity]! * 100)
+        .clamp(0.0, 100.0)
+        .roundToDouble();
+
+    final riskScore = (backend.riskScore * backendWeight +
+            local.riskScore * localWeight)
+        .round()
+        .clamp(0, 100);
+
+    // Elevation: if rule engine says CRITICAL but backend says SEVERE,
+    // trust the higher severity to be safe (flood safety bias).
+    final String finalSeverity = _saferSeverity(severity, local.severity);
+
+    final ensemble = {
+      'mode':           'hybrid_merge',
+      'backend_weight': backendWeight,
+      'local_weight':   localWeight,
+      'backend_severity': backend.severity,
+      'local_severity':   local.severity,
+      'blended_probs':    normed,
+      'backend_confidence': backend.confidencePercent,
+      'local_confidence':   local.confidencePercent,
+      'live_level_used':    liveLevel != null,
+      ...backend.ensembleDetails,
+    };
+
+    // Build a synthetic CoreFloodPrediction to reuse fromCore factory
+    final merged = CoreFloodPrediction(
+      severity:           finalSeverity,
+      confidencePercent:  confidence,
+      probabilities:      normed.map((k, v) => MapEntry(k, v * 100)),
+      algorithm:          'Hybrid (Backend ML 60% + Rule Engine 40%)',
+      dataSource:         liveLevel != null
+          ? 'CWC Live + OpsFlood API + Rule Engine'
+          : 'OpsFlood API + Rule Engine',
+      riskScore:          riskScore,
+      dangerLevel:        backend.dangerLevel,
+      proximityToDangerM: backend.proximityToDangerM,
+      monitoring:         backend.monitoring,
+      ensembleDetails:    ensemble,
+      fromBackend:        true,
+      timestamp:          DateTime.now(),
+    );
+
+    return FloodPrediction.fromCore(merged, liveRiverLevelM: liveLevel);
+  }
+
+  /// Safety bias: always return the higher (more severe) of the two severities.
+  String _saferSeverity(String a, String b) {
+    const rank = {'LOW': 0, 'MODERATE': 1, 'SEVERE': 2, 'CRITICAL': 3};
+    return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b;
   }
 
   // ── CWC level via backend proxy ───────────────────────────────────────────
-  // Routes through ApiService → backend → CWC  (no direct CWC calls from device).
   Future<double?> _fetchLiveLevel(String? station, String state) async {
     if (station == null || station.isEmpty) return null;
     try {
