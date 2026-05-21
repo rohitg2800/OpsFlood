@@ -1,6 +1,6 @@
 // Top-level build.gradle
-// Uses Flutter's built-in Kotlin Gradle plugin support (Flutter 3.22+)
-// No explicit kotlin_version declaration needed — Flutter manages it.
+// AGP 8.7+ / Gradle 9.1 compatible
+// Flutter built-in Kotlin: do NOT declare kotlin-gradle-plugin here.
 
 buildscript {
     repositories {
@@ -8,10 +8,9 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // AGP 8.3+ is required for built-in Kotlin support
-        classpath 'com.android.tools.build:gradle:8.3.2'
-        // Do NOT add org.jetbrains.kotlin:kotlin-gradle-plugin here.
-        // Flutter injects the correct Kotlin version automatically.
+        // AGP 8.7 is compatible with Gradle 9.1
+        classpath 'com.android.tools.build:gradle:8.7.0'
+        // Kotlin is injected automatically by dev.flutter.flutter-gradle-plugin
     }
 }
 
@@ -22,6 +21,6 @@ allprojects {
     }
 }
 
-task clean(type: Delete) {
-    delete rootProject.buildDir
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
 }
