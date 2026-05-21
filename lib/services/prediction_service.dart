@@ -1,9 +1,13 @@
-/// PredictionService
+/// PredictionService (core implementation)
 /// Full Dart port of OpsFlood app.py KolhapurFloodPredictor logic.
 /// Implements the Hybrid Multi-Bundle Ensemble + Rule Engine from the backend.
 /// Since the Flutter app cannot load .pkl models, we carry the rule-engine
 /// (which drives 25-50 % of each prediction) fully, and use the backend
 /// /predict endpoint for the ML component — with graceful offline fallback.
+///
+/// NOTE: CwcService has been removed. Live CWC data is now fetched by the
+/// PredictionService facade in predict.dart via ApiService (backend proxy).
+/// This class no longer makes any direct network calls to CWC endpoints.
 library;
 
 import 'dart:convert';
@@ -12,7 +16,9 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 
 import '../constants.dart';
-import 'cwc_service.dart';
+
+// ── Public type alias so predict.dart can import it cleanly ──────────────────
+typedef CoreFloodPrediction = FloodPrediction;
 
 // ── Prediction result ─────────────────────────────────────────────────────────
 
@@ -104,13 +110,13 @@ class PredictionInput {
       };
 }
 
-// ── State severity matrix (mirrors state_severity_matrix.py keys used in prediction) ─
+// ── State severity matrix ─────────────────────────────────────────────────────
 
 class _StateEntry {
   final double dangerLevelM;
   final double warningLevelM;
-  final Map<String, double> peakLevelM;   // moderate, severe, critical
-  final Map<String, double> rainfall7dMm; // moderate, severe, critical
+  final Map<String, double> peakLevelM;
+  final Map<String, double> rainfall7dMm;
 
   const _StateEntry({
     required this.dangerLevelM,
@@ -181,57 +187,19 @@ _StateEntry _getStateEntry(String state) =>
       rainfall7dMm:  {'moderate': 200, 'severe': 400,  'critical': 650},
     );
 
-// ── Service ───────────────────────────────────────────────────────────────────
+// ── Core service (singleton) ──────────────────────────────────────────────────
+// Named PredictionServiceImpl so predict.dart can expose a const-constructible
+// PredictionService facade without name collision.
 
-class PredictionService {
-  PredictionService._();
-  static final PredictionService instance = PredictionService._();
+class PredictionServiceImpl {
+  PredictionServiceImpl._();
+  static final PredictionServiceImpl instance = PredictionServiceImpl._();
 
   final http.Client _client = http.Client();
-  final CwcService  _cwc    = CwcService.instance;
 
-  // ── Main entry point ───────────────────────────────────────────────────────
-
-  /// Run prediction for a given city/state.
-  /// 1. Fetch live CWC level for the station
-  /// 2. Build input with real peak level
-  /// 3. POST to backend /predict (with ML ensemble)
-  /// 4. If backend offline, fall back to local rule-engine
-  Future<FloodPrediction> predict({
-    required String state,
-    required String station,
-    double? manualPeakLevelM,
-    double? rainfall7dMm,
-  }) async {
-    // Step 1: Get live river level from CWC
-    double? liveLevel = await _cwc.getLiveRiverLevel(station);
-    final peakLevel   = liveLevel ?? manualPeakLevelM ?? _getStateEntry(state).dangerLevelM * 0.75;
-
-    // Step 2: Build rainfall from state defaults if not supplied
-    final rain = rainfall7dMm ?? _estimateRainfall(state, peakLevel);
-    final input = PredictionInput(
-      peakFloodLevelM:    peakLevel,
-      eventDurationDays:  2,
-      timeToPeakDays:     1,
-      recessionTimeDays:  2,
-      t1d: rain * 0.10, t2d: rain * 0.14, t3d: rain * 0.18,
-      t4d: rain * 0.20, t5d: rain * 0.18, t6d: rain * 0.12, t7d: rain * 0.08,
-      state:   state,
-      station: station,
-    );
-
-    // Step 3: Try backend ML prediction
-    try {
-      return await _backendPredict(input, liveLevel: liveLevel);
-    } catch (_) {
-      // Step 4: Local rule-engine fallback
-      return _localRuleEnginePredict(input, liveLevel: liveLevel);
-    }
-  }
-
-  // ── Backend prediction (app.py /predict) ──────────────────────────────────
-
-  Future<FloodPrediction> _backendPredict(
+  // ── Backend prediction (app.py /predict/v2) ───────────────────────────────
+  // Public so predict.dart facade can delegate to it.
+  Future<FloodPrediction> backendPredict(
       PredictionInput input, {double? liveLevel}) async {
     final response = await _client
         .post(
@@ -241,7 +209,9 @@ class PredictionService {
         )
         .timeout(const Duration(seconds: 25));
 
-    if (response.statusCode != 200) throw Exception('Backend ${response.statusCode}');
+    if (response.statusCode != 200) {
+      throw Exception('Backend ${response.statusCode}');
+    }
 
     final j = jsonDecode(response.body) as Map<String, dynamic>;
     return _fromBackendJson(j);
@@ -260,24 +230,24 @@ class PredictionService {
         : _monitoringFor(j['severity']?.toString() ?? 'LOW');
 
     return FloodPrediction(
-      severity:             j['severity']?.toString() ?? 'MODERATE',
-      confidencePercent:    (j['confidence_percent'] as num?)?.toDouble() ?? 70,
-      probabilities:        probs,
-      algorithm:            j['algorithm']?.toString() ?? 'Backend ML',
-      dataSource:           j['data_source']?.toString() ?? 'CWC + ML',
-      riskScore:            (j['risk_score'] as num?)?.toInt() ?? 50,
-      dangerLevel:          (j['danger_level'] as num?)?.toDouble() ?? 12.0,
-      proximityToDangerM:   (j['proximity_to_danger_m'] as num?)?.toDouble() ?? 0,
-      monitoring:           monitoring,
-      ensembleDetails:      j['ensemble'] is Map ? j['ensemble'] as Map<String, dynamic> : {},
-      fromBackend:          true,
-      timestamp:            DateTime.now(),
+      severity:           j['severity']?.toString() ?? 'MODERATE',
+      confidencePercent:  (j['confidence_percent'] as num?)?.toDouble() ?? 70,
+      probabilities:      probs,
+      algorithm:          j['algorithm']?.toString() ?? 'Backend ML',
+      dataSource:         j['data_source']?.toString() ?? 'CWC + ML',
+      riskScore:          (j['risk_score'] as num?)?.toInt() ?? 50,
+      dangerLevel:        (j['danger_level'] as num?)?.toDouble() ?? 12.0,
+      proximityToDangerM: (j['proximity_to_danger_m'] as num?)?.toDouble() ?? 0,
+      monitoring:         monitoring,
+      ensembleDetails:    j['ensemble'] is Map ? j['ensemble'] as Map<String, dynamic> : {},
+      fromBackend:        true,
+      timestamp:          DateTime.now(),
     );
   }
 
-  // ── Local Rule-Engine (mirrors rule_engine_probability_map in Python) ─────
-
-  FloodPrediction _localRuleEnginePredict(
+  // ── Local Rule-Engine ─────────────────────────────────────────────────────
+  // Public so predict.dart facade can delegate to it.
+  FloodPrediction localRuleEnginePredict(
       PredictionInput input, {double? liveLevel}) {
     final entry = _getStateEntry(input.state);
     final dailyRain = [input.t1d, input.t2d, input.t3d,
@@ -288,7 +258,6 @@ class PredictionService {
     final rainDelta  = dailyRain.last - dailyRain.first;
     final peak       = input.peakFloodLevelM;
 
-    // Ratios
     final peakMod  = peak / math.max(entry.peakLevelM['moderate']!,  0.001);
     final peakSev  = peak / math.max(entry.peakLevelM['severe']!,   0.001);
     final peakCrit = peak / math.max(entry.peakLevelM['critical']!, 0.001);
@@ -327,13 +296,12 @@ class PredictionService {
               1.25),
     };
 
-    // Safety guard: if live level < warning, cap at MODERATE
     if (liveLevel != null && liveLevel < entry.warningLevelM) {
       scores['SEVERE']   = 0;
       scores['CRITICAL'] = 0;
     }
 
-    final probs = _normalise(scores);
+    final probs    = _normalise(scores);
     final severity = probs.entries
         .reduce((a, b) => a.value >= b.value ? a : b)
         .key;
@@ -373,14 +341,6 @@ class PredictionService {
     final total = raw.values.fold(0.0, (s, v) => s + math.max(0, v));
     if (total <= 0) return {'LOW': 1.0, 'MODERATE': 0, 'SEVERE': 0, 'CRITICAL': 0};
     return raw.map((k, v) => MapEntry(k, math.max(0, v) / total));
-  }
-
-  double _estimateRainfall(String state, double peak) {
-    final entry = _getStateEntry(state);
-    if (peak >= entry.peakLevelM['critical']!) return entry.rainfall7dMm['critical']! * 0.85;
-    if (peak >= entry.peakLevelM['severe']!)   return entry.rainfall7dMm['severe']!   * 0.75;
-    if (peak >= entry.peakLevelM['moderate']!) return entry.rainfall7dMm['moderate']! * 0.80;
-    return 60.0;
   }
 
   MonitoringProtocol _monitoringFor(String severity) {
