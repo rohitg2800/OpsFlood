@@ -13,6 +13,74 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'api_service.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CwcStationData — lightweight data class for a single CWC gauge reading.
+// Replaces CwcStation from the deleted cwc_service.dart.
+// Populated from the backend /api/live-telemetry response (not direct CWC calls).
+// ─────────────────────────────────────────────────────────────────────────────
+class CwcStationData {
+  final String stationName;
+  final String stateName;
+  final String riverName;
+  final double riverLevel;
+  final double warningLevel;
+  final double dangerLevel;
+  final double flowRate;
+  final double rainfallLastHour;
+  final String status;   // 'ACTIVE' | 'WARNING' | 'CRITICAL'
+  final String trend;    // 'RISING' | 'FALLING' | 'STEADY'
+  final String source;   // 'CWC_API' | 'TACTICAL_REGISTRY'
+  final DateTime lastUpdate;
+
+  const CwcStationData({
+    required this.stationName,
+    required this.stateName,
+    required this.riverName,
+    required this.riverLevel,
+    required this.warningLevel,
+    required this.dangerLevel,
+    required this.flowRate,
+    required this.rainfallLastHour,
+    required this.status,
+    required this.trend,
+    required this.source,
+    required this.lastUpdate,
+  });
+
+  factory CwcStationData.fromJson(Map<String, dynamic> j) {
+    double sf(dynamic v) =>
+        (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
+    return CwcStationData(
+      stationName:      (j['station'] ?? j['stationName'] ?? j['city'] ?? '').toString(),
+      stateName:        (j['state']   ?? j['stateName']   ?? j['state_name'] ?? '').toString(),
+      riverName:        (j['river']   ?? j['riverName']   ?? j['river_name'] ?? '').toString(),
+      riverLevel:       sf(j['river_level']    ?? j['riverLevel']     ?? j['current_level']),
+      warningLevel:     sf(j['warning_level']  ?? j['warningLevel']),
+      dangerLevel:      sf(j['danger_level']   ?? j['dangerLevel']),
+      flowRate:         sf(j['flow_rate']       ?? j['flowRate']       ?? j['discharge']),
+      rainfallLastHour: sf(j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
+      status:           (j['status'] ?? 'ACTIVE').toString().toUpperCase(),
+      trend:            (j['trend']  ?? 'STEADY').toString().toUpperCase(),
+      source:           (j['source'] ?? j['data_source'] ?? 'UNKNOWN').toString(),
+      lastUpdate:       DateTime.tryParse((j['last_update'] ?? j['lastUpdate'] ?? '').toString())
+                            ?? DateTime.now(),
+    );
+  }
+
+  bool get isLiveCwc => source == 'CWC_API';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RealTimeService — SINGLE source of truth for all live data in the app.
+//
+// Data flow (all through backend, never direct CWC calls from phone):
+//   Phone → ApiService → OpsFlood backend → CWC/tactical fallback
+//
+// Provides:
+//   - liveLevels:   List<FloodData>      (per-city gauged levels)
+//   - cwcStations:  List<CwcStationData> (raw CWC station strip)
+//   - criticalAlerts, history, notifications, cache
+// ─────────────────────────────────────────────────────────────────────────────
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
   factory RealTimeService() => _instance;
@@ -21,8 +89,6 @@ class RealTimeService extends ChangeNotifier {
   static const String _cacheKey = 'opsflood_realtime_cache_v2';
 
   // ── Wake-up config ────────────────────────────────────────────────────────
-  // Render free-tier takes 50-90 s to wake. 20 attempts × base 5 s = up to
-  // ~120 s with exponential backoff (capped at 15 s per step).
   static const int      _wakeUpMaxAttempts = 20;
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 5);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
@@ -35,12 +101,12 @@ class RealTimeService extends ChangeNotifier {
   Timer?  _wakeUpTimer;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
-  bool _initialized         = false;
-  bool _isPolling           = false;
-  bool _isLoading           = false;
-  bool _isOnline            = true;
-  bool _isUsingCache        = false;
-  bool _isUsingFallback     = false;
+  bool _initialized          = false;
+  bool _isPolling            = false;
+  bool _isLoading            = false;
+  bool _isOnline             = true;
+  bool _isUsingCache         = false;
+  bool _isUsingFallback      = false;
   bool _liveDataEverReceived = false;
 
   int       _retryCount          = 0;
@@ -49,27 +115,35 @@ class RealTimeService extends ChangeNotifier {
   DateTime? _lastFetchTime;
   String?   _error;
 
-  List<FloodData>  _liveLevels     = <FloodData>[];
-  List<FloodAlert> _criticalAlerts = <FloodAlert>[];
+  List<FloodData>       _liveLevels     = <FloodData>[];
+  List<FloodAlert>      _criticalAlerts = <FloodAlert>[];
+  List<CwcStationData>  _cwcStations    = <CwcStationData>[];
+  String                _cwcSource      = '';
+
   final Map<String, List<RiverLevelSnapshot>> _historyByCity =
       <String, List<RiverLevelSnapshot>>{};
 
-  // LinkedHashSet guarantees insertion-order eviction (no more random .first)
   final LinkedHashSet<String> _notificationDedup = LinkedHashSet<String>();
 
   MultiLocationMonitoring? _cachedMonitoringData;
   int _monitoringDataHash = 0;
 
   // ── Public getters ────────────────────────────────────────────────────────
-  List<FloodData>  get liveLevels          => _liveLevels;
-  List<FloodAlert> get criticalAlerts      => _criticalAlerts;
-  DateTime?        get lastFetchTime       => _lastFetchTime;
-  String?          get error               => _error;
-  bool             get isLoading           => _isLoading;
-  bool             get isOnline            => _isOnline;
-  bool             get isUsingCache        => _isUsingCache;
-  bool             get isPolling           => _isPolling;
-  int              get queuedOfflineCycles => _queuedOfflineCycles;
+  List<FloodData>      get liveLevels          => _liveLevels;
+  List<FloodAlert>     get criticalAlerts      => _criticalAlerts;
+  /// CWC stations above warning level — populated from backend proxy.
+  List<CwcStationData> get cwcStations         => _cwcStations;
+  /// 'CWC_API' when backend got live data, 'TACTICAL_REGISTRY' on fallback.
+  String               get cwcSource           => _cwcSource;
+  bool                 get hasCwcLiveData      => _cwcStations.isNotEmpty &&
+                                                  _cwcSource == 'CWC_API';
+  DateTime?            get lastFetchTime       => _lastFetchTime;
+  String?              get error               => _error;
+  bool                 get isLoading           => _isLoading;
+  bool                 get isOnline            => _isOnline;
+  bool                 get isUsingCache        => _isUsingCache;
+  bool                 get isPolling           => _isPolling;
+  int                  get queuedOfflineCycles => _queuedOfflineCycles;
 
   bool get isUsingFallback => _isUsingFallback && !_liveDataEverReceived;
 
@@ -79,7 +153,8 @@ class RealTimeService extends ChangeNotifier {
       _monitoringDataHash = hash;
       _cachedMonitoringData = MultiLocationMonitoring(
         locations: _liveLevels
-            .map((item) => RiverMonitoring.fromFloodData(item, trendForCity(item.city)))
+            .map((item) =>
+                RiverMonitoring.fromFloodData(item, trendForCity(item.city)))
             .toList(),
         fetchedAt:    _lastFetchTime ?? DateTime.now(),
         fromCache:    _isUsingCache,
@@ -97,8 +172,7 @@ class RealTimeService extends ChangeNotifier {
 
   List<RiverLevelSnapshot> trendForCity(String city) =>
       List<RiverLevelSnapshot>.from(
-        _historyByCity[city.toLowerCase()] ?? <RiverLevelSnapshot>[],
-      );
+          _historyByCity[city.toLowerCase()] ?? <RiverLevelSnapshot>[]);
 
   FloodData? dataForCity(String city) {
     for (final item in _liveLevels) {
@@ -120,10 +194,7 @@ class RealTimeService extends ChangeNotifier {
   // ── Wake-up loop with exponential backoff ─────────────────────────────────
   void _scheduleWakeUpRetry() {
     if (_wakeAttempts >= _wakeUpMaxAttempts || _liveDataEverReceived) return;
-
     _wakeUpTimer?.cancel();
-
-    // Exponential backoff: 0 s, 5 s, 7 s, 9 s … capped at 15 s
     final delayMs = _wakeAttempts == 0
         ? 0
         : math
@@ -133,14 +204,13 @@ class RealTimeService extends ChangeNotifier {
               _wakeUpMaxDelay.inMilliseconds,
             )
             .toInt();
-
     _wakeUpTimer = Timer(Duration(milliseconds: delayMs), () async {
       _wakeAttempts++;
       try {
         final health = await _api.checkHealth();
         if (health['status'] != 'error') {
           await refreshData();
-          if (_liveDataEverReceived) return; // success — stop retrying
+          if (_liveDataEverReceived) return;
         }
       } catch (_) {}
       _scheduleWakeUpRetry();
@@ -159,7 +229,6 @@ class RealTimeService extends ChangeNotifier {
       settings: const InitializationSettings(
           android: androidInit, iOS: darwinInit, macOS: darwinInit),
     );
-
     final androidPlatform = _notifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
@@ -181,34 +250,26 @@ class RealTimeService extends ChangeNotifier {
     );
   }
 
-  // ── Connectivity (connectivity_plus v6 — always emits List<>) ─────────────
+  // ── Connectivity (connectivity_plus v6) ───────────────────────────────────
   Future<void> _initConnectivityListener() async {
     final connectivity = Connectivity();
-
-    // Initial check — checkConnectivity() also returns List in v6
     final initial = await connectivity.checkConnectivity();
     _isOnline = _listOnline(initial);
-
-    // onConnectivityChanged is Stream<List<ConnectivityResult>> in v6
     _connectivitySub =
         connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
       final wasOnline = _isOnline;
       _isOnline = _listOnline(results);
-
       if (!wasOnline && _isOnline) {
-        // Just came back online — restart wake-up loop and force a fetch
         _wakeAttempts = 0;
         _scheduleWakeUpRetry();
         unawaited(refreshData(forceOnlineAttempt: true));
       } else if (wasOnline && !_isOnline) {
-        // Just went offline — cancel pending wake-up to avoid wasted pings
         _wakeUpTimer?.cancel();
       }
       notifyListeners();
     });
   }
 
-  /// Works for both single ConnectivityResult and List<ConnectivityResult>
   bool _listOnline(dynamic result) {
     if (result is List<ConnectivityResult>) {
       return result.any((r) => r != ConnectivityResult.none);
@@ -216,7 +277,7 @@ class RealTimeService extends ChangeNotifier {
     if (result is ConnectivityResult) {
       return result != ConnectivityResult.none;
     }
-    return true; // unknown type — assume online
+    return true;
   }
 
   // ── Polling ───────────────────────────────────────────────────────────────
@@ -229,11 +290,9 @@ class RealTimeService extends ChangeNotifier {
       interval ?? AppConstants.pollingInterval,
       (_) async {
         await refreshData();
-        // If polling cycle gets data for the first time, stop wake-up loop
         if (_liveDataEverReceived) {
           _wakeUpTimer?.cancel();
         } else {
-          // Still no live data — re-arm wake-up loop if exhausted
           if (_wakeAttempts >= _wakeUpMaxAttempts) {
             _wakeAttempts = 0;
             _scheduleWakeUpRetry();
@@ -253,9 +312,10 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Core data refresh ─────────────────────────────────────────────────────
+  // Fetches both per-city FloodData (liveLevels) and raw CWC station strip
+  // in parallel. Both go through the backend — no direct CWC calls from phone.
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
-
     if (!_isOnline && !forceOnlineAttempt) {
       _queuedOfflineCycles += 1;
       _error        = 'Offline. Showing cached data.';
@@ -269,11 +329,20 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final levelsResponse = await _api.getLiveLevels();
-      final alertsResponse = await _api.getCriticalAlerts();
+      // Run both fetches in parallel
+      final results = await Future.wait([
+        _api.getLiveLevels(),
+        _api.getCriticalAlerts(),
+        _api.getAllCwcStations(),
+      ]);
+
+      final levelsResponse = results[0];
+      final alertsResponse = results[1];
+      final cwcResponse    = results[2];
 
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
+      _updateCwcStations(cwcResponse);
 
       if (levels.isNotEmpty) {
         _liveLevels           = levels;
@@ -283,7 +352,6 @@ class RealTimeService extends ChangeNotifier {
         _liveLevels      = _fallbackMonitoredLevels();
         _isUsingFallback = true;
       }
-      // If levels empty but we had live data before — keep last good snapshot.
 
       _criticalAlerts = alerts.isNotEmpty
           ? alerts
@@ -311,6 +379,35 @@ class RealTimeService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  // ── CWC station parser ────────────────────────────────────────────────────
+  // Parses backend /api/live-telemetry response into CwcStationData list.
+  // The backend already handles CWC field normalisation + tactical fallback.
+  void _updateCwcStations(Map<String, dynamic> response) {
+    if (response['status'] == 'error') return;
+    final raw = response['data'];
+    final List<Map<String, dynamic>> items;
+    if (raw is List) {
+      items = raw.whereType<Map<String, dynamic>>().toList();
+    } else if (raw is Map<String, dynamic>) {
+      final inner = raw['data'] ?? raw['stations'] ?? raw['items'];
+      items = (inner is List)
+          ? inner.whereType<Map<String, dynamic>>().toList()
+          : <Map<String, dynamic>>[];
+    } else {
+      return;
+    }
+    if (items.isEmpty) return;
+
+    _cwcStations = items
+        .map(CwcStationData.fromJson)
+        .where((s) => s.stationName.isNotEmpty)
+        .toList();
+
+    _cwcSource = _cwcStations.any((s) => s.isLiveCwc)
+        ? 'CWC_API'
+        : 'TACTICAL_REGISTRY';
   }
 
   // ── Parsers ───────────────────────────────────────────────────────────────
@@ -358,15 +455,15 @@ class RealTimeService extends ChangeNotifier {
     return levels
         .where((e) => e.capacityPercent >= AppConstants.highThreshold)
         .map((e) => FloodAlert(
-              id:        '${e.city}_${now.millisecondsSinceEpoch}',
-              city:      e.city,
-              state:     e.state,
-              severity:  e.capacityPercent >= AppConstants.criticalThreshold
+              id:       '${e.city}_${now.millisecondsSinceEpoch}',
+              city:     e.city,
+              state:    e.state,
+              severity: e.capacityPercent >= AppConstants.criticalThreshold
                   ? 'CRITICAL'
                   : 'HIGH',
-              title:     '${e.city} river alert',
-              message:
-                  '${e.riverName ?? 'River'} is at ${e.capacityPercent.toStringAsFixed(0)}% capacity.',
+              title:   '${e.city} river alert',
+              message: '${e.riverName ?? 'River'} is at '
+                       '${e.capacityPercent.toStringAsFixed(0)}% capacity.',
               timestamp: now,
               resolved:  false,
               riverName:    e.riverName,
@@ -415,8 +512,9 @@ class RealTimeService extends ChangeNotifier {
           id:          level.city.hashCode,
           channelId:   AppConstants.criticalAlertChannelId,
           channelName: AppConstants.criticalAlertChannelName,
-          title: 'Critical flood risk in ${level.city}',
-          body:  '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity. Immediate action needed.',
+          title:  'Critical flood risk in ${level.city}',
+          body:   '${level.riverName ?? 'River'} at '
+                  '${level.capacityPercent.toStringAsFixed(0)}% capacity. Immediate action needed.',
           payload:    'city=${level.city}&severity=CRITICAL',
           persistent: true,
         );
@@ -426,15 +524,15 @@ class RealTimeService extends ChangeNotifier {
           id:          level.city.hashCode + 1000,
           channelId:   AppConstants.warningAlertChannelId,
           channelName: AppConstants.warningAlertChannelName,
-          title: 'High flood watch in ${level.city}',
-          body:  '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
+          title:  'High flood watch in ${level.city}',
+          body:   '${level.riverName ?? 'River'} at '
+                  '${level.capacityPercent.toStringAsFixed(0)}% capacity.',
           payload:    'city=${level.city}&severity=HIGH',
           persistent: false,
         );
         _notificationDedup.add(key);
       }
     }
-    // Evict oldest entry first (LinkedHashSet guarantees insertion order)
     while (_notificationDedup.length > 300) {
       _notificationDedup.remove(_notificationDedup.first);
     }
@@ -531,8 +629,6 @@ class RealTimeService extends ChangeNotifier {
       _lastFetchTime = DateTime.tryParse(
           (parsed['last_fetch_time'] ?? '').toString());
       _isUsingCache  = true;
-
-      // Trim stale history points loaded from cache
       _apply24HourTrim();
     } catch (_) {
       if (_liveLevels.isEmpty) {

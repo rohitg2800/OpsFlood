@@ -13,11 +13,7 @@ class ApiService {
   final http.Client _client = http.Client();
 
   // Per-request timeout: 12 s (was 30 s).
-  // Two backends × 12 s = 24 s max before caller sees an error.
   static const Duration _timeout      = Duration(seconds: 12);
-
-  // How many times to retry the same URL on transient failure before
-  // moving to the next base URL.
   static const int      _maxRetries   = 3;
   static const Duration _retryBackoff = Duration(seconds: 2);
 
@@ -43,7 +39,7 @@ class ApiService {
     for (final base in _baseCandidates) {
       for (int attempt = 1; attempt <= _maxRetries; attempt++) {
         try {
-          final uri = Uri.parse('\$base\$path');
+          final uri = Uri.parse('$base$path');
           late final http.Response res;
 
           if (method == 'POST') {
@@ -59,11 +55,8 @@ class ApiService {
           }
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            lastError = 'HTTP \${res.statusCode}';
-            // 4xx errors are not retryable — skip remaining attempts for
-            // this base and try the next one.
+            lastError = 'HTTP ${res.statusCode}';
             if (res.statusCode >= 400 && res.statusCode < 500) break;
-            // 5xx: backoff and retry
             if (attempt < _maxRetries) {
               await Future<void>.delayed(_retryBackoff * attempt);
             }
@@ -73,8 +66,7 @@ class ApiService {
           final parsedBody = _safeDecode(res.body);
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
-          lastError = 'Request timed out after \${_timeout.inSeconds}s';
-          // Timeout on final attempt — try next base immediately
+          lastError = 'Request timed out after ${_timeout.inSeconds}s';
           if (attempt == _maxRetries) break;
           await Future<void>.delayed(_retryBackoff);
         } catch (e) {
@@ -108,7 +100,7 @@ class ApiService {
         return {
           ...payload,
           'status': payload['status'] ?? 'success',
-          'source': '\$base\$path',
+          'source': '$base$path',
         };
       }
       if (payload.containsKey('records')) {
@@ -116,20 +108,20 @@ class ApiService {
           ...payload,
           'status': payload['status'] ?? 'success',
           'data':   payload['records'],
-          'source': '\$base\$path',
+          'source': '$base$path',
         };
       }
       return {
         ...payload,
         'status': payload['status'] ?? 'success',
         'data':   payload['data'] ?? payload,
-        'source': '\$base\$path',
+        'source': '$base$path',
       };
     }
     if (payload is List) {
-      return {'status': 'success', 'data': payload, 'source': '\$base\$path'};
+      return {'status': 'success', 'data': payload, 'source': '$base$path'};
     }
-    return {'status': 'success', 'data': payload, 'source': '\$base\$path'};
+    return {'status': 'success', 'data': payload, 'source': '$base$path'};
   }
 
   // ── Health ─────────────────────────────────────────────────────────────────
@@ -138,24 +130,27 @@ class ApiService {
 
   // ── Dashboard / live data ────────────────────────────────────────────
   Future<Map<String, dynamic>> getDashboardData() => _get(
-        '\${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
+        '${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
       );
 
   Future<Map<String, dynamic>> getLiveLevels() =>
       _get(AppConstants.liveLevelsEndpoint);
 
   Future<Map<String, dynamic>> getLiveLevelsByCity(String city) => _get(
-      '\${AppConstants.liveLevelsEndpoint}?city=\${Uri.encodeComponent(city)}');
+      '${AppConstants.liveLevelsEndpoint}?city=${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
 
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
-      '\${AppConstants.criticalAlertsEndpoint}?state=\${Uri.encodeComponent(state)}');
+      '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
 
-  // ── CWC Direct ────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> getCwcLiveData(String station) =>
-      _get('/cwc-live-data?station=\${Uri.encodeComponent(station)}');
+  /// Returns all CWC stations currently above warning level.
+  /// Routes through the backend (/api/live-telemetry) — never calls CWC
+  /// directly from the phone (CORS-blocked on Android/iOS).
+  /// The backend already scrapes, parses, and normalises the CWC JSON feed.
+  Future<Map<String, dynamic>> getAllCwcStations() =>
+      _get('${AppConstants.liveTelemetryEndpoint}?limit=200&all_states=true');
 
   Future<Map<String, dynamic>> getLiveTelemetry({
     String state   = 'Maharashtra',
@@ -163,10 +158,10 @@ class ApiService {
     int    limit   = 15,
   }) =>
       _get(
-        '\${AppConstants.liveTelemetryEndpoint}'
-        '?state=\${Uri.encodeComponent(state)}'
-        '&station=\${Uri.encodeComponent(station)}'
-        '&limit=\$limit',
+        '${AppConstants.liveTelemetryEndpoint}'
+        '?state=${Uri.encodeComponent(state)}'
+        '&station=${Uri.encodeComponent(station)}'
+        '&limit=$limit',
       );
 
   // ── Model ───────────────────────────────────────────────────────────────
@@ -184,41 +179,41 @@ class ApiService {
     String? state,
     int     limit = 20,
   }) {
-    final params = <String>['limit=\$limit'];
+    final params = <String>['limit=$limit'];
     if (state != null && state.isNotEmpty) {
-      params.add('state=\${Uri.encodeComponent(state)}');
+      params.add('state=${Uri.encodeComponent(state)}');
     }
-    return _get('/prediction-history?\${params.join("&")}');
+    return _get('/prediction-history?${params.join("&")}');
   }
 
   // ── Weather ───────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getWeather(String city) => _get(
-      '\${AppConstants.weatherCurrentEndpoint}?city=\${Uri.encodeComponent(city)}');
+      '${AppConstants.weatherCurrentEndpoint}?city=${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getWeatherByCoords(double lat, double lon) =>
-      _get('\${AppConstants.weatherCurrentEndpoint}?lat=\$lat&lon=\$lon');
+      _get('${AppConstants.weatherCurrentEndpoint}?lat=$lat&lon=$lon');
 
   Future<Map<String, dynamic>> getForecast(String city) => _get(
-      '\${AppConstants.weatherForecastEndpoint}?city=\${Uri.encodeComponent(city)}');
+      '${AppConstants.weatherForecastEndpoint}?city=${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getHistoricalLogs({
     String city  = 'Kolhapur',
     int    limit = 24,
   }) =>
-      _get('/historical-logs?city=\${Uri.encodeComponent(city)}&limit=\$limit');
+      _get('/historical-logs?city=${Uri.encodeComponent(city)}&limit=$limit');
 
   // ── Audit / telemetry snapshots ─────────────────────────────────────
   Future<Map<String, dynamic>> getAuditLogs({int limit = 50}) =>
-      _get('/audit-logs?limit=\$limit');
+      _get('/audit-logs?limit=$limit');
 
   Future<Map<String, dynamic>> getTelemetrySnapshots({
     String? state,
     String? station,
     int     limit = 50,
   }) {
-    final params = ['limit=\$limit'];
-    if (state   != null) params.add('state=\${Uri.encodeComponent(state)}');
-    if (station != null) params.add('station=\${Uri.encodeComponent(station)}');
-    return _get('/telemetry-snapshots?\${params.join("&")}');
+    final params = ['limit=$limit'];
+    if (state   != null) params.add('state=${Uri.encodeComponent(state)}');
+    if (station != null) params.add('station=${Uri.encodeComponent(station)}');
+    return _get('/telemetry-snapshots?${params.join("&")}');
   }
 }
