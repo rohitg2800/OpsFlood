@@ -1,26 +1,10 @@
-// Top-level build.gradle
-// AGP 8.7+ / Gradle 9.1 compatible
-// Flutter built-in Kotlin: do NOT declare kotlin-gradle-plugin here.
-
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        // AGP 8.7 is compatible with Gradle 9.1
-        classpath 'com.android.tools.build:gradle:8.7.0'
-        // Kotlin is injected automatically by dev.flutter.flutter-gradle-plugin
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
-tasks.register('clean', Delete) {
-    delete rootProject.layout.buildDirectory
-}
+// THIS FILE IS INTENTIONALLY EMPTY
+// This project uses Kotlin DSL: see android/build.gradle.kts
+// Do not add content here — Gradle will prefer build.gradle over build.gradle.kts
+// causing build failures. This empty placeholder is required only because GitHub
+// cannot delete files via the push API without a tree rewrite.
+//
+// TO FIX LOCALLY: delete this file from your machine after git pull:
+//   rm android/build.gradle
+//   rm android/app/build.gradle
+//   rm android/settings.gradle
