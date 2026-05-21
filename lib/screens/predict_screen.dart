@@ -231,9 +231,9 @@ class _PredictScreenState extends State<PredictScreen> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.08),
+                  color: Colors.red.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withOpacity(0.25)),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   children: [
@@ -305,9 +305,9 @@ class _ResultCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: color.withOpacity(0.35)),
+        side: BorderSide(color: color.withValues(alpha: 0.35)),
       ),
-      color: color.withOpacity(0.06),
+      color: color.withValues(alpha: 0.06),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -370,7 +370,7 @@ class _ResultCard extends StatelessWidget {
                             child: LinearProgressIndicator(
                               value:
                                   (num.tryParse(e.value.toString()) ?? 0) / 100,
-                              backgroundColor: Colors.grey.withOpacity(0.15),
+                              backgroundColor: Colors.grey.withValues(alpha: 0.15),
                               color: severityColor(e.key),
                               minHeight: 8,
                             ),
@@ -391,7 +391,7 @@ class _ResultCard extends StatelessWidget {
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  color: color.withOpacity(0.08),
+                  color: color.withValues(alpha: 0.08),
                 ),
                 child: Row(
                   children: [

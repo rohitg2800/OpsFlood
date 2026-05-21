@@ -93,10 +93,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.18),
+                          color: Colors.orange.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                              color: Colors.orange.withOpacity(0.55)),
+                              color: Colors.orange.withValues(alpha: 0.55)),
                         ),
                         child: const Text(
                           'Offline fallback active. Displaying cached critical alerts.',
@@ -140,9 +140,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
                         return ChoiceChip(
                           selected: selected,
                           onSelected: (_) => setState(() => _filter = severity),
-                          backgroundColor: Colors.white.withOpacity(0.12),
-                          selectedColor: color.withOpacity(0.28),
-                          side: BorderSide(color: color.withOpacity(0.55)),
+                          backgroundColor: Colors.white.withValues(alpha: 0.12),
+                          selectedColor: color.withValues(alpha: 0.28),
+                          side: BorderSide(color: color.withValues(alpha: 0.55)),
                           label: Text(
                             severity,
                             style: const TextStyle(
@@ -156,10 +156,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       Container(
                         padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.08),
+                          color: Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(14),
                           border:
-                              Border.all(color: Colors.white.withOpacity(0.15)),
+                              Border.all(color: Colors.white.withValues(alpha: 0.15)),
                         ),
                         child: const Center(
                           child: Text(
@@ -182,7 +182,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                             padding: const EdgeInsets.only(right: 20),
                             margin: const EdgeInsets.only(bottom: 10),
                             decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.3),
+                              color: Colors.red.withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: const Icon(Icons.delete_outline,
@@ -206,10 +206,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.09),
+                              color: Colors.white.withValues(alpha: 0.09),
                               borderRadius: BorderRadius.circular(14),
                               border:
-                                  Border.all(color: color.withOpacity(0.55)),
+                                  Border.all(color: color.withValues(alpha: 0.55)),
                             ),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -255,7 +255,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                               vertical: 4,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: color.withOpacity(0.2),
+                                              color: color.withValues(alpha: 0.2),
                                               borderRadius:
                                                   BorderRadius.circular(20),
                                             ),
@@ -335,7 +335,7 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(

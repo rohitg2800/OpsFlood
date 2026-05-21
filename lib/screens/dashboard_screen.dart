@@ -117,9 +117,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(10),
-                          color: Colors.orange.withOpacity(0.17),
+                          color: Colors.orange.withValues(alpha: 0.17),
                           border: Border.all(
-                              color: Colors.orangeAccent.withOpacity(0.5)),
+                              color: Colors.orangeAccent.withValues(alpha: 0.5)),
                         ),
                         child: Text(
                           _service.error!,
@@ -246,9 +246,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onSelected: (_) =>
                                 setState(() => _selectedCity = city),
                             selectedColor: const Color(0xFF0DA7C2),
-                            backgroundColor: Colors.white.withOpacity(0.12),
+                            backgroundColor: Colors.white.withValues(alpha: 0.12),
                             side: BorderSide(
-                                color: Colors.white.withOpacity(0.25)),
+                                color: Colors.white.withValues(alpha: 0.25)),
                             label: Text(
                               city,
                               style: const TextStyle(color: Colors.white),
@@ -324,9 +324,9 @@ class _TrendCard extends StatelessWidget {
       height: 230,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.09),
+        color: Colors.white.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.16)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -355,7 +355,7 @@ class _TrendCard extends StatelessWidget {
                         drawVerticalLine: false,
                         horizontalInterval: 0.5,
                         getDrawingHorizontalLine: (_) => FlLine(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           strokeWidth: 1,
                         ),
                       ),
@@ -402,7 +402,7 @@ class _TrendCard extends StatelessWidget {
                       borderData: FlBorderData(
                         show: true,
                         border:
-                            Border.all(color: Colors.white.withOpacity(0.15)),
+                            Border.all(color: Colors.white.withValues(alpha: 0.15)),
                       ),
                       lineBarsData: [
                         LineChartBarData(
@@ -417,8 +417,8 @@ class _TrendCard extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                const Color(0xFF24C9E8).withOpacity(0.35),
-                                const Color(0xFF24C9E8).withOpacity(0.02),
+                                const Color(0xFF24C9E8).withValues(alpha: 0.35),
+                                const Color(0xFF24C9E8).withValues(alpha: 0.02),
                               ],
                             ),
                           ),
