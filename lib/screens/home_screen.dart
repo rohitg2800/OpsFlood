@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/real_time_service.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
+import 'india_river_explorer_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
@@ -19,13 +20,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final RealTimeService _realTimeService = RealTimeService();
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
+  // 7 screens: Dashboard, Monitors, Alerts, Weather, Predict, Rivers (CWC), India Explorer
+  static const List<Widget> _screens = [
     DashboardScreen(),
     MonitorsScreen(),
     AlertsScreen(),
     WeatherScreen(),
     PredictScreen(),
     RiverMonitorScreen(),
+    IndiaRiverExplorerScreen(),
   ];
 
   @override
@@ -46,7 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
       body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        onDestinationSelected: (index) =>
+            setState(() => _currentIndex = index),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
@@ -77,6 +81,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.water_outlined),
             selectedIcon: Icon(Icons.water),
             label: 'Rivers',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
+            label: 'India',
           ),
         ],
       ),
