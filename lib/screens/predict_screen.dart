@@ -1,483 +1,1119 @@
-import 'package:flutter/material.dart';
-import '../services/api_service.dart';
-import '../constants.dart';
+import 'dart:convert';
 
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+
+import '../constants/app_constants.dart';
+import '../ml/flood_engine.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREDICT SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
-
   @override
   State<PredictScreen> createState() => _PredictScreenState();
 }
 
-class _PredictScreenState extends State<PredictScreen> {
-  final _formKey = GlobalKey<FormState>();
-  bool _loading = false;
-  Map<String, dynamic>? _result;
-  String _error = '';
+class _PredictScreenState extends State<PredictScreen>
+    with SingleTickerProviderStateMixin {
+  // Controllers
+  late AnimationController _gaugeCtrl;
+  late Animation<double> _gaugeAnim;
 
-  // Form fields matching the backend FloodPredictionInput schema exactly
-  final _peakFloodCtrl = TextEditingController(text: '8.5');
-  final _eventDurCtrl = TextEditingController(text: '1');
-  final _timeToPeakCtrl = TextEditingController(text: '1');
-  final _recessionCtrl = TextEditingController(text: '1');
-  final _t1Ctrl = TextEditingController(text: '10.0');
-  final _t2Ctrl = TextEditingController(text: '15.0');
-  final _t3Ctrl = TextEditingController(text: '20.0');
-  final _t4Ctrl = TextEditingController(text: '18.0');
-  final _t5Ctrl = TextEditingController(text: '12.0');
-  final _t6Ctrl = TextEditingController(text: '8.0');
-  final _t7Ctrl = TextEditingController(text: '7.0');
-  final _stationCtrl = TextEditingController(text: '');
+  // Form values
+  final _peakCtrl = TextEditingController(text: '8.5');
+  final _durCtrl = TextEditingController(text: '1');
+  final _peakTimeCtrl = TextEditingController(text: '1');
+  final _recCtrl = TextEditingController(text: '1');
+  final List<TextEditingController> _rainCtrl = List.generate(
+      7, (i) => TextEditingController(text: ['10', '15', '20', '18', '12', '8', '7'][i]));
 
   String _selectedState = 'Maharashtra';
+  String? _selectedStation;
 
-  final List<String> _states = [
-    'Maharashtra',
-    'Assam',
-    'Bihar',
-    'Kerala',
-    'Odisha',
-    'West Bengal',
-    'Uttar Pradesh',
-    'Rajasthan',
-    'Gujarat',
-    'Madhya Pradesh',
-    'Karnataka',
-    'Tamil Nadu',
-  ];
+  // Result
+  FloodResult? _result;
+  bool _loading = false;
+  String _error = '';
+  bool _usedApi = false;
+
+  // Section expand state
+  bool _riverExpanded = true;
+  bool _rainfallExpanded = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _gaugeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
+    _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
+  }
 
   @override
   void dispose() {
-    for (final c in [
-      _peakFloodCtrl,
-      _eventDurCtrl,
-      _timeToPeakCtrl,
-      _recessionCtrl,
-      _t1Ctrl,
-      _t2Ctrl,
-      _t3Ctrl,
-      _t4Ctrl,
-      _t5Ctrl,
-      _t6Ctrl,
-      _t7Ctrl,
-      _stationCtrl,
-    ]) {
+    _gaugeCtrl.dispose();
+    _peakCtrl.dispose();
+    _durCtrl.dispose();
+    _peakTimeCtrl.dispose();
+    _recCtrl.dispose();
+    for (final c in _rainCtrl) {
       c.dispose();
     }
     super.dispose();
   }
 
-  double _d(TextEditingController c, double fallback) =>
-      double.tryParse(c.text.trim()) ?? fallback;
-
-  Future<void> _predict() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() {
-      _loading = true;
-      _error = '';
-      _result = null;
-    });
-
-    final body = {
-      'Peak_Flood_Level_m': _d(_peakFloodCtrl, 8.5),
-      'Event_Duration_days': _d(_eventDurCtrl, 1),
-      'Time_to_Peak_days': _d(_timeToPeakCtrl, 1),
-      'Recession_Time_day': _d(_recessionCtrl, 1),
-      'T1d': _d(_t1Ctrl, 10.0),
-      'T2d': _d(_t2Ctrl, 15.0),
-      'T3d': _d(_t3Ctrl, 20.0),
-      'T4d': _d(_t4Ctrl, 18.0),
-      'T5d': _d(_t5Ctrl, 12.0),
-      'T6d': _d(_t6Ctrl, 8.0),
-      'T7d': _d(_t7Ctrl, 7.0),
-      'state': _selectedState,
-      if (_stationCtrl.text.trim().isNotEmpty)
-        'station': _stationCtrl.text.trim(),
-    };
-
-    try {
-      // Use /predict/v2 — auto-fills Peak_Flood_Level_m from live CWC
-      // telemetry when station is provided; falls back to manual values.
-      final res = await ApiService().predictV2(body);
-      setState(() {
-        _loading = false;
-        if (res.containsKey('status') && res['status'] == 'error') {
-          _error = res['message']?.toString() ?? 'Prediction failed';
-        } else {
-          _result = res;
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+  FloodInput _buildInput() {
+    double v(TextEditingController c, double def) =>
+        double.tryParse(c.text.trim()) ?? def;
+    return FloodInput(
+      peakFloodLevelM: v(_peakCtrl, 8.5),
+      eventDurationDays: v(_durCtrl, 1),
+      timeToPeakDays: v(_peakTimeCtrl, 1),
+      recessionTimeDay: v(_recCtrl, 1),
+      t1d: v(_rainCtrl[0], 10),
+      t2d: v(_rainCtrl[1], 15),
+      t3d: v(_rainCtrl[2], 20),
+      t4d: v(_rainCtrl[3], 18),
+      t5d: v(_rainCtrl[4], 12),
+      t6d: v(_rainCtrl[5], 8),
+      t7d: v(_rainCtrl[6], 7),
+      state: _selectedState,
+      station: _selectedStation,
+    );
   }
 
-  Color _severityColor(String? s) {
-    final colorInt = AppConstants.riskColors[s ?? 'MODERATE'] ??
-        AppConstants.riskColors['MODERATE']!;
-    return Color(colorInt);
+  // Try API first, fall back to on-device engine
+  Future<void> _predict() async {
+    setState(() { _loading = true; _error = ''; _result = null; });
+    _gaugeCtrl.reset();
+
+    final input = _buildInput();
+
+    // 1. Try OpsFlood API
+    bool apiOk = false;
+    for (final base in AppConstants.apiBaseUrls) {
+      try {
+        final uri = Uri.parse('$base/predict/legacy');
+        final body = jsonEncode({
+          'Peak_Flood_Level_m': input.peakFloodLevelM,
+          'Event_Duration_days': input.eventDurationDays,
+          'Time_to_Peak_days': input.timeToPeakDays,
+          'Recession_Time_day': input.recessionTimeDay,
+          'T1d': input.t1d,
+          'T2d': input.t2d,
+          'T3d': input.t3d,
+          'T4d': input.t4d,
+          'T5d': input.t5d,
+          'T6d': input.t6d,
+          'T7d': input.t7d,
+          'state': input.state,
+          'station': input.station,
+        });
+        final res = await http
+            .post(uri,
+                headers: {'Content-Type': 'application/json'}, body: body)
+            .timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) {
+          final j = jsonDecode(res.body) as Map<String, dynamic>;
+          if ((j['severity'] ?? '').toString().isNotEmpty &&
+              j['severity'] != 'UNKNOWN') {
+            final probs = (j['probabilities'] as Map<String, dynamic>? ?? {});
+            final ensData = (j['ensemble'] as Map<String, dynamic>? ?? {});
+            final monData = (j['monitoring'] as Map<String, dynamic>? ?? {});
+
+            final result = FloodResult(
+              severity: j['severity'] as String,
+              confidencePercent:
+                  (j['confidence_percent'] as num?)?.toDouble() ?? 75.0,
+              probabilities: {
+                for (final e in probs.entries)
+                  e.key: (e.value as num).toDouble()
+              },
+              riskScore: (j['risk_score'] as num?)?.toInt() ?? 50,
+              proximityToDangerM:
+                  (j['proximity_to_danger_m'] as num?)?.toDouble() ?? 0,
+              algorithm: (j['algorithm'] as String?) ??
+                  'Hybrid Multi-Bundle Ensemble v2',
+              alert: (j['alert'] as String?) ?? '⚠️',
+              monitoringLevel:
+                  (monData['level'] as String?) ?? '',
+              monitoringAction:
+                  (monData['action'] as String?) ?? '',
+              usedApi: true,
+              ruleProbs: {
+                for (final e in ((ensData['rule_probabilities']
+                            as Map<String, dynamic>?) ??
+                        {})
+                    .entries)
+                  e.key: (e.value as num).toDouble()
+              },
+              mlProbs: {
+                for (final e in ((ensData['ml_probabilities']
+                            as Map<String, dynamic>?) ??
+                        {})
+                    .entries)
+                  e.key: (e.value as num).toDouble()
+              },
+              thresholdSeverity:
+                  ((ensData['rule_signals'] as Map<String, dynamic>?)??
+                          {})['threshold_severity'] as String? ??
+                      '',
+            );
+            if (mounted) {
+              setState(() { _result = result; _usedApi = true; _loading = false; });
+              _gaugeCtrl.forward();
+              apiOk = true;
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback: on-device engine
+    if (!apiOk) {
+      final localResult = runOnDeviceEngine(input);
+      if (mounted) {
+        setState(() { _result = localResult; _usedApi = false; _loading = false; });
+        _gaugeCtrl.forward();
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Flood Prediction',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // ---- State selector ----
-            DropdownButtonFormField<String>(
-              value: _selectedState,
-              decoration: const InputDecoration(
-                labelText: 'State',
-                prefixIcon: Icon(Icons.location_on),
-                border: OutlineInputBorder(),
-              ),
-              items: _states
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                  .toList(),
-              onChanged: (v) => setState(() => _selectedState = v!),
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _stationCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Station / City (optional — enables CWC auto-fill)',
-                prefixIcon: Icon(Icons.place),
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            Text('Flood Event Parameters',
-                style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary)),
-            const SizedBox(height: 10),
-
-            _numField(_peakFloodCtrl, 'Peak Flood Level (m)', Icons.waves),
-            _numField(
-                _eventDurCtrl, 'Event Duration (days)', Icons.calendar_today),
-            _numField(
-                _timeToPeakCtrl, 'Time to Peak (days)', Icons.trending_up),
-            _numField(
-                _recessionCtrl, 'Recession Time (days)', Icons.trending_down),
-
-            const SizedBox(height: 16),
-            Text('7-Day Rainfall (mm/day)',
-                style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary)),
-            const SizedBox(height: 10),
-
-            Row(children: [
+      backgroundColor: const Color(0xFF05141E),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF07283D), Color(0xFF05141E), Color(0xFF02080E)],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              _Header(state: _selectedState),
               Expanded(
-                  child: _numField(_t1Ctrl, 'Day 1', Icons.water_drop,
-                      compact: true)),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _numField(_t2Ctrl, 'Day 2', Icons.water_drop,
-                      compact: true)),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _numField(_t3Ctrl, 'Day 3', Icons.water_drop,
-                      compact: true)),
-            ]),
-            const SizedBox(height: 8),
-            Row(children: [
-              Expanded(
-                  child: _numField(_t4Ctrl, 'Day 4', Icons.water_drop,
-                      compact: true)),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _numField(_t5Ctrl, 'Day 5', Icons.water_drop,
-                      compact: true)),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _numField(_t6Ctrl, 'Day 6', Icons.water_drop,
-                      compact: true)),
-            ]),
-            const SizedBox(height: 8),
-            _numField(_t7Ctrl, 'Day 7 Rainfall (mm)', Icons.water_drop),
-
-            const SizedBox(height: 20),
-
-            FilledButton.icon(
-              onPressed: _loading ? null : _predict,
-              icon: _loading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.bolt),
-              label: Text(_loading ? 'Predicting...' : 'Run Prediction'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-              ),
-            ),
-
-            // ---- Error ----
-            if (_error.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.25)),
-                ),
-                child: Row(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 14, 30),
                   children: [
-                    const Icon(Icons.error_outline,
-                        color: Colors.red, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
+                    // State selector
+                    _StateSelector(
+                      selected: _selectedState,
+                      onChanged: (s) => setState(() => _selectedState = s),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // River params section
+                    _CollapsibleSection(
+                      title: 'River Parameters',
+                      icon: Icons.water,
+                      expanded: _riverExpanded,
+                      onToggle: () =>
+                          setState(() => _riverExpanded = !_riverExpanded),
+                      child: _RiverParamsForm(
+                        peakCtrl: _peakCtrl,
+                        durCtrl: _durCtrl,
+                        peakTimeCtrl: _peakTimeCtrl,
+                        recCtrl: _recCtrl,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Rainfall section
+                    _CollapsibleSection(
+                      title: '7-Day Rainfall (mm/day)',
+                      icon: Icons.grain,
+                      expanded: _rainfallExpanded,
+                      onToggle: () =>
+                          setState(() => _rainfallExpanded = !_rainfallExpanded),
+                      child: _RainfallForm(controllers: _rainCtrl),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Predict button
+                    _PredictButton(
+                        loading: _loading, onPressed: _loading ? null : _predict),
+
+                    if (_error.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
                         child: Text(_error,
                             style: const TextStyle(
-                                color: Colors.red, fontSize: 13))),
+                                color: Colors.redAccent, fontSize: 12)),
+                      ),
+
+                    // Result
+                    if (_result != null) ...
+                      [
+                        const SizedBox(height: 20),
+                        _ResultPanel(
+                          result: _result!,
+                          gaugeAnim: _gaugeAnim,
+                          usedApi: _usedApi,
+                        ),
+                      ],
                   ],
                 ),
               ),
             ],
-
-            // ---- Result ----
-            if (_result != null) ...[
-              const SizedBox(height: 20),
-              _ResultCard(
-                  result: _result!,
-                  severityColor: _severityColor),
-            ],
-
-            const SizedBox(height: 32),
-          ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _numField(TextEditingController ctrl, String label, IconData icon,
-      {bool compact = false}) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: compact ? 0 : 10),
-      child: TextFormField(
-        controller: ctrl,
-        keyboardType:
-            const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: compact ? null : Icon(icon),
-          border: const OutlineInputBorder(),
-          isDense: compact,
-          contentPadding: compact
-              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
-              : null,
-        ),
-        validator: (v) =>
-            (double.tryParse(v ?? '') == null) ? 'Enter a number' : null,
       ),
     );
   }
 }
 
-// ── Result card ───────────────────────────────────────────────────────────────
-class _ResultCard extends StatelessWidget {
-  final Map<String, dynamic> result;
-  final Color Function(String?) severityColor;
+// ─────────────────────────────────────────────────────────────────────────────
+// HEADER
+// ─────────────────────────────────────────────────────────────────────────────
+class _Header extends StatelessWidget {
+  final String state;
+  const _Header({required this.state});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.psychology, color: Color(0xFF0DA7C2), size: 22),
+          const SizedBox(width: 8),
+          const Text(
+            'Flood Risk Prediction',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0DA7C2).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: const Color(0xFF0DA7C2).withValues(alpha: 0.4)),
+            ),
+            child: const Text('OpsFlood ML',
+                style: TextStyle(
+                    color: Color(0xFF0DA7C2),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-  const _ResultCard(
-      {required this.result, required this.severityColor});
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE SELECTOR
+// ─────────────────────────────────────────────────────────────────────────────
+const _allStates = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
+  'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim',
+  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal', 'Delhi', 'Jammu and Kashmir', 'Puducherry',
+  'Andaman and Nicobar', 'Chandigarh', 'Lakshadweep',
+];
 
-  String _s(String key) => (result[key] ?? '--').toString();
+class _StateSelector extends StatelessWidget {
+  final String selected;
+  final void Function(String) onChanged;
+  const _StateSelector({required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    final severity = _s('severity');
-    final color = severityColor(severity);
-    final probs =
-        result['probabilities'] as Map<String, dynamic>? ?? {};
-    final monitoring =
-        result['monitoring'] as Map<String, dynamic>? ?? {};
-    final autofillApplied = result['autofill_applied'] == true;
-    final liveLevel = result['live_river_level_m'];
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: color.withValues(alpha: 0.35)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border:
+            Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
-      color: color.withValues(alpha: 0.06),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── CWC auto-fill banner ─────────────────────────────────────
-            if (autofillApplied && liveLevel != null)
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0DA7C2).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: const Color(0xFF0DA7C2)
-                          .withValues(alpha: 0.4)),
-                ),
-                // FIX: wrap banner text in Expanded to prevent overflow
-                child: Row(
-                  children: [
-                    const Icon(Icons.sensors,
-                        size: 14, color: Color(0xFF0DA7C2)),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'CWC auto-fill: live river level ${liveLevel}m used',
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF0DA7C2)),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selected,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF0D2232),
+          iconEnabledColor: const Color(0xFF0DA7C2),
+          style: const TextStyle(
+              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+          items: _allStates
+              .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(s),
+                  ))
+              .toList(),
+          onChanged: (v) { if (v != null) onChanged(v); },
+        ),
+      ),
+    );
+  }
+}
 
-            // ── Severity row ──────────────────────────────────────────
-            // FIX: middle Column (severity label + risk score) must be
-            // Expanded so it fills the space between emoji and confidence
-            // instead of overflowing to the right.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Text(
-                  AppConstants.riskIcons[severity] ?? '\u26a0\ufe0f',
-                  style: const TextStyle(fontSize: 26),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        severity,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: color),
-                      ),
-                      Text(
-                        'Risk Score: ${_s("risk_score")}',
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
+// ─────────────────────────────────────────────────────────────────────────────
+// COLLAPSIBLE SECTION
+// ─────────────────────────────────────────────────────────────────────────────
+class _CollapsibleSection extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Widget child;
+  const _CollapsibleSection(
+      {required this.title,
+      required this.icon,
+      required this.expanded,
+      required this.onToggle,
+      required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: onToggle,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(icon, color: const Color(0xFF0DA7C2), size: 18),
+                  const SizedBox(width: 8),
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13)),
+                  const Spacer(),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: Colors.white54,
+                    size: 20,
                   ),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${_s("confidence_percent")}%',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: color),
-                    ),
-                    const Text('Confidence',
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey)),
-                  ],
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-
-            // ── Probabilities ──────────────────────────────────────────
-            if (probs.isNotEmpty) ...[
-              const Text('Probabilities',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600, fontSize: 13)),
-              const SizedBox(height: 8),
-              ...probs.entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 72,
-                          child: Text(e.key,
-                              style: const TextStyle(fontSize: 12)),
-                        ),
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: (num.tryParse(
-                                              e.value.toString()) ??
-                                          0) /
-                                      100,
-                              backgroundColor:
-                                  Colors.grey.withValues(alpha: 0.15),
-                              color: severityColor(e.key),
-                              minHeight: 8,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text('${e.value}%',
-                            style: const TextStyle(fontSize: 12)),
-                      ],
-                    ),
-                  )),
-              const SizedBox(height: 8),
-            ],
-
-            // ── Monitoring ────────────────────────────────────────────
-            if (monitoring.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: color.withValues(alpha: 0.08),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.monitor_heart, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${monitoring["level"] ?? ""}: ${monitoring["action"] ?? ""}',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: child,
+            ),
+        ],
+      ),
+    );
+  }
+}
 
-            Text(
-              'Algorithm: ${_s("algorithm")}  \u2022  ${_s("data_source")}',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+// ─────────────────────────────────────────────────────────────────────────────
+// RIVER PARAMS FORM
+// ─────────────────────────────────────────────────────────────────────────────
+class _RiverParamsForm extends StatelessWidget {
+  final TextEditingController peakCtrl, durCtrl, peakTimeCtrl, recCtrl;
+  const _RiverParamsForm(
+      {required this.peakCtrl,
+      required this.durCtrl,
+      required this.peakTimeCtrl,
+      required this.recCtrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+                child: _FieldTile(
+                    label: 'Peak Level (m)',
+                    hint: '8.5',
+                    ctrl: peakCtrl,
+                    tooltip: 'CWC gauge level in metres')),
+            const SizedBox(width: 10),
+            Expanded(
+                child: _FieldTile(
+                    label: 'Duration (days)',
+                    hint: '1',
+                    ctrl: durCtrl,
+                    tooltip: 'Flood event duration')),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+                child: _FieldTile(
+                    label: 'Time to Peak (days)',
+                    hint: '1',
+                    ctrl: peakTimeCtrl,
+                    tooltip: 'Hours from event start to peak')),
+            const SizedBox(width: 10),
+            Expanded(
+                child: _FieldTile(
+                    label: 'Recession (days)',
+                    hint: '1',
+                    ctrl: recCtrl,
+                    tooltip: 'River recession time after peak')),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAINFALL FORM
+// ─────────────────────────────────────────────────────────────────────────────
+class _RainfallForm extends StatelessWidget {
+  final List<TextEditingController> controllers;
+  const _RainfallForm({required this.controllers});
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 4,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1.6,
+      children: List.generate(7, (i) {
+        final dayLabels = ['D-7', 'D-6', 'D-5', 'D-4', 'D-3', 'D-2', 'D-1'];
+        return _FieldTile(
+          label: dayLabels[i],
+          hint: '0',
+          ctrl: controllers[i],
+          tooltip: 'T${i + 1}d rainfall mm',
+        );
+      }),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIELD TILE
+// ─────────────────────────────────────────────────────────────────────────────
+class _FieldTile extends StatelessWidget {
+  final String label, hint;
+  final TextEditingController ctrl;
+  final String tooltip;
+  const _FieldTile(
+      {required this.label,
+      required this.hint,
+      required this.ctrl,
+      required this.tooltip});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style:
+                  const TextStyle(color: Colors.white54, fontSize: 10)),
+          const SizedBox(height: 4),
+          TextField(
+            controller: ctrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(
+                  RegExp(r'[0-9.]'))
+            ],
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(
+                  color: Colors.white24, fontSize: 12),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.06),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(
+                    color: Color(0xFF0DA7C2)),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREDICT BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
+class _PredictButton extends StatelessWidget {
+  final bool loading;
+  final VoidCallback? onPressed;
+  const _PredictButton({required this.loading, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF0DA7C2),
+          foregroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        onPressed: onPressed,
+        child: loading
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.bolt, size: 18),
+                  SizedBox(width: 6),
+                  Text('Run Flood Prediction',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 15)),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESULT PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+class _ResultPanel extends StatelessWidget {
+  final FloodResult result;
+  final Animation<double> gaugeAnim;
+  final bool usedApi;
+  const _ResultPanel(
+      {required this.result,
+      required this.gaugeAnim,
+      required this.usedApi});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Source badge
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: usedApi
+                    ? const Color(0xFF0DA7C2).withValues(alpha: 0.15)
+                    : Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: usedApi
+                        ? const Color(0xFF0DA7C2).withValues(alpha: 0.5)
+                        : Colors.orange.withValues(alpha: 0.5)),
+              ),
+              child: Text(
+                usedApi
+                    ? '☁️  OpsFlood API  •  ${result.algorithm}'
+                    : '📱  On-Device Engine  •  ${result.algorithm}',
+                style: TextStyle(
+                    color: usedApi
+                        ? const Color(0xFF0DA7C2)
+                        : Colors.orange,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600),
+              ),
             ),
           ],
         ),
+        const SizedBox(height: 16),
+
+        // Risk gauge + severity
+        _RiskGauge(result: result, anim: gaugeAnim),
+        const SizedBox(height: 16),
+
+        // Probability bar chart
+        _ProbabilityChart(probs: result.probabilities),
+        const SizedBox(height: 14),
+
+        // Stats grid
+        _StatsGrid(result: result),
+        const SizedBox(height: 14),
+
+        // Monitoring card
+        _MonitoringCard(result: result),
+        const SizedBox(height: 14),
+
+        // Ensemble breakdown (if available)
+        if (result.ruleProbs.isNotEmpty || result.mlProbs.isNotEmpty)
+          _EnsemblePanel(result: result),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RISK GAUGE
+// ─────────────────────────────────────────────────────────────────────────────
+class _RiskGauge extends StatelessWidget {
+  final FloodResult result;
+  final Animation<double> anim;
+  const _RiskGauge({required this.result, required this.anim});
+
+  Color get _color {
+    switch (result.severity) {
+      case 'CRITICAL': return const Color(0xFFB71C1C);
+      case 'SEVERE':   return const Color(0xFFF4511E);
+      case 'MODERATE': return const Color(0xFFFB8C00);
+      default:         return const Color(0xFF43A047);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: anim,
+      builder: (_, __) {
+        final progress = anim.value * (result.riskScore / 100.0);
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _color.withValues(alpha: 0.35)),
+            boxShadow: [
+              BoxShadow(
+                color: _color.withValues(alpha: 0.12),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Text(
+                '${result.alert}  ${result.severity}',
+                style: TextStyle(
+                    color: _color,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.5),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${result.confidencePercent.toStringAsFixed(1)}% confidence',
+                style: const TextStyle(
+                    color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              // Gauge bar
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 14,
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  valueColor: AlwaysStoppedAnimation<Color>(_color),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Risk Score',
+                      style: TextStyle(
+                          color: Colors.white38, fontSize: 11)),
+                  Text(
+                    '${(progress * 100).round()} / 100',
+                    style: TextStyle(
+                        color: _color,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROBABILITY BAR CHART
+// ─────────────────────────────────────────────────────────────────────────────
+const _severityColors = {
+  'LOW': Color(0xFF43A047),
+  'MODERATE': Color(0xFFFB8C00),
+  'SEVERE': Color(0xFFF4511E),
+  'CRITICAL': Color(0xFFB71C1C),
+};
+
+class _ProbabilityChart extends StatelessWidget {
+  final Map<String, double> probs;
+  const _ProbabilityChart({required this.probs});
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
+    final bars = labels.asMap().entries.map((e) {
+      final label = e.value;
+      final val = probs[label] ?? 0.0;
+      return BarChartGroupData(
+        x: e.key,
+        barRods: [
+          BarChartRodData(
+            toY: val,
+            color: _severityColors[label],
+            width: 28,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(6)),
+          ),
+        ],
+      );
+    }).toList();
+
+    return Container(
+      height: 160,
+      padding: const EdgeInsets.fromLTRB(8, 12, 12, 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
+      child: BarChart(
+        BarChartData(
+          maxY: 100,
+          barGroups: bars,
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: 25,
+            getDrawingHorizontalLine: (_) => FlLine(
+              color: Colors.white.withValues(alpha: 0.06),
+              strokeWidth: 1,
+            ),
+          ),
+          titlesData: FlTitlesData(
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (v, _) {
+                  const abbr = ['LOW', 'MOD', 'SEV', 'CRIT'];
+                  final i = v.toInt();
+                  if (i < 0 || i >= abbr.length) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(abbr[i],
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 9)),
+                  );
+                },
+              ),
+            ),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 28,
+                interval: 25,
+                getTitlesWidget: (v, _) => Text(
+                  '${v.toInt()}%',
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 9),
+                ),
+              ),
+            ),
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+          ),
+          borderData: FlBorderData(show: false),
+          barTouchData: BarTouchData(
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipItem: (g, _, rod, __) => BarTooltipItem(
+                '${rod.toY.toStringAsFixed(1)}%',
+                const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS GRID
+// ─────────────────────────────────────────────────────────────────────────────
+class _StatsGrid extends StatelessWidget {
+  final FloodResult result;
+  const _StatsGrid({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      _Stat('Risk Score', '${result.riskScore}/100', Icons.speed),
+      _Stat('Proximity to Danger',
+          '${result.proximityToDangerM.toStringAsFixed(2)} m',
+          Icons.social_distance),
+      _Stat('Confidence', '${result.confidencePercent.toStringAsFixed(1)}%',
+          Icons.verified),
+      _Stat('Threshold', result.thresholdSeverity.isNotEmpty
+          ? result.thresholdSeverity
+          : '—', Icons.rule),
+    ];
+
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 2.8,
+      children: items
+          .map((s) => Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.1)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(s.icon,
+                        color: const Color(0xFF0DA7C2), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(s.label,
+                              style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 9)),
+                          Text(s.value,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _Stat {
+  final String label, value;
+  final IconData icon;
+  const _Stat(this.label, this.value, this.icon);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MONITORING CARD
+// ─────────────────────────────────────────────────────────────────────────────
+class _MonitoringCard extends StatelessWidget {
+  final FloodResult result;
+  const _MonitoringCard({required this.result});
+
+  Color get _bg {
+    switch (result.severity) {
+      case 'CRITICAL': return const Color(0xFFB71C1C);
+      case 'SEVERE':   return const Color(0xFFF4511E);
+      case 'MODERATE': return const Color(0xFFFB8C00);
+      default:         return const Color(0xFF43A047);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final level = result.monitoringLevel.isNotEmpty
+        ? result.monitoringLevel
+        : result.severity;
+    final action = result.monitoringAction.isNotEmpty
+        ? result.monitoringAction
+        : _defaultAction(result.severity);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _bg.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _bg.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.notifications_active,
+              color: _bg, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Monitoring: $level',
+                    style: TextStyle(
+                        color: _bg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13)),
+                const SizedBox(height: 3),
+                Text(action,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _defaultAction(String sev) {
+    switch (sev) {
+      case 'CRITICAL': return 'Immediate evacuation. Contact NDRF.';
+      case 'SEVERE': return 'Alert district admin. Prepare evacuation routes.';
+      case 'MODERATE': return 'Monitor every 6h. Pre-position rescue teams.';
+      default: return 'Standard monitoring. Review 7-day forecast daily.';
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENSEMBLE PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+class _EnsemblePanel extends StatelessWidget {
+  final FloodResult result;
+  const _EnsemblePanel({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.account_tree, color: Color(0xFF0DA7C2), size: 14),
+              SizedBox(width: 6),
+              Text('Ensemble Breakdown',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _MiniProbRow(label: 'ML (75%)', probs: result.mlProbs),
+          const SizedBox(height: 6),
+          _MiniProbRow(label: 'Rule (25%)', probs: result.ruleProbs),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniProbRow extends StatelessWidget {
+  final String label;
+  final Map<String, double> probs;
+  const _MiniProbRow({required this.label, required this.probs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label,
+              style: const TextStyle(
+                  color: Colors.white54, fontSize: 10)),
+        ),
+        ...['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'].map((l) {
+          final pct = probs[l] ?? 0.0;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Column(
+                children: [
+                  Text(
+                    '${pct.toStringAsFixed(0)}%',
+                    style: TextStyle(
+                        color: _severityColors[l],
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: (pct / 100).clamp(0.0, 1.0),
+                      minHeight: 5,
+                      backgroundColor:
+                          Colors.white.withValues(alpha: 0.06),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          _severityColors[l]!),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 }
