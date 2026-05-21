@@ -30,6 +30,7 @@ class RealTimeService extends ChangeNotifier {
   bool _isLoading = false;
   bool _isOnline = true;
   bool _isUsingCache = false;
+  bool _isUsingFallback = false;   // ← NEW: true when API returned no data
 
   int _retryCount = 0;
   int _queuedOfflineCycles = 0;
@@ -44,7 +45,6 @@ class RealTimeService extends ChangeNotifier {
 
   final Set<String> _notificationDedup = <String>{};
 
-  // Performance: Cache computed monitoringData to avoid allocation on every access
   MultiLocationMonitoring? _cachedMonitoringData;
   int _monitoringDataHash = 0;
 
@@ -55,11 +55,11 @@ class RealTimeService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isOnline => _isOnline;
   bool get isUsingCache => _isUsingCache;
+  bool get isUsingFallback => _isUsingFallback;   // ← NEW getter
   bool get isPolling => _isPolling;
   int get queuedOfflineCycles => _queuedOfflineCycles;
 
   MultiLocationMonitoring get monitoringData {
-    // Performance: Cache computed data to avoid creating objects on every access
     final hash = _liveLevels.length ^ (_historyByCity.length << 16);
     if (hash != _monitoringDataHash || _cachedMonitoringData == null) {
       _monitoringDataHash = hash;
@@ -108,6 +108,13 @@ class RealTimeService extends ChangeNotifier {
     await _initNotifications();
     await _restoreFromCache();
     await _initConnectivityListener();
+
+    // ── FIX 1: Fire a wake-up ping to the Render backend so it starts
+    // spinning up immediately. Free-tier Render sleeps after 15 min of
+    // inactivity; this ping gives it a ~10-15 s head-start before the
+    // real data fetch arrives.
+    unawaited(_api.checkHealth());
+
     _initialized = true;
   }
 
@@ -219,7 +226,12 @@ class RealTimeService extends ChangeNotifier {
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
 
-      _liveLevels = levels.isNotEmpty ? levels : _fallbackMonitoredLevels();
+      // ── FIX 2: Track whether we fell back to simulated data ──────────
+      final gotLiveData = levels.isNotEmpty;
+      _liveLevels = gotLiveData ? levels : _fallbackMonitoredLevels();
+      _isUsingFallback = !gotLiveData;   // ← NEW
+      // ─────────────────────────────────────────────────────────────────
+
       _criticalAlerts =
           alerts.isNotEmpty ? alerts : _alertsFromThresholds(_liveLevels);
 
@@ -348,13 +360,12 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  Future<void> _dispatchThresholdNotifications(List<FloodData> levels) async {
+  Future<void> _dispatchThresholdNotifications(
+      List<FloodData> levels) async {
     for (final level in levels) {
       final notificationKey =
           '${level.city}-${level.capacityPercent.toStringAsFixed(0)}-${level.riskLevel}';
-      if (_notificationDedup.contains(notificationKey)) {
-        continue;
-      }
+      if (_notificationDedup.contains(notificationKey)) continue;
 
       if (level.capacityPercent >= AppConstants.criticalThreshold) {
         await _showNotification(
@@ -443,6 +454,7 @@ class RealTimeService extends ChangeNotifier {
     if (raw == null || raw.isEmpty) {
       if (_liveLevels.isEmpty) {
         _liveLevels = _fallbackMonitoredLevels();
+        _isUsingFallback = true;
       }
       return;
     }
@@ -486,6 +498,7 @@ class RealTimeService extends ChangeNotifier {
     } catch (_) {
       if (_liveLevels.isEmpty) {
         _liveLevels = _fallbackMonitoredLevels();
+        _isUsingFallback = true;
       }
     }
   }
