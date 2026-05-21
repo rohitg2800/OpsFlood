@@ -110,10 +110,12 @@ class _FloodGaugeState extends State<FloodGauge>
                     ),
                   ),
                   // Arc painter — safe progress passed in
-                  CustomPaint(
-                    size: Size(widget.size, widget.size),
-                    painter: _GaugePainter(
-                        progress: safeProgress, color: color),
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size(widget.size, widget.size),
+                      painter: _GaugePainter(
+                          progress: safeProgress, color: color),
+                    ),
                   ),
                   // Needle
                   Transform.rotate(

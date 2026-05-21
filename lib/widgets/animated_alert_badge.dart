@@ -73,6 +73,8 @@ class _AnimatedAlertBadgeState extends State<AnimatedAlertBadge>
                 const SizedBox(width: 8),
                 Text(
                   '${widget.label}: ${widget.count}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,

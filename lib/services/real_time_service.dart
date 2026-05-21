@@ -44,6 +44,10 @@ class RealTimeService extends ChangeNotifier {
 
   final Set<String> _notificationDedup = <String>{};
 
+  // Performance: Cache computed monitoringData to avoid allocation on every access
+  MultiLocationMonitoring? _cachedMonitoringData;
+  int _monitoringDataHash = 0;
+
   List<FloodData> get liveLevels => _liveLevels;
   List<FloodAlert> get criticalAlerts => _criticalAlerts;
   DateTime? get lastFetchTime => _lastFetchTime;
@@ -55,21 +59,27 @@ class RealTimeService extends ChangeNotifier {
   int get queuedOfflineCycles => _queuedOfflineCycles;
 
   MultiLocationMonitoring get monitoringData {
-    final locations = _liveLevels
-        .map(
-          (item) => RiverMonitoring.fromFloodData(
-            item,
-            trendForCity(item.city),
-          ),
-        )
-        .toList();
+    // Performance: Cache computed data to avoid creating objects on every access
+    final hash = _liveLevels.length ^ (_historyByCity.length << 16);
+    if (hash != _monitoringDataHash || _cachedMonitoringData == null) {
+      _monitoringDataHash = hash;
+      final locations = _liveLevels
+          .map(
+            (item) => RiverMonitoring.fromFloodData(
+              item,
+              trendForCity(item.city),
+            ),
+          )
+          .toList();
 
-    return MultiLocationMonitoring(
-      locations: locations,
-      fetchedAt: _lastFetchTime ?? DateTime.now(),
-      fromCache: _isUsingCache,
-      errorMessage: _error,
-    );
+      _cachedMonitoringData = MultiLocationMonitoring(
+        locations: locations,
+        fetchedAt: _lastFetchTime ?? DateTime.now(),
+        fromCache: _isUsingCache,
+        errorMessage: _error,
+      );
+    }
+    return _cachedMonitoringData!;
   }
 
   int get criticalCount => _liveLevels.where((e) => e.isCritical).length;

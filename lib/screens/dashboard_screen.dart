@@ -31,6 +31,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // rebuilds when data hasn't actually changed.
   int _lastLevelHash = 0;
 
+  // Performance: Cache sorted levels to avoid O(n log n) sort on every rebuild
+  List<FloodData> _cachedSortedLevels = <FloodData>[];
+  int _cachedHash = -1;
+
   @override
   void initState() {
     super.initState();
@@ -69,8 +73,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final rc = RiverColors.of(context);
     final cs = Theme.of(context).colorScheme;
 
-    final levels = List<FloodData>.from(_service.liveLevels)
-      ..sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
+    // Performance: Only re-sort if data changed (cache avoids O(n log n) sort)
+    final newHash = _service.liveLevels.length ^
+        (_service.lastFetchTime?.millisecondsSinceEpoch ?? 0);
+    if (newHash != _cachedHash) {
+      _cachedHash = newHash;
+      _cachedSortedLevels = List<FloodData>.from(_service.liveLevels)
+        ..sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
+    }
+    final levels = _cachedSortedLevels;
 
     if (levels.isNotEmpty &&
         (_selectedCity == null ||
@@ -263,11 +274,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     // Trend chart for selected city
                     if (selected != null)
-                      _TrendCard(
-                        city: selected.city,
-                        history: _service.trendForCity(selected.city),
-                        dangerLevel: selected.dangerLevel,
-                        warningLevel: selected.warningLevel,
+                      RepaintBoundary(
+                        child: _TrendCard(
+                          city: selected.city,
+                          history: _service.trendForCity(selected.city),
+                          dangerLevel: selected.dangerLevel,
+                          warningLevel: selected.warningLevel,
+                        ),
                       ),
                     const SizedBox(height: 14),
                   ]),
