@@ -12,7 +12,7 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
-  // Per-request timeout: 12 s (was 30 s).
+  // Per-request timeout: 12 s.
   static const Duration _timeout      = Duration(seconds: 12);
   static const int      _maxRetries   = 3;
   static const Duration _retryBackoff = Duration(seconds: 2);
@@ -124,14 +124,26 @@ class ApiService {
     return {'status': 'success', 'data': payload, 'source': '$base$path'};
   }
 
-  // ── Health ─────────────────────────────────────────────────────────────────
+  // ── Health ─────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
-  // ── Dashboard / live data ────────────────────────────────────────────
-  Future<Map<String, dynamic>> getDashboardData() => _get(
-        '${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
-      );
+  // ── Dashboard / live data ─────────────────────────────────────────────────────
+
+  /// FIX: was hardcoded to Maharashtra/Kolhapur regardless of selected city.
+  /// Now accepts optional state + station; defaults to national overview.
+  Future<Map<String, dynamic>> getDashboardData({
+    String? state,
+    String? station,
+    int     limit = 12,
+  }) {
+    final params = <String>['limit=$limit'];
+    if (state   != null && state.isNotEmpty)   params.add('state=${Uri.encodeComponent(state)}');
+    if (station != null && station.isNotEmpty) params.add('station=${Uri.encodeComponent(station)}');
+    // When no city is selected fetch a national overview (all_states=true)
+    if (state == null && station == null)       params.add('all_states=true');
+    return _get('${AppConstants.liveTelemetryEndpoint}?${params.join("&")}');
+  }
 
   Future<Map<String, dynamic>> getLiveLevels() =>
       _get(AppConstants.liveLevelsEndpoint);
@@ -145,10 +157,8 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
       '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
 
-  /// Returns all CWC stations currently above warning level.
-  /// Routes through the backend (/api/live-telemetry) — never calls CWC
-  /// directly from the phone (CORS-blocked on Android/iOS).
-  /// The backend already scrapes, parses, and normalises the CWC JSON feed.
+  /// All CWC stations currently above warning level.
+  /// Backend proxies the CWC FFS feed (ffs.india-water.gov.in).
   Future<Map<String, dynamic>> getAllCwcStations() =>
       _get('${AppConstants.liveTelemetryEndpoint}?limit=200&all_states=true');
 
@@ -164,17 +174,55 @@ class ApiService {
         '&limit=$limit',
       );
 
-  // ── Model ───────────────────────────────────────────────────────────────
+  // ── CWC FFS ────────────────────────────────────────────────────────────────────
+
+  /// Live CWC flood forecast for a city/station.
+  /// Source: ffs.india-water.gov.in (proxied, normalised to JSON by backend).
+  Future<Map<String, dynamic>> getFloodForecast({
+    required String city,
+    String? state,
+  }) {
+    final params = ['city=${Uri.encodeComponent(city)}'];
+    if (state != null) params.add('state=${Uri.encodeComponent(state)}');
+    return _get('/api/cwc-ffs/station?${params.join("&")}');
+  }
+
+  /// All FFS stations in a state currently above warning level.
+  Future<Map<String, dynamic>> getStateFfsAlerts(String state) =>
+      _get('/api/cwc-ffs/state?state=${Uri.encodeComponent(state)}&alert_only=true');
+
+  /// Single CWC station detail by CWC station code.
+  Future<Map<String, dynamic>> getCwcStationDetail(String stationCode) =>
+      _get('/api/cwc-ffs/detail?code=${Uri.encodeComponent(stationCode)}');
+
+  // ── data.gov.in CWC Reservoir Levels ───────────────────────────────────────────────
+
+  /// Daily reservoir levels from data.gov.in CWC dataset.
+  /// Resource ID: 9ef84268-d588-465a-a308-a864a43d0070
+  /// Licence: OGD Platform India (free public reuse).
+  /// Backend caches daily at midnight (data.gov.in updates once per day).
+  Future<Map<String, dynamic>> getReservoirLevels({String? state}) {
+    final path = state != null
+        ? '/api/cwc-reservoir/state?state=${Uri.encodeComponent(state)}'
+        : '/api/cwc-reservoir';
+    return _get(path);
+  }
+
+  /// Reservoirs currently at critical fill (>=85% capacity).
+  Future<Map<String, dynamic>> getCriticalReservoirs({int limit = 20}) =>
+      _get('/api/cwc-reservoir?min_pct=85&limit=$limit&sort=pct_desc');
+
+  // ── Model ───────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getModelMetrics() => _get('/model-metrics');
 
-  // ── Prediction ────────────────────────────────────────────────────────
+  // ── Prediction ───────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
       _post(AppConstants.predictLegacyEndpoint, input);
 
   Future<Map<String, dynamic>> predictV2(Map<String, dynamic> input) =>
       _post('/predict/v2', input);
 
-  // ── History ───────────────────────────────────────────────────────────────
+  // ── History ───────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getPredictionHistory({
     String? state,
     int     limit = 20,
@@ -186,7 +234,7 @@ class ApiService {
     return _get('/prediction-history?${params.join("&")}');
   }
 
-  // ── Weather ───────────────────────────────────────────────────────────────
+  // ── Weather ───────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getWeather(String city) => _get(
       '${AppConstants.weatherCurrentEndpoint}?city=${Uri.encodeComponent(city)}');
 
@@ -202,7 +250,7 @@ class ApiService {
   }) =>
       _get('/historical-logs?city=${Uri.encodeComponent(city)}&limit=$limit');
 
-  // ── Audit / telemetry snapshots ─────────────────────────────────────
+  // ── Audit / telemetry snapshots ───────────────────────────────────────────────
   Future<Map<String, dynamic>> getAuditLogs({int limit = 50}) =>
       _get('/audit-logs?limit=$limit');
 
