@@ -90,7 +90,8 @@ class RealTimeService extends ChangeNotifier {
 
   // ── Wake-up config ────────────────────────────────────────────────────────
   static const int      _wakeUpMaxAttempts = 20;
-  static const Duration _wakeUpBaseDelay   = Duration(seconds: 5);
+  // FIX: reduced from 5 s → 2 s for faster first-boot recovery on Render
+  static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
 
   final ApiService _api = ApiService();
@@ -145,7 +146,9 @@ class RealTimeService extends ChangeNotifier {
   bool                 get isPolling           => _isPolling;
   int                  get queuedOfflineCycles => _queuedOfflineCycles;
 
-  bool get isUsingFallback => _isUsingFallback && !_liveDataEverReceived;
+  // FIX: removed `&& !_liveDataEverReceived` — that guard was hiding fallback
+  // state during cold start when live data has never arrived yet.
+  bool get isUsingFallback => _isUsingFallback;
 
   MultiLocationMonitoring get monitoringData {
     final hash = _liveLevels.length ^ (_historyByCity.length << 16);
@@ -185,10 +188,30 @@ class RealTimeService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
     await _initNotifications();
+    // FIX 1: Load fallback data FIRST, synchronously, before any network call.
+    // This ensures the dashboard always has cities + a non-null lastFetchTime
+    // to display (instead of empty gauge + "CONNECTING") during cold start.
+    _loadFallbackImmediately();
+    // FIX 2: Restore cache on top of fallback (overwrites if cache exists).
+    // notifyListeners() is called inside so consumers rebuild right away.
     await _restoreFromCache();
     await _initConnectivityListener();
     _initialized = true;
     _scheduleWakeUpRetry();
+  }
+
+  // ── FIX: Immediate fallback loader ───────────────────────────────────────
+  // Called synchronously at the very start of initialize(). Guarantees
+  // _liveLevels and _lastFetchTime are never null/empty when the first
+  // frame renders, so the dashboard shows gauges instead of "CONNECTING".
+  void _loadFallbackImmediately() {
+    if (_liveLevels.isNotEmpty) return; // already have data (e.g. hot restart)
+    _liveLevels      = _fallbackMonitoredLevels();
+    _isUsingFallback = true;
+    // Set a synthetic lastFetchTime so widgets that gate on `lastFetchTime != null`
+    // always get past the null check and render the fallback cities.
+    _lastFetchTime   = DateTime.now();
+    notifyListeners();
   }
 
   // ── Wake-up loop with exponential backoff ─────────────────────────────────
@@ -208,9 +231,13 @@ class RealTimeService extends ChangeNotifier {
       _wakeAttempts++;
       try {
         final health = await _api.checkHealth();
+        // FIX 3: Don't trust /health alone — Render can report healthy while
+        // /api/live-levels is still cold-starting and returning empty.
+        // Only stop retrying once we actually have live city data.
         if (health['status'] != 'error') {
           await refreshData();
-          if (_liveDataEverReceived) return;
+          // Confirm we got real data, not just an empty-but-healthy response.
+          if (_liveDataEverReceived && _liveLevels.isNotEmpty) return;
         }
       } catch (_) {}
       _scheduleWakeUpRetry();
@@ -587,15 +614,17 @@ class RealTimeService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final raw   = prefs.getString(_cacheKey);
     if (raw == null || raw.isEmpty) {
-      if (_liveLevels.isEmpty) {
-        _liveLevels      = _fallbackMonitoredLevels();
-        _isUsingFallback = true;
-      }
+      // No cache — fallback already loaded by _loadFallbackImmediately().
+      // Still notify so any listeners that missed the first call get updated.
+      notifyListeners();
       return;
     }
     try {
       final parsed = jsonDecode(raw);
-      if (parsed is! Map<String, dynamic>) return;
+      if (parsed is! Map<String, dynamic>) {
+        notifyListeners();
+        return;
+      }
 
       final rawLevels = parsed['levels'];
       if (rawLevels is List) {
@@ -629,12 +658,19 @@ class RealTimeService extends ChangeNotifier {
       _lastFetchTime = DateTime.tryParse(
           (parsed['last_fetch_time'] ?? '').toString());
       _isUsingCache  = true;
+      // If cache had levels, we're no longer in pure fallback mode.
+      if (_liveLevels.isNotEmpty) _isUsingFallback = false;
       _apply24HourTrim();
+
+      // FIX: Notify immediately after restoring so dashboard rebuilds with
+      // cached city data instead of waiting for the first network response.
+      notifyListeners();
     } catch (_) {
       if (_liveLevels.isEmpty) {
         _liveLevels      = _fallbackMonitoredLevels();
         _isUsingFallback = true;
       }
+      notifyListeners();
     }
   }
 
