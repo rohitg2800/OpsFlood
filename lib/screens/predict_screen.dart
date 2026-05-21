@@ -1,12 +1,14 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v3.1
-// FIX: BOTTOM OVERFLOWED errors — GridView.count replaced with Column+Row
+// OpsFlood — Predict Screen v4.0
+// NEW: Smart city search (Autocomplete) → live river level autofill
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../constants.dart';
 import '../ml/flood_engine.dart';
+import '../services/api_service.dart';
 import '../services/predict.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -35,6 +37,36 @@ const _allStates = [
   'Andaman and Nicobar','Chandigarh','Lakshadweep',
 ];
 
+// ─── City entry for autocomplete ─────────────────────────────────────────────
+class _CityEntry {
+  final String city;
+  final String state;
+  final String river;
+  const _CityEntry(this.city, this.state, this.river);
+
+  /// Build entries from AppConstants.monitoredCities (List<MonitoredCity>).
+  /// Falls back gracefully if the MonitoredCity type has fewer fields.
+  static List<_CityEntry> fromConstants() {
+    return AppConstants.monitoredCities.map((mc) {
+      // MonitoredCity always has .city and .state; .river may exist.
+      final city  = (mc as dynamic).city  as String? ?? '';
+      final state = (mc as dynamic).state as String? ?? '';
+      final river = (mc as dynamic).river as String? ?? '';
+      return _CityEntry(city, state, river);
+    }).where((e) => e.city.isNotEmpty).toList();
+  }
+
+  String get label => city;
+  String get subtitle => river.isNotEmpty ? '$state • $river' : state;
+
+  bool matches(String q) {
+    final lq = q.toLowerCase();
+    return city.toLowerCase().contains(lq) ||
+           state.toLowerCase().contains(lq) ||
+           river.toLowerCase().contains(lq);
+  }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
@@ -52,20 +84,26 @@ class _PredictScreenState extends State<PredictScreen>
   final _durCtrl      = TextEditingController(text: '1');
   final _peakTimeCtrl = TextEditingController(text: '1');
   final _recCtrl      = TextEditingController(text: '1');
-  final _stationCtrl  = TextEditingController();
+  // City search controller — drives the Autocomplete widget.
+  final _citySearchCtrl = TextEditingController();
   final List<TextEditingController> _rainCtrl = List.generate(
     7, (i) => TextEditingController(text: ['10','15','20','18','12','8','7'][i]),
   );
 
-  String           _selectedState = 'Maharashtra';
+  String           _selectedState    = 'Maharashtra';
+  String?          _selectedCity;
   FloodPrediction? _result;
-  bool   _loading      = false;
-  String _error        = '';
-  bool   _sectionRiver = true;
-  bool   _sectionRain  = true;
-  bool   _useOffline   = false;
+  bool   _loading          = false;
+  bool   _autofilling      = false;   // live CWC fetch in progress
+  bool   _autofilled       = false;   // green badge: live level was injected
+  String _error            = '';
+  bool   _sectionRiver     = true;
+  bool   _sectionRain      = true;
+  bool   _useOffline       = false;
 
+  late final List<_CityEntry> _allCities;
   final _svc = const PredictionService();
+  final _api = ApiService();
 
   @override
   void initState() {
@@ -73,13 +111,15 @@ class _PredictScreenState extends State<PredictScreen>
     _gaugeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1000));
     _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
+    _allCities = _CityEntry.fromConstants();
   }
 
   @override
   void dispose() {
     _gaugeCtrl.dispose();
     _peakCtrl.dispose(); _durCtrl.dispose();
-    _peakTimeCtrl.dispose(); _recCtrl.dispose(); _stationCtrl.dispose();
+    _peakTimeCtrl.dispose(); _recCtrl.dispose();
+    _citySearchCtrl.dispose();
     for (final c in _rainCtrl) c.dispose();
     super.dispose();
   }
@@ -97,8 +137,55 @@ class _PredictScreenState extends State<PredictScreen>
     t5d: _v(_rainCtrl[4], 12), t6d: _v(_rainCtrl[5], 8),
     t7d: _v(_rainCtrl[6], 7),
     state:   _selectedState,
-    station: _stationCtrl.text.trim().isEmpty ? null : _stationCtrl.text.trim(),
+    station: _selectedCity,
   );
+
+  // ── City selected from autocomplete ────────────────────────────────────────
+  void _onCitySelected(_CityEntry entry) {
+    setState(() {
+      _selectedCity  = entry.city;
+      _selectedState = entry.state.isNotEmpty && _allStates.contains(entry.state)
+          ? entry.state
+          : _selectedState;
+      _autofilled    = false;
+      _citySearchCtrl.text = entry.city;
+    });
+    if (!_useOffline) _autofillFromLive(entry.city);
+  }
+
+  // ── Fetch live CWC river level and inject into peakCtrl ────────────────────
+  Future<void> _autofillFromLive(String cityName) async {
+    setState(() { _autofilling = true; _autofilled = false; });
+    try {
+      final response = await _api.getAllCwcStations();
+      final raw = response['data'];
+      if (raw is! List) { setState(() => _autofilling = false); return; }
+
+      final lc = cityName.toLowerCase();
+      double? level;
+      for (final item in raw.whereType<Map<String, dynamic>>()) {
+        final name = (item['station'] ?? item['stationName'] ?? item['city'] ?? '')
+            .toString().toLowerCase();
+        if (name.contains(lc) || lc.contains(name)) {
+          final v = _sfp(item['river_level'] ?? item['riverLevel'] ?? item['current_level']);
+          if (v > 0) { level = v; break; }
+        }
+      }
+
+      if (!mounted) return;
+      if (level != null) {
+        _peakCtrl.text = level.toStringAsFixed(2);
+        setState(() { _autofilling = false; _autofilled = true; });
+      } else {
+        setState(() => _autofilling = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _autofilling = false);
+    }
+  }
+
+  double _sfp(dynamic v) =>
+      (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
 
   Future<void> _predict() async {
     setState(() { _loading = true; _error = ''; _result = null; });
@@ -141,7 +228,7 @@ class _PredictScreenState extends State<PredictScreen>
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 40),
                   children: [
-                    _buildTopRow(),
+                    _buildCitySearchRow(),
                     const SizedBox(height: 14),
                     _buildCollapsible(
                       title: '🌊  River Parameters',
@@ -213,42 +300,181 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  Widget _buildTopRow() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+  // ─── NEW: City search row ─────────────────────────────────────────────────
+  Widget _buildCitySearchRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          flex: 3,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('State',
-                  style: TextStyle(color: Colors.white54, fontSize: 10,
-                      fontWeight: FontWeight.w600, letterSpacing: 0.3)),
-              const SizedBox(height: 4),
-              _GlassCard(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedState,
-                    isExpanded: true,
-                    dropdownColor: const Color(0xFF0D1E35),
-                    iconEnabledColor: _kCyan,
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                    items: _allStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                    onChanged: (v) { if (v != null) setState(() => _selectedState = v); },
+        // Label row
+        Row(
+          children: [
+            const Text('🔍  Search City',
+                style: TextStyle(color: Colors.white54, fontSize: 10,
+                    fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+            const SizedBox(width: 8),
+            // Autofill status chip
+            if (_autofilling)
+              _StatusChip(
+                label: 'Fetching live CWC level…',
+                color: _kCyan,
+                icon: Icons.sync,
+                spinning: true,
+              )
+            else if (_autofilled)
+              _StatusChip(
+                label: '📡 Autofilled from CWC',
+                color: const Color(0xFF22C55E),
+                icon: Icons.check_circle_outline,
+              )
+            else if (_selectedCity != null)
+              _StatusChip(
+                label: '$_selectedCity · $_selectedState',
+                color: _kPurple,
+                icon: Icons.location_on_outlined,
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        // Autocomplete widget
+        Autocomplete<_CityEntry>(
+          optionsBuilder: (TextEditingValue tv) {
+            if (tv.text.isEmpty) return const Iterable<_CityEntry>.empty();
+            return _allCities.where((e) => e.matches(tv.text));
+          },
+          displayStringForOption: (e) => e.city,
+          fieldViewBuilder: (ctx, ctrl, focusNode, onSubmit) {
+            // Mirror text to our own controller so we can read it later.
+            ctrl.addListener(() {
+              if (_citySearchCtrl.text != ctrl.text) {
+                _citySearchCtrl.text = ctrl.text;
+              }
+            });
+            return TextField(
+              controller: ctrl,
+              focusNode: focusNode,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'e.g. Mumbai, Patna, Kolhapur…',
+                hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.05),
+                prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 18),
+                suffixIcon: ctrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white38, size: 16),
+                        onPressed: () {
+                          ctrl.clear();
+                          setState(() {
+                            _selectedCity = null;
+                            _autofilled   = false;
+                          });
+                        },
+                      )
+                    : null,
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: _kCyan, width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            );
+          },
+          optionsViewBuilder: (ctx, onSelected, options) {
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  margin: const EdgeInsets.only(top: 4, right: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D1E35),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _kCyan.withValues(alpha: 0.2)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _kCyan.withValues(alpha: 0.08),
+                        blurRadius: 20,
+                      ),
+                    ],
+                  ),
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    shrinkWrap: true,
+                    children: options.map((entry) {
+                      return InkWell(
+                        onTap: () => onSelected(entry),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 32, height: 32,
+                                decoration: BoxDecoration(
+                                  color: _kCyan.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.water, color: _kCyan, size: 16),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(entry.city,
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13)),
+                                    Text(entry.subtitle,
+                                        style: const TextStyle(
+                                            color: Colors.white38, fontSize: 10)),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.bolt, color: _kCyan, size: 14),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
               ),
-            ],
-          ),
+            );
+          },
+          onSelected: _onCitySelected,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 2,
-          child: _InputField(
-            ctrl: _stationCtrl, label: 'Station (opt.)',
-            hint: 'e.g. Kolhapur', tooltip: 'CWC station for live autofill',
+        const SizedBox(height: 10),
+        // State dropdown — still editable manually
+        _GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedState,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF0D1E35),
+              iconEnabledColor: _kCyan,
+              style: const TextStyle(color: Colors.white, fontSize: 13,
+                  fontWeight: FontWeight.w500),
+              items: _allStates
+                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) setState(() => _selectedState = v);
+              },
+            ),
           ),
         ),
       ],
@@ -294,7 +520,12 @@ class _PredictScreenState extends State<PredictScreen>
     return Column(
       children: [
         Row(children: [
-          Expanded(child: _InputField(ctrl: _peakCtrl,     label: 'Peak Level (m)',      hint: '8.5', tooltip: 'CWC gauge level')),
+          Expanded(child: _InputField(
+            ctrl: _peakCtrl,
+            label: _autofilled ? '⚡ Peak Level (m) — live' : 'Peak Level (m)',
+            hint: '8.5', tooltip: 'CWC gauge level',
+            glowColor: _autofilled ? const Color(0xFF22C55E) : null,
+          )),
           const SizedBox(width: 10),
           Expanded(child: _InputField(ctrl: _durCtrl,      label: 'Duration (days)',     hint: '1',   tooltip: 'Event duration')),
         ]),
@@ -308,7 +539,6 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── FIX: replaced GridView.count (childAspectRatio overflow) with Column+Row ──
   Widget _buildRainfallGrid() {
     const labels = ['D-7','D-6','D-5','D-4','D-3','D-2','D-1'];
 
@@ -321,7 +551,6 @@ class _PredictScreenState extends State<PredictScreen>
 
     return Column(
       children: [
-        // Row 1: D-7 D-6 D-5 D-4
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -332,7 +561,6 @@ class _PredictScreenState extends State<PredictScreen>
           ],
         ),
         const SizedBox(height: 10),
-        // Row 2: D-3 D-2 D-1  + invisible spacer to keep same width
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -387,21 +615,21 @@ class _PredictScreenState extends State<PredictScreen>
 
   Widget _buildPredictButton() {
     return GestureDetector(
-      onTap: _loading ? null : _predict,
+      onTap: (_loading || _autofilling) ? null : _predict,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 54,
         decoration: BoxDecoration(
-          gradient: _loading
+          gradient: (_loading || _autofilling)
               ? LinearGradient(colors: [Colors.white.withValues(alpha: 0.06), Colors.white.withValues(alpha: 0.06)])
               : const LinearGradient(colors: [_kCyan, _kPurple]),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: _loading ? [] : [
+          boxShadow: (_loading || _autofilling) ? [] : [
             BoxShadow(color: _kCyan.withValues(alpha: 0.3), blurRadius: 20, spreadRadius: 2),
           ],
         ),
         child: Center(
-          child: _loading
+          child: (_loading || _autofilling)
               ? const SizedBox(width: 24, height: 24,
               child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
               : const Row(
@@ -570,7 +798,6 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── FIX: replaced GridView.count (childAspectRatio overflow) with Column+Row ──
   Widget _buildStatsGrid(FloodPrediction r) {
     final items = [
       _StatItem(Icons.speed,    'Risk Score',  '${r.riskScore}/100',                         _kCyan),
@@ -743,6 +970,60 @@ class _PredictScreenState extends State<PredictScreen>
   }
 }
 
+// ─── Status chip ──────────────────────────────────────────────────────────────
+class _StatusChip extends StatefulWidget {
+  final String label;
+  final Color  color;
+  final IconData icon;
+  final bool spinning;
+  const _StatusChip({
+    required this.label, required this.color, required this.icon,
+    this.spinning = false,
+  });
+  @override
+  State<_StatusChip> createState() => _StatusChipState();
+}
+
+class _StatusChipState extends State<_StatusChip>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _spin;
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+      ..repeat();
+  }
+  @override
+  void dispose() { _spin.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: widget.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: widget.color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          widget.spinning
+              ? RotationTransition(
+                  turns: _spin,
+                  child: Icon(widget.icon, color: widget.color, size: 11),
+                )
+              : Icon(widget.icon, color: widget.color, size: 11),
+          const SizedBox(width: 4),
+          Text(widget.label,
+              style: TextStyle(color: widget.color, fontSize: 9,
+                  fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Reusable Widgets ─────────────────────────────────────────────────────────
 
 class _GlassCard extends StatelessWidget {
@@ -771,10 +1052,12 @@ class _InputField extends StatelessWidget {
   final TextEditingController ctrl;
   final String label, hint, tooltip;
   final bool compact;
+  final Color? glowColor;
   const _InputField({
     required this.ctrl, required this.label,
     required this.hint, required this.tooltip,
     this.compact = false,
+    this.glowColor,
   });
 
   @override
@@ -782,11 +1065,11 @@ class _InputField extends StatelessWidget {
     message: tooltip,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,   // FIX: don't stretch beyond content
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(label,
             style: TextStyle(
-                color: Colors.white54,
+                color: glowColor ?? Colors.white54,
                 fontSize: compact ? 9 : 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3)),
@@ -800,23 +1083,30 @@ class _InputField extends StatelessWidget {
             hintText: hint,
             hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withValues(alpha: 0.05),
-            isDense: true,                              // FIX: removes extra internal padding
+            fillColor: glowColor != null
+                ? glowColor!.withValues(alpha: 0.06)
+                : Colors.white.withValues(alpha: 0.05),
+            isDense: true,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+              borderSide: BorderSide(
+                  color: glowColor?.withValues(alpha: 0.4) ??
+                      Colors.white.withValues(alpha: 0.12)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+              borderSide: BorderSide(
+                  color: glowColor?.withValues(alpha: 0.5) ??
+                      Colors.white.withValues(alpha: 0.12)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: _kCyan, width: 1.5),
+              borderSide: BorderSide(
+                  color: glowColor ?? _kCyan, width: 1.5),
             ),
             contentPadding: EdgeInsets.symmetric(
               horizontal: 10,
-              vertical: compact ? 8 : 11,              // FIX: explicit vertical padding
+              vertical: compact ? 8 : 11,
             ),
           ),
         ),
