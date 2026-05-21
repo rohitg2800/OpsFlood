@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../constants.dart';
+import '../theme/river_theme.dart';
 
 class FloodGauge extends StatefulWidget {
   final double capacity;
@@ -71,11 +72,15 @@ class _FloodGaugeState extends State<FloodGauge>
 
   @override
   Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
+
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, _) {
-        final current = _animation.value.clamp(0.0, 100.0).toDouble();
+        final current = _animation.value.clamp(0.0, 100.0);
         final color = _riskColor(current);
+        // FIX 1: ensure progress is always > 0 so sweep > 0 for SweepGradient
+        final safeProgress = (current / 100).clamp(0.001, 1.0);
 
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -86,76 +91,85 @@ class _FloodGaugeState extends State<FloodGauge>
               child: Stack(
                 alignment: Alignment.center,
                 children: [
+                  // Background circle
                   Container(
                     width: widget.size,
                     height: widget.size,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          Colors.white.withOpacity(0.18),
-                          Colors.white.withOpacity(0.05),
-                        ],
-                      ),
-                      border: Border.all(color: Colors.white24),
+                      color: rc.cardBg,
+                      border: Border.all(
+                          color: color.withOpacity(0.18), width: 1.5),
                       boxShadow: [
                         BoxShadow(
-                          color: color.withOpacity(0.22),
-                          blurRadius: 30,
-                          spreadRadius: 4,
-                        )
+                          color: color.withOpacity(0.18),
+                          blurRadius: 24,
+                          spreadRadius: 2,
+                        ),
                       ],
                     ),
                   ),
+                  // Arc painter — safe progress passed in
                   CustomPaint(
                     size: Size(widget.size, widget.size),
-                    painter:
-                        _GaugePainter(progress: current / 100, color: color),
+                    painter: _GaugePainter(
+                        progress: safeProgress, color: color),
                   ),
+                  // Needle
                   Transform.rotate(
-                    angle: (-math.pi / 2) + (2 * math.pi * (current / 100)),
+                    angle: (-math.pi / 2) +
+                        (2 * math.pi * safeProgress),
                     child: Container(
                       width: 3,
                       height: widget.size * 0.35,
-                      margin: EdgeInsets.only(bottom: widget.size * 0.33),
+                      margin:
+                          EdgeInsets.only(bottom: widget.size * 0.33),
                       decoration: BoxDecoration(
                         color: color,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                   ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${current.toStringAsFixed(0)}%',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: widget.size * 0.2,
-                          fontWeight: FontWeight.w700,
+                  // FIX 2: wrap inner Column in FittedBox so text never overflows
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${current.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            color: rc.textPrimary,
+                            fontSize: widget.size * 0.20,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        widget.riskLevel,
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 13,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.w700,
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.riskLevel,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: (widget.size * 0.085)
+                                .clamp(10.0, 14.0),
+                            letterSpacing: 1.0,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             Text(
               widget.label,
-              style: const TextStyle(
-                color: Colors.white70,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: rc.textSecondary,
                 fontWeight: FontWeight.w500,
+                fontSize: 12,
               ),
             ),
           ],
@@ -166,7 +180,7 @@ class _FloodGaugeState extends State<FloodGauge>
 }
 
 class _GaugePainter extends CustomPainter {
-  final double progress;
+  final double progress; // always in (0, 1]
   final Color color;
 
   const _GaugePainter({required this.progress, required this.color});
@@ -177,34 +191,50 @@ class _GaugePainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (size.width / 2) - stroke;
 
-    final bg = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = stroke
-      ..color = Colors.white.withOpacity(0.14);
+    // Background track
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = stroke
+        ..color = color.withOpacity(0.12),
+    );
 
-    canvas.drawCircle(center, radius, bg);
-
-    final start = -math.pi / 2;
+    final startAngle = -math.pi / 2;
     final sweep = progress * 2 * math.pi;
 
-    final fg = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = stroke
-      ..shader = SweepGradient(
-        startAngle: start,
-        endAngle: start + sweep,
-        colors: [
-          color.withOpacity(0.35),
-          color,
-          color.withOpacity(0.55),
-        ],
-      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    // FIX: only use SweepGradient when sweep is large enough (> tiny epsilon)
+    // For very small sweeps just paint a solid arc to avoid the assertion.
+    final Paint fg;
+    if (sweep > 0.01) {
+      fg = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = stroke
+        ..shader = SweepGradient(
+          startAngle: startAngle,
+          endAngle: startAngle + sweep, // guaranteed > startAngle
+          colors: [
+            color.withOpacity(0.4),
+            color,
+            color.withOpacity(0.6),
+          ],
+          tileMode: TileMode.clamp,
+        ).createShader(
+            Rect.fromCircle(center: center, radius: radius));
+    } else {
+      fg = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = stroke
+        ..color = color.withOpacity(0.4);
+    }
 
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
-      start,
+      startAngle,
       sweep,
       false,
       fg,
@@ -212,7 +242,6 @@ class _GaugePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GaugePainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.color != color;
-  }
+  bool shouldRepaint(covariant _GaugePainter old) =>
+      old.progress != progress || old.color != color;
 }
