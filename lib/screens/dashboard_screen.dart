@@ -101,6 +101,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               final monitoringData = _service.monitoringData;
 
+              // FIX: build timestamp string outside the widget tree to avoid
+              // quote-escaping issues with DateFormat inside string literals.
+              final timestampLabel = _service.lastFetchTime == null
+                  ? 'Awaiting first live poll'
+                  : 'Updated ${DateFormat("dd MMM, HH:mm:ss").format(_service.lastFetchTime!.toLocal())}';
+
               return RefreshIndicator(
                 onRefresh: _service.refreshData,
                 child: ListView(
@@ -129,9 +135,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _service.lastFetchTime == null
-                          ? 'Awaiting first live poll'
-                          : 'Updated \${DateFormat('dd MMM, HH:mm:ss').format(_service.lastFetchTime!.toLocal())}',
+                      timestampLabel,
                       style: const TextStyle(
                           color: Colors.white60, fontSize: 12),
                     ),
@@ -174,7 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           capacity: primary.capacityPercent,
                           riskLevel: primary.riskLevel,
                           label:
-                              '\${primary.city} | \${primary.riverName ?? "River"}',
+                              '${primary.city} | ${primary.riverName ?? "River"}',
                           size: 240,
                         ),
                       )
@@ -197,8 +201,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: PremiumStatCard(
                               icon: Icons.warning_amber,
                               title: 'Critical',
-                              value:
-                                  '\${monitoringData.criticalCount}',
+                              value: '${monitoringData.criticalCount}',
                               subtitle: 'threshold breaches',
                               accent: const Color(0xFFEF4444),
                             ),
@@ -208,8 +211,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: PremiumStatCard(
                               icon: Icons.ssid_chart,
                               title: 'High Risk',
-                              value:
-                                  '\${monitoringData.highRiskCount}',
+                              value: '${monitoringData.highRiskCount}',
                               subtitle: 'active locations',
                               accent: const Color(0xFFF59E0B),
                             ),
@@ -224,7 +226,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ? 'Online'
                                   : 'Offline',
                               value: _service.queuedOfflineCycles > 0
-                                  ? '\${_service.queuedOfflineCycles}'
+                                  ? '${_service.queuedOfflineCycles}'
                                   : 'Live',
                               subtitle: _service.isUsingCache
                                   ? 'cache mode'
@@ -316,8 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     if (selected != null)
                       _TrendCard(
                         city: selected.city,
-                        history:
-                            _service.trendForCity(selected.city),
+                        history: _service.trendForCity(selected.city),
                         dangerLevel: selected.dangerLevel,
                         warningLevel: selected.warningLevel,
                       )
@@ -327,8 +328,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: Center(
                           child: Text(
                             'No live data — pull down to refresh',
-                            style:
-                                TextStyle(color: Colors.white54),
+                            style: TextStyle(color: Colors.white54),
                           ),
                         ),
                       ),
@@ -396,7 +396,7 @@ class _ModelMetricsCard extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    double _pct(String key) =>
+    double pct(String key) =>
         ((m[key] as num?)?.toDouble() ?? 0.0) * 100;
 
     return Container(
@@ -426,10 +426,10 @@ class _ModelMetricsCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'F1 \${_pct("f1_score").toStringAsFixed(1)}%  '
-                  'Acc \${_pct("accuracy").toStringAsFixed(1)}%  '
-                  'P \${_pct("precision").toStringAsFixed(1)}%  '
-                  'R \${_pct("recall").toStringAsFixed(1)}%',
+                  'F1 ${pct("f1_score").toStringAsFixed(1)}%  '
+                  'Acc ${pct("accuracy").toStringAsFixed(1)}%  '
+                  'P ${pct("precision").toStringAsFixed(1)}%  '
+                  'R ${pct("recall").toStringAsFixed(1)}%',
                   style: const TextStyle(
                       color: Colors.white60, fontSize: 11),
                 ),
@@ -438,7 +438,7 @@ class _ModelMetricsCard extends StatelessWidget {
           ),
           if (m['training_samples'] != null)
             Text(
-              '\${m["training_samples"]}\nsamples',
+              '${m["training_samples"]}\nsamples',
               textAlign: TextAlign.right,
               style:
                   const TextStyle(color: Colors.white38, fontSize: 10),
@@ -480,8 +480,7 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(18),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,8 +521,7 @@ class _TrendCard extends StatelessWidget {
                             getTitlesWidget: (value, _) => Text(
                               value.toStringAsFixed(1),
                               style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 10),
+                                  color: Colors.white54, fontSize: 10),
                             ),
                           ),
                         ),
@@ -564,8 +562,7 @@ class _TrendCard extends StatelessWidget {
                       borderData: FlBorderData(
                         show: true,
                         border: Border.all(
-                            color:
-                                Colors.white.withValues(alpha: 0.15)),
+                            color: Colors.white.withValues(alpha: 0.15)),
                       ),
                       lineBarsData: [
                         LineChartBarData(
