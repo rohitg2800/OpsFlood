@@ -14,8 +14,10 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'api_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CwcStationData — lightweight data class for a single CWC gauge reading.
+void _log(String msg) {
+  if (kDebugMode) debugPrint('[RTS] $msg');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 class CwcStationData {
   final String stationName;
@@ -26,9 +28,9 @@ class CwcStationData {
   final double dangerLevel;
   final double flowRate;
   final double rainfallLastHour;
-  final String status;   // 'ACTIVE' | 'WARNING' | 'CRITICAL'
-  final String trend;    // 'RISING' | 'FALLING' | 'STEADY'
-  final String source;   // 'CWC_API' | 'TACTICAL_REGISTRY'
+  final String status;
+  final String trend;
+  final String source;
   final DateTime lastUpdate;
 
   const CwcStationData({
@@ -50,18 +52,18 @@ class CwcStationData {
     double sf(dynamic v) =>
         (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
     return CwcStationData(
-      stationName:      (j['station'] ?? j['stationName'] ?? j['city'] ?? '').toString(),
+      stationName:      (j['station'] ?? j['stationName'] ?? j['station_name'] ?? j['city'] ?? j['name'] ?? '').toString(),
       stateName:        (j['state']   ?? j['stateName']   ?? j['state_name'] ?? '').toString(),
       riverName:        (j['river']   ?? j['riverName']   ?? j['river_name'] ?? '').toString(),
-      riverLevel:       sf(j['river_level']    ?? j['riverLevel']     ?? j['current_level']),
-      warningLevel:     sf(j['warning_level']  ?? j['warningLevel']),
-      dangerLevel:      sf(j['danger_level']   ?? j['dangerLevel']),
-      flowRate:         sf(j['flow_rate']       ?? j['flowRate']       ?? j['discharge']),
+      riverLevel:       sf(j['river_level'] ?? j['riverLevel'] ?? j['current_level'] ?? j['level'] ?? j['gauge_reading']),
+      warningLevel:     sf(j['warning_level'] ?? j['warningLevel'] ?? j['wl']),
+      dangerLevel:      sf(j['danger_level']  ?? j['dangerLevel']  ?? j['dl']),
+      flowRate:         sf(j['flow_rate']      ?? j['flowRate']     ?? j['discharge']),
       rainfallLastHour: sf(j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
-      status:           (j['status'] ?? 'ACTIVE').toString().toUpperCase(),
-      trend:            (j['trend']  ?? 'STEADY').toString().toUpperCase(),
-      source:           (j['source'] ?? j['data_source'] ?? 'UNKNOWN').toString(),
-      lastUpdate:       DateTime.tryParse((j['last_update'] ?? j['lastUpdate'] ?? '').toString())
+      status:           (j['status'] ?? j['alert_status'] ?? 'ACTIVE').toString().toUpperCase(),
+      trend:            (j['trend']  ?? j['water_trend']  ?? 'STEADY').toString().toUpperCase(),
+      source:           (j['source'] ?? j['data_source']  ?? 'UNKNOWN').toString(),
+      lastUpdate:       DateTime.tryParse((j['last_update'] ?? j['lastUpdate'] ?? j['updated_at'] ?? '').toString())
                             ?? DateTime.now(),
     );
   }
@@ -69,8 +71,6 @@ class CwcStationData {
   bool get isLiveCwc => source == 'CWC_API';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RealTimeService
 // ─────────────────────────────────────────────────────────────────────────────
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
@@ -98,16 +98,18 @@ class RealTimeService extends ChangeNotifier {
   bool _isUsingCache         = false;
   bool _isUsingFallback      = false;
   bool _liveDataEverReceived = false;
-
-  // FIX 4: track whether lastFetchTime is real (from network) or synthetic
-  // (set by _loadFallbackImmediately). Dashboard uses this to show waking banner.
-  bool _hasRealFetchTime = false;
+  bool _hasRealFetchTime     = false;
 
   int       _retryCount          = 0;
   int       _queuedOfflineCycles = 0;
   int       _wakeAttempts        = 0;
   DateTime? _lastFetchTime;
   String?   _error;
+
+  // Debug: store raw API responses so the debug panel can show them
+  Map<String, dynamic> _lastLevelsRaw  = {};
+  Map<String, dynamic> _lastCwcRaw     = {};
+  Map<String, dynamic> _lastAlertsRaw  = {};
 
   List<FloodData>       _liveLevels     = <FloodData>[];
   List<FloodAlert>      _criticalAlerts = <FloodAlert>[];
@@ -127,25 +129,23 @@ class RealTimeService extends ChangeNotifier {
   List<FloodAlert>     get criticalAlerts      => _criticalAlerts;
   List<CwcStationData> get cwcStations         => _cwcStations;
   String               get cwcSource           => _cwcSource;
+  bool                 get hasCwcLiveData      => _cwcStations.isNotEmpty;
+  DateTime?            get lastFetchTime       => _lastFetchTime;
+  String?              get error               => _error;
+  bool                 get isLoading           => _isLoading;
+  bool                 get isOnline            => _isOnline;
+  bool                 get isUsingCache        => _isUsingCache;
+  bool                 get isPolling           => _isPolling;
+  int                  get queuedOfflineCycles => _queuedOfflineCycles;
+  bool                 get isUsingFallback     => _isUsingFallback;
+  bool                 get isWakingUp          => _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
 
-  // FIX 2: drop source == 'CWC_API' guard — the strip being non-empty IS
-  // the proof that the backend proxied live data. The source field is often
-  // 'TACTICAL_REGISTRY' even when data is fresh from the CWC feed.
-  bool get hasCwcLiveData => _cwcStations.isNotEmpty;
-
-  DateTime? get lastFetchTime       => _lastFetchTime;
-  String?   get error               => _error;
-  bool      get isLoading           => _isLoading;
-  bool      get isOnline            => _isOnline;
-  bool      get isUsingCache        => _isUsingCache;
-  bool      get isPolling           => _isPolling;
-  int       get queuedOfflineCycles => _queuedOfflineCycles;
-  bool      get isUsingFallback     => _isUsingFallback;
-
-  // FIX 4: true when we're online + polling but no real network response yet.
-  // Dashboard uses this for the pulsing "Waking backend" message.
-  bool get isWakingUp =>
-      _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
+  // Debug getters — used by dashboard debug panel
+  Map<String, dynamic> get debugLevelsRaw  => _lastLevelsRaw;
+  Map<String, dynamic> get debugCwcRaw     => _lastCwcRaw;
+  Map<String, dynamic> get debugAlertsRaw  => _lastAlertsRaw;
+  int                  get debugRetryCount => _retryCount;
+  int                  get debugWakeAttempts => _wakeAttempts;
 
   MultiLocationMonitoring get monitoringData {
     final hash = _liveLevels.length ^ (_historyByCity.length << 16);
@@ -196,14 +196,11 @@ class RealTimeService extends ChangeNotifier {
     if (_liveLevels.isNotEmpty) return;
     _liveLevels      = _fallbackMonitoredLevels();
     _isUsingFallback = true;
-    // Synthetic timestamp — NOT a real network fetch. _hasRealFetchTime stays false.
-    _lastFetchTime   = DateTime.now();
+    _lastFetchTime   = DateTime.now(); // synthetic
     notifyListeners();
   }
 
   // ── Wake-up loop ──────────────────────────────────────────────────────────
-  // FIX 3: removed `|| _liveDataEverReceived` early-exit so the loop can
-  // restart after a Render sleep mid-session when _liveLevels goes empty.
   void _scheduleWakeUpRetry() {
     if (_wakeAttempts >= _wakeUpMaxAttempts) return;
     _wakeUpTimer?.cancel();
@@ -218,13 +215,17 @@ class RealTimeService extends ChangeNotifier {
             .toInt();
     _wakeUpTimer = Timer(Duration(milliseconds: delayMs), () async {
       _wakeAttempts++;
+      _log('wake attempt $_wakeAttempts');
       try {
         final health = await _api.checkHealth();
+        _log('health: $health');
         if (health['status'] != 'error') {
           await refreshData();
           if (_liveDataEverReceived && _liveLevels.isNotEmpty) return;
         }
-      } catch (_) {}
+      } catch (e) {
+        _log('wake error: $e');
+      }
       _scheduleWakeUpRetry();
     });
   }
@@ -323,10 +324,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Core data refresh ─────────────────────────────────────────────────────
-  // FIX 1: Replaced the single broad catch(e) with typed error handling so
-  // we can distinguish transient timeouts from parse errors. retryCount now
-  // resets if CWC data arrived even if levels were empty (partial success).
+  // ── Core refresh ─────────────────────────────────────────────────────────────
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -352,11 +350,21 @@ class RealTimeService extends ChangeNotifier {
       final alertsResponse = results[1];
       final cwcResponse    = results[2];
 
+      // Store raw for debug panel
+      _lastLevelsRaw  = levelsResponse;
+      _lastCwcRaw     = cwcResponse;
+      _lastAlertsRaw  = alertsResponse;
+
+      _log('levels raw keys: ${levelsResponse.keys.toList()}');
+      _log('cwc raw keys:    ${cwcResponse.keys.toList()}');
+      _log('cwc data type:   ${cwcResponse["data"]?.runtimeType}');
+
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
       _updateCwcStations(cwcResponse);
 
-      // Partial success: CWC data arrived even if levels is empty
+      _log('parsed levels: ${levels.length}, cwcStations: ${_cwcStations.length}');
+
       final bool cwcArrived = _cwcStations.isNotEmpty;
 
       if (levels.isNotEmpty) {
@@ -376,36 +384,36 @@ class RealTimeService extends ChangeNotifier {
       _apply24HourTrim();
       await _dispatchThresholdNotifications(_liveLevels);
 
-      // Reset retry only when we got something real
       if (levels.isNotEmpty || cwcArrived) _retryCount = 0;
 
       _queuedOfflineCycles = 0;
-      _lastFetchTime       = DateTime.now();
-      _hasRealFetchTime    = true;   // FIX 4: mark as real network response
-      _isUsingCache        = false;
-      _error               = null;
+      _lastFetchTime    = DateTime.now();
+      _hasRealFetchTime = true;
+      _isUsingCache     = false;
+      _error            = null;
 
       await _persistCache();
     } on TimeoutException {
       _retryCount += 1;
-      _error = 'Request timed out — backend may be waking up.';
-      _maybeRestoreCache();
-    } on SocketException {
+      _error = 'Timed out — backend waking up (attempt $_retryCount).';
+      _log(_error!);
+      await _maybeRestoreCache();
+    } on SocketException catch (e) {
       _retryCount += 1;
-      _error = 'Network error — check connection.';
-      _maybeRestoreCache();
+      _error = 'Network error: $e';
+      _log(_error!);
+      await _maybeRestoreCache();
     } catch (e) {
       _retryCount += 1;
-      _error = 'Refresh error: ${e.toString()}';
-      _maybeRestoreCache();
+      _error = 'Error: ${e.toString()}';
+      _log(_error!);
+      await _maybeRestoreCache();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // Only restore cache after 3 consecutive failures, and only if we currently
-  // have no real data (don't overwrite valid live data with stale cache).
   Future<void> _maybeRestoreCache() async {
     if (_retryCount >= AppConstants.maxRetries && !_liveDataEverReceived) {
       _isUsingCache = true;
@@ -413,66 +421,88 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── CWC station parser ────────────────────────────────────────────────────
+  // ── CWC station parser (hardened for all OpsFlood envelope shapes) ──────────
+  // Handles: {data:[...]}, {data:{data:[...]}}, {stations:[...]},
+  //          {result:[...]}, {items:[...]}, bare list at root.
   void _updateCwcStations(Map<String, dynamic> response) {
-    if (response['status'] == 'error') return;
-    final raw = response['data'];
-    final List<Map<String, dynamic>> items;
-    if (raw is List) {
-      items = raw.whereType<Map<String, dynamic>>().toList();
-    } else if (raw is Map<String, dynamic>) {
-      final inner = raw['data'] ?? raw['stations'] ?? raw['items'];
-      items = (inner is List)
-          ? inner.whereType<Map<String, dynamic>>().toList()
-          : <Map<String, dynamic>>[];
-    } else {
+    if (response['status'] == 'error') {
+      _log('CWC error response: ${response["error"]}');
       return;
     }
-    if (items.isEmpty) return;
 
-    _cwcStations = items
+    final List<dynamic>? items = _extractList(response);
+    if (items == null || items.isEmpty) {
+      _log('CWC: no items found in response. Keys: ${response.keys.toList()}');
+      return;
+    }
+
+    _log('CWC: found ${items.length} raw items');
+
+    final parsed = items
+        .whereType<Map<String, dynamic>>()
         .map(CwcStationData.fromJson)
         .where((s) => s.stationName.isNotEmpty)
         .toList();
 
-    _cwcSource = _cwcStations.any((s) => s.isLiveCwc)
-        ? 'CWC_API'
-        : 'TACTICAL_REGISTRY';
+    if (parsed.isEmpty) {
+      _log('CWC: items present but none parsed with non-empty stationName');
+      // Log first item to debug field names
+      if (items.isNotEmpty && kDebugMode) {
+        debugPrint('[RTS] CWC first item: ${items.first}');
+      }
+      return;
+    }
+
+    _cwcStations = parsed;
+    _cwcSource   = parsed.any((s) => s.isLiveCwc) ? 'CWC_API' : 'TACTICAL_REGISTRY';
+    _log('CWC: populated ${_cwcStations.length} stations, source=$_cwcSource');
+  }
+
+  // ── Universal list extractor ───────────────────────────────────────────────────
+  // Tries every known OpsFlood backend envelope key in priority order.
+  List<dynamic>? _extractList(Map<String, dynamic> response) {
+    // Priority 1: top-level known list keys
+    for (final key in ['data', 'stations', 'result', 'results',
+                        'items', 'records', 'levels', 'telemetry']) {
+      final v = response[key];
+      if (v is List) return v;
+      // Nested: {data: {data: [...]}}
+      if (v is Map<String, dynamic>) {
+        for (final innerKey in ['data', 'stations', 'items', 'records', 'result']) {
+          final inner = v[innerKey];
+          if (inner is List) return inner;
+        }
+      }
+    }
+    // Priority 2: the whole response IS the data (bare map with station fields)
+    // e.g. {station: 'X', river_level: 5.2, ...}
+    if (response.containsKey('station') || response.containsKey('river_level')) {
+      return [response];
+    }
+    return null;
   }
 
   // ── Parsers ───────────────────────────────────────────────────────────────
   List<FloodData> _parseFloodLevels(Map<String, dynamic> response) {
     if (response['status'] == 'error') return <FloodData>[];
-    final raw = response['data'];
-    if (raw is List) {
-      return raw
-          .whereType<Map<String, dynamic>>()
-          .map(FloodData.fromJson)
-          .toList(growable: false);
-    }
-    if (raw is Map<String, dynamic>) {
-      final candidate = raw['levels'] ?? raw['items'];
-      if (candidate is List) {
-        return candidate
-            .whereType<Map<String, dynamic>>()
-            .map(FloodData.fromJson)
-            .toList(growable: false);
-      }
-    }
-    return <FloodData>[];
+    final items = _extractList(response);
+    if (items == null) return <FloodData>[];
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(FloodData.fromJson)
+        .where((e) => e.city.isNotEmpty)
+        .toList(growable: false);
   }
 
   List<FloodAlert> _parseAlerts(Map<String, dynamic> response) {
     if (response['status'] == 'error') return <FloodAlert>[];
-    final raw = response['data'];
-    if (raw is List) {
-      return (raw
-              .whereType<Map<String, dynamic>>()
-              .map(FloodAlert.fromJson)
-              .toList(growable: false)
-            ..sort((a, b) => b.timestamp.compareTo(a.timestamp)));
-    }
-    return <FloodAlert>[];
+    final items = _extractList(response);
+    if (items == null) return <FloodAlert>[];
+    return (items
+            .whereType<Map<String, dynamic>>()
+            .map(FloodAlert.fromJson)
+            .toList(growable: false)
+          ..sort((a, b) => b.timestamp.compareTo(a.timestamp)));
   }
 
   List<FloodData> _fallbackMonitoredLevels() =>
@@ -500,8 +530,8 @@ class RealTimeService extends ChangeNotifier {
               currentLevel: e.currentLevel,
               dangerLevel:  e.dangerLevel,
               recommendation: e.capacityPercent >= AppConstants.criticalThreshold
-                  ? 'Move teams to emergency response mode for low-lying zones.'
-                  : 'Increase monitoring frequency and keep response units on standby.',
+                  ? 'Move teams to emergency response mode.'
+                  : 'Increase monitoring frequency.',
             ))
         .toList(growable: false);
   }
@@ -533,142 +563,97 @@ class RealTimeService extends ChangeNotifier {
   // ── Notifications ─────────────────────────────────────────────────────────
   Future<void> _dispatchThresholdNotifications(List<FloodData> levels) async {
     for (final level in levels) {
-      final key =
-          '${level.city}-${level.capacityPercent.toStringAsFixed(0)}-${level.riskLevel}';
+      final key = '${level.city}-${level.capacityPercent.toStringAsFixed(0)}-${level.riskLevel}';
       if (_notificationDedup.contains(key)) continue;
-
       if (level.capacityPercent >= AppConstants.criticalThreshold) {
         await _showNotification(
-          id:          level.city.hashCode,
-          channelId:   AppConstants.criticalAlertChannelId,
+          id: level.city.hashCode, channelId: AppConstants.criticalAlertChannelId,
           channelName: AppConstants.criticalAlertChannelName,
-          title:  'Critical flood risk in ${level.city}',
-          body:   '${level.riverName ?? 'River'} at '
-                  '${level.capacityPercent.toStringAsFixed(0)}% capacity. Immediate action needed.',
-          payload:    'city=${level.city}&severity=CRITICAL',
-          persistent: true,
+          title: 'Critical flood risk in ${level.city}',
+          body: '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
+          payload: 'city=${level.city}&severity=CRITICAL', persistent: true,
         );
         _notificationDedup.add(key);
       } else if (level.capacityPercent >= AppConstants.highThreshold) {
         await _showNotification(
-          id:          level.city.hashCode + 1000,
-          channelId:   AppConstants.warningAlertChannelId,
+          id: level.city.hashCode + 1000, channelId: AppConstants.warningAlertChannelId,
           channelName: AppConstants.warningAlertChannelName,
-          title:  'High flood watch in ${level.city}',
-          body:   '${level.riverName ?? 'River'} at '
-                  '${level.capacityPercent.toStringAsFixed(0)}% capacity.',
-          payload:    'city=${level.city}&severity=HIGH',
-          persistent: false,
+          title: 'High flood watch in ${level.city}',
+          body: '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
+          payload: 'city=${level.city}&severity=HIGH', persistent: false,
         );
         _notificationDedup.add(key);
       }
     }
-    while (_notificationDedup.length > 300) {
-      _notificationDedup.remove(_notificationDedup.first);
-    }
+    while (_notificationDedup.length > 300) _notificationDedup.remove(_notificationDedup.first);
   }
 
   Future<void> _showNotification({
-    required int    id,
-    required String channelId,
-    required String channelName,
-    required String title,
-    required String body,
-    required String payload,
-    required bool   persistent,
+    required int id, required String channelId, required String channelName,
+    required String title, required String body,
+    required String payload, required bool persistent,
   }) async {
     final android = AndroidNotificationDetails(
-      channelId, channelName,
-      channelDescription: channelName,
+      channelId, channelName, channelDescription: channelName,
       importance: persistent ? Importance.max  : Importance.high,
       priority:   persistent ? Priority.max    : Priority.high,
-      ongoing:    persistent,
-      autoCancel: !persistent,
+      ongoing: persistent, autoCancel: !persistent,
     );
     const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true);
     await _notifications.show(
-      id:                  id,
-      title:               title,
-      body:                body,
+      id: id, title: title, body: body,
       notificationDetails: NotificationDetails(android: android, iOS: ios),
-      payload:             payload,
+      payload: payload,
     );
   }
 
   // ── Cache ─────────────────────────────────────────────────────────────────
   Future<void> _persistCache() async {
-    final prefs       = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final historyJson = <String, dynamic>{};
     _historyByCity.forEach((key, value) {
       historyJson[key] = value.map((item) => item.toJson()).toList();
     });
-    await prefs.setString(
-      _cacheKey,
-      jsonEncode(<String, dynamic>{
-        'last_fetch_time': (_lastFetchTime ?? DateTime.now()).toIso8601String(),
-        'levels':  _liveLevels.map((i) => i.toJson()).toList(),
-        'alerts':  _criticalAlerts.map((i) => i.toJson()).toList(),
-        'history': historyJson,
-      }),
-    );
+    await prefs.setString(_cacheKey, jsonEncode(<String, dynamic>{
+      'last_fetch_time': (_lastFetchTime ?? DateTime.now()).toIso8601String(),
+      'levels':  _liveLevels.map((i) => i.toJson()).toList(),
+      'alerts':  _criticalAlerts.map((i) => i.toJson()).toList(),
+      'history': historyJson,
+    }));
   }
 
   Future<void> _restoreFromCache() async {
     final prefs = await SharedPreferences.getInstance();
     final raw   = prefs.getString(_cacheKey);
-    if (raw == null || raw.isEmpty) {
-      notifyListeners();
-      return;
-    }
+    if (raw == null || raw.isEmpty) { notifyListeners(); return; }
     try {
       final parsed = jsonDecode(raw);
-      if (parsed is! Map<String, dynamic>) {
-        notifyListeners();
-        return;
-      }
-
+      if (parsed is! Map<String, dynamic>) { notifyListeners(); return; }
       final rawLevels = parsed['levels'];
       if (rawLevels is List) {
-        _liveLevels = rawLevels
-            .whereType<Map<String, dynamic>>()
-            .map(FloodData.fromJson)
-            .toList(growable: false);
+        _liveLevels = rawLevels.whereType<Map<String, dynamic>>().map(FloodData.fromJson).toList(growable: false);
       }
-
       final rawAlerts = parsed['alerts'];
       if (rawAlerts is List) {
-        _criticalAlerts = rawAlerts
-            .whereType<Map<String, dynamic>>()
-            .map(FloodAlert.fromJson)
-            .toList(growable: false);
+        _criticalAlerts = rawAlerts.whereType<Map<String, dynamic>>().map(FloodAlert.fromJson).toList(growable: false);
       }
-
       _historyByCity.clear();
       final history = parsed['history'];
       if (history is Map<String, dynamic>) {
         history.forEach((key, value) {
           if (value is List) {
-            _historyByCity[key] = value
-                .whereType<Map<String, dynamic>>()
-                .map(RiverLevelSnapshot.fromJson)
-                .toList(growable: true);
+            _historyByCity[key] = value.whereType<Map<String, dynamic>>().map(RiverLevelSnapshot.fromJson).toList(growable: true);
           }
         });
       }
-
-      final cachedTime = DateTime.tryParse(
-          (parsed['last_fetch_time'] ?? '').toString());
-      // Only overwrite lastFetchTime if we don't already have a real one
+      final cachedTime = DateTime.tryParse((parsed['last_fetch_time'] ?? '').toString());
       if (!_hasRealFetchTime) _lastFetchTime = cachedTime;
-      _isUsingCache  = true;
+      _isUsingCache = true;
       if (_liveLevels.isNotEmpty) _isUsingFallback = false;
       _apply24HourTrim();
       notifyListeners();
     } catch (_) {
-      if (_liveLevels.isEmpty) {
-        _liveLevels      = _fallbackMonitoredLevels();
-        _isUsingFallback = true;
-      }
+      if (_liveLevels.isEmpty) { _liveLevels = _fallbackMonitoredLevels(); _isUsingFallback = true; }
       notifyListeners();
     }
   }
