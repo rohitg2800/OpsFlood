@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 class AnimatedAlertBadge extends StatefulWidget {
@@ -74,7 +72,7 @@ class _AnimatedAlertBadgeState extends State<AnimatedAlertBadge>
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '$latin1: ${widget.count}',
+                  '${widget.label}: ${widget.count}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
