@@ -5,6 +5,7 @@ import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
+import 'river_monitor_screen.dart';
 import 'weather_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
     AlertsScreen(),
     WeatherScreen(),
     PredictScreen(),
+    RiverMonitorScreen(),
   ];
 
   @override
@@ -70,6 +72,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.model_training_outlined),
             selectedIcon: Icon(Icons.model_training),
             label: 'Predict',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.water_outlined),
+            selectedIcon: Icon(Icons.water),
+            label: 'Rivers',
           ),
         ],
       ),
