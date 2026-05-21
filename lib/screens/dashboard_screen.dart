@@ -27,18 +27,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? _modelMetrics;
   bool _metricsLoading = true;
 
-  // FIX 3: track the last snapshot that caused a rebuild so we can skip
-  // rebuilds when data hasn't actually changed.
   int _lastLevelHash = 0;
 
-  // Performance: Cache sorted levels to avoid O(n log n) sort on every rebuild
   List<FloodData> _cachedSortedLevels = <FloodData>[];
   int _cachedHash = -1;
 
   @override
   void initState() {
     super.initState();
-    // FIX 1: Do NOT call startPolling() here — HomeScreen already does it.
     _fetchModelMetrics();
     _service.addListener(_onServiceUpdate);
   }
@@ -50,7 +46,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _onServiceUpdate() {
-    // FIX 4: Only call setState if data actually changed (compare a cheap hash).
     final newHash = _service.liveLevels.length ^
         (_service.lastFetchTime?.millisecondsSinceEpoch ?? 0);
     if (newHash != _lastLevelHash) {
@@ -73,7 +68,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final rc = RiverColors.of(context);
     final cs = Theme.of(context).colorScheme;
 
-    // Performance: Only re-sort if data changed (cache avoids O(n log n) sort)
     final newHash = _service.liveLevels.length ^
         (_service.lastFetchTime?.millisecondsSinceEpoch ?? 0);
     if (newHash != _cachedHash) {
@@ -112,7 +106,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    // Header
+                    // ── Header ──────────────────────────────────────────────
                     Row(
                       children: [
                         Icon(Icons.water_drop, color: rc.riverNormal),
@@ -136,7 +130,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             color: rc.textSecondary, fontSize: 12)),
                     const SizedBox(height: 10),
 
-                    // Error banner
+                    // ── Simulated-data banner (shown when backend is offline) ──
+                    if (_service.isUsingFallback)
+                      const _SimulatedDataBanner(),
+
+                    // ── Error banner ─────────────────────────────────────────
                     if (_service.error != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -152,7 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 color: Colors.white, fontSize: 12)),
                       ),
 
-                    // Alert badge
+                    // ── Alert badge ──────────────────────────────────────────
                     AnimatedAlertBadge(
                       count: _service.activeCriticalAlerts.length,
                       isCritical: _service.activeCriticalAlerts.isNotEmpty,
@@ -162,7 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Gauge — only top-risk city
+                    // ── Gauge — top-risk city ────────────────────────────────
                     if (primary != null)
                       Center(
                         child: FloodGauge(
@@ -180,7 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     const SizedBox(height: 14),
 
-                    // Stat cards
+                    // ── Stat cards ───────────────────────────────────────────
                     SizedBox(
                       height: 110,
                       child: Row(
@@ -215,13 +213,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               title: _service.isOnline ? 'Online' : 'Offline',
                               value: _service.queuedOfflineCycles > 0
                                   ? '${_service.queuedOfflineCycles}'
-                                  : 'Live',
+                                  : _service.isUsingFallback ? 'Simulated' : 'Live',
                               subtitle: _service.isUsingCache
                                   ? 'cache mode'
-                                  : 'real-time feed',
-                              accent: _service.isOnline
-                                  ? const Color(0xFF34C759)
-                                  : const Color(0xFFEF4444),
+                                  : _service.isUsingFallback
+                                      ? 'backend offline'
+                                      : 'real-time feed',
+                              accent: _service.isUsingFallback
+                                  ? const Color(0xFFF59E0B)
+                                  : _service.isOnline
+                                      ? const Color(0xFF34C759)
+                                      : const Color(0xFFEF4444),
                             ),
                           ),
                         ],
@@ -229,12 +231,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Model metrics
+                    // ── Model metrics ────────────────────────────────────────
                     _ModelMetricsCard(
                         loading: _metricsLoading, metrics: _modelMetrics),
                     const SizedBox(height: 16),
 
-                    // City selector chips
+                    // ── City selector chips ──────────────────────────────────
                     if (levels.isNotEmpty) ...[
                       Text('River Monitoring',
                           style: TextStyle(
@@ -272,7 +274,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(height: 10),
                     ],
 
-                    // Trend chart for selected city
+                    // ── Trend chart for selected city ────────────────────────
                     if (selected != null)
                       RepaintBoundary(
                         child: _TrendCard(
@@ -287,8 +289,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
 
-              // FIX 3: Replace shrinkWrap GridView with a proper SliverList.
-              // Each river card is laid out lazily — only visible items cost CPU.
+              // ── River cards (lazy) ───────────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 sliver: SliverList(
@@ -313,7 +314,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
 
-              // Risk heatmap at the bottom
+              // ── Risk heatmap ─────────────────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 sliver: SliverToBoxAdapter(
@@ -341,6 +342,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return map.entries
         .map((e) => {'state': e.key, 'risk': e.value})
         .toList(growable: false);
+  }
+}
+
+// ── Simulated Data Banner ───────────────────────────────────────────────────
+class _SimulatedDataBanner extends StatelessWidget {
+  const _SimulatedDataBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        color: const Color(0xFFF59E0B).withOpacity(0.12),
+        border: Border.all(
+          color: const Color(0xFFF59E0B).withOpacity(0.45),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded,
+              color: Color(0xFFF59E0B), size: 18),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '⚠️  Simulated Data',
+                  style: TextStyle(
+                    color: Color(0xFFF59E0B),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Backend is offline or starting up. River levels shown are estimated, not live.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
