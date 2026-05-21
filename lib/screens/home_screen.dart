@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/real_time_service.dart';
+import '../screens/india_river_explorer_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
@@ -16,64 +17,77 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final RealTimeService _realTimeService = RealTimeService();
+  // FIX 1: Only HomeScreen starts/stops polling. Individual screens must NOT
+  // call startPolling() themselves — that caused duplicate listeners + full
+  // rebuilds across all 7 screens on every poll tick.
+  final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    DashboardScreen(),
-    MonitorsScreen(),
-    AlertsScreen(),
-    WeatherScreen(),
-    PredictScreen(),
-    RiverMonitorScreen(),
+  // FIX 2: Replace IndexedStack (keeps all 7 alive) with a lazy builder that
+  // only mounts the active screen. Off-screen widgets are fully unmounted,
+  // so they cannot receive notifyListeners() calls.
+  static const _destinations = [
+    _NavEntry(label: 'Dashboard',  icon: Icons.dashboard_outlined,       selectedIcon: Icons.dashboard),
+    _NavEntry(label: 'Monitors',   icon: Icons.monitor_heart_outlined,   selectedIcon: Icons.monitor_heart),
+    _NavEntry(label: 'Alerts',     icon: Icons.notifications_outlined,   selectedIcon: Icons.notifications),
+    _NavEntry(label: 'Weather',    icon: Icons.cloud_outlined,           selectedIcon: Icons.cloud),
+    _NavEntry(label: 'Predict',    icon: Icons.model_training_outlined,  selectedIcon: Icons.model_training),
+    _NavEntry(label: 'Rivers',     icon: Icons.water_outlined,           selectedIcon: Icons.water),
+    _NavEntry(label: 'India',      icon: Icons.map_outlined,             selectedIcon: Icons.map),
   ];
+
+  Widget _buildScreen(int index) {
+    switch (index) {
+      case 0: return const DashboardScreen();
+      case 1: return const MonitorsScreen();
+      case 2: return const AlertsScreen();
+      case 3: return const WeatherScreen();
+      case 4: return const PredictScreen();
+      case 5: return const RiverMonitorScreen();
+      case 6: return const IndiaRiverExplorerScreen();
+      default: return const DashboardScreen();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _realTimeService.startPolling();
+    _svc.startPolling();
   }
 
   @override
   void dispose() {
-    _realTimeService.stopPolling();
+    _svc.stopPolling();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      // Lazy: only the active screen is in the tree at any time.
+      body: _buildScreen(_currentIndex),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            label: 'Dashboard',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.monitor_heart_outlined),
-            label: 'Monitors',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.notifications_outlined),
-            label: 'Alerts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.cloud_outlined),
-            label: 'Weather',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.model_training_outlined),
-            label: 'Predict',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.water_outlined),
-            label: 'Rivers',
-          ),
-        ],
+        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        destinations: _destinations
+            .map((d) => NavigationDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.selectedIcon),
+                  label: d.label,
+                ))
+            .toList(),
       ),
     );
   }
+}
+
+class _NavEntry {
+  const _NavEntry({
+    required this.label,
+    required this.icon,
+    required this.selectedIcon,
+  });
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
 }
