@@ -1,6 +1,6 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v3
-// Live-data-first, beautiful deep-ocean UI with 2-col result layout
+// OpsFlood — Predict Screen v3.1
+// FIX: BOTTOM OVERFLOWED errors — GridView.count replaced with Column+Row
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import '../ml/flood_engine.dart';
 import '../services/predict.dart';
 
-// ─── Palette ─────────────────────────────────────────────────────────────────
+// ─── Palette ──────────────────────────────────────────────────────────────────
 const _kCyan    = Color(0xFF00D4FF);
 const _kPurple  = Color(0xFF7B50FF);
 const _kBg1     = Color(0xFF060D1A);
@@ -26,16 +26,16 @@ const _severityColors = {
 };
 
 const _allStates = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
-  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
-  'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim',
-  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
-  'West Bengal', 'Delhi', 'Jammu and Kashmir', 'Puducherry',
-  'Andaman and Nicobar', 'Chandigarh', 'Lakshadweep',
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh',
+  'Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka',
+  'Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya',
+  'Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim',
+  'Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand',
+  'West Bengal','Delhi','Jammu and Kashmir','Puducherry',
+  'Andaman and Nicobar','Chandigarh','Lakshadweep',
 ];
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
+// ─── Screen ───────────────────────────────────────────────────────────────────
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
   @override
@@ -57,13 +57,13 @@ class _PredictScreenState extends State<PredictScreen>
     7, (i) => TextEditingController(text: ['10','15','20','18','12','8','7'][i]),
   );
 
-  String  _selectedState   = 'Maharashtra';
-  FloodPrediction?  _result;
-  bool    _loading          = false;
-  String  _error            = '';
-  bool    _sectionRiver     = true;
-  bool    _sectionRain      = true;
-  bool    _useOffline       = false; // toggled only when user explicitly wants offline
+  String           _selectedState = 'Maharashtra';
+  FloodPrediction? _result;
+  bool   _loading      = false;
+  String _error        = '';
+  bool   _sectionRiver = true;
+  bool   _sectionRain  = true;
+  bool   _useOffline   = false;
 
   final _svc = const PredictionService();
 
@@ -113,17 +113,13 @@ class _PredictScreenState extends State<PredictScreen>
       _gaugeCtrl.forward();
     } on PredictionException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error   = e.message;
-        _loading = false;
-      });
+      setState(() { _error = e.message; _loading = false; });
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = 'Unexpected error: $e'; _loading = false; });
     }
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -148,14 +144,14 @@ class _PredictScreenState extends State<PredictScreen>
                     _buildTopRow(),
                     const SizedBox(height: 14),
                     _buildCollapsible(
-                      title:    '🌊  River Parameters',
+                      title: '🌊  River Parameters',
                       expanded: _sectionRiver,
                       onToggle: () => setState(() => _sectionRiver = !_sectionRiver),
                       child: _buildRiverForm(),
                     ),
                     const SizedBox(height: 12),
                     _buildCollapsible(
-                      title:    '🌧️  7-Day Rainfall (mm/day)',
+                      title: '🌧️  7-Day Rainfall (mm/day)',
                       expanded: _sectionRain,
                       onToggle: () => setState(() => _sectionRain = !_sectionRain),
                       child: _buildRainfallGrid(),
@@ -176,15 +172,14 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── Header ───────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [_kCyan.withValues(alpha:0.08), _kPurple.withValues(alpha:0.06)],
+          colors: [_kCyan.withValues(alpha: 0.08), _kPurple.withValues(alpha: 0.06)],
         ),
-        border: Border(bottom: BorderSide(color: _kCyan.withValues(alpha:0.12))),
+        border: Border(bottom: BorderSide(color: _kCyan.withValues(alpha: 0.12))),
       ),
       child: Row(
         children: [
@@ -205,39 +200,47 @@ class _PredictScreenState extends State<PredictScreen>
                   colors: [_kCyan, _kPurple],
                 ).createShader(b),
                 child: const Text('Flood Risk Predictor',
-                  style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
+                    style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
               ),
               const Text('Live CWC · OpsFlood ML Engine',
-                style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  style: TextStyle(color: Colors.white38, fontSize: 11)),
             ],
           ),
           const Spacer(),
-          // Live pulsing badge
           _LiveBadge(isLive: !_useOffline),
         ],
       ),
     );
   }
 
-  // ── State + Station top row ───────────────────────────────────────────────
   Widget _buildTopRow() {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
           flex: 3,
-          child: _GlassCard(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedState,
-                isExpanded: true,
-                dropdownColor: const Color(0xFF0D1E35),
-                iconEnabledColor: _kCyan,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                items: _allStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (v) { if (v != null) setState(() => _selectedState = v); },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('State',
+                  style: TextStyle(color: Colors.white54, fontSize: 10,
+                      fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+              const SizedBox(height: 4),
+              _GlassCard(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedState,
+                    isExpanded: true,
+                    dropdownColor: const Color(0xFF0D1E35),
+                    iconEnabledColor: _kCyan,
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                    items: _allStates.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    onChanged: (v) { if (v != null) setState(() => _selectedState = v); },
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
         const SizedBox(width: 10),
@@ -245,17 +248,18 @@ class _PredictScreenState extends State<PredictScreen>
           flex: 2,
           child: _InputField(
             ctrl: _stationCtrl, label: 'Station (opt.)',
-            hint: 'e.g. Kolhapur', tooltip: 'CWC station name for live autofill',
+            hint: 'e.g. Kolhapur', tooltip: 'CWC station for live autofill',
           ),
         ),
       ],
     );
   }
 
-  // ── Collapsible section wrapper ───────────────────────────────────────────
   Widget _buildCollapsible({
-    required String title, required bool expanded,
-    required VoidCallback onToggle, required Widget child,
+    required String title,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required Widget child,
   }) {
     return _GlassCard(
       child: Column(
@@ -286,43 +290,62 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── River params 2×2 ─────────────────────────────────────────────────────
   Widget _buildRiverForm() {
     return Column(
       children: [
         Row(children: [
-          Expanded(child: _InputField(ctrl: _peakCtrl,     label: 'Peak Level (m)',      hint: '8.5',  tooltip: 'CWC gauge level')),
+          Expanded(child: _InputField(ctrl: _peakCtrl,     label: 'Peak Level (m)',      hint: '8.5', tooltip: 'CWC gauge level')),
           const SizedBox(width: 10),
-          Expanded(child: _InputField(ctrl: _durCtrl,      label: 'Duration (days)',      hint: '1',    tooltip: 'Event duration')),
+          Expanded(child: _InputField(ctrl: _durCtrl,      label: 'Duration (days)',     hint: '1',   tooltip: 'Event duration')),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _InputField(ctrl: _peakTimeCtrl, label: 'Time to Peak (days)',  hint: '1',    tooltip: 'Hours to peak')),
+          Expanded(child: _InputField(ctrl: _peakTimeCtrl, label: 'Time to Peak (days)', hint: '1',   tooltip: 'Hours to peak')),
           const SizedBox(width: 10),
-          Expanded(child: _InputField(ctrl: _recCtrl,      label: 'Recession (days)',     hint: '1',    tooltip: 'Recession time')),
+          Expanded(child: _InputField(ctrl: _recCtrl,      label: 'Recession (days)',    hint: '1',   tooltip: 'Recession time')),
         ]),
       ],
     );
   }
 
-  // ── Rainfall 4-col grid ───────────────────────────────────────────────────
+  // ── FIX: replaced GridView.count (childAspectRatio overflow) with Column+Row ──
   Widget _buildRainfallGrid() {
-    const dayLabels = ['D-7','D-6','D-5','D-4','D-3','D-2','D-1'];
-    return GridView.count(
-      crossAxisCount: 4,
-      crossAxisSpacing: 8,
-      mainAxisSpacing: 8,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.6,
-      children: List.generate(7, (i) => _InputField(
-        ctrl: _rainCtrl[i], label: dayLabels[i], hint: '0',
-        tooltip: 'T${i+1}d rainfall mm', compact: true,
-      )),
+    const labels = ['D-7','D-6','D-5','D-4','D-3','D-2','D-1'];
+
+    Expanded cell(int i) => Expanded(
+      child: _InputField(
+        ctrl: _rainCtrl[i], label: labels[i],
+        hint: '0', tooltip: 'T${i + 1}d rainfall mm', compact: true,
+      ),
+    );
+
+    return Column(
+      children: [
+        // Row 1: D-7 D-6 D-5 D-4
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            cell(0), const SizedBox(width: 8),
+            cell(1), const SizedBox(width: 8),
+            cell(2), const SizedBox(width: 8),
+            cell(3),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Row 2: D-3 D-2 D-1  + invisible spacer to keep same width
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            cell(4), const SizedBox(width: 8),
+            cell(5), const SizedBox(width: 8),
+            cell(6), const SizedBox(width: 8),
+            const Expanded(child: SizedBox()),
+          ],
+        ),
+      ],
     );
   }
 
-  // ── Offline toggle ────────────────────────────────────────────────────────
   Widget _buildOfflineToggle() {
     return _GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -337,13 +360,14 @@ class _PredictScreenState extends State<PredictScreen>
                 Text(
                   _useOffline ? 'Offline Rule Engine' : 'Live OpsFlood API  •  CWC Auto-fill',
                   style: TextStyle(
-                    color: _useOffline ? Colors.orange : _kCyan,
-                    fontWeight: FontWeight.w700, fontSize: 12),
+                      color: _useOffline ? Colors.orange : _kCyan,
+                      fontWeight: FontWeight.w700, fontSize: 12),
                 ),
+                const SizedBox(height: 2),
                 Text(
                   _useOffline
-                    ? 'Using on-device thresholds — no real data'
-                    : 'Fetches real CWC river levels from OpsFlood backend',
+                      ? 'Using on-device thresholds — no real data'
+                      : 'Fetches real CWC river levels from OpsFlood backend',
                   style: const TextStyle(color: Colors.white38, fontSize: 10),
                 ),
               ],
@@ -354,14 +378,13 @@ class _PredictScreenState extends State<PredictScreen>
             onChanged: (v) => setState(() => _useOffline = v),
             activeColor: Colors.orange,
             inactiveThumbColor: _kCyan,
-            inactiveTrackColor: _kCyan.withValues(alpha:0.25),
+            inactiveTrackColor: _kCyan.withValues(alpha: 0.25),
           ),
         ],
       ),
     );
   }
 
-  // ── Predict button ────────────────────────────────────────────────────────
   Widget _buildPredictButton() {
     return GestureDetector(
       onTap: _loading ? null : _predict,
@@ -370,41 +393,40 @@ class _PredictScreenState extends State<PredictScreen>
         height: 54,
         decoration: BoxDecoration(
           gradient: _loading
-              ? LinearGradient(colors: [Colors.white.withValues(alpha:0.06), Colors.white.withValues(alpha:0.06)])
+              ? LinearGradient(colors: [Colors.white.withValues(alpha: 0.06), Colors.white.withValues(alpha: 0.06)])
               : const LinearGradient(colors: [_kCyan, _kPurple]),
           borderRadius: BorderRadius.circular(16),
           boxShadow: _loading ? [] : [
-            BoxShadow(color: _kCyan.withValues(alpha:0.3), blurRadius: 20, spreadRadius: 2),
+            BoxShadow(color: _kCyan.withValues(alpha: 0.3), blurRadius: 20, spreadRadius: 2),
           ],
         ),
         child: Center(
           child: _loading
               ? const SizedBox(width: 24, height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
               : const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.bolt, size: 20, color: Colors.white),
-                    SizedBox(width: 8),
-                    Text('Run Flood Prediction',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
-                            fontSize: 15, letterSpacing: 0.5)),
-                  ],
-                ),
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.bolt, size: 20, color: Colors.white),
+              SizedBox(width: 8),
+              Text('Run Flood Prediction',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
+                      fontSize: 15, letterSpacing: 0.5)),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // ── Error banner ─────────────────────────────────────────────────────────
   Widget _buildErrorBanner() {
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha:0.1),
+        color: Colors.red.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.red.withValues(alpha:0.35)),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -415,8 +437,8 @@ class _PredictScreenState extends State<PredictScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('API Error', style: TextStyle(color: Colors.redAccent,
-                    fontWeight: FontWeight.w700, fontSize: 13)),
+                const Text('API Error',
+                    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700, fontSize: 13)),
                 const SizedBox(height: 4),
                 Text(_error, style: const TextStyle(color: Colors.white60, fontSize: 12)),
                 const SizedBox(height: 8),
@@ -434,25 +456,23 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── Results ───────────────────────────────────────────────────────────────
   Widget _buildResults() {
-    final r = _result!;
+    final r   = _result!;
     final col = _severityColors[r.severity] ?? const Color(0xFFF59E0B);
     return Column(
       children: [
-        // ── Source pill ──
         Center(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
             decoration: BoxDecoration(
               color: r.isOfflineFallback
-                  ? Colors.orange.withValues(alpha:0.12)
-                  : _kCyan.withValues(alpha:0.12),
+                  ? Colors.orange.withValues(alpha: 0.12)
+                  : _kCyan.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
                   color: r.isOfflineFallback
-                      ? Colors.orange.withValues(alpha:0.4)
-                      : _kCyan.withValues(alpha:0.4)),
+                      ? Colors.orange.withValues(alpha: 0.4)
+                      : _kCyan.withValues(alpha: 0.4)),
             ),
             child: Text(
               r.isOfflineFallback
@@ -464,63 +484,64 @@ class _PredictScreenState extends State<PredictScreen>
             ),
           ),
         ),
-        // Live river level chip
-        if (r.liveRiverLevelM != null) ...[const SizedBox(height: 8),
-          Center(child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFF22C55E).withValues(alpha:0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF22C55E).withValues(alpha:0.4)),
+        if (r.liveRiverLevelM != null) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+              ),
+              child: Text('📡  Live CWC River Level: ${r.liveRiverLevelM!.toStringAsFixed(2)} m',
+                  style: const TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.w700)),
             ),
-            child: Text('📡  Live CWC River Level: ${r.liveRiverLevelM!.toStringAsFixed(2)} m',
-                style: const TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.w700)),
-          ))],
+          ),
+        ],
         const SizedBox(height: 18),
-        // ── Severity banner ──
         AnimatedBuilder(
           animation: _gaugeAnim,
           builder: (_, __) {
             final progress = _gaugeAnim.value * (r.riskScore / 100.0);
             return _GlassCard(
-              borderColor: col.withValues(alpha:0.45),
-              shadowColor: col.withValues(alpha:0.18),
+              borderColor: col.withValues(alpha: 0.45),
+              shadowColor: col.withValues(alpha: 0.18),
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Text('${r.alert}  ', style: const TextStyle(fontSize: 36)),
+                      Text('${r.alert}  ', style: const TextStyle(fontSize: 34)),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('FLOOD SEVERITY', style: TextStyle(color: Colors.white38, fontSize: 10,
+                          const Text('FLOOD SEVERITY', style: TextStyle(color: Colors.white38, fontSize: 9,
                               fontWeight: FontWeight.w600, letterSpacing: 1.2)),
                           Text(r.severity, style: TextStyle(
-                              color: col, fontSize: 28, fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5)),
+                              color: col, fontSize: 26, fontWeight: FontWeight.w900)),
                         ],
                       ),
                       const Spacer(),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('CONFIDENCE', style: TextStyle(color: Colors.white38, fontSize: 10,
+                          const Text('CONFIDENCE', style: TextStyle(color: Colors.white38, fontSize: 9,
                               fontWeight: FontWeight.w600, letterSpacing: 1.2)),
                           Text('${r.confidencePercent.toStringAsFixed(1)}%',
-                              style: const TextStyle(color: Colors.white, fontSize: 26,
+                              style: const TextStyle(color: Colors.white, fontSize: 24,
                                   fontWeight: FontWeight.w800)),
                         ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 10,
-                      backgroundColor: Colors.white.withValues(alpha:0.07),
+                      value: progress, minHeight: 10,
+                      backgroundColor: Colors.white.withValues(alpha: 0.07),
                       valueColor: AlwaysStoppedAnimation<Color>(col),
                     ),
                   ),
@@ -539,67 +560,72 @@ class _PredictScreenState extends State<PredictScreen>
           },
         ),
         const SizedBox(height: 14),
-        // ── 2-col stats grid ──
         _buildStatsGrid(r),
         const SizedBox(height: 14),
-        // ── Probability chart ──
         _buildProbChart(r),
         const SizedBox(height: 14),
-        // ── Monitoring card ──
         _buildMonitoringCard(r),
+        const SizedBox(height: 8),
       ],
     );
   }
 
-  // ── 2-column stats grid ───────────────────────────────────────────────────
+  // ── FIX: replaced GridView.count (childAspectRatio overflow) with Column+Row ──
   Widget _buildStatsGrid(FloodPrediction r) {
     final items = [
-      _StatItem(Icons.speed,          'Risk Score',        '${r.riskScore}/100',                           _kCyan),
-      _StatItem(Icons.verified,       'Confidence',        '${r.confidencePercent.toStringAsFixed(1)}%',   _kPurple),
-      _StatItem(Icons.hub,            'Algorithm',         r.algorithm,                                    const Color(0xFF22C55E)),
-      _StatItem(Icons.sensors,        'Data Source',       r.dataSource,                                   const Color(0xFFF59E0B)),
+      _StatItem(Icons.speed,    'Risk Score',  '${r.riskScore}/100',                         _kCyan),
+      _StatItem(Icons.verified, 'Confidence',  '${r.confidencePercent.toStringAsFixed(1)}%', _kPurple),
+      _StatItem(Icons.hub,      'Algorithm',   r.algorithm,                                  const Color(0xFF22C55E)),
+      _StatItem(Icons.sensors,  'Data Source', r.dataSource,                                 const Color(0xFFF59E0B)),
     ];
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 2.6,
-      children: items.map((s) => _GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+
+    Widget card(_StatItem s) => Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _kSurface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _kBorder),
+        ),
         child: Row(
           children: [
             Container(
-              width: 34, height: 34,
+              width: 32, height: 32,
               decoration: BoxDecoration(
-                color: s.accent.withValues(alpha:0.12),
-                borderRadius: BorderRadius.circular(10),
+                color: s.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(9),
               ),
-              child: Icon(s.icon, color: s.accent, size: 18),
+              child: Icon(s.icon, color: s.accent, size: 16),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(s.label, style: const TextStyle(color: Colors.white38, fontSize: 9,
-                      fontWeight: FontWeight.w600, letterSpacing: 0.8)),
+                      fontWeight: FontWeight.w600, letterSpacing: 0.6)),
                   const SizedBox(height: 2),
                   Text(s.value, style: const TextStyle(color: Colors.white,
                       fontWeight: FontWeight.w700, fontSize: 12),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
           ],
         ),
-      )).toList(),
+      ),
+    );
+
+    return Column(
+      children: [
+        Row(children: [card(items[0]), const SizedBox(width: 10), card(items[1])]),
+        const SizedBox(height: 10),
+        Row(children: [card(items[2]), const SizedBox(width: 10), card(items[3])]),
+      ],
     );
   }
 
-  // ── Probability bar chart ─────────────────────────────────────────────────
   Widget _buildProbChart(FloodPrediction r) {
     const labels = ['LOW','MODERATE','SEVERE','CRITICAL'];
     final bars = labels.asMap().entries.map((e) {
@@ -609,9 +635,8 @@ class _PredictScreenState extends State<PredictScreen>
         barRods: [BarChartRodData(
           toY: val,
           gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [_severityColors[e.value]!.withValues(alpha:0.6), _severityColors[e.value]!],
+            begin: Alignment.bottomCenter, end: Alignment.topCenter,
+            colors: [_severityColors[e.value]!.withValues(alpha: 0.6), _severityColors[e.value]!],
           ),
           width: 30,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
@@ -636,10 +661,9 @@ class _PredictScreenState extends State<PredictScreen>
               maxY: 100,
               barGroups: bars,
               gridData: FlGridData(
-                show: true, drawVerticalLine: false,
-                horizontalInterval: 25,
-                getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.white.withValues(alpha:0.05), strokeWidth: 1),
+                show: true, drawVerticalLine: false, horizontalInterval: 25,
+                getDrawingHorizontalLine: (_) =>
+                    FlLine(color: Colors.white.withValues(alpha: 0.05), strokeWidth: 1),
               ),
               titlesData: FlTitlesData(
                 bottomTitles: AxisTitles(sideTitles: SideTitles(
@@ -650,7 +674,8 @@ class _PredictScreenState extends State<PredictScreen>
                     if (i < 0 || i >= abbr.length) return const SizedBox.shrink();
                     return Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(abbr[i], style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                      child: Text(abbr[i],
+                          style: const TextStyle(color: Colors.white38, fontSize: 9)),
                     );
                   },
                 )),
@@ -678,18 +703,15 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ── Monitoring card ───────────────────────────────────────────────────────
   Widget _buildMonitoringCard(FloodPrediction r) {
     final col = _severityColors[r.severity] ?? const Color(0xFFF59E0B);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: col.withValues(alpha:0.10),
+        color: col.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: col.withValues(alpha:0.4)),
-        boxShadow: [
-          BoxShadow(color: col.withValues(alpha:0.08), blurRadius: 20),
-        ],
+        border: Border.all(color: col.withValues(alpha: 0.4)),
+        boxShadow: [BoxShadow(color: col.withValues(alpha: 0.08), blurRadius: 20)],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -697,7 +719,7 @@ class _PredictScreenState extends State<PredictScreen>
           Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              color: col.withValues(alpha:0.18),
+              color: col.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(Icons.notifications_active, color: col, size: 22),
@@ -728,12 +750,11 @@ class _GlassCard extends StatelessWidget {
   final EdgeInsets? padding;
   final Color? borderColor;
   final Color? shadowColor;
-  const _GlassCard({
-    required this.child, this.padding, this.borderColor, this.shadowColor,
-  });
+  const _GlassCard({required this.child, this.padding, this.borderColor, this.shadowColor});
+
   @override
   Widget build(BuildContext context) => Container(
-    padding: padding ?? const EdgeInsets.all(0),
+    padding: padding ?? EdgeInsets.zero,
     decoration: BoxDecoration(
       color: _kSurface,
       borderRadius: BorderRadius.circular(16),
@@ -751,18 +772,24 @@ class _InputField extends StatelessWidget {
   final String label, hint, tooltip;
   final bool compact;
   const _InputField({
-    required this.ctrl, required this.label, required this.hint,
-    required this.tooltip, this.compact = false,
+    required this.ctrl, required this.label,
+    required this.hint, required this.tooltip,
+    this.compact = false,
   });
+
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,   // FIX: don't stretch beyond content
       children: [
-        Text(label, style: TextStyle(
-            color: Colors.white54, fontSize: compact ? 9 : 10,
-            fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+        Text(label,
+            style: TextStyle(
+                color: Colors.white54,
+                fontSize: compact ? 9 : 10,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3)),
         const SizedBox(height: 4),
         TextField(
           controller: ctrl,
@@ -773,21 +800,24 @@ class _InputField extends StatelessWidget {
             hintText: hint,
             hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withValues(alpha:0.05),
+            fillColor: Colors.white.withValues(alpha: 0.05),
+            isDense: true,                              // FIX: removes extra internal padding
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha:0.12)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha:0.12)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: _kCyan, width: 1.5),
             ),
             contentPadding: EdgeInsets.symmetric(
-                horizontal: 10, vertical: compact ? 6 : 10),
+              horizontal: 10,
+              vertical: compact ? 8 : 11,              // FIX: explicit vertical padding
+            ),
           ),
         ),
       ],
@@ -810,8 +840,8 @@ class _LiveBadgeState extends State<_LiveBadge>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 900))
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
       ..repeat(reverse: true);
     _anim = Tween<double>(begin: 0.4, end: 1.0).animate(_ctrl);
   }
@@ -827,9 +857,9 @@ class _LiveBadgeState extends State<_LiveBadge>
       builder: (_, __) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: color.withValues(alpha:0.12),
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withValues(alpha:0.4)),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -837,9 +867,9 @@ class _LiveBadgeState extends State<_LiveBadge>
             Container(
               width: 7, height: 7,
               decoration: BoxDecoration(
-                color: color.withValues(alpha:_anim.value),
+                color: color.withValues(alpha: _anim.value),
                 shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: color.withValues(alpha:0.6), blurRadius: 6)],
+                boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 6)],
               ),
             ),
             const SizedBox(width: 6),
