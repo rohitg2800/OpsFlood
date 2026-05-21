@@ -221,8 +221,7 @@ class _PredictScreenState extends State<PredictScreen> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.bolt),
-              label:
-                  Text(_loading ? 'Predicting...' : 'Run Prediction'),
+              label: Text(_loading ? 'Predicting...' : 'Run Prediction'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(50),
               ),
@@ -282,8 +281,7 @@ class _PredictScreenState extends State<PredictScreen> {
           border: const OutlineInputBorder(),
           isDense: compact,
           contentPadding: compact
-              ? const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 12)
+              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
               : null,
         ),
         validator: (v) =>
@@ -293,7 +291,7 @@ class _PredictScreenState extends State<PredictScreen> {
   }
 }
 
-// ── Result card ─────────────────────────────────────────────────────────────
+// ── Result card ───────────────────────────────────────────────────────────────
 class _ResultCard extends StatelessWidget {
   final Map<String, dynamic> result;
   final Color Function(String?) severityColor;
@@ -326,7 +324,7 @@ class _ResultCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── CWC auto-fill banner ─────────────────────────────────
+            // ── CWC auto-fill banner ─────────────────────────────────────
             if (autofillApplied && liveLevel != null)
               Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -339,50 +337,68 @@ class _ResultCard extends StatelessWidget {
                       color: const Color(0xFF0DA7C2)
                           .withValues(alpha: 0.4)),
                 ),
+                // FIX: wrap banner text in Expanded to prevent overflow
                 child: Row(
                   children: [
                     const Icon(Icons.sensors,
                         size: 14, color: Color(0xFF0DA7C2)),
                     const SizedBox(width: 6),
-                    Text(
-                      'CWC auto-fill: live river level \${liveLevel}m used',
-                      style: const TextStyle(
-                          fontSize: 11, color: Color(0xFF0DA7C2)),
+                    Expanded(
+                      child: Text(
+                        'CWC auto-fill: live river level ${liveLevel}m used',
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF0DA7C2)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ),
 
-            // ── Severity row ─────────────────────────────────────────
+            // ── Severity row ──────────────────────────────────────────
+            // FIX: middle Column (severity label + risk score) must be
+            // Expanded so it fills the space between emoji and confidence
+            // instead of overflowing to the right.
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
                   AppConstants.riskIcons[severity] ?? '\u26a0\ufe0f',
-                  style: const TextStyle(fontSize: 28),
+                  style: const TextStyle(fontSize: 26),
                 ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(severity,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        severity,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: 26,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: color)),
-                    Text('Risk Score: \${_s("risk_score")}',
+                            color: color),
+                      ),
+                      Text(
+                        'Risk Score: ${_s("risk_score")}',
                         style: const TextStyle(
-                            fontSize: 13, color: Colors.grey)),
-                  ],
+                            fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('\${_s("confidence_percent")}%',
-                        style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: color)),
+                    Text(
+                      '${_s("confidence_percent")}%',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: color),
+                    ),
                     const Text('Confidence',
                         style: TextStyle(
                             fontSize: 11, color: Colors.grey)),
@@ -392,7 +408,7 @@ class _ResultCard extends StatelessWidget {
             ),
             const Divider(height: 24),
 
-            // ── Probabilities ────────────────────────────────────────
+            // ── Probabilities ──────────────────────────────────────────
             if (probs.isNotEmpty) ...[
               const Text('Probabilities',
                   style: TextStyle(
@@ -405,8 +421,7 @@ class _ResultCard extends StatelessWidget {
                         SizedBox(
                           width: 72,
                           child: Text(e.key,
-                              style:
-                                  const TextStyle(fontSize: 12)),
+                              style: const TextStyle(fontSize: 12)),
                         ),
                         Expanded(
                           child: ClipRRect(
@@ -424,16 +439,15 @@ class _ResultCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('\${e.value}%',
-                            style:
-                                const TextStyle(fontSize: 12)),
+                        Text('${e.value}%',
+                            style: const TextStyle(fontSize: 12)),
                       ],
                     ),
                   )),
               const SizedBox(height: 8),
             ],
 
-            // ── Monitoring ───────────────────────────────────────────
+            // ── Monitoring ────────────────────────────────────────────
             if (monitoring.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.all(10),
@@ -447,7 +461,7 @@ class _ResultCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '\${monitoring["level"] ?? ""}: \${monitoring["action"] ?? ""}',
+                        '${monitoring["level"] ?? ""}: ${monitoring["action"] ?? ""}',
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -458,9 +472,8 @@ class _ResultCard extends StatelessWidget {
             ],
 
             Text(
-              'Algorithm: \${_s("algorithm")}  •  \${_s("data_source")}',
-              style:
-                  const TextStyle(fontSize: 11, color: Colors.grey),
+              'Algorithm: ${_s("algorithm")}  \u2022  ${_s("data_source")}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ],
         ),
