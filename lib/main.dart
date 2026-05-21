@@ -11,28 +11,27 @@ import 'theme/river_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Global Flutter framework error handler ──────────────────────────────
-  // Catches widget-build errors, overflow, missing assets etc.
   FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details); // prints in debug, logs in release
-    // In release builds you could forward to a crash reporter here.
+    FlutterError.presentError(details);
     if (kReleaseMode) {
       // e.g. FirebaseCrashlytics.instance.recordFlutterFatalError(details);
     }
   };
 
-  // ── Catches async errors that escape the Flutter framework ─────────────
-  // e.g. Future.error(), Zone errors, isolate errors in release mode.
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     if (kDebugMode) {
-      debugPrint('❌ PlatformDispatcher.onError: $error\n$stack');
+      debugPrint('\u274c PlatformDispatcher.onError: $error\n$stack');
     }
-    // In release builds forward to a crash reporter here.
-    return true; // mark as handled so Flutter doesn't also print
+    return true;
   };
 
   await ThemeProvider().init();
-  await RealTimeService().initialize();
+
+  // startPolling() calls initialize() internally, then begins the 5-min
+  // periodic refresh loop.  The dashboard listens via addListener() and
+  // rebuilds automatically on every new telemetry snapshot.
+  await RealTimeService().startPolling();
+
   runApp(const OpsFloodApp());
 }
 
