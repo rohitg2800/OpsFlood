@@ -1,6 +1,6 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v4.0
-// NEW: Smart city search (Autocomplete) → live river level autofill
+// OpsFlood — Predict Screen v4.1  (fix: map key access in _CityEntry.fromConstants)
+// Smart city search (Autocomplete) → live river level autofill
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -44,24 +44,23 @@ class _CityEntry {
   final String river;
   const _CityEntry(this.city, this.state, this.river);
 
-  /// Build entries from AppConstants.monitoredCities (List<MonitoredCity>).
-  /// Falls back gracefully if the MonitoredCity type has fewer fields.
+  /// AppConstants.monitoredCities is List<Map<String,dynamic>>.
+  /// Always use map key access mc['key'] — never (mc as dynamic).field.
   static List<_CityEntry> fromConstants() {
     return AppConstants.monitoredCities.map((mc) {
-      // MonitoredCity always has .city and .state; .river may exist.
-      final city  = (mc as dynamic).city  as String? ?? '';
-      final state = (mc as dynamic).state as String? ?? '';
-      final river = (mc as dynamic).river as String? ?? '';
+      final city  = (mc['city']  as String? ?? '').trim();
+      final state = (mc['state'] as String? ?? '').trim();
+      final river = (mc['river'] as String? ?? '').trim();
       return _CityEntry(city, state, river);
     }).where((e) => e.city.isNotEmpty).toList();
   }
 
-  String get label => city;
+  String get label    => city;
   String get subtitle => river.isNotEmpty ? '$state • $river' : state;
 
   bool matches(String q) {
     final lq = q.toLowerCase();
-    return city.toLowerCase().contains(lq) ||
+    return city.toLowerCase().contains(lq)  ||
            state.toLowerCase().contains(lq) ||
            river.toLowerCase().contains(lq);
   }
@@ -84,22 +83,21 @@ class _PredictScreenState extends State<PredictScreen>
   final _durCtrl      = TextEditingController(text: '1');
   final _peakTimeCtrl = TextEditingController(text: '1');
   final _recCtrl      = TextEditingController(text: '1');
-  // City search controller — drives the Autocomplete widget.
   final _citySearchCtrl = TextEditingController();
   final List<TextEditingController> _rainCtrl = List.generate(
     7, (i) => TextEditingController(text: ['10','15','20','18','12','8','7'][i]),
   );
 
-  String           _selectedState    = 'Maharashtra';
+  String           _selectedState = 'Maharashtra';
   String?          _selectedCity;
   FloodPrediction? _result;
-  bool   _loading          = false;
-  bool   _autofilling      = false;   // live CWC fetch in progress
-  bool   _autofilled       = false;   // green badge: live level was injected
-  String _error            = '';
-  bool   _sectionRiver     = true;
-  bool   _sectionRain      = true;
-  bool   _useOffline       = false;
+  bool   _loading      = false;
+  bool   _autofilling  = false;
+  bool   _autofilled   = false;
+  String _error        = '';
+  bool   _sectionRiver = true;
+  bool   _sectionRain  = true;
+  bool   _useOffline   = false;
 
   late final List<_CityEntry> _allCities;
   final _svc = const PredictionService();
@@ -111,7 +109,7 @@ class _PredictScreenState extends State<PredictScreen>
     _gaugeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1000));
     _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
-    _allCities = _CityEntry.fromConstants();
+    _allCities = _CityEntry.fromConstants();   // ← now uses mc['city'] safely
   }
 
   @override
@@ -140,20 +138,18 @@ class _PredictScreenState extends State<PredictScreen>
     station: _selectedCity,
   );
 
-  // ── City selected from autocomplete ────────────────────────────────────────
   void _onCitySelected(_CityEntry entry) {
     setState(() {
       _selectedCity  = entry.city;
       _selectedState = entry.state.isNotEmpty && _allStates.contains(entry.state)
           ? entry.state
           : _selectedState;
-      _autofilled    = false;
+      _autofilled       = false;
       _citySearchCtrl.text = entry.city;
     });
     if (!_useOffline) _autofillFromLive(entry.city);
   }
 
-  // ── Fetch live CWC river level and inject into peakCtrl ────────────────────
   Future<void> _autofillFromLive(String cityName) async {
     setState(() { _autofilling = true; _autofilled = false; });
     try {
@@ -287,7 +283,8 @@ class _PredictScreenState extends State<PredictScreen>
                   colors: [_kCyan, _kPurple],
                 ).createShader(b),
                 child: const Text('Flood Risk Predictor',
-                    style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
+                    style: TextStyle(color: Colors.white, fontSize: 19,
+                        fontWeight: FontWeight.w800)),
               ),
               const Text('Live CWC · OpsFlood ML Engine',
                   style: TextStyle(color: Colors.white38, fontSize: 11)),
@@ -300,19 +297,16 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ─── NEW: City search row ─────────────────────────────────────────────────
   Widget _buildCitySearchRow() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Label row
         Row(
           children: [
             const Text('🔍  Search City',
                 style: TextStyle(color: Colors.white54, fontSize: 10,
                     fontWeight: FontWeight.w600, letterSpacing: 0.3)),
             const SizedBox(width: 8),
-            // Autofill status chip
             if (_autofilling)
               _StatusChip(
                 label: 'Fetching live CWC level…',
@@ -335,7 +329,6 @@ class _PredictScreenState extends State<PredictScreen>
           ],
         ),
         const SizedBox(height: 6),
-        // Autocomplete widget
         Autocomplete<_CityEntry>(
           optionsBuilder: (TextEditingValue tv) {
             if (tv.text.isEmpty) return const Iterable<_CityEntry>.empty();
@@ -343,7 +336,6 @@ class _PredictScreenState extends State<PredictScreen>
           },
           displayStringForOption: (e) => e.city,
           fieldViewBuilder: (ctx, ctrl, focusNode, onSubmit) {
-            // Mirror text to our own controller so we can read it later.
             ctrl.addListener(() {
               if (_citySearchCtrl.text != ctrl.text) {
                 _citySearchCtrl.text = ctrl.text;
@@ -364,10 +356,7 @@ class _PredictScreenState extends State<PredictScreen>
                         icon: const Icon(Icons.clear, color: Colors.white38, size: 16),
                         onPressed: () {
                           ctrl.clear();
-                          setState(() {
-                            _selectedCity = null;
-                            _autofilled   = false;
-                          });
+                          setState(() { _selectedCity = null; _autofilled = false; });
                         },
                       )
                     : null,
@@ -401,10 +390,7 @@ class _PredictScreenState extends State<PredictScreen>
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: _kCyan.withValues(alpha: 0.2)),
                     boxShadow: [
-                      BoxShadow(
-                        color: _kCyan.withValues(alpha: 0.08),
-                        blurRadius: 20,
-                      ),
+                      BoxShadow(color: _kCyan.withValues(alpha: 0.08), blurRadius: 20),
                     ],
                   ),
                   child: ListView(
@@ -415,8 +401,7 @@ class _PredictScreenState extends State<PredictScreen>
                         onTap: () => onSelected(entry),
                         borderRadius: BorderRadius.circular(10),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           child: Row(
                             children: [
                               Container(
@@ -457,7 +442,6 @@ class _PredictScreenState extends State<PredictScreen>
           onSelected: _onCitySelected,
         ),
         const SizedBox(height: 10),
-        // State dropdown — still editable manually
         _GlassCard(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
           child: DropdownButtonHideUnderline(
@@ -527,13 +511,16 @@ class _PredictScreenState extends State<PredictScreen>
             glowColor: _autofilled ? const Color(0xFF22C55E) : null,
           )),
           const SizedBox(width: 10),
-          Expanded(child: _InputField(ctrl: _durCtrl,      label: 'Duration (days)',     hint: '1',   tooltip: 'Event duration')),
+          Expanded(child: _InputField(
+            ctrl: _durCtrl, label: 'Duration (days)', hint: '1', tooltip: 'Event duration')),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _InputField(ctrl: _peakTimeCtrl, label: 'Time to Peak (days)', hint: '1',   tooltip: 'Hours to peak')),
+          Expanded(child: _InputField(
+            ctrl: _peakTimeCtrl, label: 'Time to Peak (days)', hint: '1', tooltip: 'Hours to peak')),
           const SizedBox(width: 10),
-          Expanded(child: _InputField(ctrl: _recCtrl,      label: 'Recession (days)',    hint: '1',   tooltip: 'Recession time')),
+          Expanded(child: _InputField(
+            ctrl: _recCtrl, label: 'Recession (days)', hint: '1', tooltip: 'Recession time')),
         ]),
       ],
     );
@@ -541,35 +528,24 @@ class _PredictScreenState extends State<PredictScreen>
 
   Widget _buildRainfallGrid() {
     const labels = ['D-7','D-6','D-5','D-4','D-3','D-2','D-1'];
-
     Expanded cell(int i) => Expanded(
       child: _InputField(
         ctrl: _rainCtrl[i], label: labels[i],
         hint: '0', tooltip: 'T${i + 1}d rainfall mm', compact: true,
       ),
     );
-
     return Column(
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            cell(0), const SizedBox(width: 8),
-            cell(1), const SizedBox(width: 8),
-            cell(2), const SizedBox(width: 8),
-            cell(3),
-          ],
-        ),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          cell(0), const SizedBox(width: 8), cell(1),
+          const SizedBox(width: 8), cell(2), const SizedBox(width: 8), cell(3),
+        ]),
         const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            cell(4), const SizedBox(width: 8),
-            cell(5), const SizedBox(width: 8),
-            cell(6), const SizedBox(width: 8),
-            const Expanded(child: SizedBox()),
-          ],
-        ),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          cell(4), const SizedBox(width: 8), cell(5),
+          const SizedBox(width: 8), cell(6), const SizedBox(width: 8),
+          const Expanded(child: SizedBox()),
+        ]),
       ],
     );
   }
@@ -621,7 +597,10 @@ class _PredictScreenState extends State<PredictScreen>
         height: 54,
         decoration: BoxDecoration(
           gradient: (_loading || _autofilling)
-              ? LinearGradient(colors: [Colors.white.withValues(alpha: 0.06), Colors.white.withValues(alpha: 0.06)])
+              ? LinearGradient(colors: [
+                  Colors.white.withValues(alpha: 0.06),
+                  Colors.white.withValues(alpha: 0.06),
+                ])
               : const LinearGradient(colors: [_kCyan, _kPurple]),
           borderRadius: BorderRadius.circular(16),
           boxShadow: (_loading || _autofilling) ? [] : [
@@ -630,18 +609,19 @@ class _PredictScreenState extends State<PredictScreen>
         ),
         child: Center(
           child: (_loading || _autofilling)
-              ? const SizedBox(width: 24, height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+              ? const SizedBox(
+                  width: 24, height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
               : const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.bolt, size: 20, color: Colors.white),
-              SizedBox(width: 8),
-              Text('Run Flood Prediction',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
-                      fontSize: 15, letterSpacing: 0.5)),
-            ],
-          ),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.bolt, size: 20, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text('Run Flood Prediction',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
+                            fontSize: 15, letterSpacing: 0.5)),
+                  ],
+                ),
         ),
       ),
     );
@@ -666,7 +646,8 @@ class _PredictScreenState extends State<PredictScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('API Error',
-                    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700, fontSize: 13)),
+                    style: TextStyle(color: Colors.redAccent,
+                        fontWeight: FontWeight.w700, fontSize: 13)),
                 const SizedBox(height: 4),
                 Text(_error, style: const TextStyle(color: Colors.white60, fontSize: 12)),
                 const SizedBox(height: 8),
@@ -698,9 +679,10 @@ class _PredictScreenState extends State<PredictScreen>
                   : _kCyan.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                  color: r.isOfflineFallback
-                      ? Colors.orange.withValues(alpha: 0.4)
-                      : _kCyan.withValues(alpha: 0.4)),
+                color: r.isOfflineFallback
+                    ? Colors.orange.withValues(alpha: 0.4)
+                    : _kCyan.withValues(alpha: 0.4),
+              ),
             ),
             child: Text(
               r.isOfflineFallback
@@ -720,10 +702,14 @@ class _PredictScreenState extends State<PredictScreen>
               decoration: BoxDecoration(
                 color: const Color(0xFF22C55E).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+                border: Border.all(
+                    color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
               ),
-              child: Text('📡  Live CWC River Level: ${r.liveRiverLevelM!.toStringAsFixed(2)} m',
-                  style: const TextStyle(color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.w700)),
+              child: Text(
+                '📡  Live CWC River Level: ${r.liveRiverLevelM!.toStringAsFixed(2)} m',
+                style: const TextStyle(
+                    color: Color(0xFF22C55E), fontSize: 11, fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -745,18 +731,21 @@ class _PredictScreenState extends State<PredictScreen>
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('FLOOD SEVERITY', style: TextStyle(color: Colors.white38, fontSize: 9,
-                              fontWeight: FontWeight.w600, letterSpacing: 1.2)),
-                          Text(r.severity, style: TextStyle(
-                              color: col, fontSize: 26, fontWeight: FontWeight.w900)),
+                          const Text('FLOOD SEVERITY',
+                              style: TextStyle(color: Colors.white38, fontSize: 9,
+                                  fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+                          Text(r.severity,
+                              style: TextStyle(
+                                  color: col, fontSize: 26, fontWeight: FontWeight.w900)),
                         ],
                       ),
                       const Spacer(),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('CONFIDENCE', style: TextStyle(color: Colors.white38, fontSize: 9,
-                              fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+                          const Text('CONFIDENCE',
+                              style: TextStyle(color: Colors.white38, fontSize: 9,
+                                  fontWeight: FontWeight.w600, letterSpacing: 1.2)),
                           Text('${r.confidencePercent.toStringAsFixed(1)}%',
                               style: const TextStyle(color: Colors.white, fontSize: 24,
                                   fontWeight: FontWeight.w800)),
@@ -777,9 +766,11 @@ class _PredictScreenState extends State<PredictScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Risk Score', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                      const Text('Risk Score',
+                          style: TextStyle(color: Colors.white38, fontSize: 11)),
                       Text('${(progress * 100).round()} / 100',
-                          style: TextStyle(color: col, fontWeight: FontWeight.w800, fontSize: 13)),
+                          style: TextStyle(
+                              color: col, fontWeight: FontWeight.w800, fontSize: 13)),
                     ],
                   ),
                 ],
@@ -805,7 +796,6 @@ class _PredictScreenState extends State<PredictScreen>
       _StatItem(Icons.hub,      'Algorithm',   r.algorithm,                                  const Color(0xFF22C55E)),
       _StatItem(Icons.sensors,  'Data Source', r.dataSource,                                 const Color(0xFFF59E0B)),
     ];
-
     Widget card(_StatItem s) => Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -830,11 +820,13 @@ class _PredictScreenState extends State<PredictScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(s.label, style: const TextStyle(color: Colors.white38, fontSize: 9,
-                      fontWeight: FontWeight.w600, letterSpacing: 0.6)),
+                  Text(s.label,
+                      style: const TextStyle(color: Colors.white38, fontSize: 9,
+                          fontWeight: FontWeight.w600, letterSpacing: 0.6)),
                   const SizedBox(height: 2),
-                  Text(s.value, style: const TextStyle(color: Colors.white,
-                      fontWeight: FontWeight.w700, fontSize: 12),
+                  Text(s.value,
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
               ),
@@ -843,7 +835,6 @@ class _PredictScreenState extends State<PredictScreen>
         ),
       ),
     );
-
     return Column(
       children: [
         Row(children: [card(items[0]), const SizedBox(width: 10), card(items[1])]),
@@ -863,14 +854,16 @@ class _PredictScreenState extends State<PredictScreen>
           toY: val,
           gradient: LinearGradient(
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
-            colors: [_severityColors[e.value]!.withValues(alpha: 0.6), _severityColors[e.value]!],
+            colors: [
+              _severityColors[e.value]!.withValues(alpha: 0.6),
+              _severityColors[e.value]!,
+            ],
           ),
           width: 30,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
         )],
       );
     }).toList();
-
     return _GlassCard(
       padding: const EdgeInsets.fromLTRB(10, 16, 14, 8),
       child: Column(
@@ -919,7 +912,8 @@ class _PredictScreenState extends State<PredictScreen>
                 touchTooltipData: BarTouchTooltipData(
                   getTooltipItem: (g, _, rod, __) => BarTooltipItem(
                     '${rod.toY.toStringAsFixed(1)}%',
-                    const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                    const TextStyle(
+                        color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -957,10 +951,12 @@ class _PredictScreenState extends State<PredictScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Monitoring: ${r.monitoringLevel}',
-                    style: TextStyle(color: col, fontWeight: FontWeight.w800, fontSize: 14)),
+                    style: TextStyle(
+                        color: col, fontWeight: FontWeight.w800, fontSize: 14)),
                 const SizedBox(height: 4),
                 Text(r.monitoringAction,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12, height: 1.4)),
               ],
             ),
           ),
@@ -972,10 +968,10 @@ class _PredictScreenState extends State<PredictScreen>
 
 // ─── Status chip ──────────────────────────────────────────────────────────────
 class _StatusChip extends StatefulWidget {
-  final String label;
-  final Color  color;
+  final String   label;
+  final Color    color;
   final IconData icon;
-  final bool spinning;
+  final bool     spinning;
   const _StatusChip({
     required this.label, required this.color, required this.icon,
     this.spinning = false,
@@ -997,40 +993,38 @@ class _StatusChipState extends State<_StatusChip>
   void dispose() { _spin.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: widget.color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: widget.color.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          widget.spinning
-              ? RotationTransition(
-                  turns: _spin,
-                  child: Icon(widget.icon, color: widget.color, size: 11),
-                )
-              : Icon(widget.icon, color: widget.color, size: 11),
-          const SizedBox(width: 4),
-          Text(widget.label,
-              style: TextStyle(color: widget.color, fontSize: 9,
-                  fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: widget.color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: widget.color.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        widget.spinning
+            ? RotationTransition(
+                turns: _spin,
+                child: Icon(widget.icon, color: widget.color, size: 11),
+              )
+            : Icon(widget.icon, color: widget.color, size: 11),
+        const SizedBox(width: 4),
+        Text(widget.label,
+            style: TextStyle(
+                color: widget.color, fontSize: 9, fontWeight: FontWeight.w700)),
+      ],
+    ),
+  );
 }
 
 // ─── Reusable Widgets ─────────────────────────────────────────────────────────
 
 class _GlassCard extends StatelessWidget {
-  final Widget child;
+  final Widget    child;
   final EdgeInsets? padding;
-  final Color? borderColor;
-  final Color? shadowColor;
+  final Color?    borderColor;
+  final Color?    shadowColor;
   const _GlassCard({required this.child, this.padding, this.borderColor, this.shadowColor});
 
   @override
@@ -1050,14 +1044,13 @@ class _GlassCard extends StatelessWidget {
 
 class _InputField extends StatelessWidget {
   final TextEditingController ctrl;
-  final String label, hint, tooltip;
-  final bool compact;
-  final Color? glowColor;
+  final String   label, hint, tooltip;
+  final bool     compact;
+  final Color?   glowColor;
   const _InputField({
     required this.ctrl, required this.label,
     required this.hint, required this.tooltip,
-    this.compact = false,
-    this.glowColor,
+    this.compact = false, this.glowColor,
   });
 
   @override
@@ -1101,8 +1094,7 @@ class _InputField extends StatelessWidget {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                  color: glowColor ?? _kCyan, width: 1.5),
+              borderSide: BorderSide(color: glowColor ?? _kCyan, width: 1.5),
             ),
             contentPadding: EdgeInsets.symmetric(
               horizontal: 10,
@@ -1125,7 +1117,7 @@ class _LiveBadge extends StatefulWidget {
 class _LiveBadgeState extends State<_LiveBadge>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  late Animation<double> _anim;
+  late Animation<double>   _anim;
 
   @override
   void initState() {
@@ -1164,7 +1156,8 @@ class _LiveBadgeState extends State<_LiveBadge>
             ),
             const SizedBox(width: 6),
             Text(widget.isLive ? 'LIVE' : 'OFFLINE',
-                style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
+                style: TextStyle(
+                    color: color, fontSize: 10, fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -1174,7 +1167,7 @@ class _LiveBadgeState extends State<_LiveBadge>
 
 class _StatItem {
   final IconData icon;
-  final String label, value;
-  final Color accent;
+  final String   label, value;
+  final Color    accent;
   const _StatItem(this.icon, this.label, this.value, this.accent);
 }
