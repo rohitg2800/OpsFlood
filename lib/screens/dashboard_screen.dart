@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
+import '../services/api_service.dart';
 import '../services/real_time_service.dart';
 import '../widgets/animated_alert_badge.dart';
 import '../widgets/flood_gauge.dart';
@@ -23,16 +24,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final RealTimeService _service = RealTimeService();
   String? _selectedCity;
 
+  // Model metrics fetched once on init and displayed in a card
+  Map<String, dynamic>? _modelMetrics;
+  bool _metricsLoading = true;
+
   @override
   void initState() {
     super.initState();
     _initialize();
+    _fetchModelMetrics();
   }
 
   Future<void> _initialize() async {
     await _service.startPolling();
     if (_selectedCity == null && _service.liveLevels.isNotEmpty) {
       _selectedCity = _service.liveLevels.first.city;
+    }
+  }
+
+  Future<void> _fetchModelMetrics() async {
+    try {
+      final res = await ApiService().getModelMetrics();
+      if (mounted) {
+        setState(() {
+          _modelMetrics = res;
+          _metricsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _metricsLoading = false);
     }
   }
 
@@ -62,18 +82,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               if (levels.isNotEmpty &&
                   (_selectedCity == null ||
-                      levels.every((entry) => entry.city != _selectedCity))) {
+                      levels.every((e) => e.city != _selectedCity))) {
                 _selectedCity = levels.first.city;
               }
 
               final primary = levels.isNotEmpty ? levels.first : null;
-              final selected = levels.firstWhere(
-                (entry) => entry.city == _selectedCity,
-                orElse: () =>
-                    primary ??
-                    FloodData.fromMonitoredCity(
-                        AppConstants.monitoredCities.first),
-              );
+
+              // FIX: removed FloodData.fromMonitoredCity() silent fake-data
+              // fallback. When live data is unavailable selected is null and
+              // the UI shows the loading/error state instead of stale hardcoded
+              // values that would appear live to the user.
+              final FloodData? selected = levels.isEmpty
+                  ? null
+                  : levels.firstWhere(
+                      (e) => e.city == _selectedCity,
+                      orElse: () => primary!,
+                    );
 
               final monitoringData = _service.monitoringData;
 
@@ -82,6 +106,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
                   children: [
+                    // ── Header ──────────────────────────────────────────
                     Row(
                       children: [
                         const Icon(Icons.water_drop, color: Colors.white),
@@ -97,8 +122,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const Spacer(),
                         IconButton(
                           onPressed: _service.refreshData,
-                          icon:
-                              const Icon(Icons.refresh, color: Colors.white70),
+                          icon: const Icon(Icons.refresh,
+                              color: Colors.white70),
                         ),
                       ],
                     ),
@@ -106,11 +131,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Text(
                       _service.lastFetchTime == null
                           ? 'Awaiting first live poll'
-                          : 'Updated ${DateFormat('dd MMM, HH:mm:ss').format(_service.lastFetchTime!.toLocal())}',
-                      style:
-                          const TextStyle(color: Colors.white60, fontSize: 12),
+                          : 'Updated \${DateFormat('dd MMM, HH:mm:ss').format(_service.lastFetchTime!.toLocal())}',
+                      style: const TextStyle(
+                          color: Colors.white60, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
+
+                    // ── API error banner ────────────────────────────────
                     if (_service.error != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -119,7 +146,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           borderRadius: BorderRadius.circular(10),
                           color: Colors.orange.withValues(alpha: 0.17),
                           border: Border.all(
-                              color: Colors.orangeAccent.withValues(alpha: 0.5)),
+                              color:
+                                  Colors.orangeAccent.withValues(alpha: 0.5)),
                         ),
                         child: Text(
                           _service.error!,
@@ -127,21 +155,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               color: Colors.white, fontSize: 12),
                         ),
                       ),
+
+                    // ── Alert badge ─────────────────────────────────────
                     AnimatedAlertBadge(
                       count: _service.activeCriticalAlerts.length,
-                      isCritical: _service.activeCriticalAlerts.isNotEmpty,
+                      isCritical:
+                          _service.activeCriticalAlerts.isNotEmpty,
                       label: _service.activeCriticalAlerts.isNotEmpty
                           ? 'Critical Alerts'
                           : 'Live Alerts',
                     ),
                     const SizedBox(height: 16),
+
+                    // ── Flood gauge ──────────────────────────────────────
                     if (primary != null)
                       Center(
                         child: FloodGauge(
                           capacity: primary.capacityPercent,
                           riskLevel: primary.riskLevel,
                           label:
-                              '${primary.city} | ${primary.riverName ?? 'River'}',
+                              '\${primary.city} | \${primary.riverName ?? "River"}',
                           size: 240,
                         ),
                       )
@@ -149,11 +182,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(
                         height: 240,
                         child: Center(
-                          child:
-                              CircularProgressIndicator(color: Colors.white70),
+                          child: CircularProgressIndicator(
+                              color: Colors.white70),
                         ),
                       ),
                     const SizedBox(height: 14),
+
+                    // ── Stat cards ───────────────────────────────────────
                     SizedBox(
                       height: 122,
                       child: Row(
@@ -162,7 +197,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: PremiumStatCard(
                               icon: Icons.warning_amber,
                               title: 'Critical',
-                              value: '${monitoringData.criticalCount}',
+                              value:
+                                  '\${monitoringData.criticalCount}',
                               subtitle: 'threshold breaches',
                               accent: const Color(0xFFEF4444),
                             ),
@@ -172,7 +208,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: PremiumStatCard(
                               icon: Icons.ssid_chart,
                               title: 'High Risk',
-                              value: '${monitoringData.highRiskCount}',
+                              value:
+                                  '\${monitoringData.highRiskCount}',
                               subtitle: 'active locations',
                               accent: const Color(0xFFF59E0B),
                             ),
@@ -183,9 +220,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: _service.isOnline
                                   ? Icons.wifi
                                   : Icons.wifi_off,
-                              title: _service.isOnline ? 'Online' : 'Offline',
+                              title: _service.isOnline
+                                  ? 'Online'
+                                  : 'Offline',
                               value: _service.queuedOfflineCycles > 0
-                                  ? '${_service.queuedOfflineCycles}'
+                                  ? '\${_service.queuedOfflineCycles}'
                                   : 'Live',
                               subtitle: _service.isUsingCache
                                   ? 'cache mode'
@@ -198,7 +237,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // ── Model confidence card ────────────────────────────
+                    _ModelMetricsCard(
+                      loading: _metricsLoading,
+                      metrics: _modelMetrics,
+                    ),
                     const SizedBox(height: 18),
+
+                    // ── River monitoring list ────────────────────────────
                     const Text(
                       'River Monitoring',
                       style: TextStyle(
@@ -232,12 +280,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       },
                     ),
                     const SizedBox(height: 16),
+
+                    // ── City selector chips ──────────────────────────────
                     SizedBox(
                       height: 44,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         itemCount: levels.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(width: 8),
                         itemBuilder: (context, index) {
                           final city = levels[index].city;
                           final selectedChip = city == _selectedCity;
@@ -246,24 +297,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onSelected: (_) =>
                                 setState(() => _selectedCity = city),
                             selectedColor: const Color(0xFF0DA7C2),
-                            backgroundColor: Colors.white.withValues(alpha: 0.12),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.12),
                             side: BorderSide(
                                 color: Colors.white.withValues(alpha: 0.25)),
                             label: Text(
                               city,
-                              style: const TextStyle(color: Colors.white),
+                              style:
+                                  const TextStyle(color: Colors.white),
                             ),
                           );
                         },
                       ),
                     ),
                     const SizedBox(height: 10),
-                    _TrendCard(
-                      city: selected.city,
-                      history: _service.trendForCity(selected.city),
-                      dangerLevel: selected.dangerLevel,
-                      warningLevel: selected.warningLevel,
-                    ),
+
+                    // ── Trend chart ──────────────────────────────────────
+                    if (selected != null)
+                      _TrendCard(
+                        city: selected.city,
+                        history:
+                            _service.trendForCity(selected.city),
+                        dangerLevel: selected.dangerLevel,
+                        warningLevel: selected.warningLevel,
+                      )
+                    else
+                      const SizedBox(
+                        height: 230,
+                        child: Center(
+                          child: Text(
+                            'No live data — pull down to refresh',
+                            style:
+                                TextStyle(color: Colors.white54),
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 14),
                     RiskHeatmap(stateRisks: _stateRiskMap(levels)),
                   ],
@@ -279,7 +347,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, String>> _stateRiskMap(List<FloodData> levels) {
     final rank = {'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1};
     final map = <String, String>{};
-
     for (final item in levels) {
       final existing = map[item.state];
       if (existing == null ||
@@ -287,13 +354,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
         map[item.state] = item.riskLevel;
       }
     }
-
     return map.entries
         .map((e) => {'state': e.key, 'risk': e.value})
         .toList(growable: false);
   }
 }
 
+// ── Model metrics card ──────────────────────────────────────────────────────
+class _ModelMetricsCard extends StatelessWidget {
+  final bool loading;
+  final Map<String, dynamic>? metrics;
+
+  const _ModelMetricsCard({required this.loading, required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return Container(
+        height: 56,
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Colors.white38),
+          ),
+        ),
+      );
+    }
+
+    final m = metrics?['metrics'] as Map<String, dynamic>? ?? {};
+    final status = metrics?['status']?.toString() ?? 'unavailable';
+    final algo = metrics?['algorithm']?.toString() ?? 'Model';
+
+    if (status == 'unavailable' || m.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    double _pct(String key) =>
+        ((m[key] as num?)?.toDouble() ?? 0.0) * 100;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: const Color(0xFF0DA7C2).withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.psychology_alt,
+              color: Color(0xFF0DA7C2), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  algo,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'F1 \${_pct("f1_score").toStringAsFixed(1)}%  '
+                  'Acc \${_pct("accuracy").toStringAsFixed(1)}%  '
+                  'P \${_pct("precision").toStringAsFixed(1)}%  '
+                  'R \${_pct("recall").toStringAsFixed(1)}%',
+                  style: const TextStyle(
+                      color: Colors.white60, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          if (m['training_samples'] != null)
+            Text(
+              '\${m["training_samples"]}\nsamples',
+              textAlign: TextAlign.right,
+              style:
+                  const TextStyle(color: Colors.white38, fontSize: 10),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Trend chart ─────────────────────────────────────────────────────────────
 class _TrendCard extends StatelessWidget {
   final String city;
   final List<RiverLevelSnapshot> history;
@@ -311,10 +467,8 @@ class _TrendCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final sorted = List<RiverLevelSnapshot>.from(history)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
     final points =
         sorted.length > 24 ? sorted.sublist(sorted.length - 24) : sorted;
-
     final spots = <FlSpot>[];
     for (var i = 0; i < points.length; i++) {
       spots.add(FlSpot(i.toDouble(), points[i].level));
@@ -326,7 +480,8 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        border:
+            Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,7 +522,8 @@ class _TrendCard extends StatelessWidget {
                             getTitlesWidget: (value, _) => Text(
                               value.toStringAsFixed(1),
                               style: const TextStyle(
-                                  color: Colors.white54, fontSize: 10),
+                                  color: Colors.white54,
+                                  fontSize: 10),
                             ),
                           ),
                         ),
@@ -379,20 +535,26 @@ class _TrendCard extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             getTitlesWidget: (value, _) {
-                              if (value == 0)
+                              if (value == 0) {
                                 return const Text('Start',
                                     style: TextStyle(
-                                        color: Colors.white54, fontSize: 10));
+                                        color: Colors.white54,
+                                        fontSize: 10));
+                              }
                               if (value ==
-                                  ((spots.length - 1) / 2).roundToDouble()) {
+                                  ((spots.length - 1) / 2)
+                                      .roundToDouble()) {
                                 return const Text('Mid',
                                     style: TextStyle(
-                                        color: Colors.white54, fontSize: 10));
+                                        color: Colors.white54,
+                                        fontSize: 10));
                               }
-                              if (value == (spots.length - 1).toDouble()) {
+                              if (value ==
+                                  (spots.length - 1).toDouble()) {
                                 return const Text('Now',
                                     style: TextStyle(
-                                        color: Colors.white54, fontSize: 10));
+                                        color: Colors.white54,
+                                        fontSize: 10));
                               }
                               return const SizedBox.shrink();
                             },
@@ -401,8 +563,9 @@ class _TrendCard extends StatelessWidget {
                       ),
                       borderData: FlBorderData(
                         show: true,
-                        border:
-                            Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                        border: Border.all(
+                            color:
+                                Colors.white.withValues(alpha: 0.15)),
                       ),
                       lineBarsData: [
                         LineChartBarData(
@@ -417,8 +580,10 @@ class _TrendCard extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                const Color(0xFF24C9E8).withValues(alpha: 0.35),
-                                const Color(0xFF24C9E8).withValues(alpha: 0.02),
+                                const Color(0xFF24C9E8)
+                                    .withValues(alpha: 0.35),
+                                const Color(0xFF24C9E8)
+                                    .withValues(alpha: 0.02),
                               ],
                             ),
                           ),

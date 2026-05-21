@@ -18,19 +18,12 @@ class ApiService {
       ];
 
   Future<Map<String, dynamic>> _get(String path) async {
-    return _request(
-      method: 'GET',
-      path: path,
-    );
+    return _request(method: 'GET', path: path);
   }
 
   Future<Map<String, dynamic>> _post(
       String path, Map<String, dynamic> body) async {
-    return _request(
-      method: 'POST',
-      path: path,
-      body: body,
-    );
+    return _request(method: 'POST', path: path, body: body);
   }
 
   Future<Map<String, dynamic>> _request({
@@ -60,7 +53,7 @@ class ApiService {
         final parsedBody = _safeDecode(res.body);
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          lastError = 'HTTP ${res.statusCode}';
+          lastError = 'HTTP \${res.statusCode}';
           continue;
         }
 
@@ -96,7 +89,6 @@ class ApiService {
           'source': '$base$path',
         };
       }
-
       if (payload.containsKey('records')) {
         return {
           ...payload,
@@ -105,7 +97,6 @@ class ApiService {
           'source': '$base$path',
         };
       }
-
       return {
         ...payload,
         'status': payload['status'] ?? 'success',
@@ -113,67 +104,78 @@ class ApiService {
         'source': '$base$path',
       };
     }
-
     if (payload is List) {
-      return {
-        'status': 'success',
-        'data': payload,
-        'source': '$base$path',
-      };
+      return {'status': 'success', 'data': payload, 'source': '$base$path'};
     }
-
-    return {
-      'status': 'success',
-      'data': payload,
-      'source': '$base$path',
-    };
+    return {'status': 'success', 'data': payload, 'source': '$base$path'};
   }
 
+  // ── Health ──────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
+  // ── Dashboard / live data ───────────────────────────────────────────────
   Future<Map<String, dynamic>> getDashboardData() => _get(
-        '${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
+        '\${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
       );
 
+  Future<Map<String, dynamic>> getLiveLevels() =>
+      _get(AppConstants.liveLevelsEndpoint);
+
+  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) => _get(
+      '\${AppConstants.liveLevelsEndpoint}?city=\${Uri.encodeComponent(city)}');
+
+  Future<Map<String, dynamic>> getCriticalAlerts() =>
+      _get(AppConstants.criticalAlertsEndpoint);
+
+  Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
+      '\${AppConstants.criticalAlertsEndpoint}?state=\${Uri.encodeComponent(state)}');
+
+  // ── Model ────────────────────────────────────────────────────────────────
+  /// Returns accuracy, f1_score, precision, recall, training_samples
+  /// for the currently active OpsFlood model bundle.
+  /// Used by the Dashboard to render the model confidence card.
+  Future<Map<String, dynamic>> getModelMetrics() =>
+      _get('/model-metrics');
+
+  // ── Prediction ──────────────────────────────────────────────────────────
+  /// Legacy endpoint — manual input only, no CWC auto-fill.
+  Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
+      _post(AppConstants.predictLegacyEndpoint, input);
+
+  /// V2 endpoint — auto-fetches live CWC telemetry for state/station
+  /// before running inference. Falls back to manual input values when
+  /// live data is unavailable. Returns extra fields:
+  ///   autofill_applied: bool
+  ///   live_river_level_m: double?
+  Future<Map<String, dynamic>> predictV2(Map<String, dynamic> input) =>
+      _post('/predict/v2', input);
+
+  // ── History ─────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getPredictionHistory({
     String? state,
     int limit = 20,
   }) {
     final params = <String>['limit=$limit'];
     if (state != null && state.isNotEmpty) {
-      params.add('state=${Uri.encodeComponent(state)}');
+      params.add('state=\${Uri.encodeComponent(state)}');
     }
-    return _get('/prediction-history?${params.join('&')}');
+    return _get('/prediction-history?\${params.join("&")}');
   }
 
-  Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
-      _post(AppConstants.predictLegacyEndpoint, input);
-
+  // ── Weather ─────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getWeather(String city) => _get(
-      '${AppConstants.weatherCurrentEndpoint}?city=${Uri.encodeComponent(city)}');
+      '\${AppConstants.weatherCurrentEndpoint}?city=\${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getWeatherByCoords(double lat, double lon) =>
-      _get('${AppConstants.weatherCurrentEndpoint}?lat=$lat&lon=$lon');
+      _get('\${AppConstants.weatherCurrentEndpoint}?lat=$lat&lon=$lon');
 
   Future<Map<String, dynamic>> getForecast(String city) => _get(
-      '${AppConstants.weatherForecastEndpoint}?city=${Uri.encodeComponent(city)}');
+      '\${AppConstants.weatherForecastEndpoint}?city=\${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getHistoricalLogs({
     String city = 'Kolhapur',
     int limit = 24,
   }) =>
-      _get('/historical-logs?city=${Uri.encodeComponent(city)}&limit=$limit');
-
-  Future<Map<String, dynamic>> getLiveLevels() =>
-      _get(AppConstants.liveLevelsEndpoint);
-
-  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) => _get(
-      '${AppConstants.liveLevelsEndpoint}?city=${Uri.encodeComponent(city)}');
-
-  Future<Map<String, dynamic>> getCriticalAlerts() =>
-      _get(AppConstants.criticalAlertsEndpoint);
-
-  Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
-      '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
+      _get('/historical-logs?city=\${Uri.encodeComponent(city)}&limit=$limit');
 }

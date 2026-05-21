@@ -96,7 +96,9 @@ class _PredictScreenState extends State<PredictScreen> {
     };
 
     try {
-      final res = await ApiService().predict(body);
+      // Use /predict/v2 — auto-fills Peak_Flood_Level_m from live CWC
+      // telemetry when station is provided; falls back to manual values.
+      final res = await ApiService().predictV2(body);
       setState(() {
         _loading = false;
         if (res.containsKey('status') && res['status'] == 'error') {
@@ -150,7 +152,7 @@ class _PredictScreenState extends State<PredictScreen> {
             TextFormField(
               controller: _stationCtrl,
               decoration: const InputDecoration(
-                labelText: 'Station / City (optional)',
+                labelText: 'Station / City (optional — enables CWC auto-fill)',
                 prefixIcon: Icon(Icons.place),
                 border: OutlineInputBorder(),
               ),
@@ -219,7 +221,8 @@ class _PredictScreenState extends State<PredictScreen> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.bolt),
-              label: Text(_loading ? 'Predicting...' : 'Run Prediction'),
+              label:
+                  Text(_loading ? 'Predicting...' : 'Run Prediction'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(50),
               ),
@@ -233,7 +236,8 @@ class _PredictScreenState extends State<PredictScreen> {
                 decoration: BoxDecoration(
                   color: Colors.red.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                  border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   children: [
@@ -252,7 +256,9 @@ class _PredictScreenState extends State<PredictScreen> {
             // ---- Result ----
             if (_result != null) ...[
               const SizedBox(height: 20),
-              _ResultCard(result: _result!, severityColor: _severityColor),
+              _ResultCard(
+                  result: _result!,
+                  severityColor: _severityColor),
             ],
 
             const SizedBox(height: 32),
@@ -268,14 +274,16 @@ class _PredictScreenState extends State<PredictScreen> {
       padding: EdgeInsets.only(bottom: compact ? 0 : 10),
       child: TextFormField(
         controller: ctrl,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        keyboardType:
+            const TextInputType.numberWithOptions(decimal: true),
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: compact ? null : Icon(icon),
           border: const OutlineInputBorder(),
           isDense: compact,
           contentPadding: compact
-              ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
+              ? const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 12)
               : null,
         ),
         validator: (v) =>
@@ -285,12 +293,13 @@ class _PredictScreenState extends State<PredictScreen> {
   }
 }
 
-// ---- Result card ----
+// ── Result card ─────────────────────────────────────────────────────────────
 class _ResultCard extends StatelessWidget {
   final Map<String, dynamic> result;
   final Color Function(String?) severityColor;
 
-  const _ResultCard({required this.result, required this.severityColor});
+  const _ResultCard(
+      {required this.result, required this.severityColor});
 
   String _s(String key) => (result[key] ?? '--').toString();
 
@@ -298,8 +307,12 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final severity = _s('severity');
     final color = severityColor(severity);
-    final probs = result['probabilities'] as Map<String, dynamic>? ?? {};
-    final monitoring = result['monitoring'] as Map<String, dynamic>? ?? {};
+    final probs =
+        result['probabilities'] as Map<String, dynamic>? ?? {};
+    final monitoring =
+        result['monitoring'] as Map<String, dynamic>? ?? {};
+    final autofillApplied = result['autofill_applied'] == true;
+    final liveLevel = result['live_river_level_m'];
 
     return Card(
       elevation: 0,
@@ -313,6 +326,34 @@ class _ResultCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── CWC auto-fill banner ─────────────────────────────────
+            if (autofillApplied && liveLevel != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0DA7C2).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: const Color(0xFF0DA7C2)
+                          .withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.sensors,
+                        size: 14, color: Color(0xFF0DA7C2)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'CWC auto-fill: live river level \${liveLevel}m used',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF0DA7C2)),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ── Severity row ─────────────────────────────────────────
             Row(
               children: [
                 Text(
@@ -328,32 +369,34 @@ class _ResultCard extends StatelessWidget {
                             fontSize: 26,
                             fontWeight: FontWeight.bold,
                             color: color)),
-                    Text('Risk Score: ${_s("risk_score")}',
-                        style:
-                            const TextStyle(fontSize: 13, color: Colors.grey)),
+                    Text('Risk Score: \${_s("risk_score")}',
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.grey)),
                   ],
                 ),
                 const Spacer(),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('${_s("confidence_percent")}%',
+                    Text('\${_s("confidence_percent")}%',
                         style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
                             color: color)),
                     const Text('Confidence',
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey)),
                   ],
                 ),
               ],
             ),
             const Divider(height: 24),
 
-            // Probabilities
+            // ── Probabilities ────────────────────────────────────────
             if (probs.isNotEmpty) ...[
               const Text('Probabilities',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13)),
               const SizedBox(height: 8),
               ...probs.entries.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -361,31 +404,36 @@ class _ResultCard extends StatelessWidget {
                       children: [
                         SizedBox(
                           width: 72,
-                          child:
-                              Text(e.key, style: const TextStyle(fontSize: 12)),
+                          child: Text(e.key,
+                              style:
+                                  const TextStyle(fontSize: 12)),
                         ),
                         Expanded(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
-                              value:
-                                  (num.tryParse(e.value.toString()) ?? 0) / 100,
-                              backgroundColor: Colors.grey.withValues(alpha: 0.15),
+                              value: (num.tryParse(
+                                              e.value.toString()) ??
+                                          0) /
+                                      100,
+                              backgroundColor:
+                                  Colors.grey.withValues(alpha: 0.15),
                               color: severityColor(e.key),
                               minHeight: 8,
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('${e.value}%',
-                            style: const TextStyle(fontSize: 12)),
+                        Text('\${e.value}%',
+                            style:
+                                const TextStyle(fontSize: 12)),
                       ],
                     ),
                   )),
               const SizedBox(height: 8),
             ],
 
-            // Monitoring
+            // ── Monitoring ───────────────────────────────────────────
             if (monitoring.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.all(10),
@@ -399,7 +447,7 @@ class _ResultCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '${monitoring["level"] ?? ""}: ${monitoring["action"] ?? ""}',
+                        '\${monitoring["level"] ?? ""}: \${monitoring["action"] ?? ""}',
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -409,8 +457,11 @@ class _ResultCard extends StatelessWidget {
               const SizedBox(height: 8),
             ],
 
-            Text('Algorithm: ${_s("algorithm")}  •  ${_s("data_source")}',
-                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text(
+              'Algorithm: \${_s("algorithm")}  •  \${_s("data_source")}',
+              style:
+                  const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
           ],
         ),
       ),
