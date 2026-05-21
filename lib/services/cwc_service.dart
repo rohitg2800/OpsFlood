@@ -10,26 +10,25 @@ import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
 
-// ── Constants mirrored from backend/cwc_scraper.py ─────────────────────────
 const String _cwcEndpoint =
     'https://ffs.india-water.gov.in/ffm/api/station-water-level-above-warning/';
 
 const Duration _connectTimeout = Duration(seconds: 5);
 const Duration _readTimeout = Duration(seconds: 12);
 
-/// A single CWC station reading, field-compatible with FloodData.
+/// A single CWC station reading.
 class CwcStation {
   final String stationName;
   final String stateName;
   final String riverName;
-  final double riverLevel;      // metres
+  final double riverLevel;
   final double warningLevel;
   final double dangerLevel;
   final double flowRate;
   final double rainfallLastHour;
-  final String status;          // ACTIVE | WARNING | CRITICAL
-  final String trend;           // RISING | FALLING | STEADY
-  final String source;          // CWC_API | TACTICAL_REGISTRY
+  final String status;
+  final String trend;
+  final String source;
   final DateTime lastUpdate;
 
   const CwcStation({
@@ -77,22 +76,17 @@ class CwcStation {
       };
 }
 
-/// The live CWC service — direct port of CWCRiverScraper from backend.
 class CwcService {
   CwcService._();
   static final CwcService instance = CwcService._();
 
   final http.Client _client = http.Client();
 
-  // Cooldown state (mirrors _station_feed_retry_after in Python)
   DateTime? _retryAfter;
   String _failureMessage = '';
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /// Fetch telemetry for ALL above-warning stations from CWC,
-  /// ranked so the best match for [stateName]/[stationName] comes first.
-  /// Falls back to seeded tactical data if the network call fails.
   Future<List<CwcStation>> getLiveTelemetry({
     String stateName = 'Maharashtra',
     String stationName = 'Kolhapur',
@@ -108,7 +102,6 @@ class CwcService {
           .whereType<CwcStation>()
           .toList();
 
-      // Rank: same state+station (0) > station only (1) > state only (2) > rest (3)
       formatted.sort((a, b) {
         final pa = _sitePriority(a, targetState, targetStation);
         final pb = _sitePriority(b, targetState, targetStation);
@@ -116,15 +109,12 @@ class CwcService {
         return b.riverLevel.compareTo(a.riverLevel);
       });
 
-      // Only keep stations that have at least a state or station match
       final filtered = formatted
           .where((s) => _sitePriority(s, targetState, targetStation) < 3)
           .take(limit)
           .toList();
 
       if (filtered.isNotEmpty) return filtered;
-
-      // Fallback if no matching stations in live feed
       return _buildTacticalTelemetry(
           stateName: stateName, stationName: stationName, limit: limit);
     } catch (_) {
@@ -133,16 +123,14 @@ class CwcService {
     }
   }
 
-  /// Fetch live level for a single station by name.
-  /// Returns null if not found or network fails.
   Future<double?> getLiveRiverLevel(String stationName) async {
     try {
       final raw = await _fetchLiveStationFeed();
       for (final site in raw) {
-        final name = (site['stationName'] ?? site['name'] ?? '').toString();
+        final name = _stationNameFrom(site);
         if (name.toLowerCase().contains(stationName.toLowerCase())) {
-          final wl  = _safeFloat(site['warningLevel'] ?? site['warning_level']);
-          final abw = _safeFloat(site['value']);
+          final wl  = _safeFloat(site['warningLevel'] ?? site['warning_level'] ?? site['wl']);
+          final abw = _safeFloat(site['value'] ?? site['aboveWarning'] ?? site['above_warning']);
           return wl > 0 ? wl + abw : abw;
         }
       }
@@ -150,14 +138,13 @@ class CwcService {
     return null;
   }
 
-  /// Fetch all above-warning stations from CWC (unfiltered, raw list).
-  /// Used by the India-map screen.
   Future<List<CwcStation>> getAllAboveWarningStations() async {
     try {
       final raw = await _fetchLiveStationFeed();
       return raw
           .map((site) => _parseSite(site, ''))
           .whereType<CwcStation>()
+          .where((s) => s.stationName != 'UNKNOWN' && s.stationName.isNotEmpty)
           .toList();
     } catch (_) {
       return [];
@@ -167,7 +154,6 @@ class CwcService {
   // ── Network ───────────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> _fetchLiveStationFeed() async {
-    // Respect cooldown (mirrors _station_feed_retry_after in Python)
     if (_retryAfter != null && DateTime.now().isBefore(_retryAfter!)) {
       throw Exception(_failureMessage.isNotEmpty
           ? _failureMessage
@@ -191,7 +177,6 @@ class CwcService {
         _rememberFailure('CWC endpoint 404', cooldownSeconds: 900);
         throw Exception('CWC endpoint 404');
       }
-
       if (response.statusCode >= 400) {
         _rememberFailure('HTTP ${response.statusCode}', cooldownSeconds: 180);
         throw Exception('HTTP ${response.statusCode}');
@@ -222,57 +207,148 @@ class CwcService {
       return payload.whereType<Map<String, dynamic>>().toList();
     }
     if (payload is Map<String, dynamic>) {
-      final data = payload['data'];
-      if (data is List) {
-        return data.whereType<Map<String, dynamic>>().toList();
+      // Try common wrapper keys the CWC API uses
+      for (final key in ['data', 'stations', 'results', 'items', 'features']) {
+        final inner = payload[key];
+        if (inner is List) return inner.whereType<Map<String, dynamic>>().toList();
+      }
+      // GeoJSON FeatureCollection
+      final features = payload['features'];
+      if (features is List) {
+        return features
+            .whereType<Map<String, dynamic>>()
+            .map((f) => (f['properties'] as Map<String, dynamic>?) ?? f)
+            .toList();
       }
     }
     return [];
   }
 
-  // ── Parsers ───────────────────────────────────────────────────────────────
+  // ── Station name extraction (handles all known CWC API variants) ──────────
+
+  /// The CWC API has returned at least 6 different key names for station name
+  /// across different API versions. This covers them all.
+  String _stationNameFrom(Map<String, dynamic> site) {
+    final raw = site['stationName'] ??
+        site['station_name'] ??
+        site['StationName'] ??
+        site['name'] ??
+        site['Name'] ??
+        site['basin_name'] ??
+        site['BasinName'] ??
+        site['gauging_station'] ??
+        site['gaugingStation'] ??
+        site['station'] ??
+        site['title'];
+    final s = (raw ?? '').toString().trim();
+    return s.isEmpty ? '' : s;
+  }
+
+  String _stateNameFrom(Map<String, dynamic> site, String fallback) {
+    final raw = site['stateName'] ??
+        site['state_name'] ??
+        site['StateName'] ??
+        site['state'] ??
+        site['State'] ??
+        site['stateCode'];
+    final s = (raw ?? '').toString().trim();
+    return s.isEmpty ? fallback : s;
+  }
+
+  String _riverNameFrom(Map<String, dynamic> site) {
+    final raw = site['riverName'] ??
+        site['river_name'] ??
+        site['RiverName'] ??
+        site['river'] ??
+        site['River'] ??
+        site['basin'] ??
+        site['basinName'];
+    return (raw ?? '').toString().trim();
+  }
+
+  // ── Parser ────────────────────────────────────────────────────────────────
 
   CwcStation? _parseSite(Map<String, dynamic> site, String fallbackState) {
     try {
-      final warningLevel =
-          _safeFloat(site['warningLevel'] ?? site['warning_level']);
-      final dangerLevel =
-          _safeFloat(site['dangerLevel'] ?? site['danger_level']);
-      final aboveWarning = _safeFloat(site['value']);
-      final waterLevel =
-          warningLevel > 0 ? warningLevel + aboveWarning : aboveWarning;
+      final stationName = _stationNameFrom(site);
+      if (stationName.isEmpty) return null; // skip truly nameless rows
 
-      final rainfall = _safeFloat(site['rainfall'] ??
-          site['rainfallLastHour'] ??
-          site['rainfall1Hr']);
+      // Warning level
+      final warningLevel = _safeFloat(
+          site['warningLevel'] ?? site['warning_level'] ??
+          site['WarningLevel'] ?? site['wl'] ?? site['WL']);
 
-      final statusLabel = _statusFromLevels(waterLevel, warningLevel, dangerLevel);
+      // Danger level — try many aliases used by CWC
+      final dangerLevel = _safeFloat(
+          site['dangerLevel'] ?? site['danger_level'] ??
+          site['DangerLevel'] ?? site['dl'] ?? site['DL'] ??
+          site['highFloodLevel'] ?? site['high_flood_level'] ??
+          site['hfl'] ?? site['HFL']);
+
+      // Value above warning
+      final aboveWarning = _safeFloat(
+          site['value'] ?? site['Value'] ??
+          site['above_warning'] ?? site['aboveWarning'] ??
+          site['levelAboveWarning']);
+
+      // Absolute water level
+      double waterLevel;
+      if (site.containsKey('waterLevel') || site.containsKey('water_level') ||
+          site.containsKey('currentLevel') || site.containsKey('current_level')) {
+        waterLevel = _safeFloat(
+            site['waterLevel'] ?? site['water_level'] ??
+            site['currentLevel'] ?? site['current_level']);
+      } else {
+        // compute from warning + above
+        waterLevel = warningLevel > 0 ? warningLevel + aboveWarning : aboveWarning;
+      }
+
+      // If dangerLevel still 0, derive it from warningLevel using the CWC
+      // typical ratio (danger ≈ warning + 10-15%) or state default
+      final effectiveDanger = dangerLevel > 0
+          ? dangerLevel
+          : warningLevel > 0
+              ? double.parse((warningLevel * 1.12).toStringAsFixed(2))
+              : 0.0;
+
+      final rainfall = _safeFloat(
+          site['rainfall'] ?? site['rainfallLastHour'] ??
+          site['rainfall1Hr'] ?? site['rainfall_1hr'] ??
+          site['rain'] ?? site['Rain']);
+
+      final statusLabel = _statusFromLevels(waterLevel, warningLevel, effectiveDanger);
+
+      // Trend — normalise whatever string CWC sends
+      final rawTrend = (site['trend'] ?? site['Trend'] ?? site['trendIndicator'] ?? '').toString().toUpperCase();
+      final trend = rawTrend.contains('RIS') ? 'RISING'
+          : rawTrend.contains('FAL') ? 'FALLING'
+          : 'STEADY';
 
       return CwcStation(
-        stationName:
-            (site['stationName'] ?? site['name'] ?? 'UNKNOWN').toString(),
-        stateName:
-            (site['stateName'] ?? site['state'] ?? fallbackState).toString(),
-        riverName: (site['riverName'] ?? site['river'] ?? '').toString(),
-        riverLevel: double.parse(waterLevel.toStringAsFixed(2)),
-        warningLevel: double.parse(warningLevel.toStringAsFixed(2)),
-        dangerLevel: double.parse(dangerLevel.toStringAsFixed(2)),
-        flowRate: double.parse(
-            _safeFloat(site['discharge'] ?? site['flowRate'])
+        stationName:      stationName,
+        stateName:        _stateNameFrom(site, fallbackState),
+        riverName:        _riverNameFrom(site),
+        riverLevel:       double.parse(waterLevel.toStringAsFixed(2)),
+        warningLevel:     double.parse(warningLevel.toStringAsFixed(2)),
+        dangerLevel:      double.parse(effectiveDanger.toStringAsFixed(2)),
+        flowRate:         double.parse(
+            _safeFloat(site['discharge'] ?? site['Discharge'] ?? site['flowRate'] ?? site['flow_rate'])
                 .toStringAsFixed(1)),
         rainfallLastHour: double.parse(rainfall.toStringAsFixed(2)),
-        status: statusLabel,
-        trend: (site['trend'] ?? 'STEADY').toString(),
-        source: 'CWC_API',
-        lastUpdate: _parseDate(
-            site['dateTime']?.toString() ?? site['lastUpdate']?.toString()),
+        status:           statusLabel,
+        trend:            trend,
+        source:           'CWC_API',
+        lastUpdate:       _parseDate(
+            (site['dateTime'] ?? site['DateTime'] ??
+             site['lastUpdate'] ?? site['last_update'] ??
+             site['observationTime'] ?? site['date'])?.toString()),
       );
     } catch (_) {
       return null;
     }
   }
 
-  // ── Tactical fallback (mirrors _build_tactical_telemetry in Python) ────────
+  // ── Tactical fallback ──────────────────────────────────────────────────────
 
   List<CwcStation> _buildTacticalTelemetry({
     required String stateName,
@@ -287,10 +363,10 @@ class CwcService {
     final telemetry = <CwcStation>[];
 
     for (var i = 0; i < math.min(limit, profiles.length); i++) {
-      final profile   = profiles[i];
-      final seed      = '$stateKey|${_normalizeKey(profile.station)}|$timeBucket|$i';
-      final threat    = _seededUnit('$seed|threat');
-      final warnLvl   = profile.warningLevel;
+      final profile = profiles[i];
+      final seed    = '$stateKey|${_normalizeKey(profile.station)}|$timeBucket|$i';
+      final threat  = _seededUnit('$seed|threat');
+      final warnLvl = profile.warningLevel;
       final dangerLvl = profile.dangerLevel;
 
       double currentLevel = warnLvl - (0.45 + _seededUnit('$seed|safe') * 1.55);
@@ -303,46 +379,32 @@ class CwcService {
       currentLevel = double.parse(currentLevel.toStringAsFixed(2));
 
       final trendRoll = _seededUnit('$seed|trend');
-      final trend = trendRoll > 0.66
-          ? 'RISING'
-          : trendRoll > 0.33
-              ? 'STEADY'
-              : 'FALLING';
+      final trend = trendRoll > 0.66 ? 'RISING' : trendRoll > 0.33 ? 'STEADY' : 'FALLING';
 
       telemetry.add(CwcStation(
-        stationName:       profile.station,
-        stateName:         stateName,
-        riverName:         profile.river,
-        riverLevel:        currentLevel,
-        warningLevel:      warnLvl,
-        dangerLevel:       dangerLvl,
-        flowRate:          double.parse(
-            (math.max(currentLevel, 0) *
-                    (10.8 + _seededUnit('$seed|flow') * 4.4))
-                .toStringAsFixed(1)),
-        rainfallLastHour:  double.parse(
-            (_seededUnit('$seed|rain') * 18).toStringAsFixed(1)),
-        status:            _statusFromLevels(currentLevel, warnLvl, dangerLvl),
-        trend:             trend,
-        source:            'TACTICAL_REGISTRY',
-        lastUpdate:        DateTime.now().subtract(
-            Duration(
-                milliseconds:
-                    (_seededUnit('$seed|time') * 55 * 60 * 1000).toInt())),
+        stationName:      profile.station,
+        stateName:        stateName,
+        riverName:        profile.river,
+        riverLevel:       currentLevel,
+        warningLevel:     warnLvl,
+        dangerLevel:      dangerLvl,
+        flowRate:         double.parse(
+            (math.max(currentLevel, 0) * (10.8 + _seededUnit('$seed|flow') * 4.4)).toStringAsFixed(1)),
+        rainfallLastHour: double.parse((_seededUnit('$seed|rain') * 18).toStringAsFixed(1)),
+        status:           _statusFromLevels(currentLevel, warnLvl, dangerLvl),
+        trend:            trend,
+        source:           'TACTICAL_REGISTRY',
+        lastUpdate:       DateTime.now().subtract(
+            Duration(milliseconds: (_seededUnit('$seed|time') * 55 * 60 * 1000).toInt())),
       ));
     }
 
-    // Sort: station-name match first
     if (stationKey.isNotEmpty) {
       telemetry.sort((a, b) {
         final ma = _normalizeKey(a.stationName).contains(stationKey) ||
-            _normalizeKey(a.riverName).contains(stationKey)
-            ? 0
-            : 1;
+            _normalizeKey(a.riverName).contains(stationKey) ? 0 : 1;
         final mb = _normalizeKey(b.stationName).contains(stationKey) ||
-            _normalizeKey(b.riverName).contains(stationKey)
-            ? 0
-            : 1;
+            _normalizeKey(b.riverName).contains(stationKey) ? 0 : 1;
         if (ma != mb) return ma.compareTo(mb);
         return b.riverLevel.compareTo(a.riverLevel);
       });
@@ -351,54 +413,30 @@ class CwcService {
     return telemetry;
   }
 
-  // ── Tactical profiles ─────────────────────────────────────────────────────
-
   _TacticalProfile _defaultStateProfile(String stateName) {
-    // Hardcoded CWC danger levels per state (from state_severity_matrix.py)
     const dangerLevels = <String, double>{
-      'maharashtra': 14.0,
-      'odisha': 16.5,
-      'assam': 15.0,
-      'west bengal': 12.5,
-      'bihar': 13.5,
-      'uttar pradesh': 11.5,
-      'andhra pradesh': 13.0,
-      'telangana': 11.0,
-      'kerala': 12.0,
-      'karnataka': 12.5,
-      'gujarat': 10.5,
-      'punjab': 9.5,
-      'rajasthan': 8.5,
-      'madhya pradesh': 11.0,
-      'chhattisgarh': 10.5,
-      'jharkhand': 9.5,
-      'tamil nadu': 10.0,
-      'uttarakhand': 12.0,
-      'himachal pradesh': 10.0,
-      'jammu & kashmir': 11.5,
-      'arunachal pradesh': 14.0,
-      'manipur': 9.0,
-      'nagaland': 8.0,
-      'meghalaya': 9.5,
-      'tripura': 8.5,
-      'mizoram': 7.5,
-      'sikkim': 11.0,
-      'goa': 7.0,
-      'delhi': 207.49,  // Yamuna m above sea level
+      'maharashtra': 14.0, 'odisha': 16.5, 'assam': 15.0,
+      'west bengal': 12.5, 'bihar': 13.5, 'uttar pradesh': 11.5,
+      'andhra pradesh': 13.0, 'telangana': 11.0, 'kerala': 12.0,
+      'karnataka': 12.5, 'gujarat': 10.5, 'punjab': 9.5,
+      'rajasthan': 8.5, 'madhya pradesh': 11.0, 'chhattisgarh': 10.5,
+      'jharkhand': 9.5, 'tamil nadu': 10.0, 'uttarakhand': 12.0,
+      'himachal pradesh': 10.0, 'jammu & kashmir': 11.5,
+      'arunachal pradesh': 14.0, 'manipur': 9.0, 'nagaland': 8.0,
+      'meghalaya': 9.5, 'tripura': 8.5, 'mizoram': 7.5, 'sikkim': 11.0,
+      'goa': 7.0, 'delhi': 207.49,
     };
     final key    = _normalizeKey(stateName);
     final danger = dangerLevels[key] ?? 12.0;
     return _TacticalProfile(
       station: '$stateName Central Gauge',
       river:   '$stateName Primary Basin',
-      warningLevel: double.parse(
-          math.max(danger - 1.4, danger * 0.86).toStringAsFixed(2)),
-      dangerLevel: danger,
+      warningLevel: double.parse(math.max(danger - 1.4, danger * 0.86).toStringAsFixed(2)),
+      dangerLevel:  danger,
     );
   }
 
-  List<_TacticalProfile> _buildTacticalProfiles(
-      String stateName, String stationName) {
+  List<_TacticalProfile> _buildTacticalProfiles(String stateName, String stationName) {
     final base    = _defaultStateProfile(stateName);
     final danger  = base.dangerLevel;
     final primary = math.max(danger - 1.4, danger * 0.86);
@@ -424,15 +462,14 @@ class CwcService {
     ];
   }
 
-  // ── Helpers (mirrored from Python) ─────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   String _normalizeKey(String? value) {
     if (value == null) return '';
-    var k = value.trim().toLowerCase();
-    k = k.replaceAll(RegExp(r'\s+'), ' ');
-    if (k == 'orissa') return 'odisha';
+    var k = value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    if (k == 'orissa')                     return 'odisha';
     if (k == 'nct of delhi' || k == 'new delhi') return 'delhi';
-    if (k == 'uttaranchal') return 'uttarakhand';
+    if (k == 'uttaranchal')                return 'uttarakhand';
     return k;
   }
 
@@ -441,9 +478,8 @@ class CwcService {
     return double.tryParse(value.toString()) ?? def;
   }
 
-  String _statusFromLevels(
-      double current, double warning, double danger) {
-    if (danger > 0 && current >= danger) return 'CRITICAL';
+  String _statusFromLevels(double current, double warning, double danger) {
+    if (danger > 0 && current >= danger)  return 'CRITICAL';
     if (warning > 0 && current >= warning) return 'WARNING';
     return 'ACTIVE';
   }
@@ -453,21 +489,18 @@ class CwcService {
     return DateTime.tryParse(raw) ?? DateTime.now();
   }
 
-  int _sitePriority(
-      CwcStation station, String targetState, String targetStation) {
+  int _sitePriority(CwcStation station, String targetState, String targetStation) {
     final stationMatch = targetStation.isNotEmpty &&
         (_normalizeKey(station.stationName).contains(targetStation) ||
             _normalizeKey(station.riverName).contains(targetStation));
     final stateMatch = targetState.isNotEmpty &&
         _normalizeKey(station.stateName).contains(targetState);
-
     if (stationMatch && stateMatch) return 0;
     if (stationMatch) return 1;
-    if (stateMatch) return 2;
+    if (stateMatch)   return 2;
     return 3;
   }
 
-  // Seeded pseudo-random mirroring Python _seeded_unit
   double _seededUnit(String seed) {
     int hash = 0;
     for (final ch in seed.codeUnits) {
@@ -482,8 +515,8 @@ class CwcService {
   }
 
   void _clearFailure() {
-    _retryAfter      = null;
-    _failureMessage  = '';
+    _retryAfter     = null;
+    _failureMessage = '';
   }
 }
 

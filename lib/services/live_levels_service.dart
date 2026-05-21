@@ -1,9 +1,6 @@
 /// LiveLevelsService
 /// Aggregates real-time CWC station data for ALL monitored cities.
-/// Directly mirrors how app.py /api/live-levels works:
-///   1. Try CWC live endpoint for all stations
-///   2. For cities not in live feed, generate tactical telemetry
-///   3. Convert to FloodData shape for the rest of the app
+/// Directly mirrors how app.py /api/live-levels works.
 library;
 
 import 'dart:async';
@@ -22,7 +19,7 @@ class LiveLevelsService extends ChangeNotifier {
   List<FloodData>  _levels   = [];
   List<FloodAlert> _alerts   = [];
   bool             _loading  = false;
-  bool             _liveData = false;   // true once CWC_API data received
+  bool             _liveData = false;
   String?          _error;
   DateTime?        _lastFetch;
 
@@ -44,18 +41,17 @@ class LiveLevelsService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Fetch ALL above-warning stations from CWC
       final cwcStations = await _cwc.getAllAboveWarningStations();
 
-      // 2. Build a lookup: normalised city/station name → CwcStation
+      // Build lookup: normalised station name / river name → CwcStation
       final cwcByName = <String, CwcStation>{};
       for (final s in cwcStations) {
-        cwcByName[_norm(s.stationName)] = s;
-        // Also index by river name for fuzzy match
-        if (s.riverName.isNotEmpty) cwcByName[_norm(s.riverName)] = s;
+        final k = _norm(s.stationName);
+        if (k.isNotEmpty) cwcByName[k] = s;
+        final r = _norm(s.riverName);
+        if (r.isNotEmpty) cwcByName.putIfAbsent(r, () => s);
       }
 
-      // 3. Map every monitored city to a FloodData
       final newLevels = <FloodData>[];
       bool anyLive = false;
 
@@ -66,13 +62,15 @@ class LiveLevelsService extends ChangeNotifier {
         final lat       = (city['lat']  as num).toDouble();
         final lon       = (city['lon']  as num).toDouble();
 
-        // Try matching CWC live data
+        // 1. Exact match on city name
         CwcStation? match = cwcByName[_norm(cityName)];
+        // 2. Exact match on river name
         match ??= cwcByName[_norm(riverName)];
+        // 3. Fuzzy — station contains city or city contains station
         if (match == null) {
-          // Fuzzy: find any CWC station whose name contains the city or vice-versa
           for (final e in cwcByName.entries) {
-            if (e.key.contains(_norm(cityName)) || _norm(cityName).contains(e.key)) {
+            if (e.key.contains(_norm(cityName)) ||
+                _norm(cityName).contains(e.key)) {
               match = e.value;
               break;
             }
@@ -81,58 +79,75 @@ class LiveLevelsService extends ChangeNotifier {
 
         if (match != null) {
           anyLive = true;
+          // Ensure dangerLevel is never 0 — fall back to state default.
+          final dl = match.dangerLevel > 0
+              ? match.dangerLevel
+              : _defaultDanger(stateName);
+          final wl = match.warningLevel > 0
+              ? match.warningLevel
+              : _defaultWarning(stateName);
+          final sl = _safeLevel(dl);
+
+          // capacityPercent relative to safe→danger range (matches FloodData formula)
+          final rawCapacity = dl > sl
+              ? ((match.riverLevel - sl) / (dl - sl) * 100).clamp(0.0, 100.0)
+              : 0.0;
+
           newLevels.add(FloodData(
-            city:            cityName,
-            state:           stateName,
-            riverName:       match.riverName.isNotEmpty ? match.riverName : riverName,
-            currentLevel:    match.riverLevel,
-            dangerLevel:     match.dangerLevel > 0 ? match.dangerLevel : _defaultDanger(stateName),
-            warningLevel:    match.warningLevel > 0 ? match.warningLevel : _defaultWarning(stateName),
-            safeLevel:       _safeLevel(match.dangerLevel),
-            capacityPercent: match.capacityPercent,
-            riskLevel:       match.riskLevel,
-            status:          match.status,
-            trend:           match.trend,
-            flowRate:        match.flowRate,
-            rainfallLastHour: match.rainfallLastHour,
-            lat: lat, lon: lon,
-            source:          'CWC_API',
-            lastUpdate:      match.lastUpdate,
+            id:           '$cityName-$stateName-cwc',
+            city:         cityName,
+            state:        stateName,
+            latitude:     lat,
+            longitude:    lon,
+            riverName:    match.riverName.isNotEmpty ? match.riverName : riverName,
+            currentLevel: match.riverLevel,
+            dangerLevel:  dl,
+            warningLevel: wl,
+            safeLevel:    sl,
+            // Recompute riskLevel from rawCapacity so it matches the gauge
+            riskLevel:    _riskFromCapacity(rawCapacity),
+            lastUpdated:  match.lastUpdate,
+            status:       match.status,
+            flowRate:     match.flowRate > 0 ? match.flowRate : null,
+            rainfall24h:  match.rainfallLastHour > 0 ? match.rainfallLastHour : null,
           ));
         } else {
-          // Tactical fallback for cities not in the live feed
+          // Tactical fallback for cities not in CWC live feed
           final tactical = await _cwc.getLiveTelemetry(
               stateName: stateName, stationName: cityName, limit: 1);
           final t = tactical.isNotEmpty ? tactical.first : null;
+          final dl = t?.dangerLevel   ?? _defaultDanger(stateName);
+          final wl = t?.warningLevel  ?? _defaultWarning(stateName);
+          final sl = _safeLevel(dl);
+          final level = t?.riverLevel ?? (sl + (dl - sl) * _defaultCapacityFraction(city['risk'] as String));
+
           newLevels.add(FloodData(
-            city:            cityName,
-            state:           stateName,
-            riverName:       riverName,
-            currentLevel:    t?.riverLevel    ?? 0,
-            dangerLevel:     t?.dangerLevel   ?? _defaultDanger(stateName),
-            warningLevel:    t?.warningLevel  ?? _defaultWarning(stateName),
-            safeLevel:       _safeLevel(t?.dangerLevel ?? _defaultDanger(stateName)),
-            capacityPercent: t?.capacityPercent ?? _defaultCapacity(stateName, city['risk'] as String),
-            riskLevel:       t?.riskLevel  ?? (city['risk'] as String),
-            status:          t?.status     ?? 'ACTIVE',
-            trend:           t?.trend      ?? 'STEADY',
-            flowRate:        t?.flowRate   ?? 0,
-            rainfallLastHour: t?.rainfallLastHour ?? 0,
-            lat: lat, lon: lon,
-            source:          'TACTICAL_REGISTRY',
-            lastUpdate:      DateTime.now(),
+            id:           '$cityName-$stateName-tactical',
+            city:         cityName,
+            state:        stateName,
+            latitude:     lat,
+            longitude:    lon,
+            riverName:    riverName,
+            currentLevel: level,
+            dangerLevel:  dl,
+            warningLevel: wl,
+            safeLevel:    sl,
+            riskLevel:    city['risk'] as String,
+            lastUpdated:  DateTime.now(),
+            status:       t?.status ?? 'ACTIVE',
+            flowRate:     t?.flowRate,
+            rainfall24h:  t?.rainfallLastHour,
           ));
         }
       }
 
-      // Sort by risk descending
       newLevels.sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
 
-      _levels   = newLevels;
-      _liveData = anyLive;
-      _alerts   = _deriveAlerts(newLevels);
+      _levels    = newLevels;
+      _liveData  = anyLive;
+      _alerts    = _deriveAlerts(newLevels);
       _lastFetch = DateTime.now();
-      _error    = null;
+      _error     = null;
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -141,7 +156,7 @@ class LiveLevelsService extends ChangeNotifier {
     }
   }
 
-  // ── Alert derivation (mirrors _alertsFromThresholds) ──────────────────────
+  // ── Alert derivation ──────────────────────────────────────────────────────
 
   List<FloodAlert> _deriveAlerts(List<FloodData> levels) {
     final now = DateTime.now();
@@ -155,8 +170,7 @@ class LiveLevelsService extends ChangeNotifier {
                   ? 'CRITICAL'
                   : 'HIGH',
               title:         '${e.city} river alert',
-              message:
-                  '${e.riverName} is at ${e.capacityPercent.toStringAsFixed(0)}% capacity.',
+              message:       '${e.riverName} is at ${e.capacityPercent.toStringAsFixed(0)}% capacity.',
               timestamp:     now,
               resolved:      false,
               riverName:     e.riverName,
@@ -169,7 +183,7 @@ class LiveLevelsService extends ChangeNotifier {
         .toList();
   }
 
-  // ── State-level defaults (from state_severity_matrix.py) ──────────────────
+  // ── State-level defaults ──────────────────────────────────────────────────
 
   static const _stateDangerLevels = <String, double>{
     'Maharashtra': 14.0, 'Odisha': 16.5, 'Assam': 15.0,
@@ -182,24 +196,27 @@ class LiveLevelsService extends ChangeNotifier {
     'Arunachal Pradesh': 14.0, 'Delhi': 207.49,
   };
 
-  double _defaultDanger(String state) =>
-      _stateDangerLevels[state] ?? 12.0;
-
+  double _defaultDanger(String state)  => _stateDangerLevels[state] ?? 12.0;
   double _defaultWarning(String state) {
     final d = _defaultDanger(state);
     return double.parse((d * 0.86).toStringAsFixed(2));
   }
+  double _safeLevel(double danger)     => double.parse((danger * 0.60).toStringAsFixed(2));
 
-  double _safeLevel(double dangerLevel) =>
-      double.parse((dangerLevel * 0.6).toStringAsFixed(2));
-
-  double _defaultCapacity(String state, String riskLabel) {
+  double _defaultCapacityFraction(String riskLabel) {
     switch (riskLabel) {
-      case 'CRITICAL': return 92;
-      case 'HIGH':     return 75;
-      case 'MODERATE': return 55;
-      default:         return 30;
+      case 'CRITICAL': return 0.92;
+      case 'HIGH':     return 0.75;
+      case 'MODERATE': return 0.55;
+      default:         return 0.30;
     }
+  }
+
+  String _riskFromCapacity(double pct) {
+    if (pct >= AppConstants.criticalThreshold) return 'CRITICAL';
+    if (pct >= AppConstants.highThreshold)     return 'HIGH';
+    if (pct >= AppConstants.moderateThreshold) return 'MODERATE';
+    return 'LOW';
   }
 
   String _norm(String v) => v.trim().toLowerCase();
