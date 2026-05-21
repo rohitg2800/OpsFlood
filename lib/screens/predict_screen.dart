@@ -1,12 +1,9 @@
-import 'dart:convert';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 
-import '../constants/app_constants.dart';
 import '../ml/flood_engine.dart';
+import '../services/predict.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PREDICT SCREEN
@@ -19,37 +16,41 @@ class PredictScreen extends StatefulWidget {
 
 class _PredictScreenState extends State<PredictScreen>
     with SingleTickerProviderStateMixin {
-  // Controllers
+  // ── Animation ────────────────────────────────────────────────────────────
   late AnimationController _gaugeCtrl;
   late Animation<double> _gaugeAnim;
 
-  // Form values
-  final _peakCtrl = TextEditingController(text: '8.5');
-  final _durCtrl = TextEditingController(text: '1');
+  // ── Form controllers ─────────────────────────────────────────────────────
+  final _peakCtrl     = TextEditingController(text: '8.5');
+  final _durCtrl      = TextEditingController(text: '1');
   final _peakTimeCtrl = TextEditingController(text: '1');
-  final _recCtrl = TextEditingController(text: '1');
+  final _recCtrl      = TextEditingController(text: '1');
   final List<TextEditingController> _rainCtrl = List.generate(
-      7, (i) => TextEditingController(text: ['10', '15', '20', '18', '12', '8', '7'][i]));
+      7,
+      (i) => TextEditingController(
+          text: ['10', '15', '20', '18', '12', '8', '7'][i]));
 
-  String _selectedState = 'Maharashtra';
+  String  _selectedState   = 'Maharashtra';
   String? _selectedStation;
 
-  // Result
+  // ── State ─────────────────────────────────────────────────────────────────
   FloodResult? _result;
-  bool _loading = false;
-  String _error = '';
-  bool _usedApi = false;
+  bool   _loading          = false;
+  String _error            = '';
+  bool   _usedApi          = false;
+  bool   _sectionRiver     = true;
+  bool   _sectionRain      = true;
 
-  // Section expand state
-  bool _riverExpanded = true;
-  bool _rainfallExpanded = true;
+  // ── Service ───────────────────────────────────────────────────────────────
+  final _svc = const PredictionService();
 
   @override
   void initState() {
     super.initState();
     _gaugeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900));
-    _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
+    _gaugeAnim =
+        CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
   }
 
   @override
@@ -59,20 +60,19 @@ class _PredictScreenState extends State<PredictScreen>
     _durCtrl.dispose();
     _peakTimeCtrl.dispose();
     _recCtrl.dispose();
-    for (final c in _rainCtrl) {
-      c.dispose();
-    }
+    for (final c in _rainCtrl) c.dispose();
     super.dispose();
   }
 
-  FloodInput _buildInput() {
-    double v(TextEditingController c, double def) =>
-        double.tryParse(c.text.trim()) ?? def;
-    return FloodInput(
-      peakFloodLevelM: v(_peakCtrl, 8.5),
+  // ── Build FloodPredictionInput from form ──────────────────────────────────
+  FloodPredictionInput _buildInput() {
+    double v(TextEditingController c, double d) =>
+        double.tryParse(c.text.trim()) ?? d;
+    return FloodPredictionInput(
+      peakFloodLevelM:   v(_peakCtrl, 8.5),
       eventDurationDays: v(_durCtrl, 1),
-      timeToPeakDays: v(_peakTimeCtrl, 1),
-      recessionTimeDay: v(_recCtrl, 1),
+      timeToPeakDays:    v(_peakTimeCtrl, 1),
+      recessionTimeDays: v(_recCtrl, 1),
       t1d: v(_rainCtrl[0], 10),
       t2d: v(_rainCtrl[1], 15),
       t3d: v(_rainCtrl[2], 20),
@@ -80,106 +80,47 @@ class _PredictScreenState extends State<PredictScreen>
       t5d: v(_rainCtrl[4], 12),
       t6d: v(_rainCtrl[5], 8),
       t7d: v(_rainCtrl[6], 7),
-      state: _selectedState,
+      state:   _selectedState,
       station: _selectedStation,
     );
   }
 
-  // Try API first, fall back to on-device engine
+  // ── Map FloodPrediction → FloodResult (used by existing UI widgets) ───────
+  FloodResult _toFloodResult(FloodPrediction p) => FloodResult(
+        severity:            p.severity,
+        confidencePercent:   p.confidencePercent,
+        probabilities:       p.probabilities
+            .map((k, v) => MapEntry(k, v.toDouble())),
+        riskScore:           p.riskScore,
+        proximityToDangerM:  0,
+        algorithm:           p.algorithm,
+        alert:               p.alert,
+        monitoringLevel:     p.monitoringLevel,
+        monitoringAction:    p.monitoringAction,
+        usedApi:             !p.isOfflineFallback,
+        ruleProbs:           const {},
+        mlProbs:             const {},
+        thresholdSeverity:   '',
+      );
+
+  // ── Run prediction via PredictionService (v2 → offline fallback) ──────────
   Future<void> _predict() async {
     setState(() { _loading = true; _error = ''; _result = null; });
     _gaugeCtrl.reset();
 
-    final input = _buildInput();
-
-    // 1. Try OpsFlood API
-    bool apiOk = false;
-    for (final base in AppConstants.apiBaseUrls) {
-      try {
-        final uri = Uri.parse('$base/predict/legacy');
-        final body = jsonEncode({
-          'Peak_Flood_Level_m': input.peakFloodLevelM,
-          'Event_Duration_days': input.eventDurationDays,
-          'Time_to_Peak_days': input.timeToPeakDays,
-          'Recession_Time_day': input.recessionTimeDay,
-          'T1d': input.t1d,
-          'T2d': input.t2d,
-          'T3d': input.t3d,
-          'T4d': input.t4d,
-          'T5d': input.t5d,
-          'T6d': input.t6d,
-          'T7d': input.t7d,
-          'state': input.state,
-          'station': input.station,
-        });
-        final res = await http
-            .post(uri,
-                headers: {'Content-Type': 'application/json'}, body: body)
-            .timeout(const Duration(seconds: 10));
-        if (res.statusCode == 200) {
-          final j = jsonDecode(res.body) as Map<String, dynamic>;
-          if ((j['severity'] ?? '').toString().isNotEmpty &&
-              j['severity'] != 'UNKNOWN') {
-            final probs = (j['probabilities'] as Map<String, dynamic>? ?? {});
-            final ensData = (j['ensemble'] as Map<String, dynamic>? ?? {});
-            final monData = (j['monitoring'] as Map<String, dynamic>? ?? {});
-
-            final result = FloodResult(
-              severity: j['severity'] as String,
-              confidencePercent:
-                  (j['confidence_percent'] as num?)?.toDouble() ?? 75.0,
-              probabilities: {
-                for (final e in probs.entries)
-                  e.key: (e.value as num).toDouble()
-              },
-              riskScore: (j['risk_score'] as num?)?.toInt() ?? 50,
-              proximityToDangerM:
-                  (j['proximity_to_danger_m'] as num?)?.toDouble() ?? 0,
-              algorithm: (j['algorithm'] as String?) ??
-                  'Hybrid Multi-Bundle Ensemble v2',
-              alert: (j['alert'] as String?) ?? '⚠️',
-              monitoringLevel:
-                  (monData['level'] as String?) ?? '',
-              monitoringAction:
-                  (monData['action'] as String?) ?? '',
-              usedApi: true,
-              ruleProbs: {
-                for (final e in ((ensData['rule_probabilities']
-                            as Map<String, dynamic>?) ??
-                        {})
-                    .entries)
-                  e.key: (e.value as num).toDouble()
-              },
-              mlProbs: {
-                for (final e in ((ensData['ml_probabilities']
-                            as Map<String, dynamic>?) ??
-                        {})
-                    .entries)
-                  e.key: (e.value as num).toDouble()
-              },
-              thresholdSeverity:
-                  ((ensData['rule_signals'] as Map<String, dynamic>?)??
-                          {})['threshold_severity'] as String? ??
-                      '',
-            );
-            if (mounted) {
-              setState(() { _result = result; _usedApi = true; _loading = false; });
-              _gaugeCtrl.forward();
-              apiOk = true;
-              return;
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 2. Fallback: on-device engine
-    if (!apiOk) {
-      final localResult = runOnDeviceEngine(input);
-      if (mounted) {
-        setState(() { _result = localResult; _usedApi = false; _loading = false; });
-        _gaugeCtrl.forward();
-      }
+    try {
+      final input = _buildInput();
+      final prediction = await _svc.predict(input);   // /predict/v2 + offline
+      if (!mounted) return;
+      setState(() {
+        _result  = _toFloodResult(prediction);
+        _usedApi = !prediction.isOfflineFallback;
+        _loading = false;
+      });
+      _gaugeCtrl.forward();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = 'Prediction failed: $e'; _loading = false; });
     }
   }
 
@@ -198,50 +139,42 @@ class _PredictScreenState extends State<PredictScreen>
         child: SafeArea(
           child: Column(
             children: [
-              // Header
               _Header(state: _selectedState),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(14, 8, 14, 30),
                   children: [
-                    // State selector
                     _StateSelector(
                       selected: _selectedState,
                       onChanged: (s) => setState(() => _selectedState = s),
                     ),
                     const SizedBox(height: 12),
-
-                    // River params section
                     _CollapsibleSection(
-                      title: 'River Parameters',
-                      icon: Icons.water,
-                      expanded: _riverExpanded,
+                      title:    'River Parameters',
+                      icon:     Icons.water,
+                      expanded: _sectionRiver,
                       onToggle: () =>
-                          setState(() => _riverExpanded = !_riverExpanded),
+                          setState(() => _sectionRiver = !_sectionRiver),
                       child: _RiverParamsForm(
-                        peakCtrl: _peakCtrl,
-                        durCtrl: _durCtrl,
+                        peakCtrl:     _peakCtrl,
+                        durCtrl:      _durCtrl,
                         peakTimeCtrl: _peakTimeCtrl,
-                        recCtrl: _recCtrl,
+                        recCtrl:      _recCtrl,
                       ),
                     ),
                     const SizedBox(height: 10),
-
-                    // Rainfall section
                     _CollapsibleSection(
-                      title: '7-Day Rainfall (mm/day)',
-                      icon: Icons.grain,
-                      expanded: _rainfallExpanded,
+                      title:    '7-Day Rainfall (mm/day)',
+                      icon:     Icons.grain,
+                      expanded: _sectionRain,
                       onToggle: () =>
-                          setState(() => _rainfallExpanded = !_rainfallExpanded),
+                          setState(() => _sectionRain = !_sectionRain),
                       child: _RainfallForm(controllers: _rainCtrl),
                     ),
                     const SizedBox(height: 16),
-
-                    // Predict button
                     _PredictButton(
-                        loading: _loading, onPressed: _loading ? null : _predict),
-
+                        loading: _loading,
+                        onPressed: _loading ? null : _predict),
                     if (_error.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 10),
@@ -249,17 +182,11 @@ class _PredictScreenState extends State<PredictScreen>
                             style: const TextStyle(
                                 color: Colors.redAccent, fontSize: 12)),
                       ),
-
-                    // Result
-                    if (_result != null) ...
-                      [
-                        const SizedBox(height: 20),
-                        _ResultPanel(
-                          result: _result!,
+                    if (_result != null) ...[const SizedBox(height: 20),
+                      _ResultPanel(
+                          result:    _result!,
                           gaugeAnim: _gaugeAnim,
-                          usedApi: _usedApi,
-                        ),
-                      ],
+                          usedApi:   _usedApi)],
                   ],
                 ),
               ),
@@ -285,16 +212,15 @@ class _Header extends StatelessWidget {
         children: [
           const Icon(Icons.psychology, color: Color(0xFF0DA7C2), size: 22),
           const SizedBox(width: 8),
-          const Text(
-            'Flood Risk Prediction',
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w700),
-          ),
+          const Text('Flood Risk Prediction',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700)),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: const Color(0xFF0DA7C2).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
@@ -338,8 +264,7 @@ class _StateSelector extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
@@ -348,12 +273,11 @@ class _StateSelector extends StatelessWidget {
           dropdownColor: const Color(0xFF0D2232),
           iconEnabledColor: const Color(0xFF0DA7C2),
           style: const TextStyle(
-              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500),
           items: _allStates
-              .map((s) => DropdownMenuItem(
-                    value: s,
-                    child: Text(s),
-                  ))
+              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
               .toList(),
           onChanged: (v) { if (v != null) onChanged(v); },
         ),
@@ -392,8 +316,8 @@ class _CollapsibleSection extends StatelessWidget {
             onTap: onToggle,
             behavior: HitTestBehavior.opaque,
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 12),
               child: Row(
                 children: [
                   Icon(icon, color: const Color(0xFF0DA7C2), size: 18),
@@ -441,41 +365,37 @@ class _RiverParamsForm extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-                child: _FieldTile(
-                    label: 'Peak Level (m)',
-                    hint: '8.5',
-                    ctrl: peakCtrl,
-                    tooltip: 'CWC gauge level in metres')),
-            const SizedBox(width: 10),
-            Expanded(
-                child: _FieldTile(
-                    label: 'Duration (days)',
-                    hint: '1',
-                    ctrl: durCtrl,
-                    tooltip: 'Flood event duration')),
-          ],
-        ),
+        Row(children: [
+          Expanded(
+              child: _FieldTile(
+                  label: 'Peak Level (m)',
+                  hint: '8.5',
+                  ctrl: peakCtrl,
+                  tooltip: 'CWC gauge level in metres')),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _FieldTile(
+                  label: 'Duration (days)',
+                  hint: '1',
+                  ctrl: durCtrl,
+                  tooltip: 'Flood event duration')),
+        ]),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-                child: _FieldTile(
-                    label: 'Time to Peak (days)',
-                    hint: '1',
-                    ctrl: peakTimeCtrl,
-                    tooltip: 'Hours from event start to peak')),
-            const SizedBox(width: 10),
-            Expanded(
-                child: _FieldTile(
-                    label: 'Recession (days)',
-                    hint: '1',
-                    ctrl: recCtrl,
-                    tooltip: 'River recession time after peak')),
-          ],
-        ),
+        Row(children: [
+          Expanded(
+              child: _FieldTile(
+                  label: 'Time to Peak (days)',
+                  hint: '1',
+                  ctrl: peakTimeCtrl,
+                  tooltip: 'Hours from event start to peak')),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _FieldTile(
+                  label: 'Recession (days)',
+                  hint: '1',
+                  ctrl: recCtrl,
+                  tooltip: 'River recession time after peak')),
+        ]),
       ],
     );
   }
@@ -490,6 +410,7 @@ class _RainfallForm extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const dayLabels = ['D-7', 'D-6', 'D-5', 'D-4', 'D-3', 'D-2', 'D-1'];
     return GridView.count(
       crossAxisCount: 4,
       crossAxisSpacing: 8,
@@ -497,15 +418,15 @@ class _RainfallForm extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       childAspectRatio: 1.6,
-      children: List.generate(7, (i) {
-        final dayLabels = ['D-7', 'D-6', 'D-5', 'D-4', 'D-3', 'D-2', 'D-1'];
-        return _FieldTile(
-          label: dayLabels[i],
-          hint: '0',
-          ctrl: controllers[i],
+      children: List.generate(
+        7,
+        (i) => _FieldTile(
+          label:   dayLabels[i],
+          hint:    '0',
+          ctrl:    controllers[i],
           tooltip: 'T${i + 1}d rainfall mm',
-        );
-      }),
+        ),
+      ),
     );
   }
 }
@@ -514,9 +435,8 @@ class _RainfallForm extends StatelessWidget {
 // FIELD TILE
 // ─────────────────────────────────────────────────────────────────────────────
 class _FieldTile extends StatelessWidget {
-  final String label, hint;
+  final String label, hint, tooltip;
   final TextEditingController ctrl;
-  final String tooltip;
   const _FieldTile(
       {required this.label,
       required this.hint,
@@ -531,22 +451,20 @@ class _FieldTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-              style:
-                  const TextStyle(color: Colors.white54, fontSize: 10)),
+              style: const TextStyle(color: Colors.white54, fontSize: 10)),
           const SizedBox(height: 4),
           TextField(
             controller: ctrl,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
-              FilteringTextInputFormatter.allow(
-                  RegExp(r'[0-9.]'))
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
             ],
             style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: const TextStyle(
-                  color: Colors.white24, fontSize: 12),
+              hintStyle:
+                  const TextStyle(color: Colors.white24, fontSize: 12),
               filled: true,
               fillColor: Colors.white.withValues(alpha: 0.06),
               border: OutlineInputBorder(
@@ -561,8 +479,8 @@ class _FieldTile extends StatelessWidget {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(
-                    color: Color(0xFF0DA7C2)),
+                borderSide:
+                    const BorderSide(color: Color(0xFF0DA7C2)),
               ),
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 10, vertical: 8),
@@ -591,8 +509,8 @@ class _PredictButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF0DA7C2),
           foregroundColor: Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14)),
           elevation: 0,
         ),
         onPressed: onPressed,
@@ -633,7 +551,6 @@ class _ResultPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Source badge
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -665,24 +582,14 @@ class _ResultPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-
-        // Risk gauge + severity
         _RiskGauge(result: result, anim: gaugeAnim),
         const SizedBox(height: 16),
-
-        // Probability bar chart
         _ProbabilityChart(probs: result.probabilities),
         const SizedBox(height: 14),
-
-        // Stats grid
         _StatsGrid(result: result),
         const SizedBox(height: 14),
-
-        // Monitoring card
         _MonitoringCard(result: result),
         const SizedBox(height: 14),
-
-        // Ensemble breakdown (if available)
         if (result.ruleProbs.isNotEmpty || result.mlProbs.isNotEmpty)
           _EnsemblePanel(result: result),
       ],
@@ -721,10 +628,9 @@ class _RiskGauge extends StatelessWidget {
             border: Border.all(color: _color.withValues(alpha: 0.35)),
             boxShadow: [
               BoxShadow(
-                color: _color.withValues(alpha: 0.12),
-                blurRadius: 20,
-                spreadRadius: 2,
-              ),
+                  color: _color.withValues(alpha: 0.12),
+                  blurRadius: 20,
+                  spreadRadius: 2),
             ],
           ),
           child: Column(
@@ -744,13 +650,13 @@ class _RiskGauge extends StatelessWidget {
                     color: Colors.white54, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              // Gauge bar
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: LinearProgressIndicator(
                   value: progress,
                   minHeight: 14,
-                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  backgroundColor:
+                      Colors.white.withValues(alpha: 0.08),
                   valueColor: AlwaysStoppedAnimation<Color>(_color),
                 ),
               ),
@@ -782,9 +688,9 @@ class _RiskGauge extends StatelessWidget {
 // PROBABILITY BAR CHART
 // ─────────────────────────────────────────────────────────────────────────────
 const _severityColors = {
-  'LOW': Color(0xFF43A047),
+  'LOW':      Color(0xFF43A047),
   'MODERATE': Color(0xFFFB8C00),
-  'SEVERE': Color(0xFFF4511E),
+  'SEVERE':   Color(0xFFF4511E),
   'CRITICAL': Color(0xFFB71C1C),
 };
 
@@ -794,16 +700,15 @@ class _ProbabilityChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
+    const labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
     final bars = labels.asMap().entries.map((e) {
-      final label = e.value;
-      final val = probs[label] ?? 0.0;
+      final val = probs[e.value] ?? 0.0;
       return BarChartGroupData(
         x: e.key,
         barRods: [
           BarChartRodData(
             toY: val,
-            color: _severityColors[label],
+            color: _severityColors[e.value],
             width: 28,
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(6)),
@@ -818,7 +723,8 @@ class _ProbabilityChart extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        border:
+            Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: BarChart(
         BarChartData(
@@ -899,13 +805,16 @@ class _StatsGrid extends StatelessWidget {
       _Stat('Proximity to Danger',
           '${result.proximityToDangerM.toStringAsFixed(2)} m',
           Icons.social_distance),
-      _Stat('Confidence', '${result.confidencePercent.toStringAsFixed(1)}%',
+      _Stat('Confidence',
+          '${result.confidencePercent.toStringAsFixed(1)}%',
           Icons.verified),
-      _Stat('Threshold', result.thresholdSeverity.isNotEmpty
-          ? result.thresholdSeverity
-          : '—', Icons.rule),
+      _Stat(
+          'Threshold',
+          result.thresholdSeverity.isNotEmpty
+              ? result.thresholdSeverity
+              : '—',
+          Icons.rule),
     ];
-
     return GridView.count(
       crossAxisCount: 2,
       crossAxisSpacing: 10,
@@ -993,8 +902,7 @@ class _MonitoringCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.notifications_active,
-              color: _bg, size: 22),
+          Icon(Icons.notifications_active, color: _bg, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1020,9 +928,9 @@ class _MonitoringCard extends StatelessWidget {
   String _defaultAction(String sev) {
     switch (sev) {
       case 'CRITICAL': return 'Immediate evacuation. Contact NDRF.';
-      case 'SEVERE': return 'Alert district admin. Prepare evacuation routes.';
+      case 'SEVERE':   return 'Alert district admin. Prepare evacuation routes.';
       case 'MODERATE': return 'Monitor every 6h. Pre-position rescue teams.';
-      default: return 'Standard monitoring. Review 7-day forecast daily.';
+      default:         return 'Standard monitoring. Review 7-day forecast daily.';
     }
   }
 }
@@ -1048,7 +956,8 @@ class _EnsemblePanel extends StatelessWidget {
         children: [
           const Row(
             children: [
-              Icon(Icons.account_tree, color: Color(0xFF0DA7C2), size: 14),
+              Icon(Icons.account_tree,
+                  color: Color(0xFF0DA7C2), size: 14),
               SizedBox(width: 6),
               Text('Ensemble Breakdown',
                   style: TextStyle(
@@ -1058,7 +967,7 @@ class _EnsemblePanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          _MiniProbRow(label: 'ML (75%)', probs: result.mlProbs),
+          _MiniProbRow(label: 'ML (75%)',   probs: result.mlProbs),
           const SizedBox(height: 6),
           _MiniProbRow(label: 'Rule (25%)', probs: result.ruleProbs),
         ],
@@ -1086,7 +995,8 @@ class _MiniProbRow extends StatelessWidget {
           final pct = probs[l] ?? 0.0;
           return Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 2),
               child: Column(
                 children: [
                   Text(
