@@ -60,7 +60,9 @@ class _PredictScreenState extends State<PredictScreen>
     _durCtrl.dispose();
     _peakTimeCtrl.dispose();
     _recCtrl.dispose();
-    for (final c in _rainCtrl) c.dispose();
+    for (final c in _rainCtrl) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -110,7 +112,7 @@ class _PredictScreenState extends State<PredictScreen>
 
     try {
       final input = _buildInput();
-      final prediction = await _svc.predict(input);   // /predict/v2 + offline
+      final prediction = await _svc.predict(input);
       if (!mounted) return;
       setState(() {
         _result  = _toFloodResult(prediction);
