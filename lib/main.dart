@@ -14,15 +14,28 @@ class OpsFloodApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lightColorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF006C77),
+      brightness: Brightness.light,
+    );
+
+    final darkColorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF00151A),
+      brightness: Brightness.dark,
+    );
+
     return MaterialApp(
       title: 'OpsFlood',
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF006C77),
-          brightness: Brightness.dark,
-        ),
+        colorScheme: lightColorScheme,
+        scaffoldBackgroundColor: const Color(0xFFF5F7FB),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: darkColorScheme,
         scaffoldBackgroundColor: const Color(0xFF06101A),
       ),
       home: const SplashScreen(),
