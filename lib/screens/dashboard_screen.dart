@@ -99,24 +99,26 @@ class _DashboardScreenState extends State<DashboardScreen>
         : levels.firstWhere((e) => e.city == _selectedCity,
             orElse: () => primary!);
 
-    // Read CWC station data from RealTimeService (backend-proxied, no CORS)
     final cwcStations = _service.cwcStations;
     final hasCwcLive  = _service.hasCwcLiveData;
 
-    // Connection states
-    final bool isBackendLive = _service.lastFetchTime != null &&
-        !_service.isUsingFallback;
-    final bool isConnecting  = _service.lastFetchTime == null;
+    // FIX 4: use isWakingUp getter (true = online + polling + no real fetch yet)
+    // instead of lastFetchTime == null (which was always false due to synthetic time).
+    final bool isBackendLive  = _service.lastFetchTime != null &&
+        !_service.isUsingFallback && !_service.isWakingUp;
+    final bool isConnecting   = _service.isWakingUp;
 
-    final bool showLive       = isBackendLive;
-    final bool showCwcLive    = !isBackendLive && hasCwcLive;
-    final bool showConnecting = !isBackendLive && !hasCwcLive && _service.isOnline;
+    final bool showLive       = isBackendLive && !hasCwcLive;
+    final bool showCwcLive    = hasCwcLive;
+    final bool showConnecting = isConnecting && !hasCwcLive;
 
     final timestampLabel = isBackendLive
         ? 'Updated ${DateFormat("dd MMM, HH:mm:ss").format(_service.lastFetchTime!.toLocal())}'
         : cwcStations.isNotEmpty
-            ? 'CWC data: ${DateFormat("HH:mm:ss").format(DateTime.now())} \u00b7 Backend waking\u2026'
-            : 'Connecting to live feed\u2026';
+            ? 'CWC data: ${DateFormat("HH:mm:ss").format(DateTime.now())} \u00b7 Backend proxied'
+            : isConnecting
+                ? 'Connecting to live feed\u2026'
+                : 'Waiting for live data\u2026';
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -157,6 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 4),
 
+                    // FIX 4: showConnecting is now correctly true during cold start
                     showConnecting
                         ? AnimatedBuilder(
                             animation: _pulseAnim,
@@ -174,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 10),
 
                     // Status banners
-                    if (hasCwcLive && !isBackendLive)
+                    if (hasCwcLive)
                       _CwcLiveBanner(
                         stationCount: cwcStations.length,
                       )
@@ -212,7 +215,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 14),
 
-                    // Gauge — top-risk city
+                    // Gauge
                     if (primary != null)
                       Center(
                         child: FloodGauge(
@@ -230,7 +233,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                     const SizedBox(height: 14),
 
-                    // CWC station strip — data from backend proxy via RealTimeService
+                    // CWC station strip
                     if (cwcStations.isNotEmpty) ...[
                       _CwcStationStrip(stations: cwcStations.take(6).toList()),
                       const SizedBox(height: 14),
@@ -274,14 +277,16 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   : _service.isOnline ? 'Online' : 'Offline',
                               value: hasCwcLive
                                   ? '${cwcStations.length}'
-                                  : _service.queuedOfflineCycles > 0
-                                      ? '${_service.queuedOfflineCycles}'
-                                      : showConnecting ? 'Waking' : 'Live',
+                                  : isConnecting
+                                      ? 'Waking'
+                                      : _service.queuedOfflineCycles > 0
+                                          ? '${_service.queuedOfflineCycles}'
+                                          : 'Live',
                               subtitle: hasCwcLive
                                   ? 'stations above warning'
                                   : _service.isUsingCache
                                       ? 'cache mode'
-                                      : showConnecting
+                                      : isConnecting
                                           ? 'backend waking'
                                           : 'real-time feed',
                               accent: hasCwcLive

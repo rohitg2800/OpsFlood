@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection' show LinkedHashSet;
 import 'dart:convert';
+import 'dart:io' show SocketException;
 import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -15,8 +16,6 @@ import 'api_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CwcStationData — lightweight data class for a single CWC gauge reading.
-// Replaces CwcStation from the deleted cwc_service.dart.
-// Populated from the backend /api/live-telemetry response (not direct CWC calls).
 // ─────────────────────────────────────────────────────────────────────────────
 class CwcStationData {
   final String stationName;
@@ -71,15 +70,7 @@ class CwcStationData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RealTimeService — SINGLE source of truth for all live data in the app.
-//
-// Data flow (all through backend, never direct CWC calls from phone):
-//   Phone → ApiService → OpsFlood backend → CWC/tactical fallback
-//
-// Provides:
-//   - liveLevels:   List<FloodData>      (per-city gauged levels)
-//   - cwcStations:  List<CwcStationData> (raw CWC station strip)
-//   - criticalAlerts, history, notifications, cache
+// RealTimeService
 // ─────────────────────────────────────────────────────────────────────────────
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
@@ -88,9 +79,7 @@ class RealTimeService extends ChangeNotifier {
 
   static const String _cacheKey = 'opsflood_realtime_cache_v2';
 
-  // ── Wake-up config ────────────────────────────────────────────────────────
   static const int      _wakeUpMaxAttempts = 20;
-  // FIX: reduced from 5 s → 2 s for faster first-boot recovery on Render
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
 
@@ -109,6 +98,10 @@ class RealTimeService extends ChangeNotifier {
   bool _isUsingCache         = false;
   bool _isUsingFallback      = false;
   bool _liveDataEverReceived = false;
+
+  // FIX 4: track whether lastFetchTime is real (from network) or synthetic
+  // (set by _loadFallbackImmediately). Dashboard uses this to show waking banner.
+  bool _hasRealFetchTime = false;
 
   int       _retryCount          = 0;
   int       _queuedOfflineCycles = 0;
@@ -132,23 +125,27 @@ class RealTimeService extends ChangeNotifier {
   // ── Public getters ────────────────────────────────────────────────────────
   List<FloodData>      get liveLevels          => _liveLevels;
   List<FloodAlert>     get criticalAlerts      => _criticalAlerts;
-  /// CWC stations above warning level — populated from backend proxy.
   List<CwcStationData> get cwcStations         => _cwcStations;
-  /// 'CWC_API' when backend got live data, 'TACTICAL_REGISTRY' on fallback.
   String               get cwcSource           => _cwcSource;
-  bool                 get hasCwcLiveData      => _cwcStations.isNotEmpty &&
-                                                  _cwcSource == 'CWC_API';
-  DateTime?            get lastFetchTime       => _lastFetchTime;
-  String?              get error               => _error;
-  bool                 get isLoading           => _isLoading;
-  bool                 get isOnline            => _isOnline;
-  bool                 get isUsingCache        => _isUsingCache;
-  bool                 get isPolling           => _isPolling;
-  int                  get queuedOfflineCycles => _queuedOfflineCycles;
 
-  // FIX: removed `&& !_liveDataEverReceived` — that guard was hiding fallback
-  // state during cold start when live data has never arrived yet.
-  bool get isUsingFallback => _isUsingFallback;
+  // FIX 2: drop source == 'CWC_API' guard — the strip being non-empty IS
+  // the proof that the backend proxied live data. The source field is often
+  // 'TACTICAL_REGISTRY' even when data is fresh from the CWC feed.
+  bool get hasCwcLiveData => _cwcStations.isNotEmpty;
+
+  DateTime? get lastFetchTime       => _lastFetchTime;
+  String?   get error               => _error;
+  bool      get isLoading           => _isLoading;
+  bool      get isOnline            => _isOnline;
+  bool      get isUsingCache        => _isUsingCache;
+  bool      get isPolling           => _isPolling;
+  int       get queuedOfflineCycles => _queuedOfflineCycles;
+  bool      get isUsingFallback     => _isUsingFallback;
+
+  // FIX 4: true when we're online + polling but no real network response yet.
+  // Dashboard uses this for the pulsing "Waking backend" message.
+  bool get isWakingUp =>
+      _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
 
   MultiLocationMonitoring get monitoringData {
     final hash = _liveLevels.length ^ (_historyByCity.length << 16);
@@ -188,35 +185,27 @@ class RealTimeService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
     await _initNotifications();
-    // FIX 1: Load fallback data FIRST, synchronously, before any network call.
-    // This ensures the dashboard always has cities + a non-null lastFetchTime
-    // to display (instead of empty gauge + "CONNECTING") during cold start.
     _loadFallbackImmediately();
-    // FIX 2: Restore cache on top of fallback (overwrites if cache exists).
-    // notifyListeners() is called inside so consumers rebuild right away.
     await _restoreFromCache();
     await _initConnectivityListener();
     _initialized = true;
     _scheduleWakeUpRetry();
   }
 
-  // ── FIX: Immediate fallback loader ───────────────────────────────────────
-  // Called synchronously at the very start of initialize(). Guarantees
-  // _liveLevels and _lastFetchTime are never null/empty when the first
-  // frame renders, so the dashboard shows gauges instead of "CONNECTING".
   void _loadFallbackImmediately() {
-    if (_liveLevels.isNotEmpty) return; // already have data (e.g. hot restart)
+    if (_liveLevels.isNotEmpty) return;
     _liveLevels      = _fallbackMonitoredLevels();
     _isUsingFallback = true;
-    // Set a synthetic lastFetchTime so widgets that gate on `lastFetchTime != null`
-    // always get past the null check and render the fallback cities.
+    // Synthetic timestamp — NOT a real network fetch. _hasRealFetchTime stays false.
     _lastFetchTime   = DateTime.now();
     notifyListeners();
   }
 
-  // ── Wake-up loop with exponential backoff ─────────────────────────────────
+  // ── Wake-up loop ──────────────────────────────────────────────────────────
+  // FIX 3: removed `|| _liveDataEverReceived` early-exit so the loop can
+  // restart after a Render sleep mid-session when _liveLevels goes empty.
   void _scheduleWakeUpRetry() {
-    if (_wakeAttempts >= _wakeUpMaxAttempts || _liveDataEverReceived) return;
+    if (_wakeAttempts >= _wakeUpMaxAttempts) return;
     _wakeUpTimer?.cancel();
     final delayMs = _wakeAttempts == 0
         ? 0
@@ -231,12 +220,8 @@ class RealTimeService extends ChangeNotifier {
       _wakeAttempts++;
       try {
         final health = await _api.checkHealth();
-        // FIX 3: Don't trust /health alone — Render can report healthy while
-        // /api/live-levels is still cold-starting and returning empty.
-        // Only stop retrying once we actually have live city data.
         if (health['status'] != 'error') {
           await refreshData();
-          // Confirm we got real data, not just an empty-but-healthy response.
           if (_liveDataEverReceived && _liveLevels.isNotEmpty) return;
         }
       } catch (_) {}
@@ -277,7 +262,7 @@ class RealTimeService extends ChangeNotifier {
     );
   }
 
-  // ── Connectivity (connectivity_plus v6) ───────────────────────────────────
+  // ── Connectivity ──────────────────────────────────────────────────────────
   Future<void> _initConnectivityListener() async {
     final connectivity = Connectivity();
     final initial = await connectivity.checkConnectivity();
@@ -339,8 +324,9 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Core data refresh ─────────────────────────────────────────────────────
-  // Fetches both per-city FloodData (liveLevels) and raw CWC station strip
-  // in parallel. Both go through the backend — no direct CWC calls from phone.
+  // FIX 1: Replaced the single broad catch(e) with typed error handling so
+  // we can distinguish transient timeouts from parse errors. retryCount now
+  // resets if CWC data arrived even if levels were empty (partial success).
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -356,7 +342,6 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Run both fetches in parallel
       final results = await Future.wait([
         _api.getLiveLevels(),
         _api.getCriticalAlerts(),
@@ -370,6 +355,9 @@ class RealTimeService extends ChangeNotifier {
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
       _updateCwcStations(cwcResponse);
+
+      // Partial success: CWC data arrived even if levels is empty
+      final bool cwcArrived = _cwcStations.isNotEmpty;
 
       if (levels.isNotEmpty) {
         _liveLevels           = levels;
@@ -388,29 +376,44 @@ class RealTimeService extends ChangeNotifier {
       _apply24HourTrim();
       await _dispatchThresholdNotifications(_liveLevels);
 
-      _retryCount          = 0;
+      // Reset retry only when we got something real
+      if (levels.isNotEmpty || cwcArrived) _retryCount = 0;
+
       _queuedOfflineCycles = 0;
       _lastFetchTime       = DateTime.now();
+      _hasRealFetchTime    = true;   // FIX 4: mark as real network response
       _isUsingCache        = false;
       _error               = null;
 
       await _persistCache();
+    } on TimeoutException {
+      _retryCount += 1;
+      _error = 'Request timed out — backend may be waking up.';
+      _maybeRestoreCache();
+    } on SocketException {
+      _retryCount += 1;
+      _error = 'Network error — check connection.';
+      _maybeRestoreCache();
     } catch (e) {
       _retryCount += 1;
-      _error = 'Refresh failed: ${e.toString()}';
-      if (_retryCount >= AppConstants.maxRetries) {
-        _isUsingCache = true;
-        await _restoreFromCache();
-      }
+      _error = 'Refresh error: ${e.toString()}';
+      _maybeRestoreCache();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+  // Only restore cache after 3 consecutive failures, and only if we currently
+  // have no real data (don't overwrite valid live data with stale cache).
+  Future<void> _maybeRestoreCache() async {
+    if (_retryCount >= AppConstants.maxRetries && !_liveDataEverReceived) {
+      _isUsingCache = true;
+      await _restoreFromCache();
+    }
+  }
+
   // ── CWC station parser ────────────────────────────────────────────────────
-  // Parses backend /api/live-telemetry response into CwcStationData list.
-  // The backend already handles CWC field normalisation + tactical fallback.
   void _updateCwcStations(Map<String, dynamic> response) {
     if (response['status'] == 'error') return;
     final raw = response['data'];
@@ -614,8 +617,6 @@ class RealTimeService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final raw   = prefs.getString(_cacheKey);
     if (raw == null || raw.isEmpty) {
-      // No cache — fallback already loaded by _loadFallbackImmediately().
-      // Still notify so any listeners that missed the first call get updated.
       notifyListeners();
       return;
     }
@@ -655,15 +656,13 @@ class RealTimeService extends ChangeNotifier {
         });
       }
 
-      _lastFetchTime = DateTime.tryParse(
+      final cachedTime = DateTime.tryParse(
           (parsed['last_fetch_time'] ?? '').toString());
+      // Only overwrite lastFetchTime if we don't already have a real one
+      if (!_hasRealFetchTime) _lastFetchTime = cachedTime;
       _isUsingCache  = true;
-      // If cache had levels, we're no longer in pure fallback mode.
       if (_liveLevels.isNotEmpty) _isUsingFallback = false;
       _apply24HourTrim();
-
-      // FIX: Notify immediately after restoring so dashboard rebuilds with
-      // cached city data instead of waiting for the first network response.
       notifyListeners();
     } catch (_) {
       if (_liveLevels.isEmpty) {
