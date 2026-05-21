@@ -119,6 +119,8 @@ class ApiService {
         '\${AppConstants.liveTelemetryEndpoint}?state=Maharashtra&station=Kolhapur&limit=12',
       );
 
+  /// Fetches live levels from backend /api/live-levels.
+  /// The backend itself calls CWC → tactical fallback → formats into FloodData shape.
   Future<Map<String, dynamic>> getLiveLevels() =>
       _get(AppConstants.liveLevelsEndpoint);
 
@@ -131,23 +133,27 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
       '\${AppConstants.criticalAlertsEndpoint}?state=\${Uri.encodeComponent(state)}');
 
+  // ── CWC Direct ─────────────────────────────────────────────────────────
+  /// Calls backend /cwc-live-data?station=X  (proxied CWC)
+  Future<Map<String, dynamic>> getCwcLiveData(String station) =>
+      _get('/cwc-live-data?station=\${Uri.encodeComponent(station)}');
+
+  /// Calls backend /api/live-telemetry  (all-stations CWC feed)
+  Future<Map<String, dynamic>> getLiveTelemetry(
+          {String state = 'Maharashtra',
+          String station = 'Kolhapur',
+          int limit = 15}) =>
+      _get(
+          '\${AppConstants.liveTelemetryEndpoint}?state=\${Uri.encodeComponent(state)}&station=\${Uri.encodeComponent(station)}&limit=$limit');
+
   // ── Model ────────────────────────────────────────────────────────────────
-  /// Returns accuracy, f1_score, precision, recall, training_samples
-  /// for the currently active OpsFlood model bundle.
-  /// Used by the Dashboard to render the model confidence card.
   Future<Map<String, dynamic>> getModelMetrics() =>
       _get('/model-metrics');
 
   // ── Prediction ──────────────────────────────────────────────────────────
-  /// Legacy endpoint — manual input only, no CWC auto-fill.
   Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
       _post(AppConstants.predictLegacyEndpoint, input);
 
-  /// V2 endpoint — auto-fetches live CWC telemetry for state/station
-  /// before running inference. Falls back to manual input values when
-  /// live data is unavailable. Returns extra fields:
-  ///   autofill_applied: bool
-  ///   live_river_level_m: double?
   Future<Map<String, dynamic>> predictV2(Map<String, dynamic> input) =>
       _post('/predict/v2', input);
 
@@ -178,4 +184,16 @@ class ApiService {
     int limit = 24,
   }) =>
       _get('/historical-logs?city=\${Uri.encodeComponent(city)}&limit=$limit');
+
+  // ── Audit / telemetry snapshots ─────────────────────────────────────────
+  Future<Map<String, dynamic>> getAuditLogs({int limit = 50}) =>
+      _get('/audit-logs?limit=$limit');
+
+  Future<Map<String, dynamic>> getTelemetrySnapshots(
+          {String? state, String? station, int limit = 50}) {
+    final params = ['limit=$limit'];
+    if (state   != null) params.add('state=\${Uri.encodeComponent(state)}');
+    if (station != null) params.add('station=\${Uri.encodeComponent(station)}');
+    return _get('/telemetry-snapshots?\${params.join("&")}');
+  }
 }
