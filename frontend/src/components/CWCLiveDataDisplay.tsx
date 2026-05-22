@@ -26,6 +26,18 @@ import {
 } from './OpsPrimitives';
 
 type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
+type SensorSource = 'CWC_API' | 'HTML_SCRAPE' | 'CACHED' | 'MANUAL' | 'TACTICAL_REGISTRY';
+
+const KNOWN_SENSOR_SOURCES: ReadonlySet<SensorSource> = new Set([
+  'CWC_API', 'HTML_SCRAPE', 'CACHED', 'MANUAL', 'TACTICAL_REGISTRY',
+]);
+
+function toSensorSource(value: string | null | undefined): SensorSource | undefined {
+  if (value && KNOWN_SENSOR_SOURCES.has(value as SensorSource)) {
+    return value as SensorSource;
+  }
+  return undefined;
+}
 
 const getStatusTone = (status?: string): Tone => {
   if (status === 'CRITICAL') return 'danger';
@@ -56,15 +68,9 @@ export function CWCLiveDataDisplay() {
     state.prediction.selectedState,
   );
 
-  // -----------------------------------------------------------------------
-  // Build regionTelemetry directly from the live sensor feed (36 live levels
-  // from /api/live-telemetry) instead of depending on the CWC scraper.
-  // Falls back to cwc.liveData.regionalData only when sensor feed is empty.
-  // -----------------------------------------------------------------------
   const regionTelemetry = useMemo(() => {
     const liveSensors = state.sensors.data || [];
 
-    // Prefer scoped sensors; fall back to all live sensors.
     const scoped = scopeSensorsToSelectedLocation(liveSensors, {
       selectedCity: state.prediction.selectedCity,
       station: state.form.data.station,
@@ -88,7 +94,7 @@ export function CWCLiveDataDisplay() {
       danger_level: node.dangerLevel,
       trend: node.trend,
       state: node.state,
-      source: node.source,
+      source: toSensorSource(node.source),
     }));
   }, [
     state.sensors.data,
@@ -98,9 +104,6 @@ export function CWCLiveDataDisplay() {
     state.prediction.selectedState,
   ]);
 
-  // -----------------------------------------------------------------------
-  // Lead node: prefer first sensor card, fall back to cwc.liveData fields.
-  // -----------------------------------------------------------------------
   const leadSensor = regionTelemetry[0] ?? null;
 
   const dangerLevel =
@@ -120,7 +123,7 @@ export function CWCLiveDataDisplay() {
     state.cwc.liveData.status ??
     state.cwc.liveData.kolhapurStatus;
 
-  const source = leadSensor?.source ?? state.cwc.liveData.source;
+  const source = leadSensor?.source ?? toSensorSource(state.cwc.liveData.source);
   const preferredRiver = leadSensor?.river ?? state.cwc.liveData.river;
   const warningLevel =
     Number(leadSensor?.warning_level || 0) ||
@@ -129,7 +132,6 @@ export function CWCLiveDataDisplay() {
   const preferredStation = leadSensor?.station ?? state.cwc.liveData.station ?? selectedStation;
   const trend = leadSensor?.trend ?? state.cwc.liveData.trend;
 
-  // isConnected = true when we have at least one live sensor card.
   const isConnected = regionTelemetry.length > 0;
 
   const dataSourceMessage = getCWCDataSourceMessage({
