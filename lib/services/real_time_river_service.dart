@@ -19,6 +19,9 @@
 //
 //   SOURCE 4: /api/cwc-reservoir/state?state=STATE
 //             Reservoir level for dam-adjacent cities.
+//             NOTE: Results are cached per-state for the full cache TTL.
+//             Each state is fetched at most once per poll cycle, not once
+//             per city. This eliminates the N+1 fan-out (95 calls → 28).
 //
 // DATA INTEGRITY RULES:
 //   1. A level must be > 0 to be used. Never display 0 as a real reading.
@@ -63,10 +66,12 @@ class RealTimeRiverService {
   // bulkList: all stations from /api/live-telemetry?all_states=true
   // stateCache: per-state telemetry lists (populated lazily)
   // liveLevels: from /api/live-levels
-  List<dynamic>               _bulkList   = [];
-  final Map<String, List<dynamic>> _stateCache  = {};
-  List<dynamic>               _liveLevels = [];
-  DateTime?                   _cacheTime;
+  // reservoirCache: per-state reservoir lists (SOURCE 4) — dedup N+1 fan-out
+  List<dynamic>                    _bulkList       = [];
+  final Map<String, List<dynamic>> _stateCache     = {};
+  final Map<String, List<dynamic>> _reservoirCache = {};
+  List<dynamic>                    _liveLevels     = [];
+  DateTime?                        _cacheTime;
   static const Duration _cacheTTL = Duration(minutes: 5);
 
   // Render free tier cold-start can take up to 25s
@@ -127,6 +132,7 @@ class RealTimeRiverService {
     _cacheTime = null;
     _bulkList  = [];
     _stateCache.clear();
+    _reservoirCache.clear();
     _liveLevels = [];
     return fetchAll();
   }
@@ -221,10 +227,20 @@ class RealTimeRiverService {
     } catch (_) {}
 
     // ── SOURCE 4: Reservoir levels (dam-adjacent cities) ─────────────────
-    try {
-      final res = await _api.getReservoirLevels(state: state)
-          .timeout(_resTimeout);
-      final rl = _deepList(res);
+    // FIX: Cache per-state so each state is fetched at most once per poll cycle.
+    // Previously this fired one HTTP call per city, causing ~95 duplicate
+    // reservoir calls (same state hit 4-6x) per cycle → Render health timeouts.
+    if (!_reservoirCache.containsKey(stKey)) {
+      try {
+        final res = await _api.getReservoirLevels(state: state)
+            .timeout(_resTimeout);
+        _reservoirCache[stKey] = _deepList(res);
+      } catch (_) {
+        _reservoirCache[stKey] = [];
+      }
+    }
+    final rl = _reservoirCache[stKey] ?? [];
+    if (rl.isNotEmpty) {
       final m = _bestMatch(rl, city, state, river);
       if (m != null && m.confidence >= 0.40) {
         final lv = _fp(
@@ -240,7 +256,7 @@ class RealTimeRiverService {
           );
         }
       }
-    } catch (_) {}
+    }
 
     // ── ALL SOURCES EXHAUSTED — honest NO_DATA ───────────────────────────
     return LiveRiverResult(
