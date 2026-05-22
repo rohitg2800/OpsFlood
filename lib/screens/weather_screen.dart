@@ -229,15 +229,17 @@ class _WeatherScreenState extends State<WeatherScreen>
   }
 
   Future<void> _loadDefault() async {
-    final mumbai = _GeoResult(
-      name: 'Mumbai',
-      admin1: 'Maharashtra',
+    // Default location: Motihari, East Champaran, Bihar
+    // A major flood-prone district on the Gandak river plain
+    const motihari = _GeoResult(
+      name: 'Motihari',
+      admin1: 'Bihar',
       country: 'India',
-      lat: 19.0760,
-      lon: 72.8777,
+      lat: 26.6507,
+      lon: 84.9172,
     );
-    _location = mumbai;
-    await _fetchWeather(mumbai);
+    _location = motihari;
+    await _fetchWeather(motihari);
   }
 
   @override
