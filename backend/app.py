@@ -74,6 +74,7 @@ if _is_package_context():
     from backend.routers.weather import router as weather_router
     from backend.routers.telemetry import router as telemetry_router
     from backend.routers.ingestion import router as ingestion_router
+    from backend.routers.live_levels import router as live_levels_router
 else:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
@@ -92,6 +93,7 @@ else:
     from routers.weather import router as weather_router
     from routers.telemetry import router as telemetry_router
     from routers.ingestion import router as ingestion_router
+    from routers.live_levels import router as live_levels_router
 
 
 warnings.filterwarnings('ignore')
@@ -1308,6 +1310,7 @@ app.include_router(predict_router)
 app.include_router(weather_router)
 app.include_router(telemetry_router)
 app.include_router(ingestion_router)
+app.include_router(live_levels_router)
 
 
 @app.on_event("startup")
