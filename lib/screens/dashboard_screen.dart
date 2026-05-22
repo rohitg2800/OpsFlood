@@ -112,10 +112,11 @@ class _DashboardScreenState extends State<DashboardScreen>
     final bool showCwcLive    = hasCwcLive;
     final bool showConnecting = isConnecting && !hasCwcLive;
 
+    // FIX: removed backslash-escapes so Dart actually evaluates the interpolations
     final timestampLabel = isBackendLive
-        ? 'Updated \${DateFormat("dd MMM, HH:mm:ss").format(_service.lastFetchTime!.toLocal())}'
+        ? 'Updated ${DateFormat("dd MMM, HH:mm:ss").format(_service.lastFetchTime!.toLocal())}'
         : cwcStations.isNotEmpty
-            ? 'CWC data: \${DateFormat("HH:mm:ss").format(DateTime.now())} \u00b7 Backend proxied'
+            ? 'CWC data: ${DateFormat("HH:mm:ss").format(DateTime.now())} \u00b7 Backend proxied'
             : isConnecting
                 ? 'Connecting to live feed\u2026'
                 : 'Waiting for live data\u2026';
@@ -137,7 +138,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: CustomScrollView(
             slivers: [
               SliverPadding(
-                // UI-FIX: increased horizontal padding to 18 and top to 16
                 padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
@@ -174,7 +174,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ? AnimatedBuilder(
                             animation: _pulseAnim,
                             builder: (_, __) => Text(
-                              'Waking up backend — CWC feed via proxy ~5 s',
+                              'Waking up backend \u2014 CWC feed via proxy ~5 s',
                               style: TextStyle(
                                   color: Colors.orange.withValues(alpha: _pulseAnim.value),
                                   fontSize: 12,
@@ -196,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _WakingBanner(
                         message: cwcStations.isEmpty
                             ? 'Connecting to CWC flood telemetry\u2026'
-                            : 'CWC data unavailable — estimated levels shown.',
+                            : 'CWC data unavailable \u2014 estimated levels shown.',
                       )
                     else if (!_service.isOnline)
                       _OfflineBanner(),
@@ -204,7 +204,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     if (_service.error != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 10),
-                        // UI-FIX: more breathing room
                         padding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 12),
                         decoration: BoxDecoration(
@@ -229,13 +228,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 16),
 
                     // ── Flood gauge
+                    // FIX: removed backslash-escapes so city & riverName are evaluated
                     if (primary != null)
                       Center(
                         child: FloodGauge(
                           capacity: primary.capacityPercent,
                           riskLevel: primary.riskLevel,
-                          label:
-                              '\${primary.city} | \${primary.riverName ?? "River"}',
+                          label: '${primary.city} | ${primary.riverName ?? "River"}',
                           size: 200,
                         ),
                       )
@@ -254,8 +253,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ],
 
                     // ── Stat cards row
-                    // UI-FIX: intrinsic height instead of fixed 110 so content
-                    // never clips on smaller screens.
+                    // FIX: removed backslash-escapes in value strings
                     IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -264,8 +262,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.warning_amber,
                               title: 'Critical',
-                              value:
-                                  '\${_service.monitoringData.criticalCount}',
+                              value: '${_service.monitoringData.criticalCount}',
                               subtitle: 'threshold breaches',
                               accent: const Color(0xFFEF4444),
                             ),
@@ -275,8 +272,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.ssid_chart,
                               title: 'High Risk',
-                              value:
-                                  '\${_service.monitoringData.highRiskCount}',
+                              value: '${_service.monitoringData.highRiskCount}',
                               subtitle: 'active locations',
                               accent: const Color(0xFFF59E0B),
                             ),
@@ -293,11 +289,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   ? 'CWC'
                                   : _service.isOnline ? 'Online' : 'Offline',
                               value: hasCwcLive
-                                  ? '\${cwcStations.length}'
+                                  ? '${cwcStations.length}'
                                   : isConnecting
                                       ? 'Waking'
                                       : _service.queuedOfflineCycles > 0
-                                          ? '\${_service.queuedOfflineCycles}'
+                                          ? '${_service.queuedOfflineCycles}'
                                           : 'Live',
                               subtitle: hasCwcLive
                                   ? 'stations above warning'
@@ -445,7 +441,7 @@ class _DebugPanel extends StatelessWidget {
     try {
       final enc = const JsonEncoder.withIndent('  ').convert(m);
       return enc.length > 800
-          ? '\${enc.substring(0, 800)}\n...truncated'
+          ? '${enc.substring(0, 800)}\n...truncated'
           : enc;
     } catch (_) {
       return m.toString();
@@ -472,13 +468,13 @@ class _DebugPanel extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   fontSize: 13)),
           const SizedBox(height: 8),
-          _row('isWakingUp',      '\${service.isWakingUp}'),
-          _row('hasCwcLiveData',  '\${service.hasCwcLiveData}'),
-          _row('cwcStations',     '\${service.cwcStations.length}'),
-          _row('isUsingFallback', '\${service.isUsingFallback}'),
-          _row('isUsingCache',    '\${service.isUsingCache}'),
-          _row('retryCount',      '\${service.debugRetryCount}'),
-          _row('wakeAttempts',    '\${service.debugWakeAttempts}'),
+          _row('isWakingUp',      '${service.isWakingUp}'),
+          _row('hasCwcLiveData',  '${service.hasCwcLiveData}'),
+          _row('cwcStations',     '${service.cwcStations.length}'),
+          _row('isUsingFallback', '${service.isUsingFallback}'),
+          _row('isUsingCache',    '${service.isUsingCache}'),
+          _row('retryCount',      '${service.debugRetryCount}'),
+          _row('wakeAttempts',    '${service.debugWakeAttempts}'),
           _row('error',           service.error ?? 'none'),
           const Divider(color: Colors.white12, height: 16),
           const Text('live-levels response:',
@@ -743,7 +739,6 @@ class _CwcStationStrip extends StatelessWidget {
                 fontSize: 14)),
         const SizedBox(height: 8),
         SizedBox(
-          // UI-FIX: taller cards so all content is visible
           height: 118,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
@@ -760,12 +755,11 @@ class _CwcStationStrip extends StatelessWidget {
                   ? s.stationName
                   : s.riverName.isNotEmpty
                       ? s.riverName
-                      : 'Station \${i + 1}';
+                      : 'Station ${i + 1}';
               final dangerStr = s.dangerLevel > 0
-                  ? 'DL: \${s.dangerLevel.toStringAsFixed(1)} m'
-                  : 'WL: \${s.warningLevel.toStringAsFixed(1)} m';
+                  ? 'DL: ${s.dangerLevel.toStringAsFixed(1)} m'
+                  : 'WL: ${s.warningLevel.toStringAsFixed(1)} m';
               return Container(
-                // UI-FIX: wider cards (164) + more padding
                 width: 164,
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
@@ -807,7 +801,7 @@ class _CwcStationStrip extends StatelessWidget {
                     Row(
                       children: [
                         Text(
-                            '\${s.riverLevel.toStringAsFixed(2)} m',
+                            '${s.riverLevel.toStringAsFixed(2)} m',
                             style: TextStyle(
                                 color: color,
                                 fontWeight: FontWeight.w800,
@@ -895,10 +889,10 @@ class _ModelMetricsCard extends StatelessWidget {
                         fontSize: 13)),
                 const SizedBox(height: 3),
                 Text(
-                  'F1 \${pct("f1_score").toStringAsFixed(1)}%  '
-                  'Acc \${pct("accuracy").toStringAsFixed(1)}%  '
-                  'P \${pct("precision").toStringAsFixed(1)}%  '
-                  'R \${pct("recall").toStringAsFixed(1)}%',
+                  'F1 ${pct("f1_score").toStringAsFixed(1)}%  '
+                  'Acc ${pct("accuracy").toStringAsFixed(1)}%  '
+                  'P ${pct("precision").toStringAsFixed(1)}%  '
+                  'R ${pct("recall").toStringAsFixed(1)}%',
                   style: TextStyle(
                       color: rc.textSecondary, fontSize: 11),
                 ),
@@ -906,7 +900,7 @@ class _ModelMetricsCard extends StatelessWidget {
             ),
           ),
           if (m['training_samples'] != null)
-            Text('\${m["training_samples"]}\nsamples',
+            Text('${m["training_samples"]}\nsamples',
                 textAlign: TextAlign.right,
                 style: TextStyle(
                     color: rc.textSecondary, fontSize: 10)),
