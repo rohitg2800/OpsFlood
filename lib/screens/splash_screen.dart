@@ -4,6 +4,7 @@ import 'dart:async';
 import 'home_screen.dart';
 import '../services/api_service.dart';
 import '../services/real_time_service.dart';
+import '../services/background_service.dart'; // FIX: was missing — caused build failure
 import '../theme/river_theme.dart';
 
 // FIX #1: RealTimeService.startPolling() is now called here in initState(),
