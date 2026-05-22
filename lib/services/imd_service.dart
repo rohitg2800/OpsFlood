@@ -1,42 +1,5 @@
 // OpsFlood — IMD Integration Service
 // ─────────────────────────────────────────────────────────────────────────────
-// P2: Authoritative India Meteorological Department integration scaffold.
-//
-// PURPOSE
-//   Provide official India-focused rainfall / weather alert ingestion that can
-//   be fused with CWC river levels and local ML predictions.
-//
-// IMPORTANT
-//   IMD has multiple public-facing products and some feeds may change format,
-//   require portal access, or be delivered as raster / bulletin / text PDFs.
-//   This service therefore uses a layered strategy:
-//     1. Backend proxy endpoint on OpsFlood (preferred, stable contract)
-//     2. Direct IMD advisory endpoint (when publicly available)
-//     3. Graceful no-data fallback
-//
-// FUTURE BACKEND CONTRACTS
-//   GET /api/imd/alerts?state=Maharashtra
-//   GET /api/imd/rainfall?state=Maharashtra&days=3
-//   GET /api/imd/nowcast?district=Pune
-//
-//   Response shape expected by app:
-//   {
-//     "status": "ok",
-//     "data": [
-//       {
-//         "title": "Heavy rainfall warning",
-//         "severity": "ORANGE",
-//         "state": "Maharashtra",
-//         "district": "Pune",
-//         "start_time": "2026-05-22T12:00:00Z",
-//         "end_time": "2026-05-23T12:00:00Z",
-//         "rainfall_mm": 110,
-//         "source": "IMD",
-//         "message": "Heavy to very heavy rainfall likely at isolated places"
-//       }
-//     ]
-//   }
-// ─────────────────────────────────────────────────────────────────────────────
 library;
 
 import 'dart:async';
@@ -124,18 +87,12 @@ class ImdService {
   final http.Client _client = http.Client();
   static const _timeout = Duration(seconds: 12);
 
-  // ── Public: fetch state alerts ────────────────────────────────────────────
   Future<List<ImdAlert>> getAlerts({required String state}) async {
-    // Preferred path: backend proxy. Stable contract, easier auth/header mgmt.
     final proxy = await _fetchAlertsFromProxy(state: state);
     if (proxy.isNotEmpty) return proxy;
-
-    // Future direct endpoints can be attempted here if IMD publishes a stable
-    // JSON feed. For now, fail safely with no data rather than fabricating.
     return const <ImdAlert>[];
   }
 
-  // ── Public: rainfall forecast/observations ────────────────────────────────
   Future<List<ImdRainfallPoint>> getRainfall({
     required String state,
     int days = 3,
@@ -143,13 +100,18 @@ class ImdService {
     return _fetchRainfallFromProxy(state: state, days: days);
   }
 
-  // ── Proxy fetchers ────────────────────────────────────────────────────────
   Future<List<ImdAlert>> _fetchAlertsFromProxy({required String state}) async {
     try {
       final res = await _client
           .get(Uri.parse('${Env.baseUrl}/api/imd/alerts?state=${Uri.encodeComponent(state)}'))
           .timeout(_timeout);
+      // Guard: backend not yet live → returns HTML 404 page, not JSON.
       if (res.statusCode != 200) return const <ImdAlert>[];
+      final ct = res.headers['content-type'] ?? '';
+      if (!ct.contains('application/json') && !ct.contains('text/json')) {
+        if (kDebugMode) debugPrint('[IMD] alerts: non-JSON response ($ct) — endpoint not live yet');
+        return const <ImdAlert>[];
+      }
       final payload = jsonDecode(res.body);
       final items = _extractList(payload);
       return items
@@ -171,6 +133,10 @@ class ImdService {
           .get(Uri.parse('${Env.baseUrl}/api/imd/rainfall?state=${Uri.encodeComponent(state)}&days=$days'))
           .timeout(_timeout);
       if (res.statusCode != 200) return const <ImdRainfallPoint>[];
+      final ct = res.headers['content-type'] ?? '';
+      if (!ct.contains('application/json') && !ct.contains('text/json')) {
+        return const <ImdRainfallPoint>[];
+      }
       final payload = jsonDecode(res.body);
       final items = _extractList(payload);
       return items
