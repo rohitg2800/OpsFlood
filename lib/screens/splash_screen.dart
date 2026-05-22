@@ -93,6 +93,7 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _bootServices() async {
     // Start the real-time service NOW — widget tree is alive, listeners work.
     await RealTimeService().startPolling();
+    await BackgroundService.init();
     _checkBackend();
   }
 
