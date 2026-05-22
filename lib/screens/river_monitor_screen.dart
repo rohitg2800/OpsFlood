@@ -1,11 +1,11 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v3.1  (Rolls-Royce dark-gold theme)
-// FIXES v3.1:
-//  1. _seedStations: seed current = wl (not wl*0.88) — accurate baseline
-//  2. _findMatch: expands scorer to river_name, station sub-tokens, river key
-//  3. _applyLive: reads water_level / gauge_reading / hfl_level variants;
-//                 also applies live warning/danger/hfl when non-zero
-//  4. _extractList: one extra recursion level to unwrap {data:{levels:[...]}}
+// OpsFlood — River Monitor v3.2  (Rolls-Royce dark-gold theme)
+// v3.2 CHANGE: all 100+ monitored cities across all states seeded by default.
+// v3.1 FIXES retained:
+//  1. seed current = wl (not wl*0.88)
+//  2. _findMatch: river_name / token-based tier matching
+//  3. _applyLive: water_level / gauge_reading + live threshold override
+//  4. _extractList: extra recursion level
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -53,6 +53,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   bool   _refreshing = false;
   bool   _sortByRisk = false;
   String _error      = '';
+  String _filterState = ''; // '' = all states
   Timer? _timer;
 
   String       _addCityName  = '';
@@ -83,35 +84,26 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     super.dispose();
   }
 
-  // ── Seed from constants ──────────────────────────────────────────────────
-  static const _defaultCities = [
-    'Delhi','Patna','Guwahati','Prayagraj','Bhagalpur','Cuttack',
-  ];
-
+  // ── Seed ALL cities from constants registry ─────────────────────────────
+  // v3.2: No hardcoded subset — seeds the entire AppConstants.monitoredCities
+  // registry so all 100+ cities across all states appear by default.
   List<RiverStation> _seedStations() {
-    return _defaultCities.map((city) {
-      final mc = AppConstants.monitoredCities.firstWhere(
-        (m) => (m['city'] as String).toLowerCase() == city.toLowerCase(),
-        orElse: () => <String,dynamic>{},
-      );
-      if (mc.isEmpty) return null;
+    return AppConstants.monitoredCities.map((mc) {
       final dl = _fp(mc['danger_level']);
       final wl = _fp(mc['warning_level']);
-      // FIX 1: seed current = wl (not wl*0.88) so the pre-live value is the
-      // actual warning threshold baseline, not an arbitrary 12%-below value.
-      // This prevents Patna from showing 41.89m before live data arrives.
+      // FIX: seed current = wl, not wl*0.88, so pre-live display is correct
       return RiverStation(
-        city:    mc['city']  as String,
-        state:   mc['state'] as String,
-        river:   mc['river'] as String,
-        station: '${mc['city']} CWC Gauge',
-        current: wl > 0 ? wl : (dl > 0 ? dl * 0.85 : 0),
-        warning: wl,
-        danger:  dl,
-        hfl:     dl > 0 ? dl * 1.10 : (wl > 0 ? wl * 1.25 : 10),
+        city:       mc['city']  as String,
+        state:      mc['state'] as String,
+        river:      mc['river'] as String,
+        station:    '${mc['city']} CWC Gauge',
+        current:    wl > 0 ? wl : (dl > 0 ? dl * 0.85 : 0),
+        warning:    wl,
+        danger:     dl,
+        hfl:        dl > 0 ? dl * 1.10 : (wl > 0 ? wl * 1.25 : 10),
         dataSource: 'CONSTANTS',
       );
-    }).whereType<RiverStation>().toList();
+    }).toList();
   }
 
   // ── Fetch live (3-tier) ──────────────────────────────────────────────────
@@ -142,13 +134,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     }
   }
 
-  // FIX 2: _findMatch — expanded scorer:
-  //  tier-0: station+state exact          → score 0
-  //  tier-1: station only exact           → score 1
-  //  tier-2: station substring match      → score 2
-  //  tier-3: river_name match + state     → score 3  ← NEW
-  //  tier-4: river_name match alone       → score 4  ← NEW
-  //  tier-5: any token of station in city → score 5  ← NEW
+  // ── Fuzzy match (v3.1 tier-expanded) ──────────────────────────────────
   Map<String,dynamic>? _findMatch(
       List list, String city, String state, String river) {
     final lc = city.toLowerCase();
@@ -162,29 +148,19 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       final rv = _s(item['river_name'] ?? item['river'] ?? item['riverName']);
 
       int score = 99;
-
-      // Tier 0 — exact city + state
-      if (sc.contains(lc) && st.contains(ls))          score = 0;
-      // Tier 1 — exact city only
-      else if (sc.contains(lc))                         score = 1;
-      // Tier 2 — city is substring of station name (e.g. lc='patna' in sc='patna bridge')
-      else if (lc.contains(sc) && sc.length > 3)        score = 2;
-      // Tier 3 — station name contains any word from city AND river matches ← NEW
-      else if (_anyTokenMatch(sc, lc) && lr.isNotEmpty && rv.contains(lr)) score = 3;
-      // Tier 4 — river name matches + state matches ← NEW
-      else if (lr.isNotEmpty && rv.contains(lr) && st.contains(ls))        score = 4;
-      // Tier 5 — any word token of station appears in city ← NEW
-      else if (_anyTokenMatch(sc, lc))                  score = 5;
+      if (sc.contains(lc) && st.contains(ls))                                    score = 0;
+      else if (sc.contains(lc))                                                   score = 1;
+      else if (lc.contains(sc) && sc.length > 3)                                 score = 2;
+      else if (_anyTokenMatch(sc, lc) && lr.isNotEmpty && rv.contains(lr))       score = 3;
+      else if (lr.isNotEmpty && rv.contains(lr) && st.contains(ls))              score = 4;
+      else if (_anyTokenMatch(sc, lc))                                            score = 5;
 
       if (score < bs) { bs = score; best = item; }
       if (bs == 0) break;
     }
-    // Only return if we got a meaningful match (not just wildcard fallback)
     return bs <= 5 ? best : null;
   }
 
-  /// Returns true if any whitespace-split token from [source] is contained
-  /// in [target] (or vice-versa). Minimum token length of 4 to avoid noise.
   bool _anyTokenMatch(String source, String target) {
     for (final token in source.split(RegExp(r'[\s_\-]+'))) {
       if (token.length >= 4 && target.contains(token)) return true;
@@ -192,33 +168,22 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     return false;
   }
 
-  // FIX 3: _applyLive — reads all known level key variants;
-  //         also applies live warning/danger/hfl when the API sends them.
+  // ── Apply live data (v3.1: all key variants + live threshold override) ───
   RiverStation _applyLive(RiverStation s, Map<String,dynamic> d, String src) {
-    // Level — try every field name the backend might use
     final lv = _fp(
-      d['river_level']   ??
-      d['riverLevel']    ??
-      d['current_level'] ??
-      d['water_level']   ??   // ← was missing
-      d['gauge_reading'] ??   // ← was missing
-      d['currentLevel']  ??
-      d['level'],
+      d['river_level']   ?? d['riverLevel']    ?? d['current_level'] ??
+      d['water_level']   ?? d['gauge_reading'] ?? d['currentLevel']  ?? d['level'],
     );
-    // Thresholds from live API (override static seed when non-zero)
     final wl = _fp(d['warning_level'] ?? d['warningLevel'] ?? d['wl']);
     final dl = _fp(d['danger_level']  ?? d['dangerLevel']  ?? d['dl']);
     final hl = _fp(d['hfl'] ?? d['hfl_level'] ?? d['highest_flood_level']);
-
     final rn = _fp(d['rainfall_last_hour'] ?? d['rainfall']);
     final fl = _fp(d['flow_rate'] ?? d['flowRate'] ?? d['discharge']);
     final tr = _s(d['trend']).toUpperCase();
     final st = _s(d['status']).toUpperCase();
     final up = _s(d['timestamp'] ?? d['updated_at'] ?? d['lastUpdated']);
-
     return s.copyWith(
       current:          lv > 0 ? lv : null,
-      // FIX: pass live thresholds — copyWith now accepts them
       warning:          wl > 0 ? wl : null,
       danger:           dl > 0 ? dl : null,
       hfl:              hl > 0 ? hl : null,
@@ -232,15 +197,13 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     );
   }
 
-  // FIX 4: _extractList — recurse one extra level so {data:{levels:[...]}}
-  //         and similar nested payloads are unwrapped correctly.
+  // ── List extractor (v3.1: extra recursion level) ──────────────────────
   List _extractList(dynamic p) {
     if (p is List) return p;
     if (p is Map<String,dynamic>) {
       for (final k in ['data','levels','stations','results','items','records','telemetry']) {
         final v = p[k];
         if (v is List && v.isNotEmpty) return v;
-        // ONE extra recursion: {data: {levels: [...]}}
         if (v is Map<String,dynamic>) {
           for (final k2 in ['data','levels','stations','results','items','records']) {
             final v2 = v[k2];
@@ -248,7 +211,6 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
           }
         }
       }
-      // If the response itself looks like a single station record, wrap it
       if (p.containsKey('station') || p.containsKey('river_level') ||
           p.containsKey('stationName') || p.containsKey('gauge_reading')) {
         return [p];
@@ -327,12 +289,28 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     ));
   }
 
+  // ── Filtered + sorted list ──────────────────────────────────────────────
   List<RiverStation> get _list {
-    final l = List<RiverStation>.from(_stations);
+    var l = List<RiverStation>.from(_stations);
+    if (_filterState.isNotEmpty) {
+      l = l.where((s) => s.state == _filterState).toList();
+    }
     if (_sortByRisk) l.sort((a,b) => b.riskScore.compareTo(a.riskScore));
     return l;
   }
-  int get _atRisk   => _stations.where((s) => s.dangerClass != DangerClass.normal).length;
+
+  // Distinct state list from seeded stations for the filter dropdown
+  List<String> get _stateList {
+    final seen = <String>{};
+    final out  = <String>[];
+    for (final s in _stations) {
+      if (seen.add(s.state)) out.add(s.state);
+    }
+    out.sort();
+    return out;
+  }
+
+  int get _atRisk    => _stations.where((s) => s.dangerClass != DangerClass.normal).length;
   int get _liveCount => _stations.where((s) => s.isLive).length;
 
   // ─── Build ───────────────────────────────────────────────────────────────
@@ -391,7 +369,6 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         const Text('CWC Live · OpsFlood Telemetry',
             style: TextStyle(fontSize: 10, color: Color(0xFF7B8A99), letterSpacing: 0.4)),
       ])),
-      // Pulsing LIVE badge
       AnimatedBuilder(
         animation: _pulse,
         builder: (_, __) => Container(
@@ -418,7 +395,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         ),
       ),
       const SizedBox(width: 8),
-      _GoldChip(label: '${_stations.length}', sublabel: 'cities'),
+      _GoldChip(label: '${_list.length}', sublabel: 'shown'),
       const SizedBox(width: 6),
       _GoldChip(label: '$_atRisk', sublabel: 'at risk',
           color: _atRisk > 0 ? const Color(0xFFF97316) : null),
@@ -484,12 +461,12 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          SliverToBoxAdapter(child: _sortBar()),
+          SliverToBoxAdapter(child: _filterSortBar()),
           SliverToBoxAdapter(child: _legend()),
           SliverList(delegate: SliverChildBuilderDelegate(
             (ctx, i) {
               final s = _list[i];
-              return _LiveCard(key: ValueKey('${s.city}_$i'),
+              return _LiveCard(key: ValueKey('${s.city}_${s.state}'),
                   station: s, index: i,
                   onDelete: () => setState(() => _stations.remove(s)));
             },
@@ -501,17 +478,75 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     );
   }
 
-  Widget _sortBar() => Padding(
+  // ─── Filter + sort bar (v3.2: adds state filter dropdown) ───────────────
+  Widget _filterSortBar() => Padding(
     padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
     child: Row(children: [
-      Text('${_stations.length} stations',
+      Text('${_list.length} / ${_stations.length}',
           style: const TextStyle(fontSize: 12, color: Color(0xFF7B8A99))),
+      const SizedBox(width: 6),
+      const Text('stations',
+          style: TextStyle(fontSize: 11, color: Color(0xFF3A4A58))),
       const Spacer(),
-      const Icon(Icons.arrow_downward_rounded, size: 11, color: Color(0xFF3A4A58)),
-      const SizedBox(width: 4),
-      const Text('Pull to refresh',
-          style: TextStyle(fontSize: 10, color: Color(0xFF3A4A58))),
-      const SizedBox(width: 12),
+      // State filter pill
+      GestureDetector(
+        onTap: () async {
+          final states = ['All States', ..._stateList];
+          final picked = await showModalBottomSheet<String>(
+            context: context,
+            backgroundColor: _kSurface,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            builder: (_) => ListView(
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 24),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 4, 0, 10),
+                  child: Text('Filter by State', style: TextStyle(
+                      color: _kGoldLight, fontSize: 14, fontWeight: FontWeight.w800)),
+                ),
+                ...states.map((st) => ListTile(
+                  dense: true,
+                  title: Text(st, style: TextStyle(
+                      color: st == (_filterState.isEmpty ? 'All States' : _filterState)
+                          ? _kGold : Colors.white,
+                      fontSize: 13,
+                      fontWeight: st == (_filterState.isEmpty ? 'All States' : _filterState)
+                          ? FontWeight.w800 : FontWeight.w400)),
+                  trailing: st == (_filterState.isEmpty ? 'All States' : _filterState)
+                      ? const Icon(Icons.check_rounded, color: _kGold, size: 16) : null,
+                  onTap: () => Navigator.pop(context, st),
+                )),
+              ],
+            ),
+          );
+          if (picked != null) {
+            setState(() => _filterState = picked == 'All States' ? '' : picked);
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: _filterState.isNotEmpty ? _kGold.withOpacity(0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: _filterState.isNotEmpty ? _kGold.withOpacity(0.4) : const Color(0xFF2A3A4A)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.filter_list_rounded, size: 13,
+                color: _filterState.isNotEmpty ? _kGold : const Color(0xFF7B8A99)),
+            const SizedBox(width: 4),
+            Text(_filterState.isNotEmpty
+                ? _filterState.split(' ').first  // abbrev for long state names
+                : 'State',
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w600,
+                    color: _filterState.isNotEmpty ? _kGold : const Color(0xFF7B8A99))),
+          ]),
+        ),
+      ),
+      const SizedBox(width: 8),
+      // Sort by risk pill
       GestureDetector(
         onTap: () => setState(() => _sortByRisk = !_sortByRisk),
         child: Container(
@@ -519,7 +554,8 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
           decoration: BoxDecoration(
             color: _sortByRisk ? _kGold.withOpacity(0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _sortByRisk ? _kGold.withOpacity(0.4) : const Color(0xFF2A3A4A)),
+            border: Border.all(
+                color: _sortByRisk ? _kGold.withOpacity(0.4) : const Color(0xFF2A3A4A)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.sort_rounded, size: 13,
@@ -546,8 +582,8 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
 
   Widget _shimmer() => ListView.builder(
     padding: const EdgeInsets.fromLTRB(16,12,16,32),
-    itemCount: 5,
-    itemBuilder: (_, i) => _ShimmerCard(delay: i * 120),
+    itemCount: 8,
+    itemBuilder: (_, i) => _ShimmerCard(delay: i * 80),
   );
 
   // ─── Add city tab ─────────────────────────────────────────────────────────
@@ -570,11 +606,10 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       const Padding(
         padding: EdgeInsets.only(left: 13),
         child: Text(
-          'Type a city name — danger/warning/HFL auto-filled from CWC registry. No manual input needed.',
+          'Search for any city not yet in your list. All 100+ CWC-registered cities are available.',
           style: TextStyle(fontSize: 11, color: Color(0xFF7B8A99), height: 1.5)),
       ),
       const SizedBox(height: 20),
-      // Search field
       Container(
         decoration: BoxDecoration(
           color: _kSurface2,
@@ -716,9 +751,9 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
   void initState() {
     super.initState();
     _ctrl = AnimationController(vsync: this,
-        duration: Duration(milliseconds: 600 + widget.index * 80));
+        duration: Duration(milliseconds: 500 + (widget.index % 20) * 60));
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    Future.delayed(Duration(milliseconds: widget.index * 80), () {
+    Future.delayed(Duration(milliseconds: (widget.index % 20) * 60), () {
       if (mounted) _ctrl.forward();
     });
   }
@@ -737,7 +772,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
       child: SlideTransition(
         position: Tween<Offset>(begin: const Offset(0.06,0), end: Offset.zero).animate(_anim),
         child: Container(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
           decoration: BoxDecoration(
             color: _kSurface,
             borderRadius: BorderRadius.circular(18),
@@ -748,7 +783,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
             ],
           ),
           child: Column(children: [
-            // Top row
             Padding(
               padding: const EdgeInsets.fromLTRB(14,14,14,10),
               child: Row(children: [
@@ -803,7 +837,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ]),
             ),
-            // Animated bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: AnimatedBuilder(
@@ -859,7 +892,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
             const SizedBox(height: 10),
             Divider(height: 1, color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
             const SizedBox(height: 8),
-            // Live data pills
             Padding(
               padding: const EdgeInsets.fromLTRB(14,0,14,12),
               child: Wrap(spacing: 6, runSpacing: 6, children: [
@@ -922,7 +954,7 @@ class _ShimmerCardState extends State<_ShimmerCard> with SingleTickerProviderSta
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
     builder: (_, __) => Container(
-      margin: const EdgeInsets.fromLTRB(16,0,16,12),
+      margin: const EdgeInsets.fromLTRB(16,0,16,10),
       height: 120,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
