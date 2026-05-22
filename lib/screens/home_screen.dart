@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../services/real_time_service.dart';
+import '../providers/flood_providers.dart';
 import '../screens/india_river_explorer_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
@@ -9,23 +10,19 @@ import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
 import 'weather_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Only HomeScreen starts/stops polling. Individual screens must NOT
   // call startPolling() themselves — that caused duplicate listeners + full
   // rebuilds across all 7 screens on every poll tick.
-  final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
-  // Replace IndexedStack (keeps all 7 alive) with a lazy builder that
-  // only mounts the active screen. Off-screen widgets are fully unmounted,
-  // so they cannot receive notifyListeners() calls.
   static const _destinations = [
     _NavEntry(label: 'Home',     icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard),
     _NavEntry(label: 'Monitors', icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart),
@@ -52,12 +49,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _svc.startPolling();
+    // ref is available directly in ConsumerState
+    ref.read(realTimeProvider).startPolling();
   }
 
   @override
   void dispose() {
-    _svc.stopPolling();
+    ref.read(realTimeProvider).stopPolling();
     super.dispose();
   }
 

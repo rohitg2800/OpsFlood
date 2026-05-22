@@ -1,20 +1,21 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'home_screen.dart';
 import '../services/api_service.dart';
-import '../services/real_time_service.dart';
 import '../services/background_service.dart';
 import '../theme/river_theme.dart';
+import '../providers/flood_providers.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
   late AnimationController _entranceCtrl;
   late Animation<double>   _logoScale;
@@ -82,7 +83,8 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _bootServices() async {
-    await RealTimeService().startPolling();
+    // ref is available directly in ConsumerState — no parameter needed
+    await ref.read(realTimeProvider).startPolling();
     await BackgroundService.init();
     _checkBackend();
   }
@@ -93,7 +95,7 @@ class _SplashScreenState extends State<SplashScreen>
     _backendOnline =
         health['status'] != 'offline' && health['status'] != 'error';
     _setStatus(
-        _backendOnline ? 'Systems online  ✅' : 'Backend waking up  ⏳');
+        _backendOnline ? 'Systems online  \u2705' : 'Backend waking up  \u23f3');
     await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -129,7 +131,6 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: AppPalette.carbon0,
       body: Stack(
         children: [
-          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: RadialGradient(
@@ -143,23 +144,16 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
           ),
-
-          // Diagonal carbon-fibre grid
           CustomPaint(
             size: size,
             painter: _CarbonGridPainter(),
           ),
-
-          // Sweep line
           AnimatedBuilder(
             animation: _sweepCtrl,
             builder: (_, __) {
               final x = _sweepPos.value * size.width;
               return Positioned(
-                left: x,
-                top: 0,
-                bottom: 0,
-                width: 2,
+                left: x, top: 0, bottom: 0, width: 2,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -176,68 +170,53 @@ class _SplashScreenState extends State<SplashScreen>
               );
             },
           ),
-
-          // Main content
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo with pulse ring
                 AnimatedBuilder(
-                  animation: Listenable.merge([
-                    _entranceCtrl, _pulseCtrl,
-                  ]),
+                  animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
                   builder: (_, __) {
                     return Opacity(
                       opacity: _logoOpacity.value,
                       child: Transform.scale(
                         scale: _logoScale.value,
                         child: SizedBox(
-                          width: 120,
-                          height: 120,
+                          width: 120, height: 120,
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
                               Transform.scale(
                                 scale: _pulseScale.value,
                                 child: Container(
-                                  width: 110,
-                                  height: 110,
+                                  width: 110, height: 110,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: AppPalette.ferrari.withOpacity(
-                                          _pulseOpacity.value),
+                                      color: AppPalette.ferrari
+                                          .withOpacity(_pulseOpacity.value),
                                       width: 2,
                                     ),
                                   ),
                                 ),
                               ),
                               Container(
-                                width: 100,
-                                height: 100,
+                                width: 100, height: 100,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   gradient: const RadialGradient(
-                                    colors: [
-                                      Color(0xFF5A0000),
-                                      AppPalette.ferrari,
-                                    ],
+                                    colors: [Color(0xFF5A0000), AppPalette.ferrari],
                                     stops: [0.0, 1.0],
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: AppPalette.ferrari
-                                          .withOpacity(0.6),
-                                      blurRadius: 32,
-                                      spreadRadius: 4,
+                                      color: AppPalette.ferrari.withOpacity(0.6),
+                                      blurRadius: 32, spreadRadius: 4,
                                     ),
                                   ],
                                 ),
                                 child: const Icon(
-                                  Icons.water_drop,
-                                  size: 52,
-                                  color: Colors.white,
+                                  Icons.water_drop, size: 52, color: Colors.white,
                                 ),
                               ),
                             ],
@@ -247,10 +226,7 @@ class _SplashScreenState extends State<SplashScreen>
                     );
                   },
                 ),
-
                 const SizedBox(height: 28),
-
-                // Title — changed OpsFlood → Equinox
                 SlideTransition(
                   position: _titleSlide,
                   child: FadeTransition(
@@ -258,8 +234,7 @@ class _SplashScreenState extends State<SplashScreen>
                     child: Column(
                       children: [
                         ShaderMask(
-                          shaderCallback: (bounds) =>
-                              const LinearGradient(
+                          shaderCallback: (bounds) => const LinearGradient(
                             colors: [
                               AppPalette.ferrari,
                               AppPalette.goldLight,
@@ -270,10 +245,8 @@ class _SplashScreenState extends State<SplashScreen>
                           child: const Text(
                             'Equinox',
                             style: TextStyle(
-                              fontSize:      44,
-                              fontWeight:    FontWeight.w900,
-                              color:         Colors.white,
-                              letterSpacing: -1.0,
+                              fontSize: 44, fontWeight: FontWeight.w900,
+                              color: Colors.white, letterSpacing: -1.0,
                             ),
                           ),
                         ),
@@ -281,27 +254,21 @@ class _SplashScreenState extends State<SplashScreen>
                         const Text(
                           'AI-POWERED FLOOD INTELLIGENCE',
                           style: TextStyle(
-                            fontSize:      11,
-                            fontWeight:    FontWeight.w700,
-                            color:         AppPalette.gold,
-                            letterSpacing: 3.0,
+                            fontSize: 11, fontWeight: FontWeight.w700,
+                            color: AppPalette.gold, letterSpacing: 3.0,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 64),
-
-                // Status
                 FadeTransition(
                   opacity: _statusOpacity,
                   child: Column(
                     children: [
                       SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 20, height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation<Color>(
@@ -315,10 +282,8 @@ class _SplashScreenState extends State<SplashScreen>
                       Text(
                         _statusText,
                         style: const TextStyle(
-                          color:         AppPalette.textGrey,
-                          fontSize:      13,
-                          fontWeight:    FontWeight.w500,
-                          letterSpacing: 0.3,
+                          color: AppPalette.textGrey, fontSize: 13,
+                          fontWeight: FontWeight.w500, letterSpacing: 0.3,
                         ),
                       ),
                     ],
@@ -327,20 +292,14 @@ class _SplashScreenState extends State<SplashScreen>
               ],
             ),
           ),
-
-          // Bottom version tag
           Positioned(
-            bottom: 32,
-            left: 0,
-            right: 0,
+            bottom: 32, left: 0, right: 0,
             child: Center(
               child: Text(
-                'v2.1  •  EQUINOX BUILD',
+                'v2.1  \u2022  EQUINOX BUILD',
                 style: TextStyle(
-                  color:         AppPalette.ferrari.withOpacity(0.5),
-                  fontSize:      10,
-                  fontWeight:    FontWeight.w700,
-                  letterSpacing: 2.0,
+                  color: AppPalette.ferrari.withOpacity(0.5),
+                  fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 2.0,
                 ),
               ),
             ),
@@ -351,7 +310,6 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// Carbon fibre grid painter
 class _CarbonGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
