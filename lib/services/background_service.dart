@@ -27,15 +27,14 @@ void callbackDispatcher() {
   });
 }
 
-// Polynomial hash — mirrors real_time_service._stableId() but kept top-level
+// Polynomial hash — mirrors real_time_service._stableId() but top-level
 // so it's accessible from the workmanager isolate without importing UI deps.
 int _stableId(String city) =>
     city.codeUnits.fold(0, (int a, int b) => (a * 31 + b) & 0x7FFFFFFF);
 
-// FIX (P2-audit): background summary notification uses a reserved block ABOVE
-// the per-city range.  Per-city IDs are ≤ 0x7FFFFFFF (31-bit positive).
-// We reserve 0x40000000 (1_073_741_824) as the background summary slot —
-// well inside the signed 32-bit positive range and far from any city hash.
+// Background summary notification ID — reserved constant above per-city range.
+// Per-city IDs are ≤ 0x7FFFFFFF (31-bit positive via _stableId polynomial hash).
+// 0x40000000 (1_073_741_824) is well inside signed 32-bit positive range.
 const _bgSummaryNotifId = 0x40000000;
 
 Future<void> _runBackgroundRefresh() async {
@@ -65,8 +64,10 @@ Future<void> _runBackgroundRefresh() async {
     if (critical.isEmpty) return;
 
     final plugin = FlutterLocalNotificationsPlugin();
+
+    // FIX: flutter_local_notifications v18+ requires named 'settings:' param
     await plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS:     DarwinInitializationSettings(),
       ),
@@ -78,15 +79,13 @@ Future<void> _runBackgroundRefresh() async {
         .toString();
     final count = critical.length;
 
-    // FIX (P2-audit): use _bgSummaryNotifId (reserved constant) instead of
-    // hardcoded 99999 which could theoretically collide with a city _stableId.
+    // FIX: flutter_local_notifications v18+ requires all named params for show()
     await plugin.show(
-      _bgSummaryNotifId,
-      // FIX (P2-audit): updated notification title to current app name
-      '🚨 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
-      '$firstCity and ${count - 1} other '
-          'station${count > 1 ? 's are' : ' is'} at critical flood risk.',
-      const NotificationDetails(
+      id:                  _bgSummaryNotifId,
+      title:               '\u{1F6A8} Equinox Flood \u2014 $count critical alert${count > 1 ? 's' : ''}',
+      body:                '$firstCity and ${count - 1} other '
+                           'station${count > 1 ? 's are' : ' is'} at critical flood risk.',
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           AppConstants.criticalAlertChannelId,
           AppConstants.criticalAlertChannelName,
@@ -119,8 +118,6 @@ List<dynamic> _extractItems(dynamic body) {
 class BackgroundService {
   BackgroundService._();
 
-  // FIX (P2-audit): renamed task identifiers from 'opsflood-*' → 'equinox-*'
-  // so workmanager registry matches current app brand.
   static const taskName    = 'equinox-refresh';
   static const _uniqueName = 'equinox-periodic-refresh';
 
