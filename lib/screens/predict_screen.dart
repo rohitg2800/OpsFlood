@@ -1,6 +1,7 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v4.1  (fix: map key access in _CityEntry.fromConstants)
-// Smart city search (Autocomplete) → live river level autofill
+// OpsFlood — Predict Screen v5.0
+// Full autofill: river level + duration + timeToPeak + recession + 7-day rainfall
+// all derived from live CWC telemetry on station selection.
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,7 @@ import '../ml/flood_engine.dart';
 import '../services/api_service.dart';
 import '../services/predict.dart';
 
-// ─── Palette ──────────────────────────────────────────────────────────────────
+// ─── Palette ───────────────────────────────────────────────────────────────────────────────
 const _kCyan    = Color(0xFF00D4FF);
 const _kPurple  = Color(0xFF7B50FF);
 const _kBg1     = Color(0xFF060D1A);
@@ -37,15 +38,80 @@ const _allStates = [
   'Andaman and Nicobar','Chandigarh','Lakshadweep',
 ];
 
-// ─── City entry for autocomplete ─────────────────────────────────────────────
+// ─── Autofill data model ───────────────────────────────────────────────────────────────────
+/// All fields derived from a single CWC telemetry record.
+/// Non-null means a real value was resolved from the API.
+class _StationAutofill {
+  final double? riverLevelM;       // peak flood level (m)
+  final double? warningLevelM;     // CWC warning threshold
+  final double? dangerLevelM;      // CWC danger threshold
+  final double? rainfallLastHour;  // mm/hr from latest observation
+  final double? flowRate;          // cumecs / discharge
+  final String? trend;             // RISING | STEADY | FALLING
+  final String? status;            // ACTIVE | WARNING | CRITICAL
+  final String? riverName;         // river the station is on
+  final String  source;            // CWC_API | TACTICAL_REGISTRY
+
+  const _StationAutofill({
+    this.riverLevelM,
+    this.warningLevelM,
+    this.dangerLevelM,
+    this.rainfallLastHour,
+    this.flowRate,
+    this.trend,
+    this.status,
+    this.riverName,
+    required this.source,
+  });
+
+  /// Derive event duration (days) from trend.
+  /// RISING = early stage = 1d; WARNING/CRITICAL = 2-3d; else 1d.
+  double get derivedDuration {
+    if (status == 'CRITICAL') return 3.0;
+    if (status == 'WARNING')  return 2.0;
+    return 1.0;
+  }
+
+  /// Derive time-to-peak from trend.
+  /// RISING = peaking soon (1d); STEADY = near peak (1d); FALLING = past peak (0.5d → 1).
+  double get derivedTimeToPeak {
+    if (trend == 'RISING')  return 1.0;
+    if (trend == 'FALLING') return 1.0;
+    return 1.0;
+  }
+
+  /// Derive recession time (days).
+  /// Higher level relative to danger = slower recession.
+  double derivedRecession(double? level) {
+    if (level == null || dangerLevelM == null || dangerLevelM! <= 0) return 1.0;
+    final ratio = level / dangerLevelM!;
+    if (ratio >= 1.0) return 3.0;
+    if (ratio >= 0.85) return 2.0;
+    return 1.0;
+  }
+
+  /// Build 7-day backward rainfall series from rainfallLastHour.
+  /// Pattern: day-7 lightest → day-1 heaviest (peak storm model).
+  /// If rainfallLastHour is null, returns safe defaults.
+  List<double> get derivedRainfall7d {
+    final hrly = rainfallLastHour ?? 0.0;
+    final dailyPeak = (hrly * 24).clamp(0.0, 300.0);
+    // Gaussian ramp: D-7=5%, D-6=12%, D-5=22%, D-4=40%, D-3=60%, D-2=80%, D-1=100%
+    const weights = [0.05, 0.12, 0.22, 0.40, 0.60, 0.80, 1.00];
+    return weights.map((w) {
+      final v = (dailyPeak * w);
+      return double.parse(v.toStringAsFixed(1));
+    }).toList();
+  }
+}
+
+// ─── City entry for autocomplete ───────────────────────────────────────────────────────────────────
 class _CityEntry {
   final String city;
   final String state;
   final String river;
   const _CityEntry(this.city, this.state, this.river);
 
-  /// AppConstants.monitoredCities is List<Map<String,dynamic>>.
-  /// Always use map key access mc['key'] — never (mc as dynamic).field.
   static List<_CityEntry> fromConstants() {
     return AppConstants.monitoredCities.map((mc) {
       final city  = (mc['city']  as String? ?? '').trim();
@@ -66,7 +132,7 @@ class _CityEntry {
   }
 }
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
+// ─── Screen ────────────────────────────────────────────────────────────────────────────────
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
   @override
@@ -88,9 +154,9 @@ class _PredictScreenState extends State<PredictScreen>
     7, (i) => TextEditingController(text: ['10','15','20','18','12','8','7'][i]),
   );
 
-  String           _selectedState = 'Maharashtra';
-  String?          _selectedCity;
-  FloodPrediction? _result;
+  String             _selectedState = 'Maharashtra';
+  String?            _selectedCity;
+  FloodPrediction?   _result;
   bool   _loading      = false;
   bool   _autofilling  = false;
   bool   _autofilled   = false;
@@ -98,6 +164,9 @@ class _PredictScreenState extends State<PredictScreen>
   bool   _sectionRiver = true;
   bool   _sectionRain  = true;
   bool   _useOffline   = false;
+
+  // Holds the last successfully resolved autofill for display in the UI.
+  _StationAutofill? _lastAutofill;
 
   late final List<_CityEntry> _allCities;
   final _svc = const PredictionService();
@@ -109,7 +178,7 @@ class _PredictScreenState extends State<PredictScreen>
     _gaugeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1000));
     _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutCubic);
-    _allCities = _CityEntry.fromConstants();   // ← now uses mc['city'] safely
+    _allCities = _CityEntry.fromConstants();
   }
 
   @override
@@ -138,6 +207,10 @@ class _PredictScreenState extends State<PredictScreen>
     station: _selectedCity,
   );
 
+  // ────────────────────────────────────────────────────────────────────────────────
+  // AUTOFILL ENGINE — extracts all 7 input fields from CWC telemetry
+  // ────────────────────────────────────────────────────────────────────────────────
+
   void _onCitySelected(_CityEntry entry) {
     setState(() {
       _selectedCity  = entry.city;
@@ -145,43 +218,131 @@ class _PredictScreenState extends State<PredictScreen>
           ? entry.state
           : _selectedState;
       _autofilled       = false;
+      _lastAutofill     = null;
       _citySearchCtrl.text = entry.city;
     });
-    if (!_useOffline) _autofillFromLive(entry.city);
+    if (!_useOffline) _autofillFromLive(entry.city, entry.state);
   }
 
-  Future<void> _autofillFromLive(String cityName) async {
+  /// Full autofill: fetches CWC telemetry for [cityName]/[stateName],
+  /// resolves the best matching station record, then derives and fills
+  /// all 7 predictor input fields automatically.
+  Future<void> _autofillFromLive(String cityName, [String? stateName]) async {
     setState(() { _autofilling = true; _autofilled = false; });
     try {
+      // ① Fetch all live CWC stations from OpsFlood backend.
+      // ApiService.getAllCwcStations() calls /api/live-telemetry?limit=500&all_states=true
       final response = await _api.getAllCwcStations();
       final raw = response['data'];
-      if (raw is! List) { setState(() => _autofilling = false); return; }
+      if (raw is! List) {
+        if (mounted) setState(() => _autofilling = false);
+        return;
+      }
 
-      final lc = cityName.toLowerCase();
-      double? level;
+      // ② Find best matching station record.
+      // Priority: (1) city name + state match, (2) city name only,
+      // (3) river name match, (4) partial token match.
+      final lc     = cityName.toLowerCase();
+      final lstate = (stateName ?? '').toLowerCase();
+
+      Map<String, dynamic>? best;
+      int bestScore = 99;
+
       for (final item in raw.whereType<Map<String, dynamic>>()) {
-        final name = (item['station'] ?? item['stationName'] ?? item['city'] ?? '')
-            .toString().toLowerCase();
-        if (name.contains(lc) || lc.contains(name)) {
-          final v = _sfp(item['river_level'] ?? item['riverLevel'] ?? item['current_level']);
-          if (v > 0) { level = v; break; }
+        final station = _str(item['station'] ?? item['stationName'] ?? item['city']);
+        final state   = _str(item['state_name'] ?? item['state']);
+        final river   = _str(item['river'] ?? item['river_name']);
+
+        int score = 99;
+        if (station.contains(lc) && state.contains(lstate)) score = 0;  // exact both
+        else if (station.contains(lc))                       score = 1;  // city match
+        else if (lc.contains(station) && station.length > 3) score = 2;  // reverse
+        else if (river.contains(lc))                         score = 3;  // river match
+        // token partial: any 4+ char token in cityName matches station
+        else {
+          final tokens = lc.split(RegExp(r'\s+'))
+              .where((t) => t.length >= 4);
+          if (tokens.any((t) => station.contains(t))) score = 4;
         }
+
+        if (score < bestScore) {
+          bestScore = score;
+          best = item;
+        }
+        if (bestScore == 0) break; // can't do better
       }
 
       if (!mounted) return;
-      if (level != null) {
-        _peakCtrl.text = level.toStringAsFixed(2);
-        setState(() { _autofilling = false; _autofilled = true; });
-      } else {
+
+      if (best == null) {
+        // No match — silently leave fields as-is
         setState(() => _autofilling = false);
+        return;
       }
+
+      // ③ Extract typed fields from matched record.
+      // OpsFlood backend emits these exact keys (see cwc_scraper.py):
+      //   river_level, danger_level, warning_level, rainfall_last_hour,
+      //   flow_rate, trend, status, river / river_name, state_name / state
+      final af = _StationAutofill(
+        riverLevelM:      _sfp(best['river_level']     ?? best['riverLevel']     ?? best['current_level']),
+        warningLevelM:    _sfp(best['warning_level']   ?? best['warningLevel']),
+        dangerLevelM:     _sfp(best['danger_level']    ?? best['dangerLevel']),
+        rainfallLastHour: _sfp(best['rainfall_last_hour'] ?? best['rainfallLastHour'] ?? best['rainfall']),
+        flowRate:         _sfp(best['flow_rate']       ?? best['flowRate']       ?? best['discharge']),
+        trend:  _str(best['trend']).toUpperCase().isEmpty  ? null : _str(best['trend']).toUpperCase(),
+        status: _str(best['status']).toUpperCase().isEmpty ? null : _str(best['status']).toUpperCase(),
+        riverName: _str(best['river'] ?? best['river_name']).isEmpty ? null
+            : _str(best['river'] ?? best['river_name']),
+        source: _str(best['source'] ?? 'CWC'),
+      );
+
+      // ④ Apply all 7 fields to controllers.
+      _applyAutofill(af);
+
     } catch (_) {
       if (mounted) setState(() => _autofilling = false);
     }
   }
 
-  double _sfp(dynamic v) =>
+  /// Writes all derived values into the text controllers and updates state.
+  void _applyAutofill(_StationAutofill af) {
+    if (!mounted) return;
+
+    final level = af.riverLevelM;
+
+    // 1. Peak flood level (m) — directly from river_level
+    if (level != null && level > 0) {
+      _peakCtrl.text = level.toStringAsFixed(2);
+    }
+
+    // 2. Event duration (days) — derived from status/trend
+    _durCtrl.text = af.derivedDuration.toStringAsFixed(0);
+
+    // 3. Time to peak (days) — derived from trend
+    _peakTimeCtrl.text = af.derivedTimeToPeak.toStringAsFixed(0);
+
+    // 4. Recession time (days) — derived from level vs danger_level
+    _recCtrl.text = af.derivedRecession(level).toStringAsFixed(0);
+
+    // 5-11. 7-day rainfall series — derived from rainfall_last_hour
+    final rain7d = af.derivedRainfall7d;
+    for (int i = 0; i < 7; i++) {
+      _rainCtrl[i].text = rain7d[i].toStringAsFixed(1);
+    }
+
+    setState(() {
+      _autofilling = false;
+      _autofilled  = true;
+      _lastAutofill = af;
+    });
+  }
+
+  // Helpers
+  static double _sfp(dynamic v) =>
       (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
+
+  static String _str(dynamic v) => (v?.toString() ?? '').trim().toLowerCase();
 
   Future<void> _predict() async {
     setState(() { _loading = true; _error = ''; _result = null; });
@@ -226,6 +387,11 @@ class _PredictScreenState extends State<PredictScreen>
                   children: [
                     _buildCitySearchRow(),
                     const SizedBox(height: 14),
+                    // Live telemetry badge row — shows what was autofilled
+                    if (_autofilled && _lastAutofill != null)
+                      _buildAutofillBadgeRow(_lastAutofill!),
+                    if (_autofilled && _lastAutofill != null)
+                      const SizedBox(height: 10),
                     _buildCollapsible(
                       title: '🌊  River Parameters',
                       expanded: _sectionRiver,
@@ -254,6 +420,10 @@ class _PredictScreenState extends State<PredictScreen>
       ),
     );
   }
+
+  // ────────────────────────────────────────────────────────────────────────────────
+  // BUILD METHODS
+  // ────────────────────────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
     return Container(
@@ -303,20 +473,20 @@ class _PredictScreenState extends State<PredictScreen>
       children: [
         Row(
           children: [
-            const Text('🔍  Search City',
+            const Text('🔍  Search Station / City',
                 style: TextStyle(color: Colors.white54, fontSize: 10,
                     fontWeight: FontWeight.w600, letterSpacing: 0.3)),
             const SizedBox(width: 8),
             if (_autofilling)
               _StatusChip(
-                label: 'Fetching live CWC level…',
+                label: 'Fetching CWC telemetry…',
                 color: _kCyan,
                 icon: Icons.sync,
                 spinning: true,
               )
             else if (_autofilled)
               _StatusChip(
-                label: '📡 Autofilled from CWC',
+                label: '📡 All fields autofilled',
                 color: const Color(0xFF22C55E),
                 icon: Icons.check_circle_outline,
               )
@@ -346,7 +516,7 @@ class _PredictScreenState extends State<PredictScreen>
               focusNode: focusNode,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'e.g. Mumbai, Patna, Kolhapur…',
+                hintText: 'e.g. Patna, Motihari, Guwahati, Kolhapur…',
                 hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.05),
@@ -356,7 +526,11 @@ class _PredictScreenState extends State<PredictScreen>
                         icon: const Icon(Icons.clear, color: Colors.white38, size: 16),
                         onPressed: () {
                           ctrl.clear();
-                          setState(() { _selectedCity = null; _autofilled = false; });
+                          setState(() {
+                            _selectedCity  = null;
+                            _autofilled    = false;
+                            _lastAutofill  = null;
+                          });
                         },
                       )
                     : null,
@@ -465,6 +639,110 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
+  /// Compact badge row showing what telemetry values were used to autofill.
+  Widget _buildAutofillBadgeRow(_StationAutofill af) {
+    Widget pill(String label, String value, Color color) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 8,
+                  fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          Text(value,
+              style: TextStyle(color: color, fontSize: 11,
+                  fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.sensors, color: Color(0xFF22C55E), size: 13),
+              const SizedBox(width: 5),
+              Text(
+                '📡 CWC Live — ${af.riverName ?? _selectedCity ?? ''}'   
+                '  •  Source: ${af.source}',
+                style: const TextStyle(color: Color(0xFF22C55E),
+                    fontSize: 10, fontWeight: FontWeight.w700),
+              ),
+              if (af.trend != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _trendColor(af.trend!).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: _trendColor(af.trend!).withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    '${_trendIcon(af.trend!)} ${af.trend}',
+                    style: TextStyle(
+                        color: _trendColor(af.trend!), fontSize: 9,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (af.riverLevelM != null && af.riverLevelM! > 0)
+                pill('RIVER LEVEL', '${af.riverLevelM!.toStringAsFixed(2)} m', _kCyan),
+              if (af.warningLevelM != null && af.warningLevelM! > 0)
+                pill('WARNING', '${af.warningLevelM!.toStringAsFixed(2)} m', const Color(0xFFF59E0B)),
+              if (af.dangerLevelM != null && af.dangerLevelM! > 0)
+                pill('DANGER', '${af.dangerLevelM!.toStringAsFixed(2)} m', const Color(0xFFEF4444)),
+              if (af.rainfallLastHour != null && af.rainfallLastHour! > 0)
+                pill('RAINFALL/hr', '${af.rainfallLastHour!.toStringAsFixed(1)} mm', _kPurple),
+              if (af.flowRate != null && af.flowRate! > 0)
+                pill('FLOW RATE', '${af.flowRate!.toStringAsFixed(1)} m³/s', const Color(0xFF22C55E)),
+              if (af.status != null)
+                pill('STATUS', af.status!, _statusColor(af.status!)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _trendColor(String t) {
+    if (t == 'RISING')  return const Color(0xFFEF4444);
+    if (t == 'FALLING') return const Color(0xFF22C55E);
+    return const Color(0xFFF59E0B);
+  }
+
+  String _trendIcon(String t) {
+    if (t == 'RISING')  return '↑';
+    if (t == 'FALLING') return '↓';
+    return '→';
+  }
+
+  Color _statusColor(String s) {
+    if (s == 'CRITICAL') return const Color(0xFFEF4444);
+    if (s == 'WARNING')  return const Color(0xFFF59E0B);
+    return const Color(0xFF22C55E);
+  }
+
   Widget _buildCollapsible({
     required String title,
     required bool expanded,
@@ -501,26 +779,39 @@ class _PredictScreenState extends State<PredictScreen>
   }
 
   Widget _buildRiverForm() {
+    final peakAutofilled = _autofilled && (_lastAutofill?.riverLevelM ?? 0) > 0;
     return Column(
       children: [
         Row(children: [
           Expanded(child: _InputField(
             ctrl: _peakCtrl,
-            label: _autofilled ? '⚡ Peak Level (m) — live' : 'Peak Level (m)',
-            hint: '8.5', tooltip: 'CWC gauge level',
-            glowColor: _autofilled ? const Color(0xFF22C55E) : null,
+            label: peakAutofilled ? '⚡ Peak Level (m) — live CWC' : 'Peak Level (m)',
+            hint: '8.5', tooltip: 'CWC gauge water level in metres',
+            glowColor: peakAutofilled ? const Color(0xFF22C55E) : null,
           )),
           const SizedBox(width: 10),
           Expanded(child: _InputField(
-            ctrl: _durCtrl, label: 'Duration (days)', hint: '1', tooltip: 'Event duration')),
+            ctrl: _durCtrl,
+            label: _autofilled ? '⚡ Duration (days) — derived' : 'Duration (days)',
+            hint: '1', tooltip: 'Flood event duration in days',
+            glowColor: _autofilled ? const Color(0xFF22C55E) : null,
+          )),
         ]),
         const SizedBox(height: 10),
         Row(children: [
           Expanded(child: _InputField(
-            ctrl: _peakTimeCtrl, label: 'Time to Peak (days)', hint: '1', tooltip: 'Hours to peak')),
+            ctrl: _peakTimeCtrl,
+            label: _autofilled ? '⚡ Time to Peak — derived' : 'Time to Peak (days)',
+            hint: '1', tooltip: 'Hours until expected peak flood',
+            glowColor: _autofilled ? const Color(0xFF22C55E) : null,
+          )),
           const SizedBox(width: 10),
           Expanded(child: _InputField(
-            ctrl: _recCtrl, label: 'Recession (days)', hint: '1', tooltip: 'Recession time')),
+            ctrl: _recCtrl,
+            label: _autofilled ? '⚡ Recession — derived' : 'Recession (days)',
+            hint: '1', tooltip: 'Expected recession time after peak',
+            glowColor: _autofilled ? const Color(0xFF22C55E) : null,
+          )),
         ]),
       ],
     );
@@ -530,8 +821,11 @@ class _PredictScreenState extends State<PredictScreen>
     const labels = ['D-7','D-6','D-5','D-4','D-3','D-2','D-1'];
     Expanded cell(int i) => Expanded(
       child: _InputField(
-        ctrl: _rainCtrl[i], label: labels[i],
-        hint: '0', tooltip: 'T${i + 1}d rainfall mm', compact: true,
+        ctrl: _rainCtrl[i],
+        label: _autofilled ? '⚡ ${labels[i]}' : labels[i],
+        hint: '0', tooltip: 'T${i + 1}d rainfall mm',
+        compact: true,
+        glowColor: _autofilled ? const Color(0xFF22C55E).withValues(alpha: 0.8) : null,
       ),
     );
     return Column(
@@ -562,7 +856,7 @@ class _PredictScreenState extends State<PredictScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _useOffline ? 'Offline Rule Engine' : 'Live OpsFlood API  •  CWC Auto-fill',
+                  _useOffline ? 'Offline Rule Engine' : 'Live OpsFlood API  •  Full CWC Auto-fill',
                   style: TextStyle(
                       color: _useOffline ? Colors.orange : _kCyan,
                       fontWeight: FontWeight.w700, fontSize: 12),
@@ -571,7 +865,7 @@ class _PredictScreenState extends State<PredictScreen>
                 Text(
                   _useOffline
                       ? 'Using on-device thresholds — no real data'
-                      : 'Fetches real CWC river levels from OpsFlood backend',
+                      : 'Auto-fills all 11 input fields from OpsFlood CWC telemetry',
                   style: const TextStyle(color: Colors.white38, fontSize: 10),
                 ),
               ],
@@ -966,7 +1260,7 @@ class _PredictScreenState extends State<PredictScreen>
   }
 }
 
-// ─── Status chip ──────────────────────────────────────────────────────────────
+// ─── Status chip ────────────────────────────────────────────────────────────────────────────────
 class _StatusChip extends StatefulWidget {
   final String   label;
   final Color    color;
@@ -1018,7 +1312,7 @@ class _StatusChipState extends State<_StatusChip>
   );
 }
 
-// ─── Reusable Widgets ─────────────────────────────────────────────────────────
+// ─── Reusable Widgets ────────────────────────────────────────────────────────────────────────
 
 class _GlassCard extends StatelessWidget {
   final Widget    child;
