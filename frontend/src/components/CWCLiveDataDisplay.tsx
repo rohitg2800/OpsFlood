@@ -11,7 +11,7 @@ import {
   Waves,
 } from 'lucide-react';
 import { useAppState } from '../context/AppContext';
-import { useAutoRefresh, useCWCIntegration } from '../hooks/useAppOperations';
+import { useAutoRefresh, useCWCIntegration, useSensorAPI } from '../hooks/useAppOperations';
 import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
 import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
 import {
@@ -46,7 +46,8 @@ const getTrendMeta = (trend?: string) => {
 
 export function CWCLiveDataDisplay() {
   const { state } = useAppState();
-  const { fetchCWCData, isConnected } = useCWCIntegration();
+  const { fetchCWCData } = useCWCIntegration();
+  const { fetchSensors } = useSensorAPI();
   const sourcePolicy = state.system.sourcePolicy;
 
   const selectedStation = getSelectedRiverLocationLabel(
@@ -55,35 +56,26 @@ export function CWCLiveDataDisplay() {
     state.prediction.selectedState,
   );
 
-  const dangerLevel =
-    state.cwc.liveData.dangerLevel ||
-    state.prediction.currentPrediction?.danger_level ||
-    state.prediction.dangerLevel ||
-    13.5;
-
-  const cwcLevel = state.cwc.liveData.currentLevel ?? state.cwc.liveData.kolhapurLevel;
-  const cwcStatus = state.cwc.liveData.status ?? state.cwc.liveData.kolhapurStatus;
-  const source = state.cwc.liveData.source;
-  const preferredRiver = state.cwc.liveData.river;
-  const warningLevel = state.cwc.liveData.warningLevel;
-  const preferredStation = state.cwc.liveData.station || selectedStation;
-  const trend = state.cwc.liveData.trend;
-  const dataSourceMessage = getCWCDataSourceMessage({
-    isConnected,
-    liveSource: source,
-    predictionSource: state.prediction.cwcDataSource,
-    sourcePolicyMode: sourcePolicy.mode,
-  });
-
+  // -----------------------------------------------------------------------
+  // Build regionTelemetry directly from the live sensor feed (36 live levels
+  // from /api/live-telemetry) instead of depending on the CWC scraper.
+  // Falls back to cwc.liveData.regionalData only when sensor feed is empty.
+  // -----------------------------------------------------------------------
   const regionTelemetry = useMemo(() => {
-    const scopedSensors = scopeSensorsToSelectedLocation(state.sensors.data || [], {
+    const liveSensors = state.sensors.data || [];
+
+    // Prefer scoped sensors; fall back to all live sensors.
+    const scoped = scopeSensorsToSelectedLocation(liveSensors, {
       selectedCity: state.prediction.selectedCity,
       station: state.form.data.station,
       selectedState: state.prediction.selectedState,
     });
 
-    if (scopedSensors.length) return scopedSensors.slice(0, 4);
+    const sensorSlice = (scoped.length ? scoped : liveSensors).slice(0, 4);
 
+    if (sensorSlice.length) return sensorSlice;
+
+    // Hard fallback: convert cwc.liveData.regionalData if sensors are empty.
     return state.cwc.liveData.regionalData.slice(0, 4).map((node) => ({
       station: node.station,
       river_level: node.currentLevel,
@@ -98,27 +90,73 @@ export function CWCLiveDataDisplay() {
       state: node.state,
       source: node.source,
     }));
-  }, [state.cwc.liveData.regionalData, state.form.data.station, state.prediction.selectedCity, state.prediction.selectedState, state.sensors.data]);
+  }, [
+    state.sensors.data,
+    state.cwc.liveData.regionalData,
+    state.form.data.station,
+    state.prediction.selectedCity,
+    state.prediction.selectedState,
+  ]);
+
+  // -----------------------------------------------------------------------
+  // Lead node: prefer first sensor card, fall back to cwc.liveData fields.
+  // -----------------------------------------------------------------------
+  const leadSensor = regionTelemetry[0] ?? null;
+
+  const dangerLevel =
+    Number(leadSensor?.danger_level || 0) ||
+    Number(state.cwc.liveData.dangerLevel || 0) ||
+    state.prediction.currentPrediction?.danger_level ||
+    state.prediction.dangerLevel ||
+    13.5;
+
+  const cwcLevel =
+    typeof leadSensor?.river_level === 'number'
+      ? leadSensor.river_level
+      : (state.cwc.liveData.currentLevel ?? state.cwc.liveData.kolhapurLevel);
+
+  const cwcStatus =
+    leadSensor?.status ??
+    state.cwc.liveData.status ??
+    state.cwc.liveData.kolhapurStatus;
+
+  const source = leadSensor?.source ?? state.cwc.liveData.source;
+  const preferredRiver = leadSensor?.river ?? state.cwc.liveData.river;
+  const warningLevel =
+    Number(leadSensor?.warning_level || 0) ||
+    Number(state.cwc.liveData.warningLevel || 0) ||
+    null;
+  const preferredStation = leadSensor?.station ?? state.cwc.liveData.station ?? selectedStation;
+  const trend = leadSensor?.trend ?? state.cwc.liveData.trend;
+
+  // isConnected = true when we have at least one live sensor card.
+  const isConnected = regionTelemetry.length > 0;
+
+  const dataSourceMessage = getCWCDataSourceMessage({
+    isConnected,
+    liveSource: source,
+    predictionSource: state.prediction.cwcDataSource,
+    sourcePolicyMode: sourcePolicy.mode,
+  });
 
   useEffect(() => {
     if (state.system.apiStatus === 'OFFLINE' || state.system.apiStatus === 'INITIALIZING') return;
-
     const timeoutId = window.setTimeout(() => {
       void fetchCWCData();
     }, 220);
-
     return () => window.clearTimeout(timeoutId);
   }, [fetchCWCData, state.system.apiStatus]);
 
   const refreshCWCTelemetry = useCallback(() => {
     if (state.system.apiStatus === 'OFFLINE' || state.system.apiStatus === 'INITIALIZING') return;
+    void fetchSensors({ force: true });
     void fetchCWCData({ force: true });
-  }, [fetchCWCData, state.system.apiStatus]);
+  }, [fetchCWCData, fetchSensors, state.system.apiStatus]);
 
   useAutoRefresh(refreshCWCTelemetry);
 
-  const fillWidth = typeof cwcLevel === 'number' ? Math.min((cwcLevel / dangerLevel) * 100, 100) : 0;
-  const distanceToDanger = typeof cwcLevel === 'number' ? dangerLevel - cwcLevel : null;
+  const fillWidth = typeof cwcLevel === 'number' ? Math.min((cwcLevel / Number(dangerLevel)) * 100, 100) : 0;
+  const distanceToDanger = typeof cwcLevel === 'number' ? Number(dangerLevel) - cwcLevel : null;
   const thresholdLabel =
     distanceToDanger === null
       ? 'Threshold pending'
@@ -130,26 +168,28 @@ export function CWCLiveDataDisplay() {
   const TrendIcon = trendMeta.icon;
   const refreshedAt = state.cwc.lastFetchTime
     ? new Date(state.cwc.lastFetchTime).toLocaleTimeString('en-US', { hour12: false })
+    : leadSensor?.last_update
+    ? new Date(leadSensor.last_update).toLocaleTimeString('en-US', { hour12: false })
     : 'Awaiting sync';
 
   return (
     <ConsolePanel intensity="primary" className="h-full" frameTone="cyan">
       <SectionHeader
         eyebrow="Telemetry snapshot"
-        title="CWC hydrology feed"
-        description={`Live river-level context for ${preferredStation} with scoped regional nodes and threshold proximity.`}
+        title="Live hydrology feed"
+        description={`River-level context for ${preferredStation} — built from ${regionTelemetry.length} live sensor node${regionTelemetry.length === 1 ? '' : 's'} with threshold proximity.`}
         icon={Waves}
         action={
           <>
             <StatusBadge tone={isConnected ? 'success' : 'warning'} icon={Radio}>
-              {isConnected ? 'Live link active' : 'Context sync mode'}
+              {isConnected ? `${regionTelemetry.length} live nodes` : 'Context sync mode'}
             </StatusBadge>
             <ActionButton
-              onClick={() => fetchCWCData({ force: true })}
+              onClick={() => { void fetchSensors({ force: true }); void fetchCWCData({ force: true }); }}
               icon={RefreshCw}
               variant="secondary"
             >
-              {sourcePolicy.allow_live_cwc_in_app ? 'Refresh CWC feed' : 'Refresh context'}
+              Refresh feed
             </ActionButton>
           </>
         }
@@ -166,7 +206,7 @@ export function CWCLiveDataDisplay() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <StatusBadge tone={liveTone}>
-                  {cwcStatus || 'No status'}
+                  {cwcStatus || 'Active'}
                 </StatusBadge>
                 <StatusBadge tone={trendMeta.tone} icon={TrendIcon}>
                   {trendMeta.label}
@@ -188,13 +228,13 @@ export function CWCLiveDataDisplay() {
               />
               <MetricTile
                 label="Warning level"
-                value={typeof warningLevel === 'number' ? `${warningLevel.toFixed(2)}m` : '--'}
+                value={typeof warningLevel === 'number' && warningLevel > 0 ? `${warningLevel.toFixed(2)}m` : '--'}
                 tone="warning"
                 className="!p-4"
               />
               <MetricTile
                 label="Danger level"
-                value={`${dangerLevel.toFixed(2)}m`}
+                value={`${Number(dangerLevel).toFixed(2)}m`}
                 tone="danger"
                 className="!p-4"
               />
@@ -225,7 +265,7 @@ export function CWCLiveDataDisplay() {
           <MetricTile
             label="Last refresh"
             value={refreshedAt}
-            hint={source || 'No source identified'}
+            hint={source || 'Live telemetry feed'}
             icon={Clock}
             tone="info"
           />
@@ -248,12 +288,12 @@ export function CWCLiveDataDisplay() {
       <div className="mt-6 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className={opsLabelClass}>Regional nodes</div>
+            <div className={opsLabelClass}>Live station nodes</div>
             <div className="mt-1 text-sm text-[color:var(--ops-text-soft)]">
-              Nearby stations are sorted to keep the current location scope readable at a glance.
+              Built from the active live telemetry feed — no CWC scraper dependency.
             </div>
           </div>
-          <StatusBadge tone="neutral">
+          <StatusBadge tone={isConnected ? 'success' : 'neutral'}>
             {regionTelemetry.length} monitored nodes
           </StatusBadge>
         </div>
@@ -321,7 +361,7 @@ export function CWCLiveDataDisplay() {
 
                   <div className="flex items-center justify-between gap-3 text-xs text-[color:var(--ops-text-faint)]">
                     <span>Updated {sensor.last_update ? new Date(sensor.last_update).toLocaleTimeString('en-US', { hour12: false }) : 'No timestamp'}</span>
-                    <span>{sensor.source || source || 'Regional feed'}</span>
+                    <span>{sensor.source || source || 'Live feed'}</span>
                   </div>
                 </InsetPanel>
               );
@@ -329,8 +369,8 @@ export function CWCLiveDataDisplay() {
           </div>
         ) : (
           <EmptyState
-            title="No scoped telemetry nodes yet"
-            description="Select a city, station, or state to narrow the feed. Until then, the panel keeps the main hydrology snapshot available without showing empty placeholder cards."
+            title="No live telemetry nodes yet"
+            description="Select a city, station, or state to scope the feed. The panel will populate as soon as live sensor data arrives — no scraper required."
             icon={ShieldCheck}
           />
         )}
