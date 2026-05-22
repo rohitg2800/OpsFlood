@@ -4,13 +4,9 @@ import 'dart:async';
 import 'home_screen.dart';
 import '../services/api_service.dart';
 import '../services/real_time_service.dart';
-import '../services/background_service.dart'; // FIX: was missing — caused build failure
+import '../services/background_service.dart';
 import '../theme/river_theme.dart';
 
-// FIX #1: RealTimeService.startPolling() is now called here in initState(),
-//         AFTER runApp() has built the widget tree.  This guarantees that
-//         the first notifyListeners() from _loadFallbackImmediately() has
-//         at least one active listener and is not fired into a void.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -20,23 +16,19 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  // Logo entrance
   late AnimationController _entranceCtrl;
   late Animation<double>   _logoScale;
   late Animation<double>   _logoOpacity;
   late Animation<double>   _titleOpacity;
   late Animation<Offset>   _titleSlide;
 
-  // Pulse ring
   late AnimationController _pulseCtrl;
   late Animation<double>   _pulseScale;
   late Animation<double>   _pulseOpacity;
 
-  // Red sweep line
   late AnimationController _sweepCtrl;
   late Animation<double>   _sweepPos;
 
-  // Status text fade
   late AnimationController _statusCtrl;
   late Animation<double>   _statusOpacity;
 
@@ -47,7 +39,6 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
 
-    // ── Animation controllers ────────────────────────────────────────────────
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400));
     _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
@@ -87,12 +78,10 @@ class _SplashScreenState extends State<SplashScreen>
       _statusCtrl.forward();
     });
 
-    // ── FIX #1: Start polling here, after widget tree is live ────────────────
     _bootServices();
   }
 
   Future<void> _bootServices() async {
-    // Start the real-time service NOW — widget tree is alive, listeners work.
     await RealTimeService().startPolling();
     await BackgroundService.init();
     _checkBackend();
@@ -140,7 +129,7 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: AppPalette.carbon0,
       body: Stack(
         children: [
-          // ── Background gradient
+          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: RadialGradient(
@@ -155,13 +144,13 @@ class _SplashScreenState extends State<SplashScreen>
             ),
           ),
 
-          // ── Diagonal carbon-fibre grid (static)
+          // Diagonal carbon-fibre grid
           CustomPaint(
             size: size,
             painter: _CarbonGridPainter(),
           ),
 
-          // ── Sweep line
+          // Sweep line
           AnimatedBuilder(
             animation: _sweepCtrl,
             builder: (_, __) {
@@ -188,7 +177,7 @@ class _SplashScreenState extends State<SplashScreen>
             },
           ),
 
-          // ── Main content
+          // Main content
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -209,7 +198,6 @@ class _SplashScreenState extends State<SplashScreen>
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
-                              // pulse ring
                               Transform.scale(
                                 scale: _pulseScale.value,
                                 child: Container(
@@ -225,7 +213,6 @@ class _SplashScreenState extends State<SplashScreen>
                                   ),
                                 ),
                               ),
-                              // logo container
                               Container(
                                 width: 100,
                                 height: 100,
@@ -263,7 +250,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const SizedBox(height: 28),
 
-                // Title
+                // Title — changed OpsFlood → Equinox
                 SlideTransition(
                   position: _titleSlide,
                   child: FadeTransition(
@@ -281,7 +268,7 @@ class _SplashScreenState extends State<SplashScreen>
                             stops: [0.0, 0.5, 1.0],
                           ).createShader(bounds),
                           child: const Text(
-                            'OpsFlood',
+                            'Equinox',
                             style: TextStyle(
                               fontSize:      44,
                               fontWeight:    FontWeight.w900,
@@ -341,14 +328,14 @@ class _SplashScreenState extends State<SplashScreen>
             ),
           ),
 
-          // ── Bottom version tag
+          // Bottom version tag
           Positioned(
             bottom: 32,
             left: 0,
             right: 0,
             child: Center(
               child: Text(
-                'v2.1  •  SCUDERIA BUILD',
+                'v2.1  •  EQUINOX BUILD',
                 style: TextStyle(
                   color:         AppPalette.ferrari.withOpacity(0.5),
                   fontSize:      10,
@@ -364,7 +351,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// ── Carbon fibre grid painter ─────────────────────────────────────────────────
+// Carbon fibre grid painter
 class _CarbonGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
