@@ -9,14 +9,13 @@ import 'screens/splash_screen.dart';
 import 'theme/river_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIX #1: RealTimeService.startPolling() is NO LONGER called here.
-//         It is called in SplashScreen.initState() AFTER runApp(), so
-//         notifyListeners() always fires into a live widget tree.
+// RealTimeService.startPolling() is NOT called here.
+// It is called in SplashScreen.initState() AFTER runApp(), so
+// notifyListeners() always fires into a live widget tree.
 // ─────────────────────────────────────────────────────────────────────────────
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Force dark mode and Ferrari status bar style
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor:                    Colors.transparent,
     statusBarIconBrightness:           Brightness.light,
@@ -24,7 +23,6 @@ Future<void> main() async {
     systemNavigationBarIconBrightness: Brightness.light,
   ));
 
-  // Lock to portrait only
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -40,34 +38,26 @@ Future<void> main() async {
     return true;
   };
 
-  // FIX #1: Load ThemeProvider ONLY — no polling yet.
-  // RealTimeService is started inside SplashScreen.initState().
   await ThemeProvider().init();
 
-  runApp(const OpsFloodApp());
+  runApp(const EquinoxApp());
 }
 
-class OpsFloodApp extends StatelessWidget {
-  const OpsFloodApp({super.key});
+class EquinoxApp extends StatelessWidget {
+  const EquinoxApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // FIX #2 + #3: Use ListenableBuilder scoped only to ThemeProvider.
-    //   - ListenableBuilder replaces AnimatedBuilder to avoid rebuilding
-    //     the entire MaterialApp on every unrelated ChangeNotifier call.
-    //   - themeMode now reads ThemeProvider().mode instead of being
-    //     hardcoded to ThemeMode.dark.
     return ListenableBuilder(
       listenable: ThemeProvider(),
       builder: (_, __) => MaterialApp(
-        title:                    'OpsFlood',
+        title:                      'Equinox',
         debugShowCheckedModeBanner: false,
-        themeMode: ThemeProvider().mode,          // FIX #3: live from provider
+        themeMode: ThemeProvider().mode,
         theme:     RiverColors.lightTheme(),
         darkTheme:  RiverColors.darkTheme(),
         home:      const SplashScreen(),
         builder: (context, child) {
-          // Prevent font scaling beyond 1.2x so labels never overflow
           final mq = MediaQuery.of(context);
           return MediaQuery(
             data: mq.copyWith(

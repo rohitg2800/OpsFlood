@@ -6,7 +6,8 @@ class ThemeProvider extends ChangeNotifier {
   factory ThemeProvider() => _instance;
   ThemeProvider._internal();
 
-  static const _key = 'opsflood_theme_mode';
+  // Renamed key from 'opsflood_theme_mode' -> 'equinox_theme_mode'
+  static const _key = 'equinox_theme_mode';
   ThemeMode _mode = ThemeMode.system;
 
   ThemeMode get mode => _mode;
