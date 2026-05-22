@@ -347,13 +347,13 @@ class RealTimeService extends ChangeNotifier {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-    await _notifications.initialize(
-      settings: const InitializationSettings(
-        android: androidInit,
-        iOS:     darwinInit,
-        macOS:   darwinInit,
-      ),
-    );
+   await _notifications.initialize(
+    const InitializationSettings(
+    android: androidInit,
+    iOS:     darwinInit,
+    macOS:   darwinInit,
+  ),
+);
     final androidPlatform = _notifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
@@ -1135,13 +1135,13 @@ class RealTimeService extends ChangeNotifier {
     );
     const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true);
     await _notifications.show(
-      id:                  id,
-      title:               title,
-      body:                body,
-      notificationDetails: NotificationDetails(android: android, iOS: ios),
-      payload:             payload,
+      id,
+      title,
+      body,
+      NotificationDetails(android: android, iOS: ios),
+      payload: payload,
     );
-  }
+}
 
   Future<void> _persistCache() async {
     final prefs = await SharedPreferences.getInstance();

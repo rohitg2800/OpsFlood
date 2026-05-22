@@ -67,7 +67,7 @@ Future<void> _runBackgroundRefresh() async {
 
     // FIX: flutter_local_notifications v18+ requires named 'settings:' param
     await plugin.initialize(
-      settings: const InitializationSettings(
+        const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS:     DarwinInitializationSettings(),
       ),
@@ -80,25 +80,24 @@ Future<void> _runBackgroundRefresh() async {
     final count = critical.length;
 
     // FIX: flutter_local_notifications v18+ requires all named params for show()
-    await plugin.show(
-      id:                  _bgSummaryNotifId,
-      title:               '\u{1F6A8} Equinox Flood \u2014 $count critical alert${count > 1 ? 's' : ''}',
-      body:                '$firstCity and ${count - 1} other '
-                           'station${count > 1 ? 's are' : ' is'} at critical flood risk.',
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          AppConstants.criticalAlertChannelId,
-          AppConstants.criticalAlertChannelName,
-          importance: Importance.max,
-          priority:   Priority.max,
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-        ),
-      ),
-      payload: 'background_critical',
-    );
+   await plugin.show(
+  _bgSummaryNotifId,
+  '🚨 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
+  '$firstCity and ${count - 1} other station${count > 1 ? 's are' : ' is'} at critical flood risk.',
+  const NotificationDetails(
+    android: AndroidNotificationDetails(
+      AppConstants.criticalAlertChannelId,
+      AppConstants.criticalAlertChannelName,
+      importance: Importance.max,
+      priority:   Priority.max,
+    ),
+    iOS: DarwinNotificationDetails(
+      presentAlert: true,
+      presentSound: true,
+    ),
+  ),
+  payload: 'background_critical',
+);
   } finally {
     client.close();
   }
