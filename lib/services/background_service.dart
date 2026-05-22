@@ -3,21 +3,6 @@
 // P0 FIX: Timer.periodic stops when the app is backgrounded on Android.
 // workmanager schedules a real OS-level periodic task that survives the
 // app being backgrounded or the screen being locked.
-//
-// HOW IT WORKS:
-//   1. BackgroundService.init() is called from SplashScreen once.
-//   2. It registers a periodic task named 'opsflood-refresh' with a
-//      minimum 15-minute interval (Android WorkManager minimum).
-//   3. When the OS fires the task, callbackDispatcher() runs in a
-//      separate Dart isolate, creates a minimal HTTP client and
-//      hits the /health + /api/live-levels endpoints.
-//   4. If critical data is found it fires a local notification
-//      via flutter_local_notifications (channel already created
-//      by RealTimeService._initNotifications).
-//
-// NOTE: The foreground Timer.periodic in RealTimeService is kept for
-//       real-time refresh while the app is in the foreground. The
-//       workmanager task is the background safety net.
 
 import 'dart:convert';
 
@@ -47,13 +32,11 @@ Future<void> _runBackgroundRefresh() async {
   try {
     final base = AppConstants.baseUrl;
 
-    // Quick health check
     final healthRes = await client
         .get(Uri.parse('$base${AppConstants.healthEndpoint}'))
         .timeout(const Duration(seconds: 10));
     if (healthRes.statusCode != 200) return;
 
-    // Fetch live levels
     final levelsRes = await client
         .get(Uri.parse('$base${AppConstants.liveLevelsEndpoint}?limit=50'))
         .timeout(const Duration(seconds: 12));
@@ -62,7 +45,6 @@ Future<void> _runBackgroundRefresh() async {
     final body  = jsonDecode(levelsRes.body);
     final items = _extractItems(body);
 
-    // Find any CRITICAL entries
     final critical = items.whereType<Map<String, dynamic>>().where((item) {
       final pct  = (item['capacity_percent'] as num?)?.toDouble() ?? 0.0;
       final risk = (item['risk_level'] ?? '').toString().toUpperCase();
@@ -71,7 +53,6 @@ Future<void> _runBackgroundRefresh() async {
 
     if (critical.isEmpty) return;
 
-    // FIX: flutter_local_notifications v18+ uses named param `settings:`
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(
       settings: const InitializationSettings(
@@ -121,7 +102,6 @@ List<dynamic> _extractItems(dynamic body) {
   return const [];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 class BackgroundService {
   BackgroundService._();
 
@@ -130,22 +110,20 @@ class BackgroundService {
 
   static bool _registered = false;
 
-  /// Call once from SplashScreen after WidgetsFlutterBinding is initialised.
   static Future<void> init() async {
     if (_registered) return;
     await Workmanager().initialize(
       callbackDispatcher,
       isInDebugMode: kDebugMode,
     );
+    // FIX: workmanager 0.6.0 removed existingWorkPolicy from registerPeriodicTask().
+    // The public API only exports ExistingWorkPolicy for one-off tasks.
+    // Periodic tasks always use KEEP semantics by default (last registration wins
+    // only if unique name differs — same unique name = keep existing).
     await Workmanager().registerPeriodicTask(
       _uniqueName,
       taskName,
-      // Android minimum is 15 minutes; iOS uses BGAppRefreshTask (best-effort)
       frequency: const Duration(minutes: 15),
-      // FIX: workmanager 0.6.0 split ExistingWorkPolicy into two separate enums:
-      //   ExistingWorkPolicy       → for registerOneOffTask()
-      //   ExistingPeriodicWorkPolicy → for registerPeriodicTask()  ← this one
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
@@ -154,7 +132,6 @@ class BackgroundService {
     if (kDebugMode) debugPrint('[BGS] background refresh registered (15 min)');
   }
 
-  /// Cancel all background tasks (e.g. on logout / data-wipe).
   static Future<void> cancel() async {
     await Workmanager().cancelAll();
     _registered = false;
