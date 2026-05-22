@@ -1,5 +1,5 @@
 name: floodops_app
-description: OpsFlood - AI-powered flood prediction app
+description: Equinox - AI-powered flood prediction app
 publish_to: 'none'
 version: 2.1.0+2
 
@@ -10,39 +10,35 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ── Networking ──────────────────────────────────────────────────────────
+  # ── Networking ───────────────────────────────────────────────────────────────────
   http: ^1.2.0
 
-  # ── Charts ──────────────────────────────────────────────────────────────
+  # ── Charts ────────────────────────────────────────────────────────────────────
   fl_chart: ^1.2.0
 
-  # ── Persistence ──────────────────────────────────────────────────────────
+  # ── Persistence ──────────────────────────────────────────────────────────────────
   shared_preferences: ^2.2.2
 
-  # ── Localisation / formatting ─────────────────────────────────────────
+  # ── Localisation / formatting ───────────────────────────────────────────────
   intl: ^0.20.2
 
-  # ── Launch URLs ──────────────────────────────────────────────────────────
+  # ── Launch URLs ──────────────────────────────────────────────────────────────────
   url_launcher: ^6.2.5
 
-  # ── Notifications ─────────────────────────────────────────────────────────
+  # ── Notifications ─────────────────────────────────────────────────────────────────
   flutter_local_notifications: ^21.0.0
 
-  # ── Network state ────────────────────────────────────────────────────────
+  # ── Network state ────────────────────────────────────────────────────────────────
   connectivity_plus: ^7.1.1
 
-  # ── FIX #6: Map package for india_river_explorer_screen.dart ──────────────
-  #   flutter_map renders OpenStreetMap / any tile source without needing
-  #   an API key. latlong2 provides the LatLng coordinate type it requires.
+  # ── Map package for india_river_explorer_screen.dart ───────────────────────
   flutter_map: ^7.0.0
   latlong2: ^0.9.1
 
-  # ── P0: Background fetch ──────────────────────────────────────────────────
-  #   FIX: 0.5.2 used the removed Flutter V1 embedding (ShimPluginRegistry,
-  #        PluginRegistrantCallback). 0.6.0 uses V2 embedding only.
+  # ── Background fetch ─────────────────────────────────────────────────────────────
   workmanager: ^0.6.0
 
-  # ── Icons ───────────────────────────────────────────────────────────────
+  # ── Icons ────────────────────────────────────────────────────────────────────
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
