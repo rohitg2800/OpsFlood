@@ -10,6 +10,7 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../providers/flood_providers.dart';
 import '../services/api_service.dart';
+import '../services/real_time_service.dart'; // CwcStationData lives here
 import '../screens/river_monitor_screen.dart';
 import '../theme/river_theme.dart';
 import '../widgets/animated_alert_badge.dart';
@@ -74,13 +75,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final rc = RiverColors.of(context);
     final cs = Theme.of(context).colorScheme;
 
-    // Riverpod slice providers — only rebuild when these specific values change
     final svc          = ref.read(realTimeProvider);
     final liveLevels   = ref.watch(liveLevelsProvider);
     final isUsingFallback  = ref.watch(isUsingFallbackProvider);
     final isWakingUp       = ref.watch(isWakingUpProvider);
     final lastFetchTime    = ref.watch(lastFetchTimeProvider);
-    final isOnline         = ref.watch(isOnlineProvider);
+    final isOffline        = ref.watch(isOfflineProvider); // isOnlineProvider doesn't exist
+    final isOnline         = !isOffline;
     final errorMsg         = ref.watch(errorMessageProvider);
     final monData          = ref.watch(monitoringDataProvider);
 
@@ -165,7 +166,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                           isLive: showLive,
                           isCwcLive: showCwcLive,
                           isConnecting: showConnecting,
-                          isOffline: !isOnline,
+                          isOffline: isOffline,
                           pulseAnim: _pulseAnim,
                         ),
                         const SizedBox(width: 6),
@@ -206,7 +207,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             ? 'Connecting to CWC flood telemetry\u2026'
                             : 'CWC data unavailable \u2014 estimated levels shown.',
                       )
-                    else if (!isOnline)
+                    else if (isOffline)
                       _OfflineBanner(),
 
                     if (errorMsg != null)
@@ -433,7 +434,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 }
 
-// ── Debug Panel ─────────────────────────────────────────────────────────────
+// ── Debug Panel ─────────────────────────────────────────────────────────────────
 class _DebugPanel extends StatelessWidget {
   final dynamic service;
   const _DebugPanel({required this.service});
@@ -522,7 +523,7 @@ class _DebugPanel extends StatelessWidget {
       );
 }
 
-// ── Status pill ──────────────────────────────────────────────────────────────
+// ── Status pill ───────────────────────────────────────────────────────────────────
 class _StatusPill extends StatelessWidget {
   final bool isLive, isCwcLive, isConnecting, isOffline;
   final Animation<double> pulseAnim;
@@ -588,7 +589,7 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-// ── CWC Live Banner ──────────────────────────────────────────────────────────
+// ── CWC Live Banner ───────────────────────────────────────────────────────────────────
 class _CwcLiveBanner extends StatelessWidget {
   final int stationCount;
   const _CwcLiveBanner({required this.stationCount});
@@ -628,7 +629,7 @@ class _CwcLiveBanner extends StatelessWidget {
       );
 }
 
-// ── Waking Banner ────────────────────────────────────────────────────────────
+// ── Waking Banner ───────────────────────────────────────────────────────────────────
 class _WakingBanner extends StatelessWidget {
   final String message;
   const _WakingBanner({required this.message});
@@ -668,7 +669,7 @@ class _WakingBanner extends StatelessWidget {
       );
 }
 
-// ── Offline Banner ───────────────────────────────────────────────────────────
+// ── Offline Banner ───────────────────────────────────────────────────────────────────
 class _OfflineBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
@@ -703,7 +704,7 @@ class _OfflineBanner extends StatelessWidget {
       );
 }
 
-// ── CWC Station Strip ────────────────────────────────────────────────────────
+// ── CWC Station Strip ───────────────────────────────────────────────────────────────────
 class _CwcStationStrip extends StatelessWidget {
   final List<CwcStationData> stations;
   const _CwcStationStrip({required this.stations});
@@ -808,7 +809,7 @@ class _CwcStationStrip extends StatelessWidget {
   }
 }
 
-// ── CWC Live Summary Card ───────────────────────────────────────────────────
+// ── CWC Live Summary Card ───────────────────────────────────────────────────────────────────
 class _CwcLiveSummaryCard extends StatelessWidget {
   final CwcStationData station;
   final int stationCount;
@@ -914,7 +915,7 @@ class _CwcLiveSummaryCard extends StatelessWidget {
   }
 }
 
-// ── Model metrics card ───────────────────────────────────────────────────────
+// ── Model metrics card ───────────────────────────────────────────────────────────────────
 class _ModelMetricsCard extends StatelessWidget {
   final bool loading;
   final Map<String, dynamic>? metrics;
@@ -985,7 +986,7 @@ class _ModelMetricsCard extends StatelessWidget {
   }
 }
 
-// ── Trend chart ──────────────────────────────────────────────────────────────
+// ── Trend chart ───────────────────────────────────────────────────────────────────
 class _TrendCard extends StatelessWidget {
   final String city;
   final List<RiverLevelSnapshot> history;
