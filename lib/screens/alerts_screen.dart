@@ -84,10 +84,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Riverpod slice providers — replaces AnimatedBuilder(animation: _svc, ...)
+    // Riverpod slice providers
     final liveLevels   = ref.watch(liveLevelsProvider);
-    final isOnline     = ref.watch(isOnlineProvider);
-    final isUsingCache = ref.watch(isUsingCacheProvider);
+    final isOffline    = ref.watch(isOfflineProvider);   // isOnlineProvider doesn't exist
+    final isOnline     = !isOffline;
+    final isUsingCache = ref.watch(realTimeProvider).isUsingCache; // no separate provider
     final critAlerts   = ref.watch(criticalAlertsProvider);
     final activeCrit   = ref.watch(activeCriticalAlertsProvider);
 
