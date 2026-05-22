@@ -12,8 +12,8 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
-  static const Duration _timeout      = Duration(seconds: 12);
-  static const int      _maxRetries   = 3;
+  static const Duration _timeout      = Duration(seconds: 14);
+  static const int      _maxRetries   = 2;
   static const Duration _retryBackoff = Duration(seconds: 2);
 
   List<String> get _baseCandidates => <String>[
@@ -63,6 +63,7 @@ class ApiService {
           }
 
           final parsedBody = _safeDecode(res.body);
+          // FIX: Pass raw path so normalizer can decide wrapping behavior
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
           lastError = 'Request timed out after ${_timeout.inSeconds}s';
@@ -92,33 +93,23 @@ class ApiService {
     }
   }
 
+  // FIX: Previously this re-wrapped responses that already had a 'data' key,
+  // turning {status, data:[...]} into {status, data:{data:[...]}, source}.
+  // Now we pass through the payload as-is (just injecting source + status),
+  // so _deepExtractList in RealTimeService gets the real structure.
   Map<String, dynamic> _normalizeSuccess(
       dynamic payload, String base, String path) {
+    if (payload is List) {
+      // Raw list response — wrap once
+      return {'status': 'success', 'data': payload, 'source': '$base$path'};
+    }
     if (payload is Map<String, dynamic>) {
-      if (payload.containsKey('data')) {
-        return {
-          ...payload,
-          'status': payload['status'] ?? 'success',
-          'source': '$base$path',
-        };
-      }
-      if (payload.containsKey('records')) {
-        return {
-          ...payload,
-          'status': payload['status'] ?? 'success',
-          'data':   payload['records'],
-          'source': '$base$path',
-        };
-      }
-      return {
+      // Return the payload unchanged — just add source and ensure status
+      return <String, dynamic>{
         ...payload,
-        'status': payload['status'] ?? 'success',
-        'data':   payload['data'] ?? payload,
+        'status': payload['status']?.toString() ?? 'success',
         'source': '$base$path',
       };
-    }
-    if (payload is List) {
-      return {'status': 'success', 'data': payload, 'source': '$base$path'};
     }
     return {'status': 'success', 'data': payload, 'source': '$base$path'};
   }
@@ -127,7 +118,15 @@ class ApiService {
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
-  // ── Dashboard / live data ─────────────────────────────────────────────────
+  // ── Live telemetry — all stations, large page ────────────────────────────
+  // Returns {status, data:[{station, state, river_name, river_level, ...}]}
+  Future<Map<String, dynamic>> getAllLiveTelemetry() =>
+      _get('${AppConstants.liveTelemetryEndpoint}?limit=500&all_states=true');
+
+  // ── Live levels (OPSFLOOD_MATRIX — state-aggregated) ─────────────────────
+  Future<Map<String, dynamic>> getLiveLevels() =>
+      _get(AppConstants.liveLevelsEndpoint);
+
   Future<Map<String, dynamic>> getDashboardData({
     String? state,
     String? station,
@@ -140,9 +139,6 @@ class ApiService {
     return _get('${AppConstants.liveTelemetryEndpoint}?${params.join("&")}');
   }
 
-  Future<Map<String, dynamic>> getLiveLevels() =>
-      _get(AppConstants.liveLevelsEndpoint);
-
   Future<Map<String, dynamic>> getLiveLevelsByCity(String city) => _get(
       '${AppConstants.liveLevelsEndpoint}?city=${Uri.encodeComponent(city)}');
 
@@ -152,12 +148,8 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
       '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
 
-  // ── CWC Live Telemetry ────────────────────────────────────────────────────
-  // FIX: Removed the doomed /api/cwc-ffs attempt that always errors because
-  // the CWC scraper is never initialized on the free-tier backend.
-  // Now goes directly to /api/live-telemetry which is always available.
-  Future<Map<String, dynamic>> getAllCwcStations() =>
-      _get('${AppConstants.liveTelemetryEndpoint}?limit=300&all_states=true');
+  // ── CWC Live Telemetry (same as getAllLiveTelemetry but named for compat) ─
+  Future<Map<String, dynamic>> getAllCwcStations() => getAllLiveTelemetry();
 
   Future<Map<String, dynamic>> getLiveTelemetry({
     String state   = 'Maharashtra',
@@ -187,7 +179,7 @@ class ApiService {
   Future<Map<String, dynamic>> getCwcStationDetail(String stationCode) =>
       _get('/api/cwc-ffs/detail?code=${Uri.encodeComponent(stationCode)}');
 
-  // ── data.gov.in CWC Reservoir Levels ──────────────────────────────────────
+  // ── CWC Reservoir Levels ──────────────────────────────────────────────────
   Future<Map<String, dynamic>> getReservoirLevels({String? state}) {
     final path = state != null
         ? '/api/cwc-reservoir/state?state=${Uri.encodeComponent(state)}'

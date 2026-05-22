@@ -59,17 +59,10 @@ class CwcStationData {
               j['name'] ??
               '')
           .toString(),
-      stateName: (j['state'] ??
-              j['stateName'] ??
-              j['state_name'] ??
-              '')
+      stateName: (j['state'] ?? j['stateName'] ?? j['state_name'] ?? '')
           .toString(),
-      riverName: (j['river'] ??
-              j['riverName'] ??
-              j['river_name'] ??
-              '')
+      riverName: (j['river'] ?? j['riverName'] ?? j['river_name'] ?? '')
           .toString(),
-      // FIX: backend sends river_level; accept all common aliases
       riverLevel: sf(j['river_level'] ??
           j['riverLevel'] ??
           j['current_level'] ??
@@ -81,9 +74,8 @@ class CwcStationData {
           sf(j['danger_level'] ?? j['dangerLevel'] ?? j['dl']),
       flowRate:
           sf(j['flow_rate'] ?? j['flowRate'] ?? j['discharge']),
-      rainfallLastHour: sf(j['rainfall_last_hour'] ??
-          j['rainfallLastHour'] ??
-          j['rainfall']),
+      rainfallLastHour: sf(
+          j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
       status: (j['status'] ?? j['alert_status'] ?? 'ACTIVE')
           .toString()
           .toUpperCase(),
@@ -95,6 +87,7 @@ class CwcStationData {
               (j['last_update'] ??
                       j['lastUpdate'] ??
                       j['updated_at'] ??
+                      j['timestamp'] ??
                       '')
                   .toString()) ??
           DateTime.now(),
@@ -115,6 +108,27 @@ class RealTimeService extends ChangeNotifier {
   static const int      _wakeUpMaxAttempts = 20;
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
+
+  // Build a state→city lookup from monitoredCities for enrichment
+  static final Map<String, Map<String, dynamic>> _cityByState = () {
+    final m = <String, Map<String, dynamic>>{};
+    for (final c in AppConstants.monitoredCities) {
+      final state = (c['state'] as String).toLowerCase();
+      // Keep only first entry per state (primary monitored city)
+      m.putIfAbsent(state, () => c);
+    }
+    return m;
+  }();
+
+  // Full list indexed by state for multi-city enrichment
+  static final Map<String, List<Map<String, dynamic>>> _citiesByState = () {
+    final m = <String, List<Map<String, dynamic>>>{};
+    for (final c in AppConstants.monitoredCities) {
+      final state = (c['state'] as String).toLowerCase();
+      m.putIfAbsent(state, () => []).add(c);
+    }
+    return m;
+  }();
 
   final ApiService _api = ApiService();
   final FlutterLocalNotificationsPlugin _notifications =
@@ -173,10 +187,10 @@ class RealTimeService extends ChangeNotifier {
   bool                 get isWakingUp          =>
       _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
 
-  Map<String, dynamic> get debugLevelsRaw   => _lastLevelsRaw;
-  Map<String, dynamic> get debugCwcRaw      => _lastCwcRaw;
-  Map<String, dynamic> get debugAlertsRaw   => _lastAlertsRaw;
-  int                  get debugRetryCount  => _retryCount;
+  Map<String, dynamic> get debugLevelsRaw    => _lastLevelsRaw;
+  Map<String, dynamic> get debugCwcRaw       => _lastCwcRaw;
+  Map<String, dynamic> get debugAlertsRaw    => _lastAlertsRaw;
+  int                  get debugRetryCount   => _retryCount;
   int                  get debugWakeAttempts => _wakeAttempts;
 
   MultiLocationMonitoring get monitoringData {
@@ -373,53 +387,57 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Fetch both sources in parallel:
+      //  [0] /api/live-telemetry — station-level real CWC readings
+      //  [1] /api/live-levels    — OPSFLOOD_MATRIX state aggregates
+      //  [2] /api/critical-alerts
       final results = await Future.wait([
+        _api.getAllLiveTelemetry(),
         _api.getLiveLevels(),
         _api.getCriticalAlerts(),
-        _api.getAllCwcStations(),
       ]);
 
-      final levelsResponse = results[0];
-      final alertsResponse = results[1];
-      final cwcResponse    = results[2];
+      final telemetryResponse = results[0];
+      final levelsResponse    = results[1];
+      final alertsResponse    = results[2];
 
+      _lastCwcRaw    = telemetryResponse;
       _lastLevelsRaw = levelsResponse;
-      _lastCwcRaw    = cwcResponse;
       _lastAlertsRaw = alertsResponse;
 
-      _log('levels raw keys: ${levelsResponse.keys.toList()}');
-      _log('cwc raw keys:    ${cwcResponse.keys.toList()}');
+      _log('telemetry status: ${telemetryResponse["status"]}');
+      _log('levels    status: ${levelsResponse["status"]}');
 
-      // Deep-dump cwc envelope in debug mode so we can see actual structure
-      if (kDebugMode) {
-        final d = cwcResponse['data'];
-        _log('cwc data type:   ${d?.runtimeType}');
-        if (d is Map) {
-          _log('cwc data keys:   ${d.keys.toList()}');
-          final inner = d['data'];
-          _log('cwc data.data type: ${inner?.runtimeType}');
-          if (inner is List && inner.isNotEmpty) {
-            _log('cwc data.data[0]: ${inner.first}');
-          } else if (inner is Map) {
-            _log('cwc data.data keys: ${inner.keys.toList()}');
-          }
-        } else if (d is List && d.isNotEmpty) {
-          _log('cwc data[0]: ${d.first}');
-        }
-      }
+      // Step 1 — parse raw telemetry (station-level)
+      final telemetryItems = _deepExtractList(telemetryResponse) ?? [];
+      _log('telemetry items: ${telemetryItems.length}');
 
-      // FIX: Use _deepExtractList (not shallow _extractList) for live-levels response.
-      // /api/live-levels wraps as {data: {data: [...]}} (depth-2), which _extractList misses.
-      final levels = _parseFloodLevels(levelsResponse);
+      // Step 2 — parse OPSFLOOD_MATRIX levels (state-aggregated)
+      final levelsItems = _deepExtractList(levelsResponse) ?? [];
+      _log('levels items: ${levelsItems.length}');
+
+      // Step 3 — update CWC station strip from telemetry
+      _updateCwcStationsFromItems(telemetryItems);
+
+      // Step 4 — build fused FloodData list
+      //  Priority: live telemetry (has real station name + river_level)
+      //         >  OPSFLOOD_MATRIX levels (enriched with monitoredCities metadata)
+      //         >  monitoredCities fallback
+      final fused = _buildFusedLevels(
+        telemetryItems: telemetryItems
+            .whereType<Map<String, dynamic>>()
+            .toList(),
+        levelsItems: levelsItems
+            .whereType<Map<String, dynamic>>()
+            .toList(),
+      );
+
       final alerts = _parseAlerts(alertsResponse);
-      _updateCwcStations(cwcResponse);
 
-      _log('parsed levels: ${levels.length}, cwcStations: ${_cwcStations.length}');
+      _log('fused levels: ${fused.length}, cwcStations: ${_cwcStations.length}');
 
-      final bool cwcArrived = _cwcStations.isNotEmpty;
-
-      if (levels.isNotEmpty) {
-        _liveLevels           = levels;
+      if (fused.isNotEmpty) {
+        _liveLevels           = fused;
         _isUsingFallback      = false;
         _liveDataEverReceived = true;
       } else if (!_liveDataEverReceived) {
@@ -435,7 +453,7 @@ class RealTimeService extends ChangeNotifier {
       _apply24HourTrim();
       await _dispatchThresholdNotifications(_liveLevels);
 
-      if (levels.isNotEmpty || cwcArrived) _retryCount = 0;
+      if (fused.isNotEmpty || _cwcStations.isNotEmpty) _retryCount = 0;
 
       _queuedOfflineCycles = 0;
       _lastFetchTime    = DateTime.now();
@@ -472,53 +490,231 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── CWC station parser ────────────────────────────────────────────────────
-  void _updateCwcStations(Map<String, dynamic> response) {
-    if (response['status'] == 'error') {
-      _log('CWC error response: ${response["error"]}');
-      return;
+  // ── Multi-source data fusion ──────────────────────────────────────────────
+  //
+  // Strategy:
+  //  1. Index monitoredCities by state (lowercase) for fast lookup.
+  //  2. Walk telemetryItems — each has a real station name + river_level.
+  //     Build FloodData from it, enriching danger/warning/lat/lon from
+  //     monitoredCities where the backend didn't send them.
+  //  3. Walk levelsItems — these come from OPSFLOOD_MATRIX and often have
+  //     city:"Unknown". For each, find the best matching monitoredCity for
+  //     that state and emit a FloodData using the live river_level but
+  //     metadata (city name, river name, coords, danger/warning) from our
+  //     static registry. Only emit if not already covered by telemetry.
+  //  4. Finally fill any monitoredCities not covered by either source
+  //     using their risk estimate (fallback).
+  List<FloodData> _buildFusedLevels({
+    required List<Map<String, dynamic>> telemetryItems,
+    required List<Map<String, dynamic>> levelsItems,
+  }) {
+    // track which states + cities have been covered
+    final coveredCities = <String>{}; // lowercase city name
+    final coveredStates = <String>{}; // lowercase state name
+    final result        = <FloodData>[];
+
+    // ── Pass 1: telemetry (station-level, highest fidelity) ─────────────────
+    for (final item in telemetryItems) {
+      final rawStation = (item['station'] ??
+              item['stationName'] ??
+              item['station_name'] ??
+              item['city'] ??
+              '')
+          .toString()
+          .trim();
+      final rawState = (item['state'] ?? item['stateName'] ?? '')
+          .toString()
+          .trim();
+      if (rawStation.isEmpty || rawStation == 'Unknown') continue;
+
+      // Enrich with monitoredCities metadata if backend didn't send levels
+      final enriched = _enrichFromRegistry(item, rawStation, rawState);
+      final fd = FloodData.fromJson(enriched);
+      if (fd.city.isNotEmpty && fd.city != 'Unknown') {
+        result.add(fd);
+        coveredCities.add(fd.city.toLowerCase());
+        if (rawState.isNotEmpty) coveredStates.add(rawState.toLowerCase());
+      }
     }
 
-    final List<dynamic>? items = _deepExtractList(response);
-    if (items == null || items.isEmpty) {
-      _log('CWC: no list found. Full response: $response');
-      return;
+    // ── Pass 2: OPSFLOOD_MATRIX levels — enrich Unknown cities ──────────────
+    // Group by state; pick the highest capacity_percent entry per state
+    final bestByState = <String, Map<String, dynamic>>{};
+    for (final item in levelsItems) {
+      final st = (item['state'] ?? '').toString().trim().toLowerCase();
+      if (st.isEmpty) continue;
+      if (coveredStates.contains(st)) continue; // already have live data
+      final existing = bestByState[st];
+      final pct = (item['capacity_percent'] as num?)?.toDouble() ?? 0.0;
+      final exPct = (existing?['capacity_percent'] as num?)?.toDouble() ?? -1.0;
+      if (existing == null || pct > exPct) bestByState[st] = item;
     }
 
-    _log('CWC: found ${items.length} raw items');
+    for (final entry in bestByState.entries) {
+      final stateKey = entry.key;
+      final item     = entry.value;
+      // find the best matching city in our registry for this state
+      final registryCities = _citiesByState[stateKey] ?? [];
+      if (registryCities.isEmpty) continue;
 
-    if (kDebugMode && items.isNotEmpty) {
-      _log('CWC first item keys: ${(items.first as Map?)?.keys.toList()}');
-      _log('CWC first item: ${items.first}');
+      // pick city whose risk matches the live risk_level if possible
+      final liveRisk = (item['risk_level'] ?? 'MODERATE').toString().toUpperCase();
+      Map<String, dynamic> bestCity = registryCities.first;
+      for (final c in registryCities) {
+        if ((c['risk'] as String).toUpperCase() == liveRisk) {
+          bestCity = c;
+          break;
+        }
+      }
+
+      // Skip if we already covered this city via telemetry
+      final cityNameLc = (bestCity['city'] as String).toLowerCase();
+      if (coveredCities.contains(cityNameLc)) continue;
+
+      // Build enriched item using live levels + registry metadata
+      final liveLevel = (item['river_level'] ??
+              item['current_level'] ??
+              item['level']) as num?;
+      final merged = <String, dynamic>{
+        ...bestCity,
+        'station':       bestCity['city'],
+        'city':          bestCity['city'],
+        'river_name':    bestCity['river'],
+        'state':         bestCity['state'],
+        'lat':           bestCity['lat'],
+        'lon':           bestCity['lon'],
+        'danger_level':  bestCity['danger_level'],
+        'warning_level': bestCity['warning_level'],
+        'safe_level':    (bestCity['warning_level'] as double) - 2.0,
+        'risk_level':    item['risk_level'] ?? bestCity['risk'],
+        'status':        item['status'] ?? 'Stable',
+        'capacity_percent': item['capacity_percent'],
+        'timestamp':     item['timestamp'],
+        if (liveLevel != null) 'river_level': liveLevel,
+      };
+
+      final fd = FloodData.fromJson(merged);
+      if (fd.city.isNotEmpty && !coveredCities.contains(fd.city.toLowerCase())) {
+        result.add(fd);
+        coveredCities.add(fd.city.toLowerCase());
+        coveredStates.add(stateKey);
+      }
+    }
+
+    // ── Pass 3: fill remaining monitoredCities not covered ──────────────────
+    for (final c in AppConstants.monitoredCities) {
+      final cityLc  = (c['city'] as String).toLowerCase();
+      if (coveredCities.contains(cityLc)) continue;
+      result.add(FloodData.fromMonitoredCity(c));
+    }
+
+    // Sort descending by capacity so highest-risk cities appear first
+    result.sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
+    return result;
+  }
+
+  // Enrich a telemetry item with registry metadata where the backend
+  // didn't provide danger_level / warning_level / coords / river_name.
+  Map<String, dynamic> _enrichFromRegistry(
+      Map<String, dynamic> item, String station, String state) {
+    final stateKey = state.toLowerCase();
+    final cities   = _citiesByState[stateKey] ?? [];
+
+    // Try exact city match first
+    Map<String, dynamic>? match;
+    for (final c in cities) {
+      if ((c['city'] as String).toLowerCase() == station.toLowerCase()) {
+        match = c;
+        break;
+      }
+    }
+    // Then substring match
+    if (match == null) {
+      for (final c in cities) {
+        final cn = (c['city'] as String).toLowerCase();
+        if (station.toLowerCase().contains(cn) ||
+            cn.contains(station.toLowerCase())) {
+          match = c;
+          break;
+        }
+      }
+    }
+
+    if (match == null) {
+      // No registry entry — return as-is (station name is real at least)
+      return {
+        ...item,
+        'station': station,
+        'city': station,
+      };
+    }
+
+    // Merge: live data wins for levels; registry wins for metadata gaps
+    return <String, dynamic>{
+      ...item,
+      'station':    station,
+      'city':       station,
+      'river_name': item['river_name'] ?? item['river'] ?? match['river'],
+      'lat':        item['lat'] ?? item['latitude'] ?? match['lat'],
+      'lon':        item['lon'] ?? item['longitude'] ?? match['lon'],
+      // Only use registry danger/warning if backend didn't send non-zero values
+      'danger_level': _preferNonZero(
+          item['danger_level'], match['danger_level']),
+      'warning_level': _preferNonZero(
+          item['warning_level'], match['warning_level']),
+      'safe_level': item['safe_level'] ??
+          ((match['warning_level'] as double) - 2.0),
+    };
+  }
+
+  double _preferNonZero(dynamic live, dynamic fallback) {
+    final lv = live == null ? 0.0 : (double.tryParse(live.toString()) ?? 0.0);
+    final fv = fallback == null ? 0.0 : (double.tryParse(fallback.toString()) ?? 0.0);
+    return lv > 0 ? lv : fv;
+  }
+
+  // ── CWC station parser (for the station strip widget) ────────────────────
+  void _updateCwcStationsFromItems(List<dynamic> items) {
+    if (items.isEmpty) {
+      _log('CWC: no telemetry items');
+      return;
     }
 
     final parsed = items
         .whereType<Map<String, dynamic>>()
         .map(CwcStationData.fromJson)
-        .where((s) => s.stationName.isNotEmpty)
+        .where((s) =>
+            s.stationName.isNotEmpty &&
+            s.stationName != 'Unknown' &&
+            s.riverLevel > 0 &&
+            (s.riverLevel >= s.warningLevel && s.warningLevel > 0))
         .toList();
 
     if (parsed.isEmpty) {
-      _log('CWC: items found but stationName empty in all. '
-          'Check field name mapping in CwcStationData.fromJson');
-      return;
+      // Relax filter — show any station with a real name + non-zero level
+      final relaxed = items
+          .whereType<Map<String, dynamic>>()
+          .map(CwcStationData.fromJson)
+          .where((s) => s.stationName.isNotEmpty && s.stationName != 'Unknown')
+          .toList();
+      _cwcStations = relaxed;
+      _log('CWC strip (relaxed): ${_cwcStations.length} stations');
+    } else {
+      _cwcStations = parsed;
+      _log('CWC strip (above warning): ${_cwcStations.length} stations');
     }
 
-    _cwcStations = parsed;
-    _cwcSource   = parsed.any((s) => s.isLiveCwc)
+    _cwcSource = _cwcStations.any((s) => s.isLiveCwc)
         ? 'CWC_API'
         : 'TACTICAL_REGISTRY';
-    _log('CWC: populated ${_cwcStations.length} stations, source=$_cwcSource');
+  }
+
+  void _updateCwcStations(Map<String, dynamic> response) {
+    final items = _deepExtractList(response) ?? [];
+    _updateCwcStationsFromItems(items);
   }
 
   // ── Deep recursive list extractor ─────────────────────────────────────────
-  // Searches every level of a nested Map/List envelope for the first
-  // non-empty List<Map> it can find. Handles:
-  //   {data: [...]}                      depth-1
-  //   {data: {data: [...]}}              depth-2  ← /api/live-levels format
-  //   {data: {data: {data: [...]}}}      depth-3 (some backends)
-  //   {records: [...]}                   alternate key
-  //   bare Map with station fields       single-station shortcut
   List<dynamic>? _deepExtractList(dynamic node, {int depth = 0}) {
     if (depth > 6) return null;
 
@@ -552,7 +748,6 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // ── Legacy flat extractor (kept for alerts parser) ─────────────────────────
   List<dynamic>? _extractList(Map<String, dynamic> response) {
     for (final key in ['data', 'stations', 'result', 'results',
                         'items', 'records', 'levels', 'telemetry']) {
@@ -572,19 +767,6 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Parsers ───────────────────────────────────────────────────────────────
-  // FIX: Use _deepExtractList so we can pierce {data: {data: [...]}} wrapping
-  // from /api/live-levels. Previously used _extractList which only went 2 levels.
-  List<FloodData> _parseFloodLevels(Map<String, dynamic> response) {
-    if (response['status'] == 'error') return <FloodData>[];
-    final items = _deepExtractList(response);
-    if (items == null) return <FloodData>[];
-    return items
-        .whereType<Map<String, dynamic>>()
-        .map(FloodData.fromJson)
-        .where((e) => e.city.isNotEmpty)
-        .toList(growable: false);
-  }
-
   List<FloodAlert> _parseAlerts(Map<String, dynamic> response) {
     if (response['status'] == 'error') return <FloodAlert>[];
     final items = _extractList(response);
@@ -645,8 +827,7 @@ class RealTimeService extends ChangeNotifier {
   }
 
   void _apply24HourTrim() {
-    final cutoff =
-        DateTime.now().subtract(const Duration(hours: 24));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
     for (final key in _historyByCity.keys.toList()) {
       _historyByCity[key] = _historyByCity[key]!
           .where((p) => p.timestamp.isAfter(cutoff))
