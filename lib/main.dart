@@ -6,17 +6,21 @@ import 'package:flutter/services.dart';
 
 import 'providers/theme_provider.dart';
 import 'screens/splash_screen.dart';
-import 'services/real_time_service.dart';
 import 'theme/river_theme.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX #1: RealTimeService.startPolling() is NO LONGER called here.
+//         It is called in SplashScreen.initState() AFTER runApp(), so
+//         notifyListeners() always fires into a live widget tree.
+// ─────────────────────────────────────────────────────────────────────────────
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Force dark mode and Ferrari status bar style
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:           Colors.transparent,
-    statusBarIconBrightness:  Brightness.light,
-    systemNavigationBarColor: AppPalette.carbon0,
+    statusBarColor:                    Colors.transparent,
+    statusBarIconBrightness:           Brightness.light,
+    systemNavigationBarColor:          AppPalette.carbon0,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
 
@@ -36,8 +40,9 @@ Future<void> main() async {
     return true;
   };
 
+  // FIX #1: Load ThemeProvider ONLY — no polling yet.
+  // RealTimeService is started inside SplashScreen.initState().
   await ThemeProvider().init();
-  await RealTimeService().startPolling();
 
   runApp(const OpsFloodApp());
 }
@@ -47,17 +52,20 @@ class OpsFloodApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: ThemeProvider(),
+    // FIX #2 + #3: Use ListenableBuilder scoped only to ThemeProvider.
+    //   - ListenableBuilder replaces AnimatedBuilder to avoid rebuilding
+    //     the entire MaterialApp on every unrelated ChangeNotifier call.
+    //   - themeMode now reads ThemeProvider().mode instead of being
+    //     hardcoded to ThemeMode.dark.
+    return ListenableBuilder(
+      listenable: ThemeProvider(),
       builder: (_, __) => MaterialApp(
         title:                    'OpsFlood',
         debugShowCheckedModeBanner: false,
-        // Default to dark (Ferrari) theme
-        themeMode: ThemeMode.dark,
+        themeMode: ThemeProvider().mode,          // FIX #3: live from provider
         theme:     RiverColors.lightTheme(),
         darkTheme:  RiverColors.darkTheme(),
         home:      const SplashScreen(),
-        // Smooth page transitions throughout
         builder: (context, child) {
           // Prevent font scaling beyond 1.2x so labels never overflow
           final mq = MediaQuery.of(context);

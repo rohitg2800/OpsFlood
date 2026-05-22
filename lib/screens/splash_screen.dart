@@ -3,8 +3,13 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'home_screen.dart';
 import '../services/api_service.dart';
+import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 
+// FIX #1: RealTimeService.startPolling() is now called here in initState(),
+//         AFTER runApp() has built the widget tree.  This guarantees that
+//         the first notifyListeners() from _loadFallbackImmediately() has
+//         at least one active listener and is not fired into a void.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -34,13 +39,14 @@ class _SplashScreenState extends State<SplashScreen>
   late AnimationController _statusCtrl;
   late Animation<double>   _statusOpacity;
 
-  String _statusText     = 'Initializing...';
-  bool   _backendOnline  = false;
+  String _statusText    = 'Initializing...';
+  bool   _backendOnline = false;
 
   @override
   void initState() {
     super.initState();
 
+    // ── Animation controllers ────────────────────────────────────────────────
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400));
     _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
@@ -54,8 +60,8 @@ class _SplashScreenState extends State<SplashScreen>
     _titleSlide = Tween<Offset>(
             begin: const Offset(0, 0.4), end: Offset.zero)
         .animate(CurvedAnimation(
-            parent: _entranceCtrl, curve: const Interval(0.4, 0.9,
-            curve: Curves.easeOutCubic)));
+            parent: _entranceCtrl,
+            curve: const Interval(0.4, 0.9, curve: Curves.easeOutCubic)));
 
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1600))
@@ -80,6 +86,13 @@ class _SplashScreenState extends State<SplashScreen>
       _statusCtrl.forward();
     });
 
+    // ── FIX #1: Start polling here, after widget tree is live ────────────────
+    _bootServices();
+  }
+
+  Future<void> _bootServices() async {
+    // Start the real-time service NOW — widget tree is alive, listeners work.
+    await RealTimeService().startPolling();
     _checkBackend();
   }
 
@@ -268,9 +281,9 @@ class _SplashScreenState extends State<SplashScreen>
                           child: const Text(
                             'OpsFlood',
                             style: TextStyle(
-                              fontSize:   44,
-                              fontWeight: FontWeight.w900,
-                              color:      Colors.white,
+                              fontSize:      44,
+                              fontWeight:    FontWeight.w900,
+                              color:         Colors.white,
                               letterSpacing: -1.0,
                             ),
                           ),
@@ -279,9 +292,9 @@ class _SplashScreenState extends State<SplashScreen>
                         const Text(
                           'AI-POWERED FLOOD INTELLIGENCE',
                           style: TextStyle(
-                            fontSize:   11,
-                            fontWeight: FontWeight.w700,
-                            color:      AppPalette.gold,
+                            fontSize:      11,
+                            fontWeight:    FontWeight.w700,
+                            color:         AppPalette.gold,
                             letterSpacing: 3.0,
                           ),
                         ),
@@ -313,9 +326,9 @@ class _SplashScreenState extends State<SplashScreen>
                       Text(
                         _statusText,
                         style: const TextStyle(
-                          color:      AppPalette.textGrey,
-                          fontSize:   13,
-                          fontWeight: FontWeight.w500,
+                          color:         AppPalette.textGrey,
+                          fontSize:      13,
+                          fontWeight:    FontWeight.w500,
                           letterSpacing: 0.3,
                         ),
                       ),
@@ -333,11 +346,11 @@ class _SplashScreenState extends State<SplashScreen>
             right: 0,
             child: Center(
               child: Text(
-                'v2.0  •  SCUDERIA BUILD',
+                'v2.1  •  SCUDERIA BUILD',
                 style: TextStyle(
-                  color:      AppPalette.ferrari.withOpacity(0.5),
-                  fontSize:   10,
-                  fontWeight: FontWeight.w700,
+                  color:         AppPalette.ferrari.withOpacity(0.5),
+                  fontSize:      10,
+                  fontWeight:    FontWeight.w700,
                   letterSpacing: 2.0,
                 ),
               ),
@@ -357,7 +370,6 @@ class _CarbonGridPainter extends CustomPainter {
       ..color = const Color(0x08FFFFFF)
       ..strokeWidth = 0.5;
     const step = 28.0;
-    // Diagonal lines (45°)
     for (double i = -size.height; i < size.width + size.height; i += step) {
       canvas.drawLine(Offset(i, 0), Offset(i + size.height, size.height), paint);
       canvas.drawLine(Offset(i, 0), Offset(i - size.height, size.height), paint);
