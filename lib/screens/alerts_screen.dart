@@ -50,14 +50,14 @@ class AlertsScreen extends StatefulWidget {
 
 class _AlertsScreenState extends State<AlertsScreen>
     with SingleTickerProviderStateMixin {
-  final RealTimeService _svc      = RealTimeService();
+  final RealTimeService _svc       = RealTimeService();
   final Set<String>     _dismissed = {};
   String  _filter   = 'ALL';
   late AnimationController _pulseCtrl;
 
-  // P2: NDMA contacts state
-  List<NdmaContact> _ndmaContacts = [];
-  bool              _ndmaLoading  = false;
+  // FIX: was NdmaContact (doesn't exist) → correct type is EmergencyContact
+  List<EmergencyContact> _ndmaContacts = [];
+  bool                   _ndmaLoading  = false;
 
   @override
   void initState() {
@@ -78,12 +78,13 @@ class _AlertsScreenState extends State<AlertsScreen>
 
   void _onUpdate() { if (mounted) setState(() {}); }
 
-  // P2: Load NDMA emergency contacts. Fails silently if backend not live.
+  // FIX: getContacts() requires named param `state`; pass empty string so it
+  // still compiles and falls back to the hardcoded national numbers.
   Future<void> _loadNdmaContacts() async {
     if (!mounted) return;
     setState(() => _ndmaLoading = true);
     try {
-      final contacts = await NdmaService.instance.getContacts();
+      final contacts = await NdmaService.instance.getContacts(state: '');
       if (mounted) setState(() { _ndmaContacts = contacts; _ndmaLoading = false; });
     } catch (_) {
       if (mounted) setState(() => _ndmaLoading = false);
@@ -406,14 +407,11 @@ class _AlertsScreenState extends State<AlertsScreen>
   }
 }
 
-// ─── NDMA Emergency Contacts Card (P2) ─────────────────────────────────────────────
-// Calls NdmaService.instance.getContacts().
-// Shows a graceful empty state when /api/ndma/advisories not yet live.
-// Each contact row has a tap-to-call button using url_launcher.
-// ───────────────────────────────────────────────────────────────────────────────
+// ─── NDMA Emergency Contacts Card ─────────────────────────────────────────────
 class _NdmaContactsCard extends StatelessWidget {
-  final List<NdmaContact> contacts;
-  final bool              loading;
+  // FIX: was List<NdmaContact> → correct type is List<EmergencyContact>
+  final List<EmergencyContact> contacts;
+  final bool                   loading;
   const _NdmaContactsCard({required this.contacts, required this.loading});
 
   Future<void> _call(String phone) async {
@@ -432,7 +430,6 @@ class _NdmaContactsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
             child: Row(
@@ -471,7 +468,7 @@ class _NdmaContactsCard extends StatelessWidget {
           ),
           Divider(height: 1, color: Colors.white.withOpacity(0.07)),
 
-          // Hardcoded national helplines (always visible, no backend needed)
+          // Hardcoded national helplines — always visible, no backend needed
           _ContactRow(
             role:  'National Disaster Helpline',
             name:  'NDMA 24x7',
@@ -522,10 +519,11 @@ class _NdmaContactsCard extends StatelessWidget {
                     letterSpacing: 0.5),
               ),
             ),
+            // FIX: c is now properly typed as EmergencyContact so .role/.name/.phone resolve
             ...contacts.map((c) => _ContactRow(
-                  role:  c.role,
-                  name:  c.name,
-                  phone: c.phone,
+                  role:   c.role,
+                  name:   c.name,
+                  phone:  c.phone,
                   onCall: _call,
                 )),
           ] else ...[
@@ -533,14 +531,13 @@ class _NdmaContactsCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Text(
-                'ℹ️  State-specific contacts load when /api/ndma/advisories is live.',
+                'ℹ️  State-specific contacts load when /api/ndrf/contacts is live.',
                 style: TextStyle(
                     color: Colors.white.withOpacity(0.3), fontSize: 11),
               ),
             ),
           ],
 
-          // Attribution
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
             child: Text(
@@ -556,9 +553,9 @@ class _NdmaContactsCard extends StatelessWidget {
 }
 
 class _ContactRow extends StatelessWidget {
-  final String                    role;
-  final String                    name;
-  final String                    phone;
+  final String                        role;
+  final String                        name;
+  final String                        phone;
   final Future<void> Function(String) onCall;
   const _ContactRow({
     required this.role,
@@ -625,7 +622,7 @@ class _ContactRow extends StatelessWidget {
   }
 }
 
-// ─── gauge mini card ────────────────────────────────────────────────────────────────────
+// ─── gauge mini card ──────────────────────────────────────────────────────────
 class _GaugeCard extends StatelessWidget {
   final FloodData item;
   const _GaugeCard({required this.item});
@@ -744,7 +741,7 @@ class _GaugeCard extends StatelessWidget {
   }
 }
 
-// ─── alert card ───────────────────────────────────────────────────────────────────────
+// ─── alert card ───────────────────────────────────────────────────────────────
 class _AlertCard extends StatelessWidget {
   final dynamic              alert;
   final AnimationController  pulseCtrl;
