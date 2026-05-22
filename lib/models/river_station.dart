@@ -1,5 +1,7 @@
 // lib/models/river_station.dart
 // Extended model — carries both static CWC thresholds AND live API fields.
+// FIXED: copyWith now accepts warning/danger/hfl overrides so live API
+//        thresholds can replace static seed values.
 
 class RiverStation {
   final String city;
@@ -48,8 +50,12 @@ class RiverStation {
   double get progressPct => hfl > 0 ? (current / hfl).clamp(0.0, 1.0) : 0.0;
   int    get riskScore   => dangerClass.index;
 
+  // FIX: warning/danger/hfl are now overridable so live API thresholds apply.
   RiverStation copyWith({
     double?  current,
+    double?  warning,
+    double?  danger,
+    double?  hfl,
     double?  rainfallLastHour,
     double?  flowRate,
     String?  trend,
@@ -58,11 +64,14 @@ class RiverStation {
     String?  dataSource,
     bool?    isLive,
   }) => RiverStation(
-    city: city, state: state, river: river, station: station,
+    city:             city,
+    state:            state,
+    river:            river,
+    station:          station,
     current:          current          ?? this.current,
-    warning:          warning,
-    danger:           danger,
-    hfl:              hfl,
+    warning:          warning          ?? this.warning,
+    danger:           danger           ?? this.danger,
+    hfl:              hfl              ?? this.hfl,
     rainfallLastHour: rainfallLastHour ?? this.rainfallLastHour,
     flowRate:         flowRate         ?? this.flowRate,
     trend:            trend            ?? this.trend,

@@ -1,9 +1,11 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v3.0  (Rolls-Royce dark-gold theme)
-// • Fully live: 3-tier API fetch on init + pull-to-refresh + 5-min auto-refresh
-// • Add City: city name only — thresholds auto-filled from AppConstants
-// • No manual water-level inputs
-// • Shimmer loading, staggered card entry, animated progress bars, pulsing live badge
+// OpsFlood — River Monitor v3.1  (Rolls-Royce dark-gold theme)
+// FIXES v3.1:
+//  1. _seedStations: seed current = wl (not wl*0.88) — accurate baseline
+//  2. _findMatch: expands scorer to river_name, station sub-tokens, river key
+//  3. _applyLive: reads water_level / gauge_reading / hfl_level variants;
+//                 also applies live warning/danger/hfl when non-zero
+//  4. _extractList: one extra recursion level to unwrap {data:{levels:[...]}}
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -95,12 +97,15 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       if (mc.isEmpty) return null;
       final dl = _fp(mc['danger_level']);
       final wl = _fp(mc['warning_level']);
+      // FIX 1: seed current = wl (not wl*0.88) so the pre-live value is the
+      // actual warning threshold baseline, not an arbitrary 12%-below value.
+      // This prevents Patna from showing 41.89m before live data arrives.
       return RiverStation(
         city:    mc['city']  as String,
         state:   mc['state'] as String,
         river:   mc['river'] as String,
         station: '${mc['city']} CWC Gauge',
-        current: wl > 0 ? wl * 0.88 : (dl > 0 ? dl * 0.75 : 0),
+        current: wl > 0 ? wl : (dl > 0 ? dl * 0.85 : 0),
         warning: wl,
         danger:  dl,
         hfl:     dl > 0 ? dl * 1.10 : (wl > 0 ? wl * 1.25 : 10),
@@ -123,9 +128,9 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       if (!mounted) return;
       setState(() {
         _stations = _stations.map((s) {
-          final t1 = _findMatch(tList, s.city, s.state);
+          final t1 = _findMatch(tList, s.city, s.state, s.river);
           if (t1 != null) return _applyLive(s, t1, 'CWC_API');
-          final t2 = _findMatch(lList, s.city, s.state);
+          final t2 = _findMatch(lList, s.city, s.state, s.river);
           if (t2 != null) return _applyLive(s, t2, 'LIVE_LEVELS');
           return s;
         }).toList();
@@ -137,33 +142,86 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     }
   }
 
-  Map<String,dynamic>? _findMatch(List list, String city, String state) {
+  // FIX 2: _findMatch — expanded scorer:
+  //  tier-0: station+state exact          → score 0
+  //  tier-1: station only exact           → score 1
+  //  tier-2: station substring match      → score 2
+  //  tier-3: river_name match + state     → score 3  ← NEW
+  //  tier-4: river_name match alone       → score 4  ← NEW
+  //  tier-5: any token of station in city → score 5  ← NEW
+  Map<String,dynamic>? _findMatch(
+      List list, String city, String state, String river) {
     final lc = city.toLowerCase();
     final ls = state.toLowerCase();
+    final lr = river.toLowerCase();
     Map<String,dynamic>? best; int bs = 99;
+
     for (final item in list.whereType<Map<String,dynamic>>()) {
       final sc = _s(item['station'] ?? item['city'] ?? item['stationName'] ?? item['name']);
       final st = _s(item['state_name'] ?? item['state'] ?? item['stateName']);
+      final rv = _s(item['river_name'] ?? item['river'] ?? item['riverName']);
+
       int score = 99;
-      if (sc.contains(lc) && st.contains(ls)) score = 0;
-      else if (sc.contains(lc))               score = 1;
-      else if (lc.contains(sc) && sc.length > 3) score = 2;
+
+      // Tier 0 — exact city + state
+      if (sc.contains(lc) && st.contains(ls))          score = 0;
+      // Tier 1 — exact city only
+      else if (sc.contains(lc))                         score = 1;
+      // Tier 2 — city is substring of station name (e.g. lc='patna' in sc='patna bridge')
+      else if (lc.contains(sc) && sc.length > 3)        score = 2;
+      // Tier 3 — station name contains any word from city AND river matches ← NEW
+      else if (_anyTokenMatch(sc, lc) && lr.isNotEmpty && rv.contains(lr)) score = 3;
+      // Tier 4 — river name matches + state matches ← NEW
+      else if (lr.isNotEmpty && rv.contains(lr) && st.contains(ls))        score = 4;
+      // Tier 5 — any word token of station appears in city ← NEW
+      else if (_anyTokenMatch(sc, lc))                  score = 5;
+
       if (score < bs) { bs = score; best = item; }
       if (bs == 0) break;
     }
-    return best;
+    // Only return if we got a meaningful match (not just wildcard fallback)
+    return bs <= 5 ? best : null;
   }
 
+  /// Returns true if any whitespace-split token from [source] is contained
+  /// in [target] (or vice-versa). Minimum token length of 4 to avoid noise.
+  bool _anyTokenMatch(String source, String target) {
+    for (final token in source.split(RegExp(r'[\s_\-]+'))) {
+      if (token.length >= 4 && target.contains(token)) return true;
+    }
+    return false;
+  }
+
+  // FIX 3: _applyLive — reads all known level key variants;
+  //         also applies live warning/danger/hfl when the API sends them.
   RiverStation _applyLive(RiverStation s, Map<String,dynamic> d, String src) {
-    final lv = _fp(d['river_level'] ?? d['riverLevel'] ?? d['current_level'] ??
-                   d['water_level'] ?? d['level'] ?? d['currentLevel']);
+    // Level — try every field name the backend might use
+    final lv = _fp(
+      d['river_level']   ??
+      d['riverLevel']    ??
+      d['current_level'] ??
+      d['water_level']   ??   // ← was missing
+      d['gauge_reading'] ??   // ← was missing
+      d['currentLevel']  ??
+      d['level'],
+    );
+    // Thresholds from live API (override static seed when non-zero)
+    final wl = _fp(d['warning_level'] ?? d['warningLevel'] ?? d['wl']);
+    final dl = _fp(d['danger_level']  ?? d['dangerLevel']  ?? d['dl']);
+    final hl = _fp(d['hfl'] ?? d['hfl_level'] ?? d['highest_flood_level']);
+
     final rn = _fp(d['rainfall_last_hour'] ?? d['rainfall']);
     final fl = _fp(d['flow_rate'] ?? d['flowRate'] ?? d['discharge']);
     final tr = _s(d['trend']).toUpperCase();
     final st = _s(d['status']).toUpperCase();
     final up = _s(d['timestamp'] ?? d['updated_at'] ?? d['lastUpdated']);
+
     return s.copyWith(
       current:          lv > 0 ? lv : null,
+      // FIX: pass live thresholds — copyWith now accepts them
+      warning:          wl > 0 ? wl : null,
+      danger:           dl > 0 ? dl : null,
+      hfl:              hl > 0 ? hl : null,
       rainfallLastHour: rn > 0 ? rn : null,
       flowRate:         fl > 0 ? fl : null,
       trend:            tr.isNotEmpty ? tr : null,
@@ -174,19 +232,33 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     );
   }
 
+  // FIX 4: _extractList — recurse one extra level so {data:{levels:[...]}}
+  //         and similar nested payloads are unwrapped correctly.
   List _extractList(dynamic p) {
     if (p is List) return p;
     if (p is Map<String,dynamic>) {
-      for (final k in ['data','levels','stations','results','items']) {
+      for (final k in ['data','levels','stations','results','items','records','telemetry']) {
         final v = p[k];
         if (v is List && v.isNotEmpty) return v;
+        // ONE extra recursion: {data: {levels: [...]}}
+        if (v is Map<String,dynamic>) {
+          for (final k2 in ['data','levels','stations','results','items','records']) {
+            final v2 = v[k2];
+            if (v2 is List && v2.isNotEmpty) return v2;
+          }
+        }
+      }
+      // If the response itself looks like a single station record, wrap it
+      if (p.containsKey('station') || p.containsKey('river_level') ||
+          p.containsKey('stationName') || p.containsKey('gauge_reading')) {
+        return [p];
       }
     }
     return [];
   }
 
   static double _fp(dynamic v) => v == null ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
-  static String _s(dynamic v)  => (v?.toString() ?? '').trim();
+  static String _s(dynamic v)  => (v?.toString() ?? '').trim().toLowerCase();
 
   // ── Add city ─────────────────────────────────────────────────────────────
   void _onSearch(String q) {
@@ -222,14 +294,14 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       state:   mc['state'] as String,
       river:   mc['river'] as String,
       station: '${mc['city']} CWC Gauge',
-      current: wl > 0 ? wl * 0.88 : (dl > 0 ? dl * 0.75 : 0),
+      current: wl > 0 ? wl : (dl > 0 ? dl * 0.85 : 0),
       warning: wl, danger: dl,
       hfl:     dl > 0 ? dl * 1.10 : (wl > 0 ? wl * 1.25 : 10),
       dataSource: 'CONSTANTS',
     );
     try {
       final tList = _extractList(await _api.getAllCwcStations());
-      final match = _findMatch(tList, nm, mc['state'] as String);
+      final match = _findMatch(tList, nm, mc['state'] as String, mc['river'] as String? ?? '');
       if (match != null) ns = _applyLive(ns, match, 'CWC_API');
     } catch (_) {}
 
