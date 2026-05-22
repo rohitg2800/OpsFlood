@@ -6,10 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../constants.dart';
 import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
-import '../services/cwc_live_provider.dart';
 import '../services/ndma_service.dart';
 import '../widgets/animated_alert_badge.dart';
-import '../widgets/river_level_visualizer.dart';
 
 const _kBg     = Color(0xFF060D14);
 const _kCard   = Color(0xFF0D1B26);
@@ -22,7 +20,7 @@ const _kText   = Color(0xFFE2EAF0);
 const _kSub    = Color(0xFF6B8699);
 
 Color _sevColor(String sev) {
-  switch (sev) {
+  switch (sev.toUpperCase()) {
     case 'ALL':      return _kCyan;
     case 'CRITICAL': return _kRed;
     case 'HIGH':     return _kOrange;
@@ -32,13 +30,42 @@ Color _sevColor(String sev) {
 }
 
 String _sevIcon(String sev) {
-  switch (sev) {
+  switch (sev.toUpperCase()) {
     case 'CRITICAL': return '\uD83D\uDD34';
     case 'HIGH':     return '\uD83D\uDFE0';
     case 'MODERATE': return '\uD83D\uDFE1';
     case 'LOW':      return '\uD83D\uDFE2';
     default:         return '\u26AA';
   }
+}
+
+// IMD colour → Flutter Color
+Color _imdColor(String sev) {
+  switch (sev.toUpperCase()) {
+    case 'RED':    return _kRed;
+    case 'ORANGE': return _kOrange;
+    case 'YELLOW': return _kYellow;
+    case 'GREEN':  return _kGreen;
+    default:       return _kSub;
+  }
+}
+
+// Source badge label + colour for _GaugeCard
+_SourceBadge _sourceBadge(String status) {
+  final s = status.toUpperCase();
+  if (s == 'ESTIMATED') return _SourceBadge('ESTIMATED', _kSub);
+  if (s.contains('CWC') || s == 'BULK' || s == 'TELEMETRY' || s == 'CWC_FFS' ||
+      s == 'RESERVOIR' || s == 'LIVE_LEVELS') {
+    return _SourceBadge('LIVE · CWC', _kCyan);
+  }
+  if (s == 'LIVE') return _SourceBadge('LIVE', _kGreen);
+  return _SourceBadge(status, _kSub);
+}
+
+class _SourceBadge {
+  final String label;
+  final Color  color;
+  const _SourceBadge(this.label, this.color);
 }
 
 class AlertsScreen extends ConsumerStatefulWidget {
@@ -53,16 +80,12 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
   String _filter = 'ALL';
   late AnimationController _pulseCtrl;
 
-  List<EmergencyContact> _ndmaContacts = [];
-  bool                   _ndmaLoading  = false;
-
   @override
   void initState() {
     super.initState();
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(seconds: 2))
       ..repeat(reverse: true);
-    _loadNdmaContacts();
   }
 
   @override
@@ -71,26 +94,17 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     super.dispose();
   }
 
-  Future<void> _loadNdmaContacts() async {
-    if (!mounted) return;
-    setState(() => _ndmaLoading = true);
-    try {
-      final contacts = await NdmaService.instance.getContacts(state: '');
-      if (mounted) setState(() { _ndmaContacts = contacts; _ndmaLoading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _ndmaLoading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Riverpod slice providers
-    final liveLevels   = ref.watch(liveLevelsProvider);
-    final isOffline    = ref.watch(isOfflineProvider);   // isOnlineProvider doesn't exist
-    final isOnline     = !isOffline;
-    final isUsingCache = ref.watch(realTimeProvider).isUsingCache; // no separate provider
-    final critAlerts   = ref.watch(criticalAlertsProvider);
-    final activeCrit   = ref.watch(activeCriticalAlertsProvider);
+    final liveLevels    = ref.watch(liveLevelsProvider);
+    final isOffline     = ref.watch(isOfflineProvider);
+    final isOnline      = !isOffline;
+    final isUsingCache  = ref.watch(realTimeProvider).isUsingCache;
+    final critAlerts    = ref.watch(criticalAlertsProvider);
+    final activeCrit    = ref.watch(activeCriticalAlertsProvider);
+    final imdAlerts     = ref.watch(imdAlertsProvider);
+    final ndmaAdvisories= ref.watch(ndmaAdvisoriesProvider);
+    final emergContacts = ref.watch(emergencyContactsProvider);
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -105,12 +119,9 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
         child: SafeArea(
           child: Builder(builder: (context) {
             final levels = List<FloodData>.from(liveLevels)
-              ..sort((a, b) =>
-                  b.capacityPercent.compareTo(a.capacityPercent));
+              ..sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
 
-            final baseAlerts = critAlerts.isNotEmpty
-                ? critAlerts
-                : activeCrit;
+            final baseAlerts = critAlerts.isNotEmpty ? critAlerts : activeCrit;
 
             final timelineAlerts = baseAlerts
                 .where((a) => !_dismissed.contains(a.id))
@@ -126,15 +137,13 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
             };
 
             return RefreshIndicator(
-              onRefresh: () async {
-                await ref.read(realTimeProvider).refreshData();
-                await _loadNdmaContacts();
-              },
+              onRefresh: () => ref.read(realTimeProvider).refreshData(),
               color: _kCyan,
               backgroundColor: _kCard,
               child: CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
+                  // ── Header ───────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
@@ -151,15 +160,10 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                                       letterSpacing: -0.5)),
                               const Spacer(),
                               IconButton(
-                                onPressed: () async {
-                                  await ref.read(realTimeProvider).refreshData();
-                                  await _loadNdmaContacts();
-                                },
-                                icon: const Icon(Icons.refresh_rounded,
-                                    color: _kSub, size: 20),
+                                onPressed: () => ref.read(realTimeProvider).refreshData(),
+                                icon: const Icon(Icons.refresh_rounded, color: _kSub, size: 20),
                                 style: IconButton.styleFrom(
-                                    backgroundColor:
-                                        Colors.white.withOpacity(0.06),
+                                    backgroundColor: Colors.white.withOpacity(0.06),
                                     padding: const EdgeInsets.all(8)),
                               ),
                             ],
@@ -167,27 +171,22 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                           const SizedBox(height: 12),
                           AnimatedAlertBadge(
                             count: timelineAlerts.length,
-                            isCritical: timelineAlerts
-                                .any((e) => e.severity == 'CRITICAL'),
+                            isCritical: timelineAlerts.any((e) => e.severity == 'CRITICAL'),
                             label: 'Active Timeline Alerts',
                           ),
                           const SizedBox(height: 14),
+                          // ── Severity count row ────────────────────────────
                           Row(
-                            children: [
-                              'CRITICAL', 'HIGH', 'MODERATE', 'LOW'
-                            ].map((s) {
+                            children: ['CRITICAL', 'HIGH', 'MODERATE', 'LOW'].map((s) {
                               final c = _sevColor(s);
                               return Expanded(
                                 child: Container(
                                   margin: const EdgeInsets.only(right: 6),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 8),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
                                     color: c.withOpacity(0.08),
-                                    borderRadius:
-                                        BorderRadius.circular(12),
-                                    border: Border.all(
-                                        color: c.withOpacity(0.22)),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: c.withOpacity(0.22)),
                                   ),
                                   child: Column(
                                     children: [
@@ -198,8 +197,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                                               fontSize: 18)),
                                       Text(s[0] + s.substring(1).toLowerCase(),
                                           style: const TextStyle(
-                                              color: _kSub,
-                                              fontSize: 9)),
+                                              color: _kSub, fontSize: 9)),
                                     ],
                                   ),
                                 ),
@@ -207,6 +205,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                             }).toList(),
                           ),
                           const SizedBox(height: 16),
+                          // ── Offline banner ────────────────────────────────
                           if (!isOnline || isUsingCache)
                             Container(
                               margin: const EdgeInsets.only(bottom: 12),
@@ -214,37 +213,57 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                               decoration: BoxDecoration(
                                 color: _kOrange.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: _kOrange.withOpacity(0.4)),
+                                border: Border.all(color: _kOrange.withOpacity(0.4)),
                               ),
-                              child: Row(
-                                children: const [
-                                  Icon(Icons.wifi_off_rounded,
-                                      color: _kOrange, size: 14),
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.wifi_off_rounded, color: _kOrange, size: 14),
                                   SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       'Offline \u2014 showing cached alerts.',
-                                      style: TextStyle(
-                                          color: _kOrange, fontSize: 12),
+                                      style: TextStyle(color: _kOrange, fontSize: 12),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          Row(
-                            children: const [
-                              Icon(Icons.water_drop,
-                                  color: _kCyan, size: 13),
-                              SizedBox(width: 5),
-                              Text('Live River Gauges',
-                                  style: TextStyle(
-                                      color: _kText,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14)),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ── IMD Colour Alerts section ─────────────────────────────
+                  if (imdAlerts.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                        child: _ImdAlertsSection(alerts: imdAlerts),
+                      ),
+                    ),
+
+                  // ── NDMA Advisories section ───────────────────────────────
+                  if (ndmaAdvisories.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+                        child: _NdmaAdvisoriesSection(advisories: ndmaAdvisories),
+                      ),
+                    ),
+
+                  // ── Live River Gauges ─────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.water_drop, color: _kCyan, size: 13),
+                          SizedBox(width: 5),
+                          Text('Live River Gauges',
+                              style: TextStyle(
+                                  color: _kText,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14)),
                         ],
                       ),
                     ),
@@ -254,51 +273,36 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                     padding: const EdgeInsets.symmetric(horizontal: 18),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
-                        (_, i) {
-                          final item = levels[i];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _GaugeCard(item: item),
-                          );
-                        },
-                        childCount: levels.take(4).length,
+                        (_, i) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _GaugeCard(item: levels[i]),
+                        ),
+                        childCount: levels.take(6).length,
                       ),
                     ),
                   ),
 
+                  // ── Alert Timeline filter ─────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding:
-                          const EdgeInsets.fromLTRB(18, 8, 18, 12),
+                      padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
-                          children: [
-                            'ALL', 'CRITICAL', 'HIGH', 'MODERATE', 'LOW'
-                          ].map((s) {
+                          children: ['ALL', 'CRITICAL', 'HIGH', 'MODERATE', 'LOW'].map((s) {
                             final selected = s == _filter;
                             final c = _sevColor(s);
                             return GestureDetector(
-                              onTap: () =>
-                                  setState(() => _filter = s),
+                              onTap: () => setState(() => _filter = s),
                               child: AnimatedContainer(
-                                duration:
-                                    const Duration(milliseconds: 250),
-                                margin:
-                                    const EdgeInsets.only(right: 8),
-                                padding:
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 14, vertical: 8),
+                                duration: const Duration(milliseconds: 250),
+                                margin: const EdgeInsets.only(right: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: selected
-                                      ? c.withOpacity(0.2)
-                                      : Colors.white.withOpacity(0.05),
-                                  borderRadius:
-                                      BorderRadius.circular(22),
+                                  color: selected ? c.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(22),
                                   border: Border.all(
-                                    color: selected
-                                        ? c
-                                        : Colors.white.withOpacity(0.15),
+                                    color: selected ? c : Colors.white.withOpacity(0.15),
                                     width: selected ? 1.5 : 1.0,
                                   ),
                                 ),
@@ -306,19 +310,13 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     if (s != 'ALL') ...[
-                                      Text(_sevIcon(s),
-                                          style: const TextStyle(
-                                              fontSize: 12)),
+                                      Text(_sevIcon(s), style: const TextStyle(fontSize: 12)),
                                       const SizedBox(width: 5),
                                     ],
                                     Text(s,
                                         style: TextStyle(
-                                          color: selected
-                                              ? c
-                                              : Colors.white70,
-                                          fontWeight: selected
-                                              ? FontWeight.w700
-                                              : FontWeight.w400,
+                                          color: selected ? c : Colors.white70,
+                                          fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                                           fontSize: 12,
                                         )),
                                   ],
@@ -331,27 +329,24 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                     ),
                   ),
 
+                  // ── Timeline alerts list ──────────────────────────────────
                   if (timelineAlerts.isEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding:
-                            const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
                         child: Container(
                           padding: const EdgeInsets.all(28),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.04),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                                color: Colors.white.withOpacity(0.1)),
+                            border: Border.all(color: Colors.white.withOpacity(0.1)),
                           ),
                           child: const Column(
                             children: [
-                              Icon(Icons.check_circle_outline,
-                                  color: _kGreen, size: 36),
+                              Icon(Icons.check_circle_outline, color: _kGreen, size: 36),
                               SizedBox(height: 10),
                               Text('No alerts for this severity',
-                                  style: TextStyle(
-                                      color: _kSub, fontSize: 13)),
+                                  style: TextStyle(color: _kSub, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -359,8 +354,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                     )
                   else
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
                           (_, i) {
@@ -369,10 +363,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                               key: ValueKey(alert.id),
                               alert: alert,
                               pulseCtrl: _pulseCtrl,
-                              onDismiss: () => setState(
-                                  () => _dismissed.add(alert.id)),
-                              onUndo: () => setState(
-                                  () => _dismissed.remove(alert.id)),
+                              onDismiss: () => setState(() => _dismissed.add(alert.id)),
+                              onUndo: () => setState(() => _dismissed.remove(alert.id)),
                             );
                           },
                           childCount: timelineAlerts.length,
@@ -380,13 +372,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                       ),
                     ),
 
+                  // ── Emergency Contacts card ───────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(18, 0, 18, 30),
-                      child: _NdmaContactsCard(
-                        contacts: _ndmaContacts,
-                        loading:  _ndmaLoading,
-                      ),
+                      child: _NdmaContactsCard(contacts: emergContacts),
                     ),
                   ),
                 ],
@@ -399,11 +389,189 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
   }
 }
 
+// ─── IMD Colour Alerts Section ────────────────────────────────────────────────
+class _ImdAlertsSection extends StatelessWidget {
+  final List<dynamic> alerts; // List<ImdAlert>
+  const _ImdAlertsSection({required this.alerts});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _kYellow.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kYellow.withOpacity(0.5)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('\uD83C\uDF27', style: TextStyle(fontSize: 11)),
+                  SizedBox(width: 5),
+                  Text('IMD Weather Alerts',
+                      style: TextStyle(
+                          color: _kYellow,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 11,
+                          letterSpacing: 0.5)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...alerts.take(5).map((a) {
+          final c = _imdColor(a.severity as String? ?? '');
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: c.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: c.withOpacity(0.35)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 10, height: 10,
+                  decoration: BoxDecoration(color: c, shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)]),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text((a.title as String? ?? a.severity as String? ?? 'IMD Alert'),
+                          style: const TextStyle(
+                              color: _kText, fontWeight: FontWeight.w700, fontSize: 13)),
+                      if ((a.description as String?)?.isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(a.description as String,
+                              style: const TextStyle(color: Colors.white60, fontSize: 11),
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: c.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: c.withOpacity(0.5)),
+                      ),
+                      child: Text((a.severity as String? ?? '').toUpperCase(),
+                          style: TextStyle(
+                              color: c, fontWeight: FontWeight.w800, fontSize: 10)),
+                    ),
+                    const SizedBox(height: 3),
+                    Text((a.state as String? ?? ''),
+                        style: const TextStyle(color: _kSub, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+// ─── NDMA Advisories Section ──────────────────────────────────────────────────
+class _NdmaAdvisoriesSection extends StatelessWidget {
+  final List<dynamic> advisories; // List<NdmaAdvisory>
+  const _NdmaAdvisoriesSection({required this.advisories});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _kOrange.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kOrange.withOpacity(0.5)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('\uD83D\uDEA8', style: TextStyle(fontSize: 11)),
+                  SizedBox(width: 5),
+                  Text('NDMA Advisories',
+                      style: TextStyle(
+                          color: _kOrange,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 11,
+                          letterSpacing: 0.5)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...advisories.take(4).map((adv) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: _kOrange.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kOrange.withOpacity(0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: _kOrange, size: 16),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text((adv.title as String? ?? 'NDMA Advisory'),
+                          style: const TextStyle(
+                              color: _kText, fontWeight: FontWeight.w700, fontSize: 13)),
+                      if ((adv.advisory as String?)?.isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(adv.advisory as String,
+                              style: const TextStyle(color: Colors.white60, fontSize: 11),
+                              maxLines: 3, overflow: TextOverflow.ellipsis),
+                        ),
+                      const SizedBox(height: 4),
+                      Text((adv.state as String? ?? ''),
+                          style: const TextStyle(color: _kSub, fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
 // ─── NDMA Emergency Contacts Card ─────────────────────────────────────────────
 class _NdmaContactsCard extends StatelessWidget {
   final List<EmergencyContact> contacts;
-  final bool                   loading;
-  const _NdmaContactsCard({required this.contacts, required this.loading});
+  const _NdmaContactsCard({required this.contacts});
 
   Future<void> _call(String phone) async {
     final uri = Uri(scheme: 'tel', path: phone);
@@ -414,9 +582,9 @@ class _NdmaContactsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color:        _kCard,
+        color: _kCard,
         borderRadius: BorderRadius.circular(16),
-        border:       Border.all(color: Colors.white.withOpacity(0.10)),
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,31 +596,23 @@ class _NdmaContactsCard extends StatelessWidget {
                 const Text('\uD83D\uDEA8', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
                 const Expanded(
-                  child: Text(
-                    'Emergency Contacts',
-                    style: TextStyle(
-                      color: _kText,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
+                  child: Text('Emergency Contacts',
+                      style: TextStyle(
+                          color: _kText, fontWeight: FontWeight.w700, fontSize: 13)),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: _kOrange.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: _kOrange.withOpacity(0.5)),
                   ),
-                  child: const Text(
-                    'NDMA',
-                    style: TextStyle(
-                        color: _kOrange,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1),
-                  ),
+                  child: const Text('NDMA',
+                      style: TextStyle(
+                          color: _kOrange,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1)),
                 ),
               ],
             ),
@@ -462,30 +622,19 @@ class _NdmaContactsCard extends StatelessWidget {
           _ContactRow(role: 'NDRF Emergency', name: 'National Disaster Response Force', phone: '011-24363260', onCall: _call),
           _ContactRow(role: 'Police Emergency', name: 'National Helpline', phone: '100', onCall: _call),
           _ContactRow(role: 'Ambulance', name: 'National Helpline', phone: '108', onCall: _call),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: _kCyan),
-                ),
-              ),
-            )
-          else if (contacts.isNotEmpty) ...[
+          if (contacts.isNotEmpty) ...[
             Divider(height: 1, color: Colors.white.withOpacity(0.07)),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-              child: Text(
-                'State-specific contacts',
-                style: TextStyle(
-                    color: Colors.white.withOpacity(0.35),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5),
-              ),
+              child: Text('State-specific contacts',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.35),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5)),
             ),
-            ...contacts.map((c) => _ContactRow(role: c.role, name: c.name, phone: c.phone, onCall: _call)),
+            ...contacts.map((c) =>
+                _ContactRow(role: c.role, name: c.name, phone: c.phone, onCall: _call)),
           ] else ...[
             Divider(height: 1, color: Colors.white.withOpacity(0.07)),
             Padding(
@@ -548,7 +697,9 @@ class _ContactRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: _kGreen.withOpacity(0.4)),
               ),
-              child: Text(phone, style: const TextStyle(color: _kGreen, fontWeight: FontWeight.w700, fontSize: 12)),
+              child: Text(phone,
+                  style: const TextStyle(
+                      color: _kGreen, fontWeight: FontWeight.w700, fontSize: 12)),
             ),
           ],
         ),
@@ -557,6 +708,7 @@ class _ContactRow extends StatelessWidget {
   }
 }
 
+// ─── Gauge Card with real source badge ────────────────────────────────────────
 class _GaugeCard extends StatelessWidget {
   final FloodData item;
   const _GaugeCard({required this.item});
@@ -565,6 +717,8 @@ class _GaugeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final riskC = _getRiskColor(item.riskLevel);
     final pct   = item.capacityPercent.clamp(0.0, 100.0);
+    final badge = _sourceBadge(item.status);
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -592,24 +746,58 @@ class _GaugeCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(item.city, style: const TextStyle(color: _kText, fontWeight: FontWeight.w700, fontSize: 14)),
-                    const SizedBox(width: 6),
-                    Text(item.riverName ?? '', style: const TextStyle(color: _kSub, fontSize: 11)),
-                    const Spacer(),
-                    Text('D ${item.dangerLevel.toStringAsFixed(1)}', style: const TextStyle(color: _kSub, fontSize: 11)),
+                    Expanded(
+                      child: Text(item.city,
+                          style: const TextStyle(
+                              color: _kText, fontWeight: FontWeight.w700, fontSize: 14)),
+                    ),
+                    Text(item.riverName ?? '',
+                        style: const TextStyle(color: _kSub, fontSize: 11)),
+                    const SizedBox(width: 8),
+                    Text('D ${item.dangerLevel.toStringAsFixed(1)}',
+                        style: const TextStyle(color: _kSub, fontSize: 11)),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Text('${item.currentLevel.toStringAsFixed(2)} m',
-                        style: TextStyle(color: riskC, fontWeight: FontWeight.w700, fontSize: 16)),
+                        style: TextStyle(
+                            color: riskC, fontWeight: FontWeight.w700, fontSize: 16)),
                     const SizedBox(width: 6),
+                    // Real source badge (LIVE · CWC / LIVE / ESTIMATED)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: riskC.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                      child: Text('ESTIMATED', style: TextStyle(color: riskC.withOpacity(0.8), fontSize: 9, fontWeight: FontWeight.w600)),
+                      decoration: BoxDecoration(
+                          color: badge.color.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: badge.color.withOpacity(0.5))),
+                      child: Text(badge.label,
+                          style: TextStyle(
+                              color: badge.color,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700)),
                     ),
+                    // IMD severity dot if present
+                    if (item.imdSeverity != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 8, height: 8,
+                        decoration: BoxDecoration(
+                          color: _imdColor(item.imdSeverity!),
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(
+                              color: _imdColor(item.imdSeverity!).withOpacity(0.6),
+                              blurRadius: 5)],
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      Text('IMD ${item.imdSeverity}',
+                          style: TextStyle(
+                              color: _imdColor(item.imdSeverity!),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700)),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -623,7 +811,8 @@ class _GaugeCard extends StatelessWidget {
                         child: Container(
                           height: 4,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: [riskC.withOpacity(0.6), riskC]),
+                            gradient: LinearGradient(
+                                colors: [riskC.withOpacity(0.6), riskC]),
                           ),
                         ),
                       ),
@@ -648,17 +837,24 @@ class _GaugeCard extends StatelessWidget {
   }
 }
 
+// ─── Alert Timeline Card ──────────────────────────────────────────────────────
 class _AlertCard extends StatelessWidget {
-  final dynamic alert;
+  final FloodAlert alert;
   final AnimationController pulseCtrl;
   final VoidCallback onDismiss, onUndo;
-  const _AlertCard({super.key, required this.alert, required this.pulseCtrl, required this.onDismiss, required this.onUndo});
+  const _AlertCard({
+    super.key,
+    required this.alert,
+    required this.pulseCtrl,
+    required this.onDismiss,
+    required this.onUndo,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final color  = _sevColor(alert.severity as String);
+    final color  = _sevColor(alert.severity);
     final isCrit = alert.severity == 'CRITICAL';
-    final date   = DateFormat('dd MMM | HH:mm').format((alert.timestamp as DateTime).toLocal());
+    final date   = DateFormat('dd MMM | HH:mm').format(alert.timestamp.toLocal());
 
     return Dismissible(
       key: ValueKey(alert.id),
@@ -667,7 +863,9 @@ class _AlertCard extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(color: _kRed.withOpacity(0.2), borderRadius: BorderRadius.circular(18)),
+        decoration: BoxDecoration(
+            color: _kRed.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(18)),
         child: const Icon(Icons.delete_outline_rounded, color: Colors.white60),
       ),
       onDismissed: (_) {
@@ -675,25 +873,33 @@ class _AlertCard extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: _kCard,
-            content: Text('${alert.city} alert dismissed', style: const TextStyle(color: _kText)),
-            action: SnackBarAction(label: 'UNDO', textColor: _kCyan, onPressed: onUndo),
+            content: Text('${alert.city} alert dismissed',
+                style: const TextStyle(color: _kText)),
+            action: SnackBarAction(
+                label: 'UNDO', textColor: _kCyan, onPressed: onUndo),
           ),
         );
       },
       child: AnimatedBuilder(
         animation: pulseCtrl,
         builder: (_, child) {
-          final glow = isCrit ? color.withOpacity(0.04 + pulseCtrl.value * 0.06) : Colors.transparent;
+          final glow = isCrit
+              ? color.withOpacity(0.04 + pulseCtrl.value * 0.06)
+              : Colors.transparent;
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             decoration: BoxDecoration(
               color: _kCard,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: isCrit ? color.withOpacity(0.5 + pulseCtrl.value * 0.3) : color.withOpacity(0.35),
+                color: isCrit
+                    ? color.withOpacity(0.5 + pulseCtrl.value * 0.3)
+                    : color.withOpacity(0.35),
                 width: isCrit ? 1.5 : 1.0,
               ),
-              boxShadow: [BoxShadow(color: glow, blurRadius: 16, spreadRadius: 1)],
+              boxShadow: [
+                BoxShadow(color: glow, blurRadius: 16, spreadRadius: 1)
+              ],
             ),
             child: child,
           );
@@ -704,8 +910,11 @@ class _AlertCard extends StatelessWidget {
             Container(
               height: 3,
               decoration: BoxDecoration(
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(18), topRight: Radius.circular(18)),
-                gradient: LinearGradient(colors: [color.withOpacity(0.6), color]),
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(18),
+                    topRight: Radius.circular(18)),
+                gradient: LinearGradient(
+                    colors: [color.withOpacity(0.6), color]),
               ),
             ),
             Padding(
@@ -718,11 +927,18 @@ class _AlertCard extends StatelessWidget {
                       Container(
                         width: 12, height: 12,
                         decoration: BoxDecoration(
-                          color: color, shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 6)],
+                          color: color,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                                color: color.withOpacity(0.5),
+                                blurRadius: 6)
+                          ],
                         ),
                       ),
-                      Container(width: 1.5, height: 70, color: color.withOpacity(0.2)),
+                      Container(
+                          width: 1.5, height: 70,
+                          color: color.withOpacity(0.2)),
                     ],
                   ),
                   const SizedBox(width: 12),
@@ -734,40 +950,53 @@ class _AlertCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
-                              child: Text(alert.title as String,
-                                  style: const TextStyle(color: _kText, fontWeight: FontWeight.w700, fontSize: 14)),
+                              child: Text(alert.title,
+                                  style: const TextStyle(
+                                      color: _kText,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14)),
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: color.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: color.withOpacity(0.4)),
+                                border:
+                                    Border.all(color: color.withOpacity(0.4)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(_sevIcon(alert.severity as String), style: const TextStyle(fontSize: 10)),
+                                  Text(_sevIcon(alert.severity),
+                                      style:
+                                          const TextStyle(fontSize: 10)),
                                   const SizedBox(width: 4),
-                                  Text(alert.severity as String,
-                                      style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+                                  Text(alert.severity,
+                                      style: TextStyle(
+                                          color: color,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700)),
                                 ],
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 6),
-                        Text(alert.message as String, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                        Text(alert.message,
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 12)),
                         const SizedBox(height: 10),
                         Wrap(
                           spacing: 8, runSpacing: 6,
                           children: [
-                            _Chip(Icons.location_on_outlined, alert.city as String),
-                            _Chip(Icons.map_outlined, alert.state as String),
+                            _Chip(Icons.location_on_outlined, alert.city),
+                            _Chip(Icons.map_outlined, alert.state),
                             _Chip(Icons.schedule_rounded, date),
                             if (alert.currentLevel != null)
-                              _Chip(Icons.straighten, '${(alert.currentLevel as double).toStringAsFixed(2)} m'),
+                              _Chip(Icons.straighten,
+                                  '${alert.currentLevel!.toStringAsFixed(2)} m'),
                           ],
                         ),
                       ],
@@ -802,7 +1031,8 @@ class _Chip extends StatelessWidget {
         children: [
           Icon(icon, size: 10, color: _kSub),
           const SizedBox(width: 4),
-          Text(text, style: const TextStyle(color: Colors.white60, fontSize: 10.5)),
+          Text(text,
+              style: const TextStyle(color: Colors.white60, fontSize: 10.5)),
         ],
       ),
     );
