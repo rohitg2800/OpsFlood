@@ -339,9 +339,13 @@ class RealTimeService extends ChangeNotifier {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
+    // FIX: flutter_local_notifications v18+ requires named 'settings:' param
     await _notifications.initialize(
-      const InitializationSettings(
-          android: androidInit, iOS: darwinInit, macOS: darwinInit),
+      settings: const InitializationSettings(
+        android: androidInit,
+        iOS:     darwinInit,
+        macOS:   darwinInit,
+      ),
     );
     final androidPlatform = _notifications
         .resolvePlatformSpecificImplementation<
@@ -557,7 +561,6 @@ class RealTimeService extends ChangeNotifier {
   // ── Pass 4 fetch helpers ──────────────────────────────────────────────────
 
   Future<_ImdResult> _fetchImdData(List<String> states) async {
-    // Fetch alerts + rainfall for every active monitored state in parallel
     try {
       final alertFutures    = states.map((s) => ImdService.instance.getAlerts(state: s));
       final rainfallFutures = states.map((s) => ImdService.instance.getRainfall(state: s));
@@ -606,13 +609,6 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Pass 4 enrichment ───────────────────────────────────────────────────
-  //
-  // Walk every fused FloodData item and try to match it with IMD rainfall
-  // data by state. If an IMD rainfall point exists for this city's state,
-  // inject imdRainfallMm + imdSeverity via copyWith.
-  //
-  // flood_engine.dart can then use FloodData.effectiveRainfallMm which
-  // automatically prefers IMD data over backend estimates.
   List<FloodData> _enrichWithImd(
     List<FloodData> levels,
     List<ImdRainfallPoint> rainfall,
@@ -620,20 +616,17 @@ class RealTimeService extends ChangeNotifier {
   ) {
     if (rainfall.isEmpty && alerts.isEmpty) return levels;
 
-    // Build state-keyed lookup maps for O(1) access
     final rainfallByState = <String, double>{};
     for (final pt in rainfall) {
       final key = pt.state.toLowerCase();
       final current = rainfallByState[key] ?? 0.0;
-      // Use max rainfall across districts in same state (worst-case for safety)
       if (pt.rainfallMm > current) rainfallByState[key] = pt.rainfallMm;
     }
 
-    final alertsByState = <String, String>{}; // state → IMD colour code
+    final alertsByState = <String, String>{};
     for (final a in alerts) {
       final key = a.state.toLowerCase();
       final existing = alertsByState[key];
-      // Escalate to worst severity seen for this state
       if (existing == null || _imdSeverityRank(a.severity) > _imdSeverityRank(existing)) {
         alertsByState[key] = a.severity;
       }
@@ -643,7 +636,7 @@ class RealTimeService extends ChangeNotifier {
       final stateKey = fd.state.toLowerCase();
       final rain   = rainfallByState[stateKey];
       final sev    = alertsByState[stateKey];
-      if (rain == null && sev == null) return fd; // nothing to enrich
+      if (rain == null && sev == null) return fd;
       return fd.copyWith(
         imdRainfallMm: rain,
         imdSeverity:   sev,
@@ -1134,7 +1127,6 @@ class RealTimeService extends ChangeNotifier {
 }
 
 // ── Private result containers for parallel fetch ─────────────────────────────
-// Using typed wrappers avoids unsafe List<dynamic> casts from Future.wait
 class _ImdResult {
   final List<ImdAlert> alerts;
   final List<ImdRainfallPoint> rainfall;
