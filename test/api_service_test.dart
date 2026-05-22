@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('ApiService retry-loop safety', () {
     test('backupBaseUrl is empty so _baseCandidates has 1 entry (no dead dupe)', () {
-      // We replicate the _baseCandidates logic here to test the fix.
       final candidates = [
         AppConstants.baseUrl,
         if (AppConstants.backupBaseUrl.isNotEmpty) AppConstants.backupBaseUrl,
@@ -17,7 +16,6 @@ void main() {
     test('baseUrl and backupBaseUrl are different strings (or backup is empty)', () {
       final base   = AppConstants.baseUrl;
       final backup = AppConstants.backupBaseUrl;
-      // Either backup is empty OR it points to a different host.
       expect(
         backup.isEmpty || backup != base,
         isTrue,

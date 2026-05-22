@@ -1,7 +1,5 @@
 name: equinox_flood
 description: Equinox — AI-powered flood prediction & river monitoring for India.
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -50,8 +48,9 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/
-    - assets/icon/
-    - assets/images/
-    - assets/animations/
+  # Assets block intentionally left minimal until asset folders actually exist.
+  # Add entries here only after creating the corresponding directories.
+  # assets:
+  #   - assets/icon/
+  #   - assets/images/
+  #   - assets/animations/
