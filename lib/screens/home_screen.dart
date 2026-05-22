@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/flood_providers.dart';
-import '../screens/india_river_explorer_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
@@ -18,9 +17,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  // Only HomeScreen starts/stops polling. Individual screens must NOT
-  // call startPolling() themselves — that caused duplicate listeners + full
-  // rebuilds across all 7 screens on every poll tick.
   int _currentIndex = 0;
 
   static const _destinations = [
@@ -30,7 +26,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _NavEntry(label: 'Weather',  icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud),
     _NavEntry(label: 'Predict',  icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
     _NavEntry(label: 'Rivers',   icon: Icons.water_outlined,          selectedIcon: Icons.water),
-    _NavEntry(label: 'India',    icon: Icons.map_outlined,            selectedIcon: Icons.map),
   ];
 
   Widget _buildScreen(int index) {
@@ -41,7 +36,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 3:  return const WeatherScreen();
       case 4:  return const PredictScreen();
       case 5:  return const RiverMonitorScreen();
-      case 6:  return const IndiaRiverExplorerScreen();
       default: return const DashboardScreen();
     }
   }
@@ -49,7 +43,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // ref is available directly in ConsumerState
     ref.read(realTimeProvider).startPolling();
   }
 
