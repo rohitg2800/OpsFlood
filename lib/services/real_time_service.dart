@@ -52,19 +52,51 @@ class CwcStationData {
     double sf(dynamic v) =>
         (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
     return CwcStationData(
-      stationName:      (j['station'] ?? j['stationName'] ?? j['station_name'] ?? j['city'] ?? j['name'] ?? '').toString(),
-      stateName:        (j['state']   ?? j['stateName']   ?? j['state_name'] ?? '').toString(),
-      riverName:        (j['river']   ?? j['riverName']   ?? j['river_name'] ?? '').toString(),
-      riverLevel:       sf(j['river_level'] ?? j['riverLevel'] ?? j['current_level'] ?? j['level'] ?? j['gauge_reading']),
-      warningLevel:     sf(j['warning_level'] ?? j['warningLevel'] ?? j['wl']),
-      dangerLevel:      sf(j['danger_level']  ?? j['dangerLevel']  ?? j['dl']),
-      flowRate:         sf(j['flow_rate']      ?? j['flowRate']     ?? j['discharge']),
-      rainfallLastHour: sf(j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
-      status:           (j['status'] ?? j['alert_status'] ?? 'ACTIVE').toString().toUpperCase(),
-      trend:            (j['trend']  ?? j['water_trend']  ?? 'STEADY').toString().toUpperCase(),
-      source:           (j['source'] ?? j['data_source']  ?? 'UNKNOWN').toString(),
-      lastUpdate:       DateTime.tryParse((j['last_update'] ?? j['lastUpdate'] ?? j['updated_at'] ?? '').toString())
-                            ?? DateTime.now(),
+      stationName: (j['station'] ??
+              j['stationName'] ??
+              j['station_name'] ??
+              j['city'] ??
+              j['name'] ??
+              '')
+          .toString(),
+      stateName: (j['state'] ??
+              j['stateName'] ??
+              j['state_name'] ??
+              '')
+          .toString(),
+      riverName: (j['river'] ??
+              j['riverName'] ??
+              j['river_name'] ??
+              '')
+          .toString(),
+      riverLevel: sf(j['river_level'] ??
+          j['riverLevel'] ??
+          j['current_level'] ??
+          j['level'] ??
+          j['gauge_reading']),
+      warningLevel:
+          sf(j['warning_level'] ?? j['warningLevel'] ?? j['wl']),
+      dangerLevel:
+          sf(j['danger_level'] ?? j['dangerLevel'] ?? j['dl']),
+      flowRate:
+          sf(j['flow_rate'] ?? j['flowRate'] ?? j['discharge']),
+      rainfallLastHour: sf(j['rainfall_last_hour'] ??
+          j['rainfallLastHour'] ??
+          j['rainfall']),
+      status: (j['status'] ?? j['alert_status'] ?? 'ACTIVE')
+          .toString()
+          .toUpperCase(),
+      trend: (j['trend'] ?? j['water_trend'] ?? 'STEADY')
+          .toString()
+          .toUpperCase(),
+      source: (j['source'] ?? j['data_source'] ?? 'UNKNOWN').toString(),
+      lastUpdate: DateTime.tryParse(
+              (j['last_update'] ??
+                      j['lastUpdate'] ??
+                      j['updated_at'] ??
+                      '')
+                  .toString()) ??
+          DateTime.now(),
     );
   }
 
@@ -106,15 +138,14 @@ class RealTimeService extends ChangeNotifier {
   DateTime? _lastFetchTime;
   String?   _error;
 
-  // Debug: store raw API responses so the debug panel can show them
-  Map<String, dynamic> _lastLevelsRaw  = {};
-  Map<String, dynamic> _lastCwcRaw     = {};
-  Map<String, dynamic> _lastAlertsRaw  = {};
+  Map<String, dynamic> _lastLevelsRaw = {};
+  Map<String, dynamic> _lastCwcRaw    = {};
+  Map<String, dynamic> _lastAlertsRaw = {};
 
-  List<FloodData>       _liveLevels     = <FloodData>[];
-  List<FloodAlert>      _criticalAlerts = <FloodAlert>[];
-  List<CwcStationData>  _cwcStations    = <CwcStationData>[];
-  String                _cwcSource      = '';
+  List<FloodData>      _liveLevels     = <FloodData>[];
+  List<FloodAlert>     _criticalAlerts = <FloodAlert>[];
+  List<CwcStationData> _cwcStations    = <CwcStationData>[];
+  String               _cwcSource      = '';
 
   final Map<String, List<RiverLevelSnapshot>> _historyByCity =
       <String, List<RiverLevelSnapshot>>{};
@@ -138,13 +169,13 @@ class RealTimeService extends ChangeNotifier {
   bool                 get isPolling           => _isPolling;
   int                  get queuedOfflineCycles => _queuedOfflineCycles;
   bool                 get isUsingFallback     => _isUsingFallback;
-  bool                 get isWakingUp          => _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
+  bool                 get isWakingUp          =>
+      _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
 
-  // Debug getters — used by dashboard debug panel
-  Map<String, dynamic> get debugLevelsRaw  => _lastLevelsRaw;
-  Map<String, dynamic> get debugCwcRaw     => _lastCwcRaw;
-  Map<String, dynamic> get debugAlertsRaw  => _lastAlertsRaw;
-  int                  get debugRetryCount => _retryCount;
+  Map<String, dynamic> get debugLevelsRaw   => _lastLevelsRaw;
+  Map<String, dynamic> get debugCwcRaw      => _lastCwcRaw;
+  Map<String, dynamic> get debugAlertsRaw   => _lastAlertsRaw;
+  int                  get debugRetryCount  => _retryCount;
   int                  get debugWakeAttempts => _wakeAttempts;
 
   MultiLocationMonitoring get monitoringData {
@@ -164,7 +195,8 @@ class RealTimeService extends ChangeNotifier {
     return _cachedMonitoringData!;
   }
 
-  int get criticalCount => _liveLevels.where((e) => e.isCritical).length;
+  int get criticalCount =>
+      _liveLevels.where((e) => e.isCritical).length;
 
   List<FloodAlert> get activeCriticalAlerts => _criticalAlerts
       .where((e) => e.severity == 'CRITICAL' && !e.resolved)
@@ -196,7 +228,7 @@ class RealTimeService extends ChangeNotifier {
     if (_liveLevels.isNotEmpty) return;
     _liveLevels      = _fallbackMonitoredLevels();
     _isUsingFallback = true;
-    _lastFetchTime   = DateTime.now(); // synthetic
+    _lastFetchTime   = DateTime.now();
     notifyListeners();
   }
 
@@ -324,7 +356,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Core refresh ─────────────────────────────────────────────────────────────
+  // ── Core refresh ──────────────────────────────────────────────────────────
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -350,14 +382,30 @@ class RealTimeService extends ChangeNotifier {
       final alertsResponse = results[1];
       final cwcResponse    = results[2];
 
-      // Store raw for debug panel
-      _lastLevelsRaw  = levelsResponse;
-      _lastCwcRaw     = cwcResponse;
-      _lastAlertsRaw  = alertsResponse;
+      _lastLevelsRaw = levelsResponse;
+      _lastCwcRaw    = cwcResponse;
+      _lastAlertsRaw = alertsResponse;
 
       _log('levels raw keys: ${levelsResponse.keys.toList()}');
       _log('cwc raw keys:    ${cwcResponse.keys.toList()}');
-      _log('cwc data type:   ${cwcResponse["data"]?.runtimeType}');
+
+      // Deep-dump cwc envelope in debug mode so we can see actual structure
+      if (kDebugMode) {
+        final d = cwcResponse['data'];
+        _log('cwc data type:   ${d?.runtimeType}');
+        if (d is Map) {
+          _log('cwc data keys:   ${d.keys.toList()}');
+          final inner = d['data'];
+          _log('cwc data.data type: ${inner?.runtimeType}');
+          if (inner is List && inner.isNotEmpty) {
+            _log('cwc data.data[0]: ${inner.first}');
+          } else if (inner is Map) {
+            _log('cwc data.data keys: ${inner.keys.toList()}');
+          }
+        } else if (d is List && d.isNotEmpty) {
+          _log('cwc data[0]: ${d.first}');
+        }
+      }
 
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
@@ -421,22 +469,25 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── CWC station parser (hardened for all OpsFlood envelope shapes) ──────────
-  // Handles: {data:[...]}, {data:{data:[...]}}, {stations:[...]},
-  //          {result:[...]}, {items:[...]}, bare list at root.
+  // ── CWC station parser ────────────────────────────────────────────────────
   void _updateCwcStations(Map<String, dynamic> response) {
     if (response['status'] == 'error') {
       _log('CWC error response: ${response["error"]}');
       return;
     }
 
-    final List<dynamic>? items = _extractList(response);
+    final List<dynamic>? items = _deepExtractList(response);
     if (items == null || items.isEmpty) {
-      _log('CWC: no items found in response. Keys: ${response.keys.toList()}');
+      _log('CWC: no list found. Full response: $response');
       return;
     }
 
     _log('CWC: found ${items.length} raw items');
+
+    if (kDebugMode && items.isNotEmpty) {
+      _log('CWC first item keys: ${(items.first as Map?)?.keys.toList()}');
+      _log('CWC first item: ${items.first}');
+    }
 
     final parsed = items
         .whereType<Map<String, dynamic>>()
@@ -445,28 +496,69 @@ class RealTimeService extends ChangeNotifier {
         .toList();
 
     if (parsed.isEmpty) {
-      _log('CWC: items present but none parsed with non-empty stationName');
-      // Log first item to debug field names
-      if (items.isNotEmpty && kDebugMode) {
-        debugPrint('[RTS] CWC first item: ${items.first}');
-      }
+      _log('CWC: items found but stationName empty in all. '
+          'Check field name mapping in CwcStationData.fromJson');
       return;
     }
 
     _cwcStations = parsed;
-    _cwcSource   = parsed.any((s) => s.isLiveCwc) ? 'CWC_API' : 'TACTICAL_REGISTRY';
+    _cwcSource   = parsed.any((s) => s.isLiveCwc)
+        ? 'CWC_API'
+        : 'TACTICAL_REGISTRY';
     _log('CWC: populated ${_cwcStations.length} stations, source=$_cwcSource');
   }
 
-  // ── Universal list extractor ───────────────────────────────────────────────────
-  // Tries every known OpsFlood backend envelope key in priority order.
+  // ── Deep recursive list extractor ─────────────────────────────────────────
+  // Searches every level of a nested Map/List envelope for the first
+  // non-empty List<Map> it can find. This handles:
+  //   {data: [...]}                      depth-1
+  //   {data: {data: [...]}}              depth-2
+  //   {data: {data: {data: [...]}}}      depth-3 (some backends)
+  //   {records: [...]}                   alternate key
+  //   bare Map with station fields       single-station shortcut
+  List<dynamic>? _deepExtractList(dynamic node, {int depth = 0}) {
+    if (depth > 6) return null; // guard against infinite recursion
+
+    if (node is List) {
+      if (node.isEmpty) return null;
+      // Only accept if items look like station objects
+      if (node.first is Map) return node;
+      return null;
+    }
+
+    if (node is! Map<String, dynamic>) return null;
+
+    // Try known list-bearing keys in priority order
+    const listKeys = [
+      'data', 'stations', 'result', 'results',
+      'items', 'records', 'levels', 'telemetry',
+    ];
+
+    for (final key in listKeys) {
+      final v = node[key];
+      if (v is List && v.isNotEmpty && v.first is Map) return v;
+      if (v != null) {
+        // Recurse into nested map/list
+        final found = _deepExtractList(v, depth: depth + 1);
+        if (found != null) return found;
+      }
+    }
+
+    // Last resort: single-station bare map
+    if (node.containsKey('station') || node.containsKey('river_level') ||
+        node.containsKey('stationName') || node.containsKey('gauge_reading')) {
+      return [node];
+    }
+
+    return null;
+  }
+
+  // ── Legacy flat extractor (used by levels + alerts parsers) ──────────────
   List<dynamic>? _extractList(Map<String, dynamic> response) {
-    // Priority 1: top-level known list keys
     for (final key in ['data', 'stations', 'result', 'results',
                         'items', 'records', 'levels', 'telemetry']) {
       final v = response[key];
       if (v is List) return v;
-      // Nested: {data: {data: [...]}}
       if (v is Map<String, dynamic>) {
         for (final innerKey in ['data', 'stations', 'items', 'records', 'result']) {
           final inner = v[innerKey];
@@ -474,8 +566,6 @@ class RealTimeService extends ChangeNotifier {
         }
       }
     }
-    // Priority 2: the whole response IS the data (bare map with station fields)
-    // e.g. {station: 'X', river_level: 5.2, ...}
     if (response.containsKey('station') || response.containsKey('river_level')) {
       return [response];
     }
@@ -529,9 +619,10 @@ class RealTimeService extends ChangeNotifier {
               riverName:    e.riverName,
               currentLevel: e.currentLevel,
               dangerLevel:  e.dangerLevel,
-              recommendation: e.capacityPercent >= AppConstants.criticalThreshold
-                  ? 'Move teams to emergency response mode.'
-                  : 'Increase monitoring frequency.',
+              recommendation:
+                  e.capacityPercent >= AppConstants.criticalThreshold
+                      ? 'Move teams to emergency response mode.'
+                      : 'Increase monitoring frequency.',
             ))
         .toList(growable: false);
   }
@@ -541,7 +632,8 @@ class RealTimeService extends ChangeNotifier {
     final now = DateTime.now();
     for (final item in levels) {
       final key  = item.city.toLowerCase();
-      final list = _historyByCity.putIfAbsent(key, () => <RiverLevelSnapshot>[]);
+      final list = _historyByCity.putIfAbsent(
+          key, () => <RiverLevelSnapshot>[]);
       list.add(RiverLevelSnapshot(
         timestamp: now,
         level:    item.currentLevel,
@@ -552,7 +644,8 @@ class RealTimeService extends ChangeNotifier {
   }
 
   void _apply24HourTrim() {
-    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+    final cutoff =
+        DateTime.now().subtract(const Duration(hours: 24));
     for (final key in _historyByCity.keys.toList()) {
       _historyByCity[key] = _historyByCity[key]!
           .where((p) => p.timestamp.isAfter(cutoff))
@@ -561,48 +654,69 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Notifications ─────────────────────────────────────────────────────────
-  Future<void> _dispatchThresholdNotifications(List<FloodData> levels) async {
+  Future<void> _dispatchThresholdNotifications(
+      List<FloodData> levels) async {
     for (final level in levels) {
-      final key = '${level.city}-${level.capacityPercent.toStringAsFixed(0)}-${level.riskLevel}';
+      final key =
+          '${level.city}-${level.capacityPercent.toStringAsFixed(0)}-${level.riskLevel}';
       if (_notificationDedup.contains(key)) continue;
       if (level.capacityPercent >= AppConstants.criticalThreshold) {
         await _showNotification(
-          id: level.city.hashCode, channelId: AppConstants.criticalAlertChannelId,
+          id: level.city.hashCode,
+          channelId: AppConstants.criticalAlertChannelId,
           channelName: AppConstants.criticalAlertChannelName,
           title: 'Critical flood risk in ${level.city}',
-          body: '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
-          payload: 'city=${level.city}&severity=CRITICAL', persistent: true,
+          body:
+              '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
+          payload: 'city=${level.city}&severity=CRITICAL',
+          persistent: true,
         );
         _notificationDedup.add(key);
       } else if (level.capacityPercent >= AppConstants.highThreshold) {
         await _showNotification(
-          id: level.city.hashCode + 1000, channelId: AppConstants.warningAlertChannelId,
+          id: level.city.hashCode + 1000,
+          channelId: AppConstants.warningAlertChannelId,
           channelName: AppConstants.warningAlertChannelName,
           title: 'High flood watch in ${level.city}',
-          body: '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
-          payload: 'city=${level.city}&severity=HIGH', persistent: false,
+          body:
+              '${level.riverName ?? 'River'} at ${level.capacityPercent.toStringAsFixed(0)}% capacity.',
+          payload: 'city=${level.city}&severity=HIGH',
+          persistent: false,
         );
         _notificationDedup.add(key);
       }
     }
-    while (_notificationDedup.length > 300) _notificationDedup.remove(_notificationDedup.first);
+    while (_notificationDedup.length > 300) {
+      _notificationDedup.remove(_notificationDedup.first);
+    }
   }
 
   Future<void> _showNotification({
-    required int id, required String channelId, required String channelName,
-    required String title, required String body,
-    required String payload, required bool persistent,
+    required int    id,
+    required String channelId,
+    required String channelName,
+    required String title,
+    required String body,
+    required String payload,
+    required bool   persistent,
   }) async {
     final android = AndroidNotificationDetails(
-      channelId, channelName, channelDescription: channelName,
+      channelId,
+      channelName,
+      channelDescription: channelName,
       importance: persistent ? Importance.max  : Importance.high,
       priority:   persistent ? Priority.max    : Priority.high,
-      ongoing: persistent, autoCancel: !persistent,
+      ongoing: persistent,
+      autoCancel: !persistent,
     );
-    const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true);
+    const ios = DarwinNotificationDetails(
+        presentAlert: true, presentSound: true);
     await _notifications.show(
-      id: id, title: title, body: body,
-      notificationDetails: NotificationDetails(android: android, iOS: ios),
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails:
+          NotificationDetails(android: android, iOS: ios),
       payload: payload,
     );
   }
@@ -614,46 +728,68 @@ class RealTimeService extends ChangeNotifier {
     _historyByCity.forEach((key, value) {
       historyJson[key] = value.map((item) => item.toJson()).toList();
     });
-    await prefs.setString(_cacheKey, jsonEncode(<String, dynamic>{
-      'last_fetch_time': (_lastFetchTime ?? DateTime.now()).toIso8601String(),
-      'levels':  _liveLevels.map((i) => i.toJson()).toList(),
-      'alerts':  _criticalAlerts.map((i) => i.toJson()).toList(),
-      'history': historyJson,
-    }));
+    await prefs.setString(
+        _cacheKey,
+        jsonEncode(<String, dynamic>{
+          'last_fetch_time':
+              (_lastFetchTime ?? DateTime.now()).toIso8601String(),
+          'levels':  _liveLevels.map((i) => i.toJson()).toList(),
+          'alerts':  _criticalAlerts.map((i) => i.toJson()).toList(),
+          'history': historyJson,
+        }));
   }
 
   Future<void> _restoreFromCache() async {
     final prefs = await SharedPreferences.getInstance();
     final raw   = prefs.getString(_cacheKey);
-    if (raw == null || raw.isEmpty) { notifyListeners(); return; }
+    if (raw == null || raw.isEmpty) {
+      notifyListeners();
+      return;
+    }
     try {
       final parsed = jsonDecode(raw);
-      if (parsed is! Map<String, dynamic>) { notifyListeners(); return; }
+      if (parsed is! Map<String, dynamic>) {
+        notifyListeners();
+        return;
+      }
       final rawLevels = parsed['levels'];
       if (rawLevels is List) {
-        _liveLevels = rawLevels.whereType<Map<String, dynamic>>().map(FloodData.fromJson).toList(growable: false);
+        _liveLevels = rawLevels
+            .whereType<Map<String, dynamic>>()
+            .map(FloodData.fromJson)
+            .toList(growable: false);
       }
       final rawAlerts = parsed['alerts'];
       if (rawAlerts is List) {
-        _criticalAlerts = rawAlerts.whereType<Map<String, dynamic>>().map(FloodAlert.fromJson).toList(growable: false);
+        _criticalAlerts = rawAlerts
+            .whereType<Map<String, dynamic>>()
+            .map(FloodAlert.fromJson)
+            .toList(growable: false);
       }
       _historyByCity.clear();
       final history = parsed['history'];
       if (history is Map<String, dynamic>) {
         history.forEach((key, value) {
           if (value is List) {
-            _historyByCity[key] = value.whereType<Map<String, dynamic>>().map(RiverLevelSnapshot.fromJson).toList(growable: true);
+            _historyByCity[key] = value
+                .whereType<Map<String, dynamic>>()
+                .map(RiverLevelSnapshot.fromJson)
+                .toList(growable: true);
           }
         });
       }
-      final cachedTime = DateTime.tryParse((parsed['last_fetch_time'] ?? '').toString());
+      final cachedTime = DateTime.tryParse(
+          (parsed['last_fetch_time'] ?? '').toString());
       if (!_hasRealFetchTime) _lastFetchTime = cachedTime;
       _isUsingCache = true;
       if (_liveLevels.isNotEmpty) _isUsingFallback = false;
       _apply24HourTrim();
       notifyListeners();
     } catch (_) {
-      if (_liveLevels.isEmpty) { _liveLevels = _fallbackMonitoredLevels(); _isUsingFallback = true; }
+      if (_liveLevels.isEmpty) {
+        _liveLevels      = _fallbackMonitoredLevels();
+        _isUsingFallback = true;
+      }
       notifyListeners();
     }
   }
