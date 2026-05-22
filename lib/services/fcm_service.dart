@@ -1,4 +1,4 @@
-// OpsFlood — Firebase Cloud Messaging (FCM) Service
+// Equinox Flood — Firebase Cloud Messaging (FCM) Service
 // ─────────────────────────────────────────────────────────────────────────────
 // P1: Real push delivery for critical flood alerts.
 //
@@ -91,7 +91,8 @@ class FcmService {
   FcmService._();
   static final FcmService instance = FcmService._();
 
-  static const _tokenKey = 'opsflood_fcm_token';
+  // FIX (P2-audit): renamed from 'opsflood_fcm_token' → consistent with app brand
+  static const _tokenKey = 'equinox_fcm_token';
 
   // Stream controller — screens subscribe to this for live alert badges
   final _alertController = StreamController<FcmFloodAlert>.broadcast();
@@ -182,7 +183,8 @@ class FcmService {
             body: jsonEncode({
               'token':    token,
               'platform': defaultTargetPlatform.name.toLowerCase(),
-              'app':      'opsflood_android_v2',
+              // FIX (P2-audit): renamed from 'opsflood_android_v2' → brand-consistent
+              'app':      'equinox_android_v2',
             }),
           )
           .timeout(const Duration(seconds: 10));
@@ -276,6 +278,9 @@ class FcmService {
     _alertController.close();
   }
 
+  // Shared stable ID — same polynomial hash as real_time_service.dart
+  // Duplicated intentionally (isolate boundary: background isolate can't import
+  // real_time_service without pulling in ChangeNotifier + UI deps).
   int _stableId(String city) =>
       city.codeUnits.fold(0, (int a, int b) => (a * 31 + b) & 0x7FFFFFFF);
 }
