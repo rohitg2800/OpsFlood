@@ -1,14 +1,10 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v4.0  (Dr. APJ Abdul Kalam Edition)
+// OpsFlood — River Monitor v4.1  (merged India Map tab)
 //
-// KEY CHANGES from v3.2:
-//   * Wired to RealTimeRiverService — zero synthetic values
-//   * NO_DATA badge replaces phantom seed values
-//   * ML risk_level + flood probability shown per card
-//   * Stale indicator (>30 min since last API read)
-//   * Confidence badge on each card
-//   * State filter dropdown retained
-//   * Sort by risk retained
+// TABS:
+//   0 — Stations   (CWC live telemetry list)
+//   1 — Add City   (search + add extra cities)
+//   2 — India Map  (IndiaRiverExplorerScreen embedded)
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -16,6 +12,7 @@ import 'package:flutter/services.dart';
 import '../constants.dart';
 import '../models/river_station.dart';
 import '../services/real_time_river_service.dart';
+import 'india_river_explorer_screen.dart';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const _kBg        = Color(0xFF060B12);
@@ -44,6 +41,7 @@ class RiverMonitorScreen extends StatefulWidget {
 class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     with TickerProviderStateMixin {
 
+  // 3 tabs: Stations | Add City | India Map
   late final TabController      _tab;
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
@@ -63,13 +61,13 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   bool         _adding      = false;
   List<String> _suggestions = [];
 
-  // Cities manually added by user (on top of the 100+ defaults)
   final Set<String> _extraCities = {};
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    // length: 3 — Stations | Add City | India Map
+    _tab = TabController(length: 3, vsync: this);
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
@@ -89,7 +87,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     super.dispose();
   }
 
-  // ── Fetch all results via RealTimeRiverService ────────────────────────────
+  // ── Fetch ─────────────────────────────────────────────────────────────────
   Future<void> _fetchAll({bool silent = false}) async {
     if (!mounted) return;
     setState(() {
@@ -131,10 +129,10 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     return l;
   }
 
-  int get _liveCount  => _results.where((r) => r.source != 'NO_DATA').length;
-  int get _atRisk     => _results.where((r) =>
+  int get _liveCount => _results.where((r) => r.source != 'NO_DATA').length;
+  int get _atRisk    => _results.where((r) =>
       r.station.dangerClass != DangerClass.normal && r.source != 'NO_DATA').length;
-  int get _noData     => _results.where((r) => r.source == 'NO_DATA').length;
+  int get _noData    => _results.where((r) => r.source == 'NO_DATA').length;
 
   List<String> get _stateList {
     final seen = <String>{};
@@ -146,7 +144,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     return out;
   }
 
-  // ── Add extra city ────────────────────────────────────────────────────────
+  // ── Add city helpers ──────────────────────────────────────────────────────
   void _onSearch(String q) {
     if (q.isEmpty) { setState(() => _suggestions = []); return; }
     final lq = q.toLowerCase();
@@ -227,7 +225,12 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
             if (_error.isNotEmpty) _errorBanner(),
             Expanded(child: TabBarView(
               controller: _tab,
-              children: [_stationsTab(), _addCityTab()],
+              // India Map tab uses keepAlive via its own State
+              children: [
+                _stationsTab(),
+                _addCityTab(),
+                const IndiaRiverExplorerScreen(),
+              ],
             )),
           ]),
         ),
@@ -313,7 +316,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     ]),
   );
 
-  // ── Tab bar ───────────────────────────────────────────────────────────────
+  // ── Tab bar (3 tabs) ──────────────────────────────────────────────────────
   Widget _tabBar() => Padding(
     padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
     child: Container(
@@ -335,8 +338,12 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         ),
         labelColor: const Color(0xFF060B12),
         unselectedLabelColor: const Color(0xFF7B8A99),
-        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-        tabs: const [Tab(text: '  Stations  '), Tab(text: '  Add City  ')],
+        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+        tabs: const [
+          Tab(text: ' Stations '),
+          Tab(text: ' Add City '),
+          Tab(text: ' India Map '),
+        ],
       ),
     ),
   );
@@ -495,7 +502,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       const Padding(
         padding: EdgeInsets.only(left: 13),
         child: Text(
-          'Live CWC data fetched immediately. '  
+          'Live CWC data fetched immediately. '
           'If the station has no live reading, it will show NO DATA — never a fake value.',
           style: TextStyle(fontSize: 11, color: Color(0xFF7B8A99), height: 1.5)),
       ),
@@ -688,7 +695,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
     final s  = r.station;
     final dc = s.dangerClass;
 
-    // NO_DATA — greyed out card
     if (r.source == 'NO_DATA') {
       return FadeTransition(
         opacity: _anim,
@@ -758,8 +764,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
             ],
           ),
           child: Column(children: [
-
-            // ── Top row ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
               child: Row(children: [
@@ -783,7 +787,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                               fontWeight: FontWeight.w800, fontSize: 15),
                           overflow: TextOverflow.ellipsis)),
                       const SizedBox(width: 6),
-                      // Source badge
                       _SourceBadge(source: r.source, confidence: r.confidence),
                       if (r.isStale) ...[
                         const SizedBox(width: 4),
@@ -817,8 +820,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ]),
             ),
-
-            // ── Level + progress bar ──────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: AnimatedBuilder(
@@ -881,8 +882,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ),
-
-            // ── ML Prediction strip ───────────────────────────────────────
             if (r.mlRiskLevel != null) ...[
               const SizedBox(height: 8),
               Divider(height: 1,
@@ -907,8 +906,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ],
-
-            // ── Pills row ─────────────────────────────────────────────────
             const SizedBox(height: 6),
             Divider(height: 1,
                 color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
