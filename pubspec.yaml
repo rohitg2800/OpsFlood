@@ -29,6 +29,7 @@ dependencies:
   package_info_plus: ^8.0.2
   cupertino_icons: ^1.0.8
   workmanager: ^0.9.0
+  flutter_dotenv: ^5.1.0
 
 dev_dependencies:
   flutter_test:
@@ -49,8 +50,8 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-  # Uncomment each line below only after creating the folder locally:
-  # assets:
-  #   - assets/icon/
-  #   - assets/images/
-  #   - assets/animations/
+  assets:
+    - .env
+    # - assets/icon/
+    # - assets/images/
+    # - assets/animations/

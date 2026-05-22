@@ -3,14 +3,18 @@
 
 import 'dart:core';
 
-class AppConstants {
-  // ── Backend URLs ─────────────────────────────────────────────────────────────
-  static const String baseUrl = 'https://opsflood.onrender.com';
-  // Leave empty until a real secondary server (Fly.dev / Railway) is available.
-  // ApiService._baseCandidates filters out empty strings automatically.
-  static const String backupBaseUrl = '';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-  // ── API Endpoints ──────────────────────────────────────────────────────────
+class AppConstants {
+  // ── Backend URLs ────────────────────────────────────────────────────────────────────────
+  // Read from .env at runtime; fall back to hardcoded value if .env is absent
+  // (e.g. during unit tests that don’t load dotenv).
+  static String get baseUrl =>
+      dotenv.maybeGet('BASE_URL') ?? 'https://opsflood.onrender.com';
+
+  static String get backupBaseUrl => dotenv.maybeGet('BACKUP_URL') ?? '';
+
+  // ── API Endpoints ────────────────────────────────────────────────────────────
   static const String healthEndpoint          = '/health';
   static const String liveTelemetryEndpoint   = '/api/live-telemetry';
   static const String liveLevelsEndpoint      = '/api/live-levels';
@@ -19,31 +23,31 @@ class AppConstants {
   static const String weatherCurrentEndpoint  = '/weather/current';
   static const String weatherForecastEndpoint = '/weather/forecast';
 
-  // ── Flood severity thresholds (capacity %) ───────────────────────────────
+  // ── Flood severity thresholds (capacity %) ───────────────────────────────────────
   static const double criticalThreshold  = 90.0;
   static const double highThreshold      = 75.0;
   static const double moderateThreshold  = 50.0;
 
-  // ── Default water level values (metres) ───────────────────────────────────
+  // ── Default water level values (metres) ───────────────────────────────────────────
   static const double defaultDangerLevel  = 12.0;
   static const double defaultWarningLevel = 10.32;
   static const double defaultSafeLevel    = 8.0;
 
-  // ── Notification channels ───────────────────────────────────────────────────
+  // ── Notification channels ────────────────────────────────────────────────────────────────
   static const String criticalAlertChannelId   = 'opsflood_critical';
   static const String criticalAlertChannelName = 'Critical Flood Alerts';
   static const String warningAlertChannelId    = 'opsflood_warning';
   static const String warningAlertChannelName  = 'Flood Warnings';
 
-  // ── Polling & retry config ──────────────────────────────────────────────────
+  // ── Polling & retry config ───────────────────────────────────────────────────────────────
   static const Duration pollingInterval = Duration(minutes: 5);
   static const int      maxRetries      = 3;
 
-  // ── Animation durations ────────────────────────────────────────────────────
+  // ── Animation durations ─────────────────────────────────────────────────────────────────
   static const Duration shortAnimDuration = Duration(milliseconds: 300);
   static const Duration longAnimDuration  = Duration(milliseconds: 800);
 
-  // ── Risk color palette ─────────────────────────────────────────────────────
+  // ── Risk color palette ───────────────────────────────────────────────────────────────────
   static const Map<String, int> riskColors = {
     'LOW':      0xFF34C759,
     'MODERATE': 0xFFF59E0B,
@@ -60,7 +64,7 @@ class AppConstants {
     'HIGH':     'WARN',
   };
 
-  // ── Indian states list ──────────────────────────────────────────────────────
+  // ── Indian states list ───────────────────────────────────────────────────────────────────
   static const List<String> indianStates = [
     'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar',
     'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
@@ -75,7 +79,7 @@ class AppConstants {
     'Lakshadweep', 'Puducherry',
   ];
 
-  // ───────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────────
   // MONITORED CITIES — all-India CWC gauge registry
   //
   // Fields:
@@ -90,10 +94,10 @@ class AppConstants {
   //   river_type                — 'perennial'|'seasonal'|'glacier'|'coastal'
   //   zone                      — 'himalayan'|'northeastern'|'peninsular'|
   //                               'coastal'|'arid'|'central'
-  // ───────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────────
   static const List<Map<String, dynamic>> monitoredCities = [
 
-    // ── ANDHRA PRADESH ────────────────────────────────────────────────────────────
+    // ── ANDHRA PRADESH ────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Vijayawada',   'state': 'Andhra Pradesh', 'river': 'Krishna',
       'lat': 16.5062, 'lon': 80.6480, 'risk': 'HIGH',
       'danger_level': 12.50, 'warning_level': 9.00,
@@ -115,7 +119,7 @@ class AppConstants {
       'danger_level': 11.50, 'warning_level': 9.50,
       'flood_freq': 0.55, 'river_type': 'perennial', 'zone': 'peninsular' },
 
-    // ── ARUNACHAL PRADESH ─────────────────────────────────────────────────────────
+    // ── ARUNACHAL PRADESH ─────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Itanagar',     'state': 'Arunachal Pradesh', 'river': 'Dikrong',
       'lat': 27.0844, 'lon': 93.6053, 'risk': 'HIGH',
       'danger_level': 12.00, 'warning_level': 10.00,
@@ -125,7 +129,7 @@ class AppConstants {
       'danger_level': 154.00, 'warning_level': 151.00,
       'flood_freq': 0.85, 'river_type': 'glacier', 'zone': 'northeastern' },
 
-    // ── ASSAM ────────────────────────────────────────────────────────────────────
+    // ── ASSAM ────────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Guwahati',     'state': 'Assam', 'river': 'Brahmaputra',
       'lat': 26.1445, 'lon': 91.7362, 'risk': 'HIGH',
       'danger_level': 51.75, 'warning_level': 49.68,
@@ -155,7 +159,7 @@ class AppConstants {
       'danger_level': 47.00, 'warning_level': 45.00,
       'flood_freq': 0.82, 'river_type': 'perennial', 'zone': 'northeastern' },
 
-    // ── BIHAR ────────────────────────────────────────────────────────────────────
+    // ── BIHAR ────────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Patna',        'state': 'Bihar', 'river': 'Ganga',
       'lat': 25.5941, 'lon': 85.1376, 'risk': 'HIGH',
       'danger_level': 48.60, 'warning_level': 47.60,
@@ -181,7 +185,7 @@ class AppConstants {
       'danger_level': 40.68, 'warning_level': 39.68,
       'flood_freq': 0.76, 'river_type': 'perennial', 'zone': 'himalayan' },
 
-    // ── CHHATTISGARH ────────────────────────────────────────────────────────────
+    // ── CHHATTISGARH ──────────────────────────────────────────────────────────────────────────
     { 'city': 'Raipur',       'state': 'Chhattisgarh', 'river': 'Kharun',
       'lat': 21.2514, 'lon': 81.6296, 'risk': 'MODERATE',
       'danger_level': 8.50,  'warning_level': 7.00,
@@ -195,19 +199,19 @@ class AppConstants {
       'danger_level': 11.00, 'warning_level': 9.50,
       'flood_freq': 0.65, 'river_type': 'seasonal', 'zone': 'central' },
 
-    // ── DELHI ────────────────────────────────────────────────────────────────────
+    // ── DELHI ────────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Delhi',        'state': 'Delhi', 'river': 'Yamuna',
       'lat': 28.6139, 'lon': 77.2090, 'risk': 'HIGH',
       'danger_level': 204.83, 'warning_level': 204.50,
       'flood_freq': 0.60, 'river_type': 'perennial', 'zone': 'himalayan' },
 
-    // ── GOA ────────────────────────────────────────────────────────────────────
+    // ── GOA ────────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Panaji',       'state': 'Goa', 'river': 'Mandovi',
       'lat': 15.4909, 'lon': 73.8278, 'risk': 'MODERATE',
       'danger_level': 6.00,  'warning_level': 5.00,
       'flood_freq': 0.45, 'river_type': 'coastal', 'zone': 'coastal' },
 
-    // ── GUJARAT ───────────────────────────────────────────────────────────────
+    // ── GUJARAT ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Surat',        'state': 'Gujarat', 'river': 'Tapi',
       'lat': 21.1702, 'lon': 72.8311, 'risk': 'HIGH',
       'danger_level': 10.97, 'warning_level': 9.45,
@@ -225,7 +229,7 @@ class AppConstants {
       'danger_level': 48.00, 'warning_level': 46.50,
       'flood_freq': 0.48, 'river_type': 'seasonal', 'zone': 'arid' },
 
-    // ── HARYANA ────────────────────────────────────────────────────────────────
+    // ── HARYANA ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Ambala',       'state': 'Haryana', 'river': 'Ghaggar',
       'lat': 30.3782, 'lon': 76.7767, 'risk': 'MODERATE',
       'danger_level': 270.0, 'warning_level': 268.5,
@@ -235,7 +239,7 @@ class AppConstants {
       'danger_level': 204.0, 'warning_level': 203.0,
       'flood_freq': 0.22, 'river_type': 'seasonal', 'zone': 'arid' },
 
-    // ── HIMACHAL PRADESH ──────────────────────────────────────────────────────────
+    // ── HIMACHAL PRADESH ───────────────────────────────────────────────────────────────────────────────
     { 'city': 'Mandi',        'state': 'Himachal Pradesh', 'river': 'Beas',
       'lat': 31.7090, 'lon': 76.9320, 'risk': 'HIGH',
       'danger_level': 775.0, 'warning_level': 773.0,
@@ -245,7 +249,7 @@ class AppConstants {
       'danger_level': 670.0, 'warning_level': 668.0,
       'flood_freq': 0.48, 'river_type': 'glacier', 'zone': 'himalayan' },
 
-    // ── JHARKHAND ──────────────────────────────────────────────────────────────
+    // ── JHARKHAND ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Ranchi',       'state': 'Jharkhand', 'river': 'Subarnarekha',
       'lat': 23.3441, 'lon': 85.3096, 'risk': 'MODERATE',
       'danger_level': 609.0, 'warning_level': 607.0,
@@ -259,7 +263,7 @@ class AppConstants {
       'danger_level': 10.50, 'warning_level': 9.00,
       'flood_freq': 0.45, 'river_type': 'seasonal', 'zone': 'central' },
 
-    // ── JAMMU & KASHMIR ─────────────────────────────────────────────────────────
+    // ── JAMMU & KASHMIR ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Srinagar',     'state': 'Jammu and Kashmir', 'river': 'Jhelum',
       'lat': 34.0837, 'lon': 74.7973, 'risk': 'HIGH',
       'danger_level': 18.00, 'warning_level': 16.00,
@@ -269,7 +273,7 @@ class AppConstants {
       'danger_level': 316.0, 'warning_level': 314.0,
       'flood_freq': 0.45, 'river_type': 'glacier', 'zone': 'himalayan' },
 
-    // ── KARNATAKA ──────────────────────────────────────────────────────────────
+    // ── KARNATAKA ────────────────────────────────────────────────────────────────────────────
     { 'city': 'Belagavi',     'state': 'Karnataka', 'river': 'Ghataprabha',
       'lat': 15.8497, 'lon': 74.4977, 'risk': 'HIGH',
       'danger_level': 11.00, 'warning_level': 9.50,
@@ -287,7 +291,7 @@ class AppConstants {
       'danger_level': 773.0, 'warning_level': 770.0,
       'flood_freq': 0.40, 'river_type': 'perennial', 'zone': 'peninsular' },
 
-    // ── KERALA ──────────────────────────────────────────────────────────────────
+    // ── KERALA ──────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Kochi',        'state': 'Kerala', 'river': 'Periyar',
       'lat': 9.9312, 'lon': 76.2673, 'risk': 'HIGH',
       'danger_level': 8.84,  'warning_level': 7.84,
@@ -309,7 +313,7 @@ class AppConstants {
       'danger_level': 5.50,  'warning_level': 4.50,
       'flood_freq': 0.50, 'river_type': 'perennial', 'zone': 'coastal' },
 
-    // ── MADHYA PRADESH ────────────────────────────────────────────────────────────
+    // ── MADHYA PRADESH ───────────────────────────────────────────────────────────────────────────────
     { 'city': 'Jabalpur',     'state': 'Madhya Pradesh', 'river': 'Narmada',
       'lat': 23.1815, 'lon': 79.9864, 'risk': 'HIGH',
       'danger_level': 12.50, 'warning_level': 11.00,
@@ -327,7 +331,7 @@ class AppConstants {
       'danger_level': 185.0, 'warning_level': 183.5,
       'flood_freq': 0.45, 'river_type': 'seasonal', 'zone': 'central' },
 
-    // ── MAHARASHTRA ──────────────────────────────────────────────────────────────
+    // ── MAHARASHTRA ──────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Kolhapur',     'state': 'Maharashtra', 'river': 'Panchganga',
       'lat': 16.7050, 'lon': 74.2433, 'risk': 'HIGH',
       'danger_level': 14.00, 'warning_level': 12.05,
@@ -353,19 +357,19 @@ class AppConstants {
       'danger_level': 10.00, 'warning_level': 8.50,
       'flood_freq': 0.48, 'river_type': 'perennial', 'zone': 'coastal' },
 
-    // ── MANIPUR ───────────────────────────────────────────────────────────────
+    // ── MANIPUR ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Imphal',       'state': 'Manipur', 'river': 'Imphal',
       'lat': 24.8170, 'lon': 93.9368, 'risk': 'MODERATE',
       'danger_level': 786.5, 'warning_level': 784.5,
       'flood_freq': 0.55, 'river_type': 'perennial', 'zone': 'northeastern' },
 
-    // ── MEGHALAYA ──────────────────────────────────────────────────────────────
+    // ── MEGHALAYA ────────────────────────────────────────────────────────────────────────────
     { 'city': 'Shillong',     'state': 'Meghalaya', 'river': 'Umiam',
       'lat': 25.5788, 'lon': 91.8933, 'risk': 'MODERATE',
       'danger_level': 960.0, 'warning_level': 958.0,
       'flood_freq': 0.50, 'river_type': 'perennial', 'zone': 'northeastern' },
 
-    // ── ODISHA ─────────────────────────────────────────────────────────────────
+    // ── ODISHA ──────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Cuttack',      'state': 'Odisha', 'river': 'Mahanadi',
       'lat': 20.4625, 'lon': 85.8830, 'risk': 'HIGH',
       'danger_level': 15.24, 'warning_level': 14.19,
@@ -387,7 +391,7 @@ class AppConstants {
       'danger_level': 7.00,  'warning_level': 5.50,
       'flood_freq': 0.72, 'river_type': 'perennial', 'zone': 'coastal' },
 
-    // ── PUNJAB ─────────────────────────────────────────────────────────────────
+    // ── PUNJAB ──────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Ludhiana',     'state': 'Punjab', 'river': 'Sutlej',
       'lat': 30.9010, 'lon': 75.8573, 'risk': 'MODERATE',
       'danger_level': 248.0, 'warning_level': 246.5,
@@ -401,7 +405,7 @@ class AppConstants {
       'danger_level': 188.0, 'warning_level': 186.5,
       'flood_freq': 0.60, 'river_type': 'glacier', 'zone': 'himalayan' },
 
-    // ── RAJASTHAN ──────────────────────────────────────────────────────────────
+    // ── RAJASTHAN ────────────────────────────────────────────────────────────────────────────
     { 'city': 'Kota',         'state': 'Rajasthan', 'river': 'Chambal',
       'lat': 25.2138, 'lon': 75.8648, 'risk': 'MODERATE',
       'danger_level': 256.0, 'warning_level': 254.0,
@@ -415,13 +419,13 @@ class AppConstants {
       'danger_level': 5.00,  'warning_level': 4.00,
       'flood_freq': 0.35, 'river_type': 'seasonal', 'zone': 'arid' },
 
-    // ── SIKKIM ────────────────────────────────────────────────────────────────
+    // ── SIKKIM ──────────────────────────────────────────────────────────────────────────────────
     { 'city': 'Gangtok',      'state': 'Sikkim', 'river': 'Teesta',
       'lat': 27.3314, 'lon': 88.6138, 'risk': 'HIGH',
       'danger_level': 1462.0, 'warning_level': 1460.0,
       'flood_freq': 0.70, 'river_type': 'glacier', 'zone': 'himalayan' },
 
-    // ── TAMIL NADU ──────────────────────────────────────────────────────────────
+    // ── TAMIL NADU ──────────────────────────────────────────────────────────────────────────────
     { 'city': 'Chennai',      'state': 'Tamil Nadu', 'river': 'Adyar',
       'lat': 13.0827, 'lon': 80.2707, 'risk': 'HIGH',
       'danger_level': 5.50,  'warning_level': 4.50,
@@ -443,7 +447,7 @@ class AppConstants {
       'danger_level': 6.00,  'warning_level': 5.00,
       'flood_freq': 0.68, 'river_type': 'coastal', 'zone': 'coastal' },
 
-    // ── TELANGANA ──────────────────────────────────────────────────────────────
+    // ── TELANGANA ────────────────────────────────────────────────────────────────────────────
     { 'city': 'Hyderabad',    'state': 'Telangana', 'river': 'Musi',
       'lat': 17.3850, 'lon': 78.4867, 'risk': 'MODERATE',
       'danger_level': 7.50,  'warning_level': 6.50,
@@ -457,13 +461,13 @@ class AppConstants {
       'danger_level': 8.00,  'warning_level': 6.50,
       'flood_freq': 0.62, 'river_type': 'seasonal', 'zone': 'peninsular' },
 
-    // ── TRIPURA ───────────────────────────────────────────────────────────────
+    // ── TRIPURA ─────────────────────────────────────────────────────────────────────────────
     { 'city': 'Agartala',     'state': 'Tripura', 'river': 'Haora',
       'lat': 23.8315, 'lon': 91.2868, 'risk': 'HIGH',
       'danger_level': 12.00, 'warning_level': 10.50,
       'flood_freq': 0.75, 'river_type': 'perennial', 'zone': 'northeastern' },
 
-    // ── UTTAR PRADESH ────────────────────────────────────────────────────────────
+    // ── UTTAR PRADESH ───────────────────────────────────────────────────────────────────────────────
     { 'city': 'Varanasi',     'state': 'Uttar Pradesh', 'river': 'Ganga',
       'lat': 25.3176, 'lon': 82.9739, 'risk': 'HIGH',
       'danger_level': 71.26, 'warning_level': 70.26,
@@ -489,7 +493,7 @@ class AppConstants {
       'danger_level': 76.34, 'warning_level': 74.34,
       'flood_freq': 0.80, 'river_type': 'perennial', 'zone': 'himalayan' },
 
-    // ── UTTARAKHAND ─────────────────────────────────────────────────────────────
+    // ── UTTARAKHAND ───────────────────────────────────────────────────────────────────────────────
     { 'city': 'Haridwar',     'state': 'Uttarakhand', 'river': 'Ganga',
       'lat': 29.9457, 'lon': 78.1642, 'risk': 'HIGH',
       'danger_level': 294.0, 'warning_level': 292.5,
@@ -499,7 +503,7 @@ class AppConstants {
       'danger_level': 455.0, 'warning_level': 453.0,
       'flood_freq': 0.50, 'river_type': 'glacier', 'zone': 'himalayan' },
 
-    // ── WEST BENGAL ─────────────────────────────────────────────────────────────
+    // ── WEST BENGAL ───────────────────────────────────────────────────────────────────────────────
     { 'city': 'Kolkata',      'state': 'West Bengal', 'river': 'Hooghly',
       'lat': 22.5726, 'lon': 88.3639, 'risk': 'HIGH',
       'danger_level': 5.97,  'warning_level': 4.97,
