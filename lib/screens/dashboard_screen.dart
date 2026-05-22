@@ -3,12 +3,13 @@ import 'dart:convert';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
+import '../providers/flood_providers.dart';
 import '../services/api_service.dart';
-import '../services/real_time_service.dart';
 import '../screens/river_monitor_screen.dart';
 import '../theme/river_theme.dart';
 import '../widgets/animated_alert_badge.dart';
@@ -17,22 +18,20 @@ import '../widgets/premium_stat_card.dart';
 import '../widgets/risk_heatmap.dart';
 import '../widgets/river_level_visualizer.dart';
 
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen>
+class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with SingleTickerProviderStateMixin {
-  final RealTimeService _service = RealTimeService();
   String? _selectedCity;
 
   Map<String, dynamic>? _modelMetrics;
   bool _metricsLoading = true;
   bool _showDebug = false;
 
-  int _lastLevelHash = 0;
   List<FloodData> _cachedSortedLevels = <FloodData>[];
   int _cachedHash = -1;
 
@@ -47,23 +46,12 @@ class _DashboardScreenState extends State<DashboardScreen>
       ..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 0.5, end: 1.0).animate(_pulseCtrl);
     _fetchModelMetrics();
-    _service.addListener(_onServiceUpdate);
   }
 
   @override
   void dispose() {
     _pulseCtrl.dispose();
-    _service.removeListener(_onServiceUpdate);
     super.dispose();
-  }
-
-  void _onServiceUpdate() {
-    final newHash = _service.liveLevels.length ^
-        (_service.lastFetchTime?.millisecondsSinceEpoch ?? 0);
-    if (newHash != _lastLevelHash) {
-      _lastLevelHash = newHash;
-      if (mounted) setState(() {});
-    }
   }
 
   Future<void> _fetchModelMetrics() async {
@@ -79,18 +67,31 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> _onRefresh() => _service.refreshData();
+  Future<void> _onRefresh() => ref.read(realTimeProvider).refreshData();
 
   @override
   Widget build(BuildContext context) {
     final rc = RiverColors.of(context);
     final cs = Theme.of(context).colorScheme;
 
-    final newHash = _service.liveLevels.length ^
-        (_service.lastFetchTime?.millisecondsSinceEpoch ?? 0);
+    // Riverpod slice providers — only rebuild when these specific values change
+    final svc          = ref.read(realTimeProvider);
+    final liveLevels   = ref.watch(liveLevelsProvider);
+    final isUsingFallback  = ref.watch(isUsingFallbackProvider);
+    final isWakingUp       = ref.watch(isWakingUpProvider);
+    final lastFetchTime    = ref.watch(lastFetchTimeProvider);
+    final isOnline         = ref.watch(isOnlineProvider);
+    final errorMsg         = ref.watch(errorMessageProvider);
+    final monData          = ref.watch(monitoringDataProvider);
+
+    final cwcStations  = svc.cwcStations;
+    final hasCwcLive   = svc.hasCwcLiveData;
+
+    final newHash = liveLevels.length ^
+        (lastFetchTime?.millisecondsSinceEpoch ?? 0);
     if (newHash != _cachedHash) {
       _cachedHash = newHash;
-      _cachedSortedLevels = List<FloodData>.from(_service.liveLevels)
+      _cachedSortedLevels = List<FloodData>.from(liveLevels)
         ..sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
     }
     final levels = _cachedSortedLevels;
@@ -107,20 +108,16 @@ class _DashboardScreenState extends State<DashboardScreen>
         : levels.firstWhere((e) => e.city == _selectedCity,
             orElse: () => primary!);
 
-    final cwcStations = _service.cwcStations;
-    final hasCwcLive = _service.hasCwcLiveData;
-
-    final bool isBackendLive = _service.lastFetchTime != null &&
-        !_service.isUsingFallback &&
-        !_service.isWakingUp;
-    final bool isConnecting = _service.isWakingUp;
-    final bool showLive = isBackendLive && !hasCwcLive;
-    final bool showCwcLive = hasCwcLive;
+    final bool isBackendLive = lastFetchTime != null &&
+        !isUsingFallback &&
+        !isWakingUp;
+    final bool isConnecting  = isWakingUp;
+    final bool showLive      = isBackendLive && !hasCwcLive;
+    final bool showCwcLive   = hasCwcLive;
     final bool showConnecting = isConnecting && !hasCwcLive;
 
-    // FIX: removed backslash-escapes so Dart actually evaluates the interpolations
     final timestampLabel = isBackendLive
-        ? 'Updated ${DateFormat("dd MMM, HH:mm:ss").format(_service.lastFetchTime!.toLocal())}'
+        ? 'Updated ${DateFormat("dd MMM, HH:mm:ss").format(lastFetchTime!.toLocal())}'
         : cwcStations.isNotEmpty
             ? 'CWC data: ${DateFormat("HH:mm:ss").format(DateTime.now())} \u00b7 Backend proxied'
             : isConnecting
@@ -149,7 +146,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    // ── Header row
                     Row(
                       children: [
                         Icon(Icons.water_drop, color: rc.riverNormal, size: 22),
@@ -169,7 +165,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           isLive: showLive,
                           isCwcLive: showCwcLive,
                           isConnecting: showConnecting,
-                          isOffline: !_service.isOnline,
+                          isOffline: !isOnline,
                           pulseAnim: _pulseAnim,
                         ),
                         const SizedBox(width: 6),
@@ -199,23 +195,21 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 color: rc.textSecondary, fontSize: 12)),
                     const SizedBox(height: 12),
 
-                    // ── Debug panel (debug builds only)
                     if (kDebugMode && _showDebug)
-                      _DebugPanel(service: _service),
+                      _DebugPanel(service: svc),
 
-                    // ── Status banners
                     if (hasCwcLive)
                       _CwcLiveBanner(stationCount: cwcStations.length)
-                    else if (_service.isUsingFallback && !hasCwcLive)
+                    else if (isUsingFallback && !hasCwcLive)
                       _WakingBanner(
                         message: cwcStations.isEmpty
                             ? 'Connecting to CWC flood telemetry\u2026'
                             : 'CWC data unavailable \u2014 estimated levels shown.',
                       )
-                    else if (!_service.isOnline)
+                    else if (!isOnline)
                       _OfflineBanner(),
 
-                    if (_service.error != null)
+                    if (errorMsg != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.symmetric(
@@ -224,26 +218,22 @@ class _DashboardScreenState extends State<DashboardScreen>
                           borderRadius: BorderRadius.circular(12),
                           color: Colors.orange.withValues(alpha: 0.12),
                           border: Border.all(
-                              color:
-                                  Colors.orangeAccent.withValues(alpha: 0.5)),
+                              color: Colors.orangeAccent.withValues(alpha: 0.5)),
                         ),
-                        child: Text(_service.error!,
+                        child: Text(errorMsg,
                             style: const TextStyle(
                                 color: Colors.white, fontSize: 12)),
                       ),
 
-                    // ── Alert badge
                     AnimatedAlertBadge(
-                      count: _service.activeCriticalAlerts.length,
-                      isCritical: _service.activeCriticalAlerts.isNotEmpty,
-                      label: _service.activeCriticalAlerts.isNotEmpty
+                      count: svc.activeCriticalAlerts.length,
+                      isCritical: svc.activeCriticalAlerts.isNotEmpty,
+                      label: svc.activeCriticalAlerts.isNotEmpty
                           ? 'Critical Alerts'
                           : 'Live Alerts',
                     ),
                     const SizedBox(height: 16),
 
-                    // ── Flood gauge
-                    // FIX: removed backslash-escapes so city & riverName are evaluated
                     if (primary != null)
                       Center(
                         child: FloodGauge(
@@ -260,7 +250,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                           child: Center(child: CircularProgressIndicator())),
                     const SizedBox(height: 16),
 
-                    // ── CWC station strip
                     if (cwcStations.isNotEmpty) ...[
                       _CwcStationStrip(stations: cwcStations.take(8).toList()),
                       const SizedBox(height: 16),
@@ -271,8 +260,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                       const SizedBox(height: 16),
                     ],
 
-                    // ── Stat cards row
-                    // FIX: removed backslash-escapes in value strings
                     IntrinsicHeight(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -281,7 +268,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.warning_amber,
                               title: 'Critical',
-                              value: '${_service.monitoringData.criticalCount}',
+                              value: '${monData.criticalCount}',
                               subtitle: 'threshold breaches',
                               accent: const Color(0xFFEF4444),
                             ),
@@ -291,7 +278,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.ssid_chart,
                               title: 'High Risk',
-                              value: '${_service.monitoringData.highRiskCount}',
+                              value: '${monData.highRiskCount}',
                               subtitle: 'active locations',
                               accent: const Color(0xFFF59E0B),
                             ),
@@ -301,33 +288,33 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: hasCwcLive
                                   ? Icons.sensors
-                                  : _service.isOnline
+                                  : isOnline
                                       ? Icons.wifi
                                       : Icons.wifi_off,
                               title: hasCwcLive
                                   ? 'CWC'
-                                  : _service.isOnline
+                                  : isOnline
                                       ? 'Online'
                                       : 'Offline',
                               value: hasCwcLive
                                   ? '${cwcStations.length}'
                                   : isConnecting
                                       ? 'Waking'
-                                      : _service.queuedOfflineCycles > 0
-                                          ? '${_service.queuedOfflineCycles}'
+                                      : svc.queuedOfflineCycles > 0
+                                          ? '${svc.queuedOfflineCycles}'
                                           : 'Live',
                               subtitle: hasCwcLive
                                   ? 'stations above warning'
-                                  : _service.isUsingCache
+                                  : svc.isUsingCache
                                       ? 'cache mode'
                                       : isConnecting
                                           ? 'backend waking'
                                           : 'real-time feed',
                               accent: hasCwcLive
                                   ? const Color(0xFF34C759)
-                                  : _service.isUsingFallback
+                                  : isUsingFallback
                                       ? const Color(0xFFF59E0B)
-                                      : _service.isOnline
+                                      : isOnline
                                           ? const Color(0xFF34C759)
                                           : const Color(0xFFEF4444),
                             ),
@@ -341,7 +328,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                         loading: _metricsLoading, metrics: _modelMetrics),
                     const SizedBox(height: 16),
 
-                    // ── City selector
                     if (levels.isNotEmpty) ...[
                       Text('River Monitoring',
                           style: TextStyle(
@@ -379,12 +365,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                       const SizedBox(height: 12),
                     ],
 
-                    // ── Trend chart
                     if (selected != null)
                       RepaintBoundary(
                         child: _TrendCard(
                           city: selected.city,
-                          history: _service.trendForCity(selected.city),
+                          history: svc.trendForCity(selected.city),
                           dangerLevel: selected.dangerLevel,
                           warningLevel: selected.warningLevel,
                           isLiveData: isBackendLive || hasCwcLive,
@@ -395,7 +380,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
 
-              // River level cards
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
                 sliver: SliverList(
@@ -420,7 +404,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
 
-              // Risk heatmap
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(18, 0, 18, 110),
                 sliver: SliverToBoxAdapter(
@@ -452,7 +435,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
 // ── Debug Panel ─────────────────────────────────────────────────────────────
 class _DebugPanel extends StatelessWidget {
-  final RealTimeService service;
+  final dynamic service;
   const _DebugPanel({required this.service});
 
   String _fmt(Map<String, dynamic> m) {
@@ -858,9 +841,9 @@ class _CwcLiveSummaryCard extends StatelessWidget {
           Row(children: [
             const Icon(Icons.sensors, size: 18, color: Colors.white70),
             const SizedBox(width: 10),
-            Expanded(
+            const Expanded(
               child: Text('Live CWC river feed',
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w700)),
@@ -886,7 +869,7 @@ class _CwcLiveSummaryCard extends StatelessWidget {
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 2),
           Text(
-              '${station.riverName.isNotEmpty ? '${station.riverName} · ' : ''}${station.stateName}',
+              '${station.riverName.isNotEmpty ? '${station.riverName} \u00b7 ' : ''}${station.stateName}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white70, fontSize: 11)),
