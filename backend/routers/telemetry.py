@@ -2,7 +2,7 @@
 Telemetry router: Live telemetry, audit logs, and CWC data endpoints.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from typing import Any, Dict
 import csv
 import os
@@ -16,20 +16,31 @@ from .dependencies import (
     current_timestamp_iso,
 )
 
+# ── Module-level CWC scraper singleton ────────────────────────────────────────────
+# Import CWCRiverScraper here so the scraper is always initialized
+# regardless of which endpoint is called first.
+try:
+    from backend.cwc_scraper import CWCRiverScraper
+except ImportError:
+    from cwc_scraper import CWCRiverScraper  # type: ignore
+
+_cwc_scraper = CWCRiverScraper()
+
 router = APIRouter(tags=["telemetry"])
 
+
 def _normalize_log_key(value: str) -> str:
-    """Normalize key for log matching."""
     value = (value or "").strip().lower()
     cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in value)
     return " ".join(cleaned.split())
 
+
 def _safe_float(value: Any) -> float:
-    """Safely convert value to float."""
     try:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
 
 # ============= PREDICTION HISTORY =============
 @router.get("/prediction-history")
@@ -64,6 +75,7 @@ async def get_prediction_history(state: str | None = None, limit: int = 50):
         ],
     }
 
+
 # ============= TELEMETRY SNAPSHOTS =============
 @router.get("/telemetry-snapshots")
 async def get_telemetry_snapshots(state: str | None = None, station: str | None = None, limit: int = 50):
@@ -89,6 +101,7 @@ async def get_telemetry_snapshots(state: str | None = None, station: str | None 
         ],
     }
 
+
 # ============= AUDIT LOGS =============
 @router.get("/audit-logs")
 async def get_audit_logs(limit: int = 50):
@@ -112,6 +125,7 @@ async def get_audit_logs(limit: int = 50):
             for record in records
         ],
     }
+
 
 # ============= HISTORICAL LOGS =============
 @router.get("/historical-logs")
@@ -212,30 +226,28 @@ async def get_historical_logs(city: str = "Kolhapur", limit: int = 50):
             "message": None if logs else f"No packaged historical flood dataset is currently mapped to {requested_city}.",
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "records": []
-        }
+        return {"status": "error", "message": str(e), "records": []}
+
 
 # ============= SENSORS (TELEMETRY DATA) =============
 @router.get("/sensors")
-async def get_sensors(station: str = "Kolhapur", state: str = "Maharashtra", cwc_scraper = None):
+async def get_sensors(station: str = "Kolhapur", state: str = "Maharashtra"):
     """Get tactical telemetry data for sensors."""
-    if not cwc_scraper:
-        return []
-    
-    telemetry = cwc_scraper._build_tactical_telemetry(state_name=state, station_name=station, limit=6)
-    persist_telemetry_record(state, station, 6, 
+    telemetry = _cwc_scraper._build_tactical_telemetry(
+        state_name=state, station_name=station, limit=6
+    )
+    persist_telemetry_record(
+        state, station, 6,
         {
             "status": "POLICY_LOCKED",
             "data": telemetry,
             "data_source": "TACTICAL_REGISTRY",
             "source_policy": get_source_policy_payload(),
         },
-        "/sensors"
+        "/sensors",
     )
     return telemetry
+
 
 # ============= LIVE TELEMETRY =============
 @router.get("/api/live-telemetry")
@@ -243,19 +255,14 @@ async def get_live_telemetry(
     state: str = "Maharashtra",
     station: str = "Kolhapur",
     limit: int = 6,
-    cwc_scraper = None
 ):
     """Get formatted CWC telemetry data."""
-    if not cwc_scraper:
-        return {
-            "status": "error",
-            "message": "CWC scraper not initialized",
-            "timestamp": current_timestamp_iso(),
-        }
-    
     source_policy = get_source_policy_payload()
+
     if source_policy.get("allow_live_cwc_in_app"):
-        telemetry = cwc_scraper.get_live_telemetry(state_name=state, station_name=station, limit=limit)
+        telemetry = _cwc_scraper.get_live_telemetry(
+            state_name=state, station_name=station, limit=limit
+        )
         if not isinstance(telemetry, dict):
             telemetry = {}
         telemetry["source_policy"] = source_policy
@@ -266,19 +273,22 @@ async def get_live_telemetry(
             "data_source": "TACTICAL_REGISTRY",
             "source_policy": source_policy,
             "timestamp": current_timestamp_iso(),
-            "data": cwc_scraper._build_tactical_telemetry(state_name=state, station_name=station, limit=limit),
+            "data": _cwc_scraper._build_tactical_telemetry(
+                state_name=state, station_name=station, limit=limit
+            ),
         }
-    
+
     snapshot_id = persist_telemetry_record(state, station, limit, telemetry, "/api/live-telemetry")
     telemetry["snapshot_id"] = snapshot_id
     return telemetry
 
+
 # ============= CWC LIVE DATA =============
 @router.get("/cwc-live-data")
-async def get_cwc_live_data(station: str = "Kolhapur", cwc_scraper = None):
+async def get_cwc_live_data(station: str = "Kolhapur"):
     """Fetch live CWC river level data."""
     source_policy = get_source_policy_payload()
-    
+
     if not source_policy.get("allow_live_cwc_in_app"):
         return {
             "status": "policy_locked",
@@ -288,18 +298,8 @@ async def get_cwc_live_data(station: str = "Kolhapur", cwc_scraper = None):
             "timestamp": current_timestamp_iso(),
         }
 
-    if not cwc_scraper:
-        return {
-            "status": "error",
-            "station": station,
-            "message": "CWC scraper not initialized",
-            "source_policy": source_policy,
-            "timestamp": current_timestamp_iso()
-        }
-
     try:
-        live_data = cwc_scraper.get_live_river_level(station)
-        
+        live_data = _cwc_scraper.get_live_river_level(station)
         if live_data.get("status") in ["success", "success_fallback"]:
             return {
                 "status": "success",
@@ -308,21 +308,20 @@ async def get_cwc_live_data(station: str = "Kolhapur", cwc_scraper = None):
                 "source": live_data.get("source"),
                 "source_policy": source_policy,
                 "timestamp": current_timestamp_iso(),
-                "api": "CWC Official"
+                "api": "CWC Official",
             }
-        else:
-            return {
-                "status": "error",
-                "station": station,
-                "message": "Unable to fetch live CWC data",
-                "source_policy": source_policy,
-                "timestamp": current_timestamp_iso()
-            }
+        return {
+            "status": "error",
+            "station": station,
+            "message": "Unable to fetch live CWC data",
+            "source_policy": source_policy,
+            "timestamp": current_timestamp_iso(),
+        }
     except Exception as e:
         return {
             "status": "error",
             "station": station,
             "message": str(e),
             "source_policy": source_policy,
-            "timestamp": current_timestamp_iso()
+            "timestamp": current_timestamp_iso(),
         }
