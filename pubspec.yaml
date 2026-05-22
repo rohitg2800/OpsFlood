@@ -28,6 +28,7 @@ dependencies:
   url_launcher: ^6.3.0
   package_info_plus: ^8.0.2
   cupertino_icons: ^1.0.8
+  workmanager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
@@ -48,8 +49,7 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-  # Assets block intentionally left minimal until asset folders actually exist.
-  # Add entries here only after creating the corresponding directories.
+  # Uncomment each line below only after creating the folder locally:
   # assets:
   #   - assets/icon/
   #   - assets/images/

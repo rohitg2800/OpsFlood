@@ -1,13 +1,16 @@
 // test/widget_test.dart
-// Default Flutter smoke test — updated for equinox_flood package name.
+// App-level smoke test — verifies widget tree pumps without exception.
 import 'package:equinox_flood/main.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('App smoke test — widget tree pumps without exception',
+  testWidgets('App smoke test — EquinoxApp pumps without exception',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const OpsFloodApp());
-    // If the widget tree builds without throwing, the test passes.
-    expect(find.byType(OpsFloodApp), findsOneWidget);
+    // ProviderScope is required because EquinoxApp is a ConsumerWidget.
+    await tester.pumpWidget(
+      const ProviderScope(child: EquinoxApp()),
+    );
+    expect(find.byType(EquinoxApp), findsOneWidget);
   });
 }
