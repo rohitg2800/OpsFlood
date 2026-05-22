@@ -16,10 +16,13 @@ class ApiService {
   static const int      _maxRetries   = 2;
   static const Duration _retryBackoff = Duration(seconds: 2);
 
-  List<String> get _baseCandidates => <String>[
-        AppConstants.baseUrl,
-        AppConstants.backupBaseUrl,
-      ];
+  // Only include backupBaseUrl when it is non-empty.
+  // This prevents the retry loop from hitting the same dead endpoint twice
+  // when no real backup server is configured.
+  List<String> get _baseCandidates => [
+    AppConstants.baseUrl,
+    if (AppConstants.backupBaseUrl.isNotEmpty) AppConstants.backupBaseUrl,
+  ];
 
   Future<Map<String, dynamic>> _get(String path) =>
       _request(method: 'GET', path: path);
@@ -63,7 +66,6 @@ class ApiService {
           }
 
           final parsedBody = _safeDecode(res.body);
-          // FIX: Pass raw path so normalizer can decide wrapping behavior
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
           lastError = 'Request timed out after ${_timeout.inSeconds}s';
@@ -93,18 +95,12 @@ class ApiService {
     }
   }
 
-  // FIX: Previously this re-wrapped responses that already had a 'data' key,
-  // turning {status, data:[...]} into {status, data:{data:[...]}, source}.
-  // Now we pass through the payload as-is (just injecting source + status),
-  // so _deepExtractList in RealTimeService gets the real structure.
   Map<String, dynamic> _normalizeSuccess(
       dynamic payload, String base, String path) {
     if (payload is List) {
-      // Raw list response — wrap once
       return {'status': 'success', 'data': payload, 'source': '$base$path'};
     }
     if (payload is Map<String, dynamic>) {
-      // Return the payload unchanged — just add source and ensure status
       return <String, dynamic>{
         ...payload,
         'status': payload['status']?.toString() ?? 'success',
@@ -114,16 +110,14 @@ class ApiService {
     return {'status': 'success', 'data': payload, 'source': '$base$path'};
   }
 
-  // ── Health ────────────────────────────────────────────────────────────────
+  // ── Health ──────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
-  // ── Live telemetry — all stations, large page ────────────────────────────
-  // Returns {status, data:[{station, state, river_name, river_level, ...}]}
+  // ── Live telemetry ───────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getAllLiveTelemetry() =>
       _get('${AppConstants.liveTelemetryEndpoint}?limit=500&all_states=true');
 
-  // ── Live levels (OPSFLOOD_MATRIX — state-aggregated) ─────────────────────
   Future<Map<String, dynamic>> getLiveLevels() =>
       _get(AppConstants.liveLevelsEndpoint);
 
@@ -148,7 +142,6 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
       '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
 
-  // ── CWC Live Telemetry (same as getAllLiveTelemetry but named for compat) ─
   Future<Map<String, dynamic>> getAllCwcStations() => getAllLiveTelemetry();
 
   Future<Map<String, dynamic>> getLiveTelemetry({
@@ -163,7 +156,7 @@ class ApiService {
         '&limit=$limit',
       );
 
-  // ── CWC FFS ───────────────────────────────────────────────────────────────
+  // ── CWC FFS ─────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getFloodForecast({
     required String city,
     String? state,
@@ -179,7 +172,7 @@ class ApiService {
   Future<Map<String, dynamic>> getCwcStationDetail(String stationCode) =>
       _get('/api/cwc-ffs/detail?code=${Uri.encodeComponent(stationCode)}');
 
-  // ── CWC Reservoir Levels ──────────────────────────────────────────────────
+  // ── CWC Reservoir Levels ──────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getReservoirLevels({String? state}) {
     final path = state != null
         ? '/api/cwc-reservoir/state?state=${Uri.encodeComponent(state)}'
@@ -190,17 +183,17 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalReservoirs({int limit = 20}) =>
       _get('/api/cwc-reservoir?min_pct=85&limit=$limit&sort=pct_desc');
 
-  // ── Model ─────────────────────────────────────────────────────────────────
+  // ── Model ───────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getModelMetrics() => _get('/model-metrics');
 
-  // ── Prediction ────────────────────────────────────────────────────────────
+  // ── Prediction ───────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
       _post(AppConstants.predictLegacyEndpoint, input);
 
   Future<Map<String, dynamic>> predictV2(Map<String, dynamic> input) =>
       _post('/predict/v2', input);
 
-  // ── History ───────────────────────────────────────────────────────────────
+  // ── History ─────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getPredictionHistory({
     String? state,
     int     limit = 20,
@@ -212,7 +205,7 @@ class ApiService {
     return _get('/prediction-history?${params.join("&")}');
   }
 
-  // ── Weather ───────────────────────────────────────────────────────────────
+  // ── Weather ────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getWeather(String city) => _get(
       '${AppConstants.weatherCurrentEndpoint}?city=${Uri.encodeComponent(city)}');
 
@@ -228,7 +221,7 @@ class ApiService {
   }) =>
       _get('/historical-logs?city=${Uri.encodeComponent(city)}&limit=$limit');
 
-  // ── Audit / telemetry snapshots ───────────────────────────────────────────
+  // ── Audit / telemetry snapshots ───────────────────────────────────────────────
   Future<Map<String, dynamic>> getAuditLogs({int limit = 50}) =>
       _get('/audit-logs?limit=$limit');
 
