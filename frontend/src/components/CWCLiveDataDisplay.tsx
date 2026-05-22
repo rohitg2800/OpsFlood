@@ -14,6 +14,7 @@ import { useAppState } from '../context/AppContext';
 import { useAutoRefresh, useCWCIntegration, useSensorAPI } from '../hooks/useAppOperations';
 import { getSelectedRiverLocationLabel, scopeSensorsToSelectedLocation } from '../utils/regionReadings';
 import { getCWCDataSourceMessage } from '../utils/cwcDataSource';
+import type { SensorData } from '../types';
 import {
   ActionButton,
   ConsolePanel,
@@ -26,18 +27,6 @@ import {
 } from './OpsPrimitives';
 
 type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
-type SensorSource = 'CWC_API' | 'HTML_SCRAPE' | 'CACHED' | 'MANUAL' | 'TACTICAL_REGISTRY';
-
-const KNOWN_SENSOR_SOURCES: ReadonlySet<SensorSource> = new Set([
-  'CWC_API', 'HTML_SCRAPE', 'CACHED', 'MANUAL', 'TACTICAL_REGISTRY',
-]);
-
-function toSensorSource(value: string | null | undefined): SensorSource | undefined {
-  if (value && KNOWN_SENSOR_SOURCES.has(value as SensorSource)) {
-    return value as SensorSource;
-  }
-  return undefined;
-}
 
 const getStatusTone = (status?: string): Tone => {
   if (status === 'CRITICAL') return 'danger';
@@ -68,7 +57,7 @@ export function CWCLiveDataDisplay() {
     state.prediction.selectedState,
   );
 
-  const regionTelemetry = useMemo(() => {
+  const regionTelemetry = useMemo((): SensorData[] => {
     const liveSensors = state.sensors.data || [];
 
     const scoped = scopeSensorsToSelectedLocation(liveSensors, {
@@ -78,11 +67,10 @@ export function CWCLiveDataDisplay() {
     });
 
     const sensorSlice = (scoped.length ? scoped : liveSensors).slice(0, 4);
-
     if (sensorSlice.length) return sensorSlice;
 
     // Hard fallback: convert cwc.liveData.regionalData if sensors are empty.
-    return state.cwc.liveData.regionalData.slice(0, 4).map((node) => ({
+    return state.cwc.liveData.regionalData.slice(0, 4).map((node): SensorData => ({
       station: node.station,
       river_level: node.currentLevel,
       flow_rate: Number((node.currentLevel * 12.4).toFixed(1)),
@@ -90,11 +78,11 @@ export function CWCLiveDataDisplay() {
       status: node.status,
       last_update: node.updateTime,
       river: node.river,
-      warning_level: node.warningLevel,
-      danger_level: node.dangerLevel,
+      warning_level: node.warningLevel ?? undefined,
+      danger_level: node.dangerLevel ?? undefined,
       trend: node.trend,
       state: node.state,
-      source: toSensorSource(node.source),
+      source: node.source,  // CWCSensorData.source is the literal union; SensorData.source is string — compatible
     }));
   }, [
     state.sensors.data,
@@ -123,7 +111,7 @@ export function CWCLiveDataDisplay() {
     state.cwc.liveData.status ??
     state.cwc.liveData.kolhapurStatus;
 
-  const source = leadSensor?.source ?? toSensorSource(state.cwc.liveData.source);
+  const source = leadSensor?.source ?? state.cwc.liveData.source;
   const preferredRiver = leadSensor?.river ?? state.cwc.liveData.river;
   const warningLevel =
     Number(leadSensor?.warning_level || 0) ||
@@ -136,7 +124,7 @@ export function CWCLiveDataDisplay() {
 
   const dataSourceMessage = getCWCDataSourceMessage({
     isConnected,
-    liveSource: source,
+    liveSource: source as Parameters<typeof getCWCDataSourceMessage>[0]['liveSource'],
     predictionSource: state.prediction.cwcDataSource,
     sourcePolicyMode: sourcePolicy.mode,
   });
