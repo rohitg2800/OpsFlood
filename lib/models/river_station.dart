@@ -1,13 +1,24 @@
-// Model: CWC River Station with danger classification
+// lib/models/river_station.dart
+// Extended model — carries both static CWC thresholds AND live API fields.
+
 class RiverStation {
   final String city;
   final String state;
   final String river;
   final String station;
-  final double current;    // m – current gauge reading
+  final double current;   // m – gauge reading (live or seeded)
   final double warning;   // m – CWC warning level
   final double danger;    // m – CWC danger level
   final double hfl;       // m – highest flood level
+
+  // ── Live fields (null = not yet fetched) ────────────────────────────────
+  final double?  rainfallLastHour;
+  final double?  flowRate;
+  final String?  trend;
+  final String?  liveStatus;
+  final String?  lastUpdated;
+  final String?  dataSource;
+  final bool     isLive;
 
   const RiverStation({
     required this.city,
@@ -18,32 +29,48 @@ class RiverStation {
     required this.warning,
     required this.danger,
     required this.hfl,
+    this.rainfallLastHour,
+    this.flowRate,
+    this.trend,
+    this.liveStatus,
+    this.lastUpdated,
+    this.dataSource,
+    this.isLive = false,
   });
 
-  /// CWC 4-tier classification
   DangerClass get dangerClass {
-    if (current >= hfl) return DangerClass.extreme;
-    if (current >= danger) return DangerClass.severe;
+    if (current >= hfl)     return DangerClass.extreme;
+    if (current >= danger)  return DangerClass.severe;
     if (current >= warning) return DangerClass.aboveNormal;
     return DangerClass.normal;
   }
 
-  /// 0-100 progress against HFL
-  double get progressPct => (current / hfl).clamp(0.0, 1.0);
+  double get progressPct => hfl > 0 ? (current / hfl).clamp(0.0, 1.0) : 0.0;
+  int    get riskScore   => dangerClass.index;
 
-  /// Risk sort score
-  int get riskScore => dangerClass.index;
-
-  RiverStation copyWith({double? current}) => RiverStation(
-        city: city,
-        state: state,
-        river: river,
-        station: station,
-        current: current ?? this.current,
-        warning: warning,
-        danger: danger,
-        hfl: hfl,
-      );
+  RiverStation copyWith({
+    double?  current,
+    double?  rainfallLastHour,
+    double?  flowRate,
+    String?  trend,
+    String?  liveStatus,
+    String?  lastUpdated,
+    String?  dataSource,
+    bool?    isLive,
+  }) => RiverStation(
+    city: city, state: state, river: river, station: station,
+    current:          current          ?? this.current,
+    warning:          warning,
+    danger:           danger,
+    hfl:              hfl,
+    rainfallLastHour: rainfallLastHour ?? this.rainfallLastHour,
+    flowRate:         flowRate         ?? this.flowRate,
+    trend:            trend            ?? this.trend,
+    liveStatus:       liveStatus       ?? this.liveStatus,
+    lastUpdated:      lastUpdated      ?? this.lastUpdated,
+    dataSource:       dataSource       ?? this.dataSource,
+    isLive:           isLive           ?? this.isLive,
+  );
 }
 
 enum DangerClass { normal, aboveNormal, severe, extreme }
