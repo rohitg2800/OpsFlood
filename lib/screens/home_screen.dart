@@ -1,10 +1,7 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../services/real_time_service.dart';
 import '../screens/india_river_explorer_screen.dart';
-import '../theme/river_theme.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
@@ -19,9 +16,38 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> {
+  // FIX 1: Only HomeScreen starts/stops polling. Individual screens must NOT
+  // call startPolling() themselves — that caused duplicate listeners + full
+  // rebuilds across all 7 screens on every poll tick.
   final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
+
+  // FIX 2: Replace IndexedStack (keeps all 7 alive) with a lazy builder that
+  // only mounts the active screen. Off-screen widgets are fully unmounted,
+  // so they cannot receive notifyListeners() calls.
+  static const _destinations = [
+    _NavEntry(label: 'Home',       icon: Icons.dashboard_outlined,       selectedIcon: Icons.dashboard),
+    _NavEntry(label: 'Monitors',   icon: Icons.monitor_heart_outlined,   selectedIcon: Icons.monitor_heart),
+    _NavEntry(label: 'Alerts',     icon: Icons.notifications_outlined,   selectedIcon: Icons.notifications),
+    _NavEntry(label: 'Weather',    icon: Icons.cloud_outlined,           selectedIcon: Icons.cloud),
+    _NavEntry(label: 'Predict',    icon: Icons.model_training_outlined,  selectedIcon: Icons.model_training),
+    _NavEntry(label: 'Rivers',     icon: Icons.water_outlined,           selectedIcon: Icons.water),
+    _NavEntry(label: 'India',      icon: Icons.map_outlined,             selectedIcon: Icons.map),
+  ];
+
+  Widget _buildScreen(int index) {
+    switch (index) {
+      case 0: return const DashboardScreen();
+      case 1: return const MonitorsScreen();
+      case 2: return const AlertsScreen();
+      case 3: return const WeatherScreen();
+      case 4: return const PredictScreen();
+      case 5: return const RiverMonitorScreen();
+      case 6: return const IndiaRiverExplorerScreen();
+      default: return const DashboardScreen();
+    }
+  }
 
   @override
   void initState() {
@@ -35,123 +61,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  void _onTap(int index) {
-    if (index == _currentIndex) return;
-    setState(() => _currentIndex = index);
-  }
-
-  Widget _buildScreen(int index) {
-    switch (index) {
-      case 0:  return const DashboardScreen();
-      case 1:  return const MonitorsScreen();
-      case 2:  return const AlertsScreen();
-      case 3:  return const WeatherScreen();
-      case 4:  return const PredictScreen();
-      case 5:  return const RiverMonitorScreen();
-      case 6:  return const IndiaRiverExplorerScreen();
-      default: return const DashboardScreen();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBody: true,
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        transitionBuilder: (child, anim) => FadeTransition(
-          opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
-          child: child,
-        ),
-        child: KeyedSubtree(
-          key: ValueKey(_currentIndex),
-          child: _buildScreen(_currentIndex),
-        ),
-      ),
-      bottomNavigationBar: _FerrariNavBar(
-        currentIndex: _currentIndex,
-        onTap: _onTap,
+      // Lazy: only the active screen is in the tree at any time.
+      body: _buildScreen(_currentIndex),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        destinations: _destinations
+            .map((d) => NavigationDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.selectedIcon),
+                  label: d.label,
+                ))
+            .toList(),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Ferrari Nav Bar  — uses NavigationBar (M3) so layout is always safe
-// ─────────────────────────────────────────────────────────────────────────────
-class _FerrariNavBar extends StatelessWidget {
-  final int             currentIndex;
-  final ValueChanged<int> onTap;
-
-  const _FerrariNavBar({
-    required this.currentIndex,
-    required this.onTap,
+class _NavEntry {
+  const _NavEntry({
+    required this.label,
+    required this.icon,
+    required this.selectedIcon,
   });
-
-  static const _items = [
-    NavigationDestination(
-      icon:         Icon(Icons.dashboard_outlined),
-      selectedIcon: Icon(Icons.dashboard),
-      label: 'Monitor',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.monitor_heart_outlined),
-      selectedIcon: Icon(Icons.monitor_heart),
-      label: 'Monitors',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.notifications_outlined),
-      selectedIcon: Icon(Icons.notifications),
-      label: 'Alerts',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.cloud_outlined),
-      selectedIcon: Icon(Icons.cloud),
-      label: 'Weather',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.model_training_outlined),
-      selectedIcon: Icon(Icons.model_training),
-      label: 'Predict',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.water_outlined),
-      selectedIcon: Icon(Icons.water),
-      label: 'Rivers',
-    ),
-    NavigationDestination(
-      icon:         Icon(Icons.map_outlined),
-      selectedIcon: Icon(Icons.map),
-      label: 'India',
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: NavigationBar(
-          selectedIndex:    currentIndex,
-          onDestinationSelected: onTap,
-          animationDuration: const Duration(milliseconds: 300),
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          height: 64,
-          // Ferrari palette
-          backgroundColor:        const Color(0xF0100808),
-          shadowColor:            AppPalette.ferrari,
-          surfaceTintColor:       Colors.transparent,
-          indicatorColor:         AppPalette.ferrari.withOpacity(0.22),
-          indicatorShape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-          ),
-          overlayColor: WidgetStateProperty.all(
-            AppPalette.ferrari.withOpacity(0.08),
-          ),
-          destinations: _items,
-        ),
-      ),
-    );
-  }
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
 }

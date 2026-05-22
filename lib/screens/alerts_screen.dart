@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../constants.dart';
 import '../models/flood_data.dart';
+import '../services/cwc_live_provider.dart';
 import '../services/real_time_service.dart';
 import '../widgets/animated_alert_badge.dart';
 import '../widgets/river_level_visualizer.dart';
@@ -23,7 +24,18 @@ class _AlertsScreenState extends State<AlertsScreen> {
   @override
   void initState() {
     super.initState();
-    _service.startPolling();
+    // FIX: HomeScreen owns polling lifecycle, not individual screens
+    _service.addListener(_onUpdate);
+  }
+
+  @override
+  void dispose() {
+    _service.removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  void _onUpdate() {
+    if (mounted) setState(() {});
   }
 
   @override
