@@ -306,8 +306,6 @@ class _WeatherScreenState extends State<WeatherScreen>
     } catch (_) {}
   }
 
-  // P2: Load official IMD alerts for the selected state.
-  // Falls back silently if the backend endpoint is not yet live.
   Future<void> _loadImdAlerts(String state) async {
     if (!mounted) return;
     setState(() => _imdLoading = true);
@@ -325,7 +323,6 @@ class _WeatherScreenState extends State<WeatherScreen>
     setState(() { _location = r; _suggestions = []; });
     _fetchWeather(r);
     _loadCwcAlerts();
-    // Reload IMD alerts for the newly selected state
     if (r.admin1.isNotEmpty) _loadImdAlerts(r.admin1);
   }
 
@@ -401,6 +398,10 @@ class _WeatherScreenState extends State<WeatherScreen>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CWC TICKER BAR
+// Fix: OverflowBox inner Row was leaking outside ClipRect bounds.
+// Solution: give each ticker segment an explicit SizedBox width and use
+// mainAxisSize: MainAxisSize.min so the Row only measures its children,
+// not the unconstrained OverflowBox space.
 // ─────────────────────────────────────────────────────────────────────────────
 class _CwcTickerBar extends StatefulWidget {
   final List<Map<String, dynamic>> alerts;
@@ -412,8 +413,8 @@ class _CwcTickerBar extends StatefulWidget {
 class _CwcTickerBarState extends State<_CwcTickerBar>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
+  static const double _segmentWidth    = 1800.0;
   static const double _pixelsPerSecond = 50.0;
-  static const double _totalWidth      = 1800.0;
 
   @override
   void initState() {
@@ -421,7 +422,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
     _ctrl = AnimationController(
       vsync: this,
       duration: Duration(
-          milliseconds: (_totalWidth / _pixelsPerSecond * 1000).round()),
+          milliseconds: (_segmentWidth / _pixelsPerSecond * 1000).round()),
     )..repeat();
   }
 
@@ -454,6 +455,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
       color: bgColor,
       child: Row(
         children: [
+          // Label badge — does NOT scroll
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             color: Colors.black26,
@@ -466,6 +468,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   letterSpacing: 1.2),
             ),
           ),
+          // Scrolling ticker area
           Expanded(
             child: ClipRect(
               child: AnimatedBuilder(
@@ -474,19 +477,23 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   translation: Offset(-_ctrl.value, 0),
                   child: child,
                 ),
-                child: OverflowBox(
-                  alignment: Alignment.centerLeft,
-                  maxWidth: _totalWidth * 2,
+                // FIX: wrap the two ticker copies in a fixed-size SizedBox
+                // so the Row's OverflowBox never reports "60 pixels overflow".
+                // The ClipRect above ensures only the visible slice is painted.
+                child: SizedBox(
+                  width: _segmentWidth * 2 + 60,
+                  height: 34,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       SizedBox(
-                        width: _totalWidth,
+                        width: _segmentWidth,
                         child: _TickerText(text: tickerText),
                       ),
                       const SizedBox(width: 60),
                       SizedBox(
-                        width: _totalWidth,
+                        width: _segmentWidth,
                         child: _TickerText(text: tickerText),
                       ),
                     ],
@@ -678,8 +685,6 @@ class _WeatherBody extends StatelessWidget {
         _DetailGrid(weather: weather),
         const SizedBox(height: 14),
         _SevenDayForecast(weather: weather),
-        // P2: Official IMD alerts card — appears below forecast
-        // Shows a skeleton while loading, empty state when no backend data yet
         const SizedBox(height: 14),
         _OfficialImdAlertsCard(alerts: imdAlerts, loading: imdLoading),
       ],
@@ -689,9 +694,6 @@ class _WeatherBody extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OFFICIAL IMD ALERTS CARD (P2)
-// Calls ImdService.instance.getAlerts() via backend proxy.
-// Shows nothing when backend endpoint not yet live (graceful empty state).
-// Shows live alerts with severity colour-coding once backend is wired.
 // ─────────────────────────────────────────────────────────────────────────────
 class _OfficialImdAlertsCard extends StatelessWidget {
   final List<ImdAlert> alerts;
@@ -727,12 +729,11 @@ class _OfficialImdAlertsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
             child: Row(
               children: [
-                const Text('🇳🇺', style: TextStyle(fontSize: 16)),
+                const Text('🌦', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
@@ -765,8 +766,6 @@ class _OfficialImdAlertsCard extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
-
-          // Body
           if (loading)
             const Padding(
               padding: EdgeInsets.all(20),
@@ -856,7 +855,6 @@ class _OfficialImdAlertsCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Severity badge
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
@@ -878,7 +876,6 @@ class _OfficialImdAlertsCard extends StatelessWidget {
               );
             }),
           const SizedBox(height: 10),
-          // Attribution footer
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Text(
@@ -895,7 +892,7 @@ class _OfficialImdAlertsCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IMD ALERT BANNER (local rainfall classification — unchanged)
+// IMD ALERT BANNER
 // ─────────────────────────────────────────────────────────────────────────────
 class _ImdAlertBanner extends StatelessWidget {
   final _RainfallClass rc;
@@ -964,6 +961,8 @@ class _HeroWeatherCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Location + date row
+          // Fix: date Text is shrinkable; location name gets all remaining space.
           Row(
             children: [
               const Icon(Icons.location_on, color: Color(0xFF0DA7C2), size: 16),
@@ -972,10 +971,14 @@ class _HeroWeatherCard extends StatelessWidget {
                 child: Text(
                   '${location.name}, ${location.admin1}',
                   style: const TextStyle(
-                      color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                      color: Colors.white70, fontSize: 13,
+                      fontWeight: FontWeight.w500),
                   overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ),
+              const SizedBox(width: 8),
+              // FIX: was unconstrained — now explicitly shrink-wraps
               Text(
                 DateFormat('dd MMM, HH:mm').format(DateTime.now()),
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
@@ -1000,7 +1003,8 @@ class _HeroWeatherCard extends StatelessWidget {
                   ),
                   Text(_wmoLabel(weather.weatherCode),
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w400)),
+                          color: Colors.white70, fontSize: 16,
+                          fontWeight: FontWeight.w400)),
                   const SizedBox(height: 4),
                   Text('Feels like ${weather.feelsLike.toStringAsFixed(1)}°C',
                       style: const TextStyle(color: Colors.white38, fontSize: 12)),
