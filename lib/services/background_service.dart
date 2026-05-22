@@ -1,5 +1,5 @@
 // OpsFlood Background Service
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // P0 FIX: Timer.periodic stops when the app is backgrounded on Android.
 // workmanager schedules a real OS-level periodic task that survives the
 // app being backgrounded or the screen being locked.
@@ -59,24 +59,25 @@ Future<void> _runBackgroundRefresh() async {
         .timeout(const Duration(seconds: 12));
     if (levelsRes.statusCode != 200) return;
 
-    final body = jsonDecode(levelsRes.body);
-    final List<dynamic> items = _extractItems(body);
+    final body  = jsonDecode(levelsRes.body);
+    final items = _extractItems(body);
 
     // Find any CRITICAL entries
     final critical = items.whereType<Map<String, dynamic>>().where((item) {
-      final pct = (item['capacity_percent'] as num?)?.toDouble() ?? 0.0;
+      final pct  = (item['capacity_percent'] as num?)?.toDouble() ?? 0.0;
       final risk = (item['risk_level'] ?? '').toString().toUpperCase();
       return pct >= AppConstants.criticalThreshold || risk == 'CRITICAL';
     }).toList();
 
     if (critical.isEmpty) return;
 
-    // Fire a summary notification
+    // FIX: flutter_local_notifications v18+ uses named param `settings:`
+    //      (was positional in v16 and below)
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
+        iOS:     DarwinInitializationSettings(),
       ),
     );
 
@@ -87,9 +88,10 @@ Future<void> _runBackgroundRefresh() async {
     final count = critical.length;
 
     await plugin.show(
-      id: 99999,
-      title: '\u26a0\ufe0f OpsFlood — $count critical alert${count > 1 ? 's' : ''}',
-      body:  '$firstCity and ${count - 1} other station${count > 1 ? 's are' : ' is'} at critical flood risk.',
+      id:    99999,
+      title: '⚠️ OpsFlood — $count critical alert${count > 1 ? 's' : ''}',
+      body:  '$firstCity and ${count - 1} other '
+             'station${count > 1 ? 's are' : ' is'} at critical flood risk.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           AppConstants.criticalAlertChannelId,
@@ -124,8 +126,8 @@ List<dynamic> _extractItems(dynamic body) {
 class BackgroundService {
   BackgroundService._();
 
-  static const taskName        = 'opsflood-refresh';
-  static const _uniqueName     = 'opsflood-periodic-refresh';
+  static const taskName    = 'opsflood-refresh';
+  static const _uniqueName = 'opsflood-periodic-refresh';
 
   static bool _registered = false;
 
@@ -140,7 +142,7 @@ class BackgroundService {
       _uniqueName,
       taskName,
       // Android minimum is 15 minutes; iOS uses BGAppRefreshTask (best-effort)
-      frequency:       const Duration(minutes: 15),
+      frequency:          const Duration(minutes: 15),
       existingWorkPolicy: ExistingWorkPolicy.keep,
       constraints: Constraints(
         networkType: NetworkType.connected,
