@@ -17,23 +17,17 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // FIX 1: Only HomeScreen starts/stops polling. Individual screens must NOT
-  // call startPolling() themselves — that caused duplicate listeners + full
-  // rebuilds across all 7 screens on every poll tick.
   final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
-  // FIX 2: Replace IndexedStack (keeps all 7 alive) with a lazy builder that
-  // only mounts the active screen. Off-screen widgets are fully unmounted,
-  // so they cannot receive notifyListeners() calls.
   static const _destinations = [
-    _NavEntry(label: 'Dashboard',  icon: Icons.dashboard_outlined,       selectedIcon: Icons.dashboard),
-    _NavEntry(label: 'Monitors',   icon: Icons.monitor_heart_outlined,   selectedIcon: Icons.monitor_heart),
-    _NavEntry(label: 'Alerts',     icon: Icons.notifications_outlined,   selectedIcon: Icons.notifications),
-    _NavEntry(label: 'Weather',    icon: Icons.cloud_outlined,           selectedIcon: Icons.cloud),
-    _NavEntry(label: 'Predict',    icon: Icons.model_training_outlined,  selectedIcon: Icons.model_training),
-    _NavEntry(label: 'Rivers',     icon: Icons.water_outlined,           selectedIcon: Icons.water),
-    _NavEntry(label: 'India',      icon: Icons.map_outlined,             selectedIcon: Icons.map),
+    _NavEntry(label: 'Dashboard', icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard),
+    _NavEntry(label: 'Monitors',  icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart),
+    _NavEntry(label: 'Alerts',    icon: Icons.notifications_outlined,  selectedIcon: Icons.notifications),
+    _NavEntry(label: 'Weather',   icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud),
+    _NavEntry(label: 'Predict',   icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
+    _NavEntry(label: 'Rivers',    icon: Icons.water_outlined,          selectedIcon: Icons.water),
+    _NavEntry(label: 'India',     icon: Icons.map_outlined,            selectedIcon: Icons.map),
   ];
 
   Widget _buildScreen(int index) {
@@ -64,15 +58,24 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Lazy: only the active screen is in the tree at any time.
       body: _buildScreen(_currentIndex),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        // Ensure labels and icons are comfortably sized and not clipped
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        elevation: 8,
+        height: 68,
         destinations: _destinations
             .map((d) => NavigationDestination(
-                  icon: Icon(d.icon),
-                  selectedIcon: Icon(d.selectedIcon),
+                  icon: Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Icon(d.icon, size: 24),
+                  ),
+                  selectedIcon: Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Icon(d.selectedIcon, size: 24),
+                  ),
                   label: d.label,
                 ))
             .toList(),
