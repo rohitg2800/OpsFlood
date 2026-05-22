@@ -45,103 +45,128 @@ class RiverLevelVisualizer extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
           child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withOpacity(0.16)),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 26,
-                height: 90,
-                child: Stack(
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Color(0xFF8B0000),
-                            Color(0xFFEF4444),
-                            Color(0xFFF59E0B),
-                            Color(0xFF34C759),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withOpacity(0.16)),
+            ),
+            child: Row(
+              children: [
+                // ── Gauge bar ─────────────────────────────────────────
+                SizedBox(
+                  width: 26,
+                  height: 90,
+                  child: Stack(
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0xFF8B0000),
+                              Color(0xFFEF4444),
+                              Color(0xFFF59E0B),
+                              Color(0xFF34C759),
+                            ],
+                          ),
+                        ),
+                      ),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 350),
+                        curve: Curves.easeOut,
+                        height: 90 * _ratio,
+                        width: 26,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: _levelColor.withOpacity(0.9),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _levelColor.withOpacity(0.4),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            )
                           ],
                         ),
                       ),
-                    ),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 350),
-                      curve: Curves.easeOut,
-                      height: 90 * _ratio,
-                      width: 26,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: _levelColor.withOpacity(0.9),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _levelColor.withOpacity(0.4),
-                            blurRadius: 8,
-                            spreadRadius: 1,
-                          )
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                // ── City / river / level info ──────────────────────────
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        city,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        river,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      // FIX: was a bare Row — level text + spacer + trend
+                      // overflowed 130 px parent by 9.4 px.
+                      // Wrap both Text widgets in Flexible so they share
+                      // available space and clip gracefully.
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${currentLevel.toStringAsFixed(2)} m',
+                              style: TextStyle(
+                                color: _levelColor,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              trend.toUpperCase(),
+                              style: const TextStyle(
+                                  color: Colors.white60, fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      city,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                      ),
-                    ),
-                    Text(
-                      river,
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text(
-                          '${currentLevel.toStringAsFixed(2)} m',
-                          style: TextStyle(
-                            color: _levelColor,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          trend.toUpperCase(),
-                          style: const TextStyle(
-                              color: Colors.white60, fontSize: 11),
-                        )
-                      ],
-                    ),
-                  ],
+
+                const SizedBox(width: 6),
+
+                // FIX: danger label — FittedBox prevents it from pushing
+                // the row wider when dangerLevel has many digits (e.g. 204.83).
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'D ${dangerLevel.toStringAsFixed(1)}',
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 11),
+                  ),
                 ),
-              ),
-              Text(
-                'D ${dangerLevel.toStringAsFixed(1)}',
-                style: const TextStyle(color: Colors.white54, fontSize: 11),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
