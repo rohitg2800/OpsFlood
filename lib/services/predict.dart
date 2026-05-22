@@ -14,8 +14,6 @@
 /// ─────────────────────────────────────────────────────────────────────
 library;
 
-import 'dart:math' as math;
-
 import '../constants.dart';
 import 'api_service.dart';
 import 'prediction_service.dart';
@@ -151,7 +149,6 @@ class PredictionService {
       backendResult = await PredictionServiceImpl.instance
           .backendPredict(core, liveLevel: liveLevel);
     } catch (_) {
-      // Backend unreachable — pure offline mode
       backendResult = null;
     }
 
@@ -193,10 +190,6 @@ class PredictionService {
   }
 
   // ── Hybrid merge logic ────────────────────────────────────────────────────
-  // Blends probabilities from backend ML + rule engine using configurable weights.
-  // Final severity is taken from the highest blended probability.
-  // Confidence = weighted average of both confidences.
-  // Risk score  = weighted average of both risk scores.
   FloodPrediction _mergeResults({
     required CoreFloodPrediction backend,
     required CoreFloodPrediction local,
@@ -206,31 +199,26 @@ class PredictionService {
   }) {
     const labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
 
-    // Normalise both probability maps to 0-1 scale
-    Map<String, double> _norm(Map<String, double> p) {
+    Map<String, double> norm(Map<String, double> p) {
       final sum = p.values.fold(0.0, (s, v) => s + v);
       if (sum <= 0) return {for (final l in labels) l: 0.25};
-      // If already 0-1, keep; if 0-100, divide by 100
       final scale = sum > 2.0 ? 100.0 : 1.0;
       return {for (final l in labels) l: (p[l] ?? 0) / scale};
     }
 
-    final bp = _norm(backend.probabilities);
-    final lp = _norm(local.probabilities);
+    final bp = norm(backend.probabilities);
+    final lp = norm(local.probabilities);
 
-    // Weighted blend
     final blended = <String, double>{
       for (final l in labels)
         l: bp[l]! * backendWeight + lp[l]! * localWeight
     };
 
-    // Re-normalise to sum = 1.0
     final total = blended.values.fold(0.0, (s, v) => s + v);
     final normed = total > 0
         ? blended.map((k, v) => MapEntry(k, v / total))
         : {for (final l in labels) l: 0.25};
 
-    // Pick winner
     final severity = normed.entries
         .reduce((a, b) => a.value >= b.value ? a : b)
         .key;
@@ -244,8 +232,6 @@ class PredictionService {
         .round()
         .clamp(0, 100);
 
-    // Elevation: if rule engine says CRITICAL but backend says SEVERE,
-    // trust the higher severity to be safe (flood safety bias).
     final String finalSeverity = _saferSeverity(severity, local.severity);
 
     final ensemble = {
@@ -261,7 +247,6 @@ class PredictionService {
       ...backend.ensembleDetails,
     };
 
-    // Build a synthetic CoreFloodPrediction to reuse fromCore factory
     final merged = CoreFloodPrediction(
       severity:           finalSeverity,
       confidencePercent:  confidence,
@@ -282,7 +267,6 @@ class PredictionService {
     return FloodPrediction.fromCore(merged, liveRiverLevelM: liveLevel);
   }
 
-  /// Safety bias: always return the higher (more severe) of the two severities.
   String _saferSeverity(String a, String b) {
     const rank = {'LOW': 0, 'MODERATE': 1, 'SEVERE': 2, 'CRITICAL': 3};
     return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b;
@@ -306,8 +290,8 @@ class PredictionService {
             .toString()
             .toLowerCase();
         if (name.contains(lc) || lc.contains(name)) {
+          final abw = _sf(item['river_level'] ?? item['riverLevel'] ?? item['current_level']);
           final wl  = _sf(item['warning_level'] ?? item['warningLevel']);
-          final abw = _sf(item['river_level']   ?? item['riverLevel'] ?? item['current_level']);
           if (abw > 0) return abw;
           if (wl  > 0) return wl;
         }
