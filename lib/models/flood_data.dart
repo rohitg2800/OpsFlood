@@ -26,27 +26,22 @@ class FloodRiskEngine {
     final danger     = (city['danger_level']  as double? ?? AppConstants.defaultDangerLevel);
     final warning    = (city['warning_level'] as double? ?? AppConstants.defaultWarningLevel);
 
-    // ── Factor 1: Seasonal baseline (30%) ─────────────────────────────────
-    // Each zone has an IMD-defined peak monsoon month window.
-    // Current month drives how far into the monsoon cycle we are.
+    // ── Factor 1: Seasonal baseline (30%) ─────────────────────────────
     final month = DateTime.now().month;
-    final seasonal = _seasonalFactor(zone, riverType, month);     // 0.0 – 1.0
+    final seasonal = _seasonalFactor(zone, riverType, month);
 
-    // ── Factor 2: Historical flood frequency (25%) ────────────────────────
-    final freqScore = floodFreq;                                    // 0.0 – 1.0
+    // ── Factor 2: Historical flood frequency (25%) ────────────────────
+    final freqScore = floodFreq;
 
-    // ── Factor 3: Gauge band ratio (25%) ─────────────────────────────────
-    // A narrow warning-to-danger band (< 2m) means the city transitions
-    // from safe to critical very quickly — inherently higher risk score.
-    // gaugeRatio close to 1.0 = tight band = high risk
+    // ── Factor 3: Gauge band ratio (25%) ─────────────────────────────
     final band       = danger - warning;
     final gaugeScore = band <= 0 ? 0.5
-        : (1.0 - (band / (danger * 0.3)).clamp(0.0, 1.0));          // 0.0 – 1.0
+        : (1.0 - (band / (danger * 0.3)).clamp(0.0, 1.0));
 
-    // ── Factor 4: Geographic vulnerability (15%) ──────────────────────────
-    final geoScore = _geoVulnerability(zone, riverType);             // 0.0 – 1.0
+    // ── Factor 4: Geographic vulnerability (15%) ─────────────────────
+    final geoScore = _geoVulnerability(zone, riverType);
 
-    // ── Factor 5: Baseline risk tag (5%) ─────────────────────────────────
+    // ── Factor 5: Baseline risk tag (5%) ─────────────────────────────
     final tagScore = switch (risk) {
       'CRITICAL' => 1.00,
       'HIGH'     => 0.75,
@@ -54,64 +49,50 @@ class FloodRiskEngine {
       _          => 0.20,
     };
 
-    // ── Weighted sum ──────────────────────────────────────────────────────
     final raw = (seasonal   * 0.30)
               + (freqScore  * 0.25)
               + (gaugeScore * 0.25)
               + (geoScore   * 0.15)
               + (tagScore   * 0.05);
 
-    // Map [0–1] to a capacity percent with realistic distribution.
-    // We add ±3% gaussian-equivalent jitter per city so neighbouring
-    // cities of the same risk band show differentiated values on the UI.
-    final jitter = _deterministicJitter(city['city'] as String? ?? '');  // ±3
+    final jitter = _deterministicJitter(city['city'] as String? ?? '');
     return (raw * 100.0 + jitter).clamp(5.0, 98.0);
   }
 
-  /// IMD monsoon onset by zone (month of peak, ±2 months window).
-  /// Returns a 0–1 score for "how deep into monsoon season" we are.
   static double _seasonalFactor(String zone, String riverType, int month) {
     if (riverType == 'glacier') {
-      // Glacier-fed rivers peak in summer melt (May-Aug)
       return _bellCurve(month, peak: 7, width: 2.5);
     }
     switch (zone) {
       case 'northeastern':
-        // Earliest monsoon — June onset, peak July-Aug
         return _bellCurve(month, peak: 7.5, width: 2.0);
       case 'coastal':
-        // SW monsoon Jun-Sep; NE coast Oct-Dec
         final sw = _bellCurve(month, peak: 7.0, width: 2.0);
         final ne = _bellCurve(month, peak: 11.0, width: 1.5);
         return (sw + ne) / 2.0;
       case 'himalayan':
-        // Monsoon Jul-Sep; also snowmelt Mar-May
         final monsoon  = _bellCurve(month, peak: 8.0, width: 2.0);
         final snowmelt = _bellCurve(month, peak: 4.0, width: 1.5);
         return (monsoon * 0.7 + snowmelt * 0.3);
       case 'arid':
-        // Short erratic monsoon Jul-Aug
         return _bellCurve(month, peak: 7.5, width: 1.5) * 0.6;
       case 'central':
         return _bellCurve(month, peak: 8.0, width: 2.5);
-      default: // peninsular
+      default:
         return _bellCurve(month, peak: 7.5, width: 2.0);
     }
   }
 
-  /// Gaussian bell curve centred on `peak` month with given half-width.
   static double _bellCurve(int month, {required double peak, required double width}) {
     final diff = month.toDouble() - peak;
     return _exp(-(diff * diff) / (2.0 * width * width));
   }
 
   static double _exp(double x) {
-    // Taylor-series safe approximation for x in [-10, 0]
     if (x < -10) return 0.0;
     return 1.0 / (1.0 + (-x) + 0.5 * x * x * (1 + x / 3.0 + x * x / 24.0).abs());
   }
 
-  /// Geographic vulnerability 0–1 based on zone × river_type interaction.
   static double _geoVulnerability(String zone, String riverType) {
     const zoneBase = <String, double>{
       'northeastern': 0.85,
@@ -132,14 +113,11 @@ class FloodRiskEngine {
     return (base + bonus).clamp(0.0, 1.0);
   }
 
-  /// Deterministic ±3 jitter from city name hash so same city always
-  /// returns the same value across restarts (no random drift).
   static double _deterministicJitter(String cityName) {
     var hash = 0;
     for (final c in cityName.codeUnits) {
       hash = (hash * 31 + c) & 0xFFFFFFFF;
     }
-    // Map [0, 2^32-1] → [-3.0, +3.0]
     return ((hash % 600) - 300) / 100.0;
   }
 }
@@ -165,6 +143,15 @@ class FloodData {
   final DateTime? expectedPeakTime;
   final double? expectedPeakLevel;
 
+  // ── IMD enrichment fields (Pass 4) ─────────────────────────────────
+  // imdRainfallMm: authoritative 24-hr IMD rainfall for this city's district.
+  //   When present, flood_engine.dart should prefer this over any backend
+  //   rainfall estimate for the rainfall axis in severityFromEntry().
+  // imdSeverity: IMD colour-code for the district (RED | ORANGE | YELLOW | GREEN).
+  //   Screens can overlay this as a badge on city cards.
+  final double? imdRainfallMm;
+  final String? imdSeverity;
+
   const FloodData({
     required this.id,
     required this.city,
@@ -183,6 +170,8 @@ class FloodData {
     this.rainfall24h,
     this.expectedPeakTime,
     this.expectedPeakLevel,
+    this.imdRainfallMm,
+    this.imdSeverity,
   });
 
   double get capacityPercent {
@@ -194,6 +183,13 @@ class FloodData {
 
   bool get isCritical => capacityPercent >= AppConstants.criticalThreshold;
   bool get isHigh => capacityPercent >= AppConstants.highThreshold;
+
+  /// Whether this data point has been enriched with authoritative IMD data.
+  bool get hasImdData => imdRainfallMm != null && imdRainfallMm! > 0;
+
+  /// The best available rainfall figure: IMD authoritative if present,
+  /// otherwise the backend-provided 24-hour rainfall value.
+  double get effectiveRainfallMm => imdRainfallMm ?? rainfall24h ?? 0.0;
 
   FloodData copyWith({
     String? id,
@@ -213,25 +209,29 @@ class FloodData {
     String? status,
     DateTime? expectedPeakTime,
     double? expectedPeakLevel,
+    double? imdRainfallMm,
+    String? imdSeverity,
   }) {
     return FloodData(
-      id: id ?? this.id,
-      city: city ?? this.city,
-      state: state ?? this.state,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      currentLevel: currentLevel ?? this.currentLevel,
-      dangerLevel: dangerLevel ?? this.dangerLevel,
-      warningLevel: warningLevel ?? this.warningLevel,
-      safeLevel: safeLevel ?? this.safeLevel,
-      riskLevel: riskLevel ?? this.riskLevel,
-      lastUpdated: lastUpdated ?? this.lastUpdated,
-      riverName: riverName ?? this.riverName,
-      flowRate: flowRate ?? this.flowRate,
-      rainfall24h: rainfall24h ?? this.rainfall24h,
-      status: status ?? this.status,
-      expectedPeakTime: expectedPeakTime ?? this.expectedPeakTime,
-      expectedPeakLevel: expectedPeakLevel ?? this.expectedPeakLevel,
+      id:                id              ?? this.id,
+      city:              city             ?? this.city,
+      state:             state            ?? this.state,
+      latitude:          latitude         ?? this.latitude,
+      longitude:         longitude        ?? this.longitude,
+      currentLevel:      currentLevel     ?? this.currentLevel,
+      dangerLevel:       dangerLevel      ?? this.dangerLevel,
+      warningLevel:      warningLevel     ?? this.warningLevel,
+      safeLevel:         safeLevel        ?? this.safeLevel,
+      riskLevel:         riskLevel        ?? this.riskLevel,
+      lastUpdated:       lastUpdated      ?? this.lastUpdated,
+      riverName:         riverName        ?? this.riverName,
+      flowRate:          flowRate         ?? this.flowRate,
+      rainfall24h:       rainfall24h      ?? this.rainfall24h,
+      status:            status           ?? this.status,
+      expectedPeakTime:  expectedPeakTime ?? this.expectedPeakTime,
+      expectedPeakLevel: expectedPeakLevel?? this.expectedPeakLevel,
+      imdRainfallMm:     imdRainfallMm    ?? this.imdRainfallMm,
+      imdSeverity:       imdSeverity      ?? this.imdSeverity,
     );
   }
 
@@ -301,32 +301,28 @@ class FloodData {
       expectedPeakLevel: json['expected_peak_level'] == null
           ? null
           : _asDouble(json['expected_peak_level'], 0),
+      // IMD fields: only present after Pass 4 enrichment (null safe)
+      imdRainfallMm: json['imd_rainfall_mm'] == null
+          ? null
+          : _asDouble(json['imd_rainfall_mm'], 0),
+      imdSeverity: json['imd_severity']?.toString(),
     );
   }
 
-  /// Build a FloodData from the static monitored-cities registry using
-  /// FloodRiskEngine to derive a statistically realistic capacity percent
-  /// instead of hardcoded constants per risk tag.
   factory FloodData.fromMonitoredCity(Map<String, dynamic> cityData) {
     final dangerLevel  = _asDouble(cityData['danger_level'],  AppConstants.defaultDangerLevel);
     final warningLevel = _asDouble(cityData['warning_level'], AppConstants.defaultWarningLevel);
     final safeLevel    = (warningLevel - 2.0).clamp(0.0, double.infinity);
     final risk         = (cityData['risk'] as String? ?? 'LOW').toUpperCase();
 
-    // ── Use FloodRiskEngine for realistic, differentiated capacity ──────
     final capacity = FloodRiskEngine.computeFallbackCapacity(cityData);
-
-    // Derive currentLevel from capacity within the gauge band
     final currentLevel = safeLevel + (dangerLevel - safeLevel) * (capacity / 100.0);
 
-    // Re-derive risk label from computed capacity (more accurate than static tag)
     final computedRisk = capacity >= AppConstants.criticalThreshold ? 'CRITICAL'
         : capacity >= AppConstants.highThreshold     ? 'HIGH'
         : capacity >= AppConstants.moderateThreshold ? 'MODERATE'
         : 'LOW';
 
-    // If static tag was CRITICAL/HIGH but engine says otherwise, trust engine
-    // unless static tag is more severe (conservative safety principle)
     final finalRisk = _worstCase(risk, computedRisk);
 
     return FloodData(
@@ -345,10 +341,13 @@ class FloodData {
       flowRate:     null,
       rainfall24h:  null,
       status:       'Estimated',
+      // IMD fields not available at fallback construction time;
+      // enriched later by RealTimeService._enrichWithImd()
+      imdRainfallMm: null,
+      imdSeverity:   null,
     );
   }
 
-  /// Returns the more severe of two risk labels (safety-conservative).
   static String _worstCase(String a, String b) {
     const order = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'];
     final ai = order.indexOf(a);
@@ -357,23 +356,26 @@ class FloodData {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'city': city,
-        'state': state,
-        'latitude': latitude,
-        'longitude': longitude,
-        'current_level': currentLevel,
-        'danger_level': dangerLevel,
-        'warning_level': warningLevel,
-        'safe_level': safeLevel,
-        'risk_level': riskLevel,
-        'last_updated': lastUpdated.toIso8601String(),
-        'river_name': riverName,
-        'flow_rate': flowRate,
-        'rainfall_24h': rainfall24h,
-        'status': status,
-        'expected_peak_time': expectedPeakTime?.toIso8601String(),
-        'expected_peak_level': expectedPeakLevel,
+        'id':                   id,
+        'city':                 city,
+        'state':                state,
+        'latitude':             latitude,
+        'longitude':            longitude,
+        'current_level':        currentLevel,
+        'danger_level':         dangerLevel,
+        'warning_level':        warningLevel,
+        'safe_level':           safeLevel,
+        'risk_level':           riskLevel,
+        'last_updated':         lastUpdated.toIso8601String(),
+        'river_name':           riverName,
+        'flow_rate':            flowRate,
+        'rainfall_24h':         rainfall24h,
+        'status':               status,
+        'expected_peak_time':   expectedPeakTime?.toIso8601String(),
+        'expected_peak_level':  expectedPeakLevel,
+        // IMD fields — null if not yet enriched
+        'imd_rainfall_mm':      imdRainfallMm,
+        'imd_severity':         imdSeverity,
       };
 }
 

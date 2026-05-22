@@ -14,17 +14,18 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'api_service.dart';
 import 'cwc_direct_service.dart';
+import 'imd_service.dart';
+import 'ndma_service.dart';
 
 void _log(String msg) {
   if (kDebugMode) debugPrint('[RTS] $msg');
 }
 
-// FIX: deterministic, collision-free notification ID using polynomial hash
+// Deterministic, collision-free notification ID
 int _stableId(String city) =>
     city.codeUnits.fold(0, (int a, int b) => (a * 31 + b) & 0x7FFFFFFF);
 
-// FIX: HIGH-severity offset uses XOR + constant to guarantee no overflow
-// into negatives regardless of _stableId output value.
+// HIGH-severity offset — XOR bitmask, always stays in signed 32-bit positive range
 int _stableIdHigh(String city) => (_stableId(city) ^ 0x00100000) & 0x7FFFFFFF;
 
 class CwcStationData {
@@ -110,7 +111,6 @@ class RealTimeService extends ChangeNotifier {
   factory RealTimeService() => _instance;
   RealTimeService._internal();
 
-  // FIX: renamed from 'opsflood_realtime_cache_v2' -> 'equinox_realtime_cache_v2'
   static const String _cacheKey = 'equinox_realtime_cache_v2';
 
   static const int      _wakeUpMaxAttempts = 20;
@@ -169,6 +169,11 @@ class RealTimeService extends ChangeNotifier {
 
   List<CwcLiveReading> _cwcDirectReadings = <CwcLiveReading>[];
 
+  // ── Pass 4: IMD + NDMA state ───────────────────────────────────────────────
+  List<ImdAlert>         _imdAlerts         = <ImdAlert>[];
+  List<NdmaAdvisory>     _ndmaAdvisories    = <NdmaAdvisory>[];
+  List<EmergencyContact> _emergencyContacts = <EmergencyContact>[];
+
   final Map<String, List<RiverLevelSnapshot>> _historyByCity =
       <String, List<RiverLevelSnapshot>>{};
 
@@ -177,7 +182,7 @@ class RealTimeService extends ChangeNotifier {
   MultiLocationMonitoring? _cachedMonitoringData;
   int _monitoringDataHash = 0;
 
-  // Public getters
+  // ─── Public getters ───────────────────────────────────────────────────────────
   List<FloodData>        get liveLevels          => _liveLevels;
   List<FloodAlert>       get criticalAlerts      => _criticalAlerts;
   List<CwcStationData>   get cwcStations         => _cwcStations;
@@ -194,6 +199,11 @@ class RealTimeService extends ChangeNotifier {
   bool                   get isUsingFallback     => _isUsingFallback;
   bool                   get isWakingUp          =>
       _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
+
+  // Pass 4 getters — safe to read at any time (return empty list if not yet fetched)
+  List<ImdAlert>         get imdAlerts         => _imdAlerts;
+  List<NdmaAdvisory>     get ndmaAdvisories    => _ndmaAdvisories;
+  List<EmergencyContact> get emergencyContacts => _emergencyContacts;
 
   Map<String, dynamic> get debugLevelsRaw    => _lastLevelsRaw;
   Map<String, dynamic> get debugCwcRaw       => _lastCwcRaw;
@@ -247,7 +257,33 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // Initialization
+  // ── Pass 4 lookup helpers ───────────────────────────────────────────────
+
+  /// Returns IMD alerts for a given state (case-insensitive).
+  List<ImdAlert> imdAlertsForState(String state) {
+    final lc = state.toLowerCase();
+    return _imdAlerts
+        .where((a) => a.state.toLowerCase() == lc)
+        .toList(growable: false);
+  }
+
+  /// Returns emergency contacts (NDRF/SDRF) for a given state.
+  List<EmergencyContact> emergencyContactsForState(String state) {
+    final lc = state.toLowerCase();
+    return _emergencyContacts
+        .where((c) => c.state.toLowerCase() == lc)
+        .toList(growable: false);
+  }
+
+  /// Returns NDMA advisories for a given state.
+  List<NdmaAdvisory> ndmaAdvisoriesForState(String state) {
+    final lc = state.toLowerCase();
+    return _ndmaAdvisories
+        .where((a) => a.state.toLowerCase() == lc)
+        .toList(growable: false);
+  }
+
+  // ─── Initialization ───────────────────────────────────────────────────────────
   Future<void> initialize() async {
     if (_initialized) return;
     await _initNotifications();
@@ -266,7 +302,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Wake-up loop
+  // ─── Wake-up loop ────────────────────────────────────────────────────────────
   void _scheduleWakeUpRetry() {
     if (_wakeAttempts >= _wakeUpMaxAttempts) return;
     _wakeUpTimer?.cancel();
@@ -295,7 +331,7 @@ class RealTimeService extends ChangeNotifier {
     });
   }
 
-  // Notifications
+  // ─── Notifications ────────────────────────────────────────────────────────────
   Future<void> _initNotifications() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwinInit  = DarwinInitializationSettings(
@@ -304,7 +340,7 @@ class RealTimeService extends ChangeNotifier {
       requestSoundPermission: true,
     );
     await _notifications.initialize(
-      settings: const InitializationSettings(
+      const InitializationSettings(
           android: androidInit, iOS: darwinInit, macOS: darwinInit),
     );
     final androidPlatform = _notifications
@@ -328,7 +364,7 @@ class RealTimeService extends ChangeNotifier {
     );
   }
 
-  // Connectivity
+  // ─── Connectivity ────────────────────────────────────────────────────────────
   Future<void> _initConnectivityListener() async {
     final connectivity = Connectivity();
     final initial = await connectivity.checkConnectivity();
@@ -358,7 +394,7 @@ class RealTimeService extends ChangeNotifier {
     return true;
   }
 
-  // Polling
+  // ─── Polling ───────────────────────────────────────────────────────────────────
   Future<void> startPolling({Duration? interval}) async {
     await initialize();
     if (_isPolling) return;
@@ -389,7 +425,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Core refresh
+  // ─── Core refresh ────────────────────────────────────────────────────────────
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -404,18 +440,29 @@ class RealTimeService extends ChangeNotifier {
     _error     = null;
     notifyListeners();
 
+    // Determine active states from monitoredCities registry for IMD/NDMA calls
+    final activeStates = AppConstants.monitoredCities
+        .map((c) => (c['state'] as String).toLowerCase())
+        .toSet()
+        .toList();
+
     try {
+      // Pass 0–3 + Pass 4 all fire in parallel — zero added latency
       final results = await Future.wait([
-        _api.getAllLiveTelemetry(),
-        _api.getLiveLevels(),
-        _api.getCriticalAlerts(),
-        _fetchCwcDirectReadings(),
+        _api.getAllLiveTelemetry(),           // [0] backend telemetry
+        _api.getLiveLevels(),                 // [1] OPSFLOOD_MATRIX levels
+        _api.getCriticalAlerts(),             // [2] backend alerts
+        _fetchCwcDirectReadings(),            // [3] CWC direct (Pass 0)
+        _fetchImdData(activeStates),          // [4] IMD alerts + rainfall
+        _fetchNdmaData(activeStates),         // [5] NDMA advisories + NDRF contacts
       ]);
 
       final telemetryResponse  = results[0] as Map<String, dynamic>;
       final levelsResponse     = results[1] as Map<String, dynamic>;
       final alertsResponse     = results[2] as Map<String, dynamic>;
       final cwcDirectList      = results[3] as List<CwcLiveReading>;
+      final imdResult          = results[4] as _ImdResult;
+      final ndmaResult         = results[5] as _NdmaResult;
 
       _lastCwcRaw    = telemetryResponse;
       _lastLevelsRaw = levelsResponse;
@@ -424,8 +471,15 @@ class RealTimeService extends ChangeNotifier {
       _log('telemetry status: ${telemetryResponse["status"]}');
       _log('levels    status: ${levelsResponse["status"]}');
       _log('cwcDirect readings: ${cwcDirectList.length}');
+      _log('IMD alerts: ${imdResult.alerts.length}, rainfall points: ${imdResult.rainfall.length}');
+      _log('NDMA advisories: ${ndmaResult.advisories.length}, contacts: ${ndmaResult.contacts.length}');
 
       _cwcDirectReadings = cwcDirectList;
+
+      // Store Pass 4 data
+      _imdAlerts         = imdResult.alerts;
+      _ndmaAdvisories    = ndmaResult.advisories;
+      _emergencyContacts = ndmaResult.contacts;
 
       final telemetryItems = _deepExtractList(telemetryResponse) ?? [];
       final levelsItems    = _deepExtractList(levelsResponse)    ?? [];
@@ -439,18 +493,22 @@ class RealTimeService extends ChangeNotifier {
         }
       }
 
+      // Build fused levels (Pass 0–3)
       final fused = _buildFusedLevels(
         telemetryItems: telemetryItems.whereType<Map<String, dynamic>>().toList(),
         levelsItems:    levelsItems.whereType<Map<String, dynamic>>().toList(),
         cwcDirectMap:   cwcDirectMap,
       );
 
+      // Pass 4: enrich fused FloodData with IMD rainfall + severity
+      final enriched = _enrichWithImd(fused, imdResult.rainfall, imdResult.alerts);
+
       final alerts = _parseAlerts(alertsResponse);
 
-      _log('fused levels: ${fused.length}, cwcStations: ${_cwcStations.length}');
+      _log('fused: ${fused.length} levels, enriched with IMD: ${enriched.where((e) => e.hasImdData).length}');
 
-      if (fused.isNotEmpty) {
-        _liveLevels           = fused;
+      if (enriched.isNotEmpty) {
+        _liveLevels           = enriched;
         _isUsingFallback      = false;
         _liveDataEverReceived = true;
       } else if (!_liveDataEverReceived) {
@@ -496,6 +554,112 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
+  // ── Pass 4 fetch helpers ──────────────────────────────────────────────────
+
+  Future<_ImdResult> _fetchImdData(List<String> states) async {
+    // Fetch alerts + rainfall for every active monitored state in parallel
+    try {
+      final alertFutures    = states.map((s) => ImdService.instance.getAlerts(state: s));
+      final rainfallFutures = states.map((s) => ImdService.instance.getRainfall(state: s));
+      final allResults = await Future.wait([
+        Future.wait(alertFutures),
+        Future.wait(rainfallFutures),
+      ]).timeout(const Duration(seconds: 14));
+
+      final allAlerts   = (allResults[0] as List<List<ImdAlert>>)
+          .expand((list) => list)
+          .toList(growable: false);
+      final allRainfall = (allResults[1] as List<List<ImdRainfallPoint>>)
+          .expand((list) => list)
+          .toList(growable: false);
+
+      _log('IMD fetched: ${allAlerts.length} alerts, ${allRainfall.length} rainfall pts');
+      return _ImdResult(alerts: allAlerts, rainfall: allRainfall);
+    } catch (e) {
+      _log('IMD fetch error (non-fatal): $e');
+      return const _ImdResult(alerts: [], rainfall: []);
+    }
+  }
+
+  Future<_NdmaResult> _fetchNdmaData(List<String> states) async {
+    try {
+      final advisoryFutures = states.map((s) => NdmaService.instance.getAdvisories(state: s));
+      final contactFutures  = states.map((s) => NdmaService.instance.getContacts(state: s));
+      final allResults = await Future.wait([
+        Future.wait(advisoryFutures),
+        Future.wait(contactFutures),
+      ]).timeout(const Duration(seconds: 14));
+
+      final allAdvisories = (allResults[0] as List<List<NdmaAdvisory>>)
+          .expand((list) => list)
+          .toList(growable: false);
+      final allContacts   = (allResults[1] as List<List<EmergencyContact>>)
+          .expand((list) => list)
+          .toList(growable: false);
+
+      _log('NDMA fetched: ${allAdvisories.length} advisories, ${allContacts.length} contacts');
+      return _NdmaResult(advisories: allAdvisories, contacts: allContacts);
+    } catch (e) {
+      _log('NDMA fetch error (non-fatal): $e');
+      return const _NdmaResult(advisories: [], contacts: []);
+    }
+  }
+
+  // ── Pass 4 enrichment ───────────────────────────────────────────────────
+  //
+  // Walk every fused FloodData item and try to match it with IMD rainfall
+  // data by state. If an IMD rainfall point exists for this city's state,
+  // inject imdRainfallMm + imdSeverity via copyWith.
+  //
+  // flood_engine.dart can then use FloodData.effectiveRainfallMm which
+  // automatically prefers IMD data over backend estimates.
+  List<FloodData> _enrichWithImd(
+    List<FloodData> levels,
+    List<ImdRainfallPoint> rainfall,
+    List<ImdAlert> alerts,
+  ) {
+    if (rainfall.isEmpty && alerts.isEmpty) return levels;
+
+    // Build state-keyed lookup maps for O(1) access
+    final rainfallByState = <String, double>{};
+    for (final pt in rainfall) {
+      final key = pt.state.toLowerCase();
+      final current = rainfallByState[key] ?? 0.0;
+      // Use max rainfall across districts in same state (worst-case for safety)
+      if (pt.rainfallMm > current) rainfallByState[key] = pt.rainfallMm;
+    }
+
+    final alertsByState = <String, String>{}; // state → IMD colour code
+    for (final a in alerts) {
+      final key = a.state.toLowerCase();
+      final existing = alertsByState[key];
+      // Escalate to worst severity seen for this state
+      if (existing == null || _imdSeverityRank(a.severity) > _imdSeverityRank(existing)) {
+        alertsByState[key] = a.severity;
+      }
+    }
+
+    return levels.map((fd) {
+      final stateKey = fd.state.toLowerCase();
+      final rain   = rainfallByState[stateKey];
+      final sev    = alertsByState[stateKey];
+      if (rain == null && sev == null) return fd; // nothing to enrich
+      return fd.copyWith(
+        imdRainfallMm: rain,
+        imdSeverity:   sev,
+      );
+    }).toList(growable: false);
+  }
+
+  /// IMD colour severity rank for escalation comparison.
+  static int _imdSeverityRank(String s) => switch (s.toUpperCase()) {
+    'RED'    => 4,
+    'ORANGE' => 3,
+    'YELLOW' => 2,
+    'GREEN'  => 1,
+    _        => 0,
+  };
+
   Future<List<CwcLiveReading>> _fetchCwcDirectReadings() async {
     try {
       return await CwcDirectService.instance
@@ -514,7 +678,7 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // Multi-source data fusion (Pass 0-3)
+  // ─── Multi-source data fusion (Pass 0–3) ───────────────────────────────────
   List<FloodData> _buildFusedLevels({
     required List<Map<String, dynamic>> telemetryItems,
     required List<Map<String, dynamic>> levelsItems,
@@ -563,8 +727,7 @@ class RealTimeService extends ChangeNotifier {
         result.add(fd);
         coveredCities.add(cityLc);
         coveredStates.add(r.state.toLowerCase());
-        _log('Pass0 CwcDirect: ${r.stationName} @ ${r.currentLevelM}m '
-             '(${r.source.name}, conf=${r.confidence.toStringAsFixed(2)})');
+        _log('Pass0 CwcDirect: ${r.stationName} @ ${r.currentLevelM}m');
       }
     }
 
@@ -852,8 +1015,6 @@ class RealTimeService extends ChangeNotifier {
         );
         _notificationDedup.add(key);
       } else if (level.capacityPercent >= AppConstants.highThreshold) {
-        // FIX: was _stableId(city) + 100000 which could overflow 0x7FFFFFFF
-        // Now uses XOR bitmask — always stays within signed 32-bit positive range
         await _showNotification(
           id:          _stableIdHigh(level.city),
           channelId:   AppConstants.warningAlertChannelId,
@@ -970,4 +1131,18 @@ class RealTimeService extends ChangeNotifier {
     _connectivitySub?.cancel();
     super.dispose();
   }
+}
+
+// ── Private result containers for parallel fetch ─────────────────────────────
+// Using typed wrappers avoids unsafe List<dynamic> casts from Future.wait
+class _ImdResult {
+  final List<ImdAlert> alerts;
+  final List<ImdRainfallPoint> rainfall;
+  const _ImdResult({required this.alerts, required this.rainfall});
+}
+
+class _NdmaResult {
+  final List<NdmaAdvisory> advisories;
+  final List<EmergencyContact> contacts;
+  const _NdmaResult({required this.advisories, required this.contacts});
 }
