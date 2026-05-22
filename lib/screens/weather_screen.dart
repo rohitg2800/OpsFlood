@@ -397,11 +397,16 @@ class _WeatherScreenState extends State<WeatherScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC TICKER BAR
-// Fix: OverflowBox inner Row was leaking outside ClipRect bounds.
-// Solution: give each ticker segment an explicit SizedBox width and use
-// mainAxisSize: MainAxisSize.min so the Row only measures its children,
-// not the unconstrained OverflowBox space.
+// CWC TICKER BAR  (overflow-safe rewrite)
+//
+// Problem: inner Row(mainAxisSize: min) inside FractionalTranslation is still
+// measured by Flutter against the *constrained* parent width (367px), so any
+// content wider than that blows up with "overflowed by N pixels on the right".
+//
+// Fix: replace the inner Row+SizedBox pair with a single OverflowBox that
+// explicitly declares its maxWidth = segmentWidth*2, then puts the Text
+// directly inside. ClipRect (parent) ensures nothing outside [0, parentWidth]
+// is painted. No Row child = no RenderFlex overflow.
 // ─────────────────────────────────────────────────────────────────────────────
 class _CwcTickerBar extends StatefulWidget {
   final List<Map<String, dynamic>> alerts;
@@ -448,14 +453,15 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                 '${a['level'] == 'CRITICAL' ? '🔴' : '🟠'}  CWC Alert: ${a['city']} — ${a['river']} at ${(a['capacity'] as double).toStringAsFixed(0)}% capacity [${a['level']}]  •  ')
             .toList();
 
-    final tickerText = items.join('   ');
+    // Double the text so the loop is seamless
+    final tickerText = '${items.join('   ')}          ${items.join('   ')}';
 
     return Container(
       height: 34,
       color: bgColor,
       child: Row(
         children: [
-          // Label badge — does NOT scroll
+          // Static label badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             color: Colors.black26,
@@ -468,7 +474,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   letterSpacing: 1.2),
             ),
           ),
-          // Scrolling ticker area
+          // Scrolling ticker — ClipRect prevents painting outside bounds
           Expanded(
             child: ClipRect(
               child: AnimatedBuilder(
@@ -477,26 +483,29 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   translation: Offset(-_ctrl.value, 0),
                   child: child,
                 ),
-                // FIX: wrap the two ticker copies in a fixed-size SizedBox
-                // so the Row's OverflowBox never reports "60 pixels overflow".
-                // The ClipRect above ensures only the visible slice is painted.
-                child: SizedBox(
-                  width: _segmentWidth * 2 + 60,
-                  height: 34,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: _segmentWidth,
-                        child: _TickerText(text: tickerText),
+                // OverflowBox lets the child be as wide as it needs;
+                // it does NOT participate in the parent's flex layout,
+                // so RenderFlex never sees it as overflowing.
+                child: OverflowBox(
+                  alignment: Alignment.centerLeft,
+                  maxWidth: _segmentWidth * 2,
+                  maxHeight: 34,
+                  child: SizedBox(
+                    width: _segmentWidth * 2,
+                    height: 34,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        tickerText,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.clip,
                       ),
-                      const SizedBox(width: 60),
-                      SizedBox(
-                        width: _segmentWidth,
-                        child: _TickerText(text: tickerText),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -506,22 +515,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
       ),
     );
   }
-}
-
-class _TickerText extends StatelessWidget {
-  final String text;
-  const _TickerText({required this.text});
-  @override
-  Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11.5,
-            fontWeight: FontWeight.w500),
-        maxLines: 1,
-        overflow: TextOverflow.fade,
-        softWrap: false,
-      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -961,8 +954,6 @@ class _HeroWeatherCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Location + date row
-          // Fix: date Text is shrinkable; location name gets all remaining space.
           Row(
             children: [
               const Icon(Icons.location_on, color: Color(0xFF0DA7C2), size: 16),
@@ -978,7 +969,6 @@ class _HeroWeatherCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // FIX: was unconstrained — now explicitly shrink-wraps
               Text(
                 DateFormat('dd MMM, HH:mm').format(DateTime.now()),
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
