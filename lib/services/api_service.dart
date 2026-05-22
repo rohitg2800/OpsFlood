@@ -152,30 +152,12 @@ class ApiService {
   Future<Map<String, dynamic>> getCriticalAlertsByState(String state) => _get(
       '${AppConstants.criticalAlertsEndpoint}?state=${Uri.encodeComponent(state)}');
 
-  // ── CWC Live Telemetry (with scraper-not-ready fallback) ──────────────────
-  // Tries /api/cwc-ffs first (real CWC FFS data).
-  // If the backend responds with a scraper error or empty data, falls back
-  // to /api/live-telemetry so the app always shows something meaningful.
-  Future<Map<String, dynamic>> getAllCwcStations() async {
-    final ffsResult = await _get('/api/cwc-ffs?alert_only=false&limit=300');
-
-    // Check if CWC scraper is not yet initialized or returned an error
-    final isScraperError = ffsResult['status'] == 'error' ||
-        (ffsResult['message']?.toString() ?? '').contains('not initialized') ||
-        (ffsResult['data'] is Map &&
-            (ffsResult['data']['message']?.toString() ?? '')
-                .contains('not initialized'));
-
-    if (!isScraperError) {
-      final data = ffsResult['data'];
-      final hasItems = (data is List && data.isNotEmpty) ||
-          (data is Map && (data['data'] is List) && (data['data'] as List).isNotEmpty);
-      if (hasItems) return ffsResult;
-    }
-
-    // Fallback: generic live-telemetry endpoint which is always available
-    return _get('${AppConstants.liveTelemetryEndpoint}?limit=300&all_states=true');
-  }
+  // ── CWC Live Telemetry ────────────────────────────────────────────────────
+  // FIX: Removed the doomed /api/cwc-ffs attempt that always errors because
+  // the CWC scraper is never initialized on the free-tier backend.
+  // Now goes directly to /api/live-telemetry which is always available.
+  Future<Map<String, dynamic>> getAllCwcStations() =>
+      _get('${AppConstants.liveTelemetryEndpoint}?limit=300&all_states=true');
 
   Future<Map<String, dynamic>> getLiveTelemetry({
     String state   = 'Maharashtra',

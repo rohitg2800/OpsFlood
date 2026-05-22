@@ -69,6 +69,7 @@ class CwcStationData {
               j['river_name'] ??
               '')
           .toString(),
+      // FIX: backend sends river_level; accept all common aliases
       riverLevel: sf(j['river_level'] ??
           j['riverLevel'] ??
           j['current_level'] ??
@@ -407,6 +408,8 @@ class RealTimeService extends ChangeNotifier {
         }
       }
 
+      // FIX: Use _deepExtractList (not shallow _extractList) for live-levels response.
+      // /api/live-levels wraps as {data: {data: [...]}} (depth-2), which _extractList misses.
       final levels = _parseFloodLevels(levelsResponse);
       final alerts = _parseAlerts(alertsResponse);
       _updateCwcStations(cwcResponse);
@@ -510,25 +513,23 @@ class RealTimeService extends ChangeNotifier {
 
   // ── Deep recursive list extractor ─────────────────────────────────────────
   // Searches every level of a nested Map/List envelope for the first
-  // non-empty List<Map> it can find. This handles:
+  // non-empty List<Map> it can find. Handles:
   //   {data: [...]}                      depth-1
-  //   {data: {data: [...]}}              depth-2
+  //   {data: {data: [...]}}              depth-2  ← /api/live-levels format
   //   {data: {data: {data: [...]}}}      depth-3 (some backends)
   //   {records: [...]}                   alternate key
   //   bare Map with station fields       single-station shortcut
   List<dynamic>? _deepExtractList(dynamic node, {int depth = 0}) {
-    if (depth > 6) return null; // guard against infinite recursion
+    if (depth > 6) return null;
 
     if (node is List) {
       if (node.isEmpty) return null;
-      // Only accept if items look like station objects
       if (node.first is Map) return node;
       return null;
     }
 
     if (node is! Map<String, dynamic>) return null;
 
-    // Try known list-bearing keys in priority order
     const listKeys = [
       'data', 'stations', 'result', 'results',
       'items', 'records', 'levels', 'telemetry',
@@ -538,13 +539,11 @@ class RealTimeService extends ChangeNotifier {
       final v = node[key];
       if (v is List && v.isNotEmpty && v.first is Map) return v;
       if (v != null) {
-        // Recurse into nested map/list
         final found = _deepExtractList(v, depth: depth + 1);
         if (found != null) return found;
       }
     }
 
-    // Last resort: single-station bare map
     if (node.containsKey('station') || node.containsKey('river_level') ||
         node.containsKey('stationName') || node.containsKey('gauge_reading')) {
       return [node];
@@ -553,7 +552,7 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // ── Legacy flat extractor (used by levels + alerts parsers) ──────────────
+  // ── Legacy flat extractor (kept for alerts parser) ─────────────────────────
   List<dynamic>? _extractList(Map<String, dynamic> response) {
     for (final key in ['data', 'stations', 'result', 'results',
                         'items', 'records', 'levels', 'telemetry']) {
@@ -573,9 +572,11 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ── Parsers ───────────────────────────────────────────────────────────────
+  // FIX: Use _deepExtractList so we can pierce {data: {data: [...]}} wrapping
+  // from /api/live-levels. Previously used _extractList which only went 2 levels.
   List<FloodData> _parseFloodLevels(Map<String, dynamic> response) {
     if (response['status'] == 'error') return <FloodData>[];
-    final items = _extractList(response);
+    final items = _deepExtractList(response);
     if (items == null) return <FloodData>[];
     return items
         .whereType<Map<String, dynamic>>()

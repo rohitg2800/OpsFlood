@@ -110,8 +110,9 @@ class FloodData {
   }
 
   factory FloodData.fromJson(Map<String, dynamic> json) {
+    // FIX: Backend sends river_level (not current_level). Priority: river_level > current_level > level
     final currentLevel = _asDouble(
-      json['current_level'] ?? json['level'] ?? json['river_level'],
+      json['river_level'] ?? json['current_level'] ?? json['level'],
       0,
     );
     final dangerLevel =
@@ -128,13 +129,17 @@ class FloodData {
         : ((currentLevel - safeLevel) / (dangerLevel - safeLevel) * 100)
             .clamp(0, 100);
 
+    // FIX: Backend sends 'station' field not 'city'. Try station first, then city.
+    final cityName = (json['station'] ?? json['city'] ?? '').toString();
+
     return FloodData(
       id: (json['id'] ??
-              '${json['city'] ?? 'unknown'}-${json['state'] ?? 'na'}')
+              '${cityName}-${json['state'] ?? 'na'}')
           .toString(),
-      city: (json['city'] ?? json['station'] ?? '').toString(),
+      city: cityName,
       state: (json['state'] ?? '').toString(),
-      latitude: _asDouble(json['latitude'] ?? json['lat'], 0),
+      // FIX: Backend does not send lat/lon in live-telemetry; default to 0.0 (map overlay skips zero-coord pins)
+      latitude:  _asDouble(json['latitude']  ?? json['lat'], 0),
       longitude: _asDouble(json['longitude'] ?? json['lon'], 0),
       currentLevel: currentLevel,
       dangerLevel: dangerLevel,
@@ -161,33 +166,42 @@ class FloodData {
   }
 
   factory FloodData.fromMonitoredCity(Map<String, dynamic> cityData) {
+    // FIX: Use city-specific danger/warning levels from the monitoredCities map.
+    // Previously used hardcoded defaultDangerLevel=12 / defaultSafeLevel=8 for ALL cities,
+    // which made capacityPercent wildly wrong for cities like Guwahati (51.75m),
+    // Patna (48.6m), Kanpur (111.5m) etc.
     final risk = (cityData['risk'] ?? 'LOW').toString().toUpperCase();
-    final baseDanger = AppConstants.defaultDangerLevel;
-    final baseSafe = AppConstants.defaultSafeLevel;
+    final dangerLevel  = _asDouble(cityData['danger_level'],  AppConstants.defaultDangerLevel);
+    final warningLevel = _asDouble(cityData['warning_level'], AppConstants.defaultWarningLevel);
+    // safeLevel = warning_level - 2m is a reasonable CWC approximation
+    final safeLevel    = warningLevel - 2.0;
+
     final capacity = switch (risk) {
       'CRITICAL' => 92.0,
-      'HIGH' => 78.0,
+      'HIGH'     => 78.0,
       'MODERATE' => 58.0,
-      _ => 36.0,
+      _          => 36.0,
     };
-    final currentLevel = baseSafe + (baseDanger - baseSafe) * (capacity / 100);
+    // Derive a plausible currentLevel from city-specific danger/safe band
+    final effectiveSafe = safeLevel < 0 ? 0.0 : safeLevel;
+    final currentLevel  = effectiveSafe + (dangerLevel - effectiveSafe) * (capacity / 100);
 
     return FloodData(
-      id: '${cityData['city']}-${cityData['state']}',
-      city: cityData['city'].toString(),
-      state: cityData['state'].toString(),
-      latitude: _asDouble(cityData['lat'], 0),
-      longitude: _asDouble(cityData['lon'], 0),
+      id:           '${cityData['city']}-${cityData['state']}',
+      city:         cityData['city'].toString(),
+      state:        cityData['state'].toString(),
+      latitude:     _asDouble(cityData['lat'], 0),
+      longitude:    _asDouble(cityData['lon'], 0),
       currentLevel: currentLevel,
-      dangerLevel: baseDanger,
-      warningLevel: AppConstants.defaultWarningLevel,
-      safeLevel: baseSafe,
-      riskLevel: risk,
-      lastUpdated: DateTime.now(),
-      riverName: cityData['river']?.toString(),
-      flowRate: null,
-      rainfall24h: null,
-      status: 'Stable',
+      dangerLevel:  dangerLevel,
+      warningLevel: warningLevel,
+      safeLevel:    effectiveSafe,
+      riskLevel:    risk,
+      lastUpdated:  DateTime.now(),
+      riverName:    cityData['river']?.toString(),
+      flowRate:     null,
+      rainfall24h:  null,
+      status:       'Stable',
     );
   }
 

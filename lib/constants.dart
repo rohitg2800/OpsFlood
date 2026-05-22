@@ -6,7 +6,8 @@ import 'dart:core';
 class AppConstants {
   // ── Backend URLs ────────────────────────────────────────────────────────────
   static const String baseUrl       = 'https://opsflood.onrender.com';
-  static const String backupBaseUrl = 'https://opsflood-backend.onrender.com';
+  // FIX: was 'opsflood-backend.onrender.com' which does not exist
+  static const String backupBaseUrl = 'https://opsflood.onrender.com';
 
   // ── API Endpoints ─────────────────────────────────────────────────────────
   static const String healthEndpoint          = '/health';
@@ -22,7 +23,7 @@ class AppConstants {
   static const double highThreshold      = 75.0;
   static const double moderateThreshold  = 50.0;
 
-  // ── Default water level values (metres) ───────────────────────────────
+  // ── Default water level values (metres) — used only when city map has no levels ───
   static const double defaultDangerLevel  = 12.0;
   static const double defaultWarningLevel = 10.32;
   static const double defaultSafeLevel    = 8.0;
