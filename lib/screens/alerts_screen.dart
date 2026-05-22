@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../constants.dart';
 import '../models/flood_data.dart';
 import '../services/cwc_live_provider.dart';
+import '../services/ndma_service.dart';
 import '../services/real_time_service.dart';
 import '../widgets/animated_alert_badge.dart';
 import '../widgets/river_level_visualizer.dart';
 
-// ─── palette ───────────────────────────────────────────────────────────────────
+// ─── palette ───────────────────────────────────────────────────────────────────────────────
 const _kBg     = Color(0xFF060D14);
 const _kCard   = Color(0xFF0D1B26);
 const _kCyan   = Color(0xFF00C2DE);
@@ -39,7 +41,7 @@ String _sevIcon(String sev) {
   }
 }
 
-// ─── screen ─────────────────────────────────────────────────────────────────────
+// ─── screen ───────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
   @override
@@ -53,6 +55,10 @@ class _AlertsScreenState extends State<AlertsScreen>
   String  _filter   = 'ALL';
   late AnimationController _pulseCtrl;
 
+  // P2: NDMA contacts state
+  List<NdmaContact> _ndmaContacts = [];
+  bool              _ndmaLoading  = false;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +66,7 @@ class _AlertsScreenState extends State<AlertsScreen>
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(seconds: 2))
       ..repeat(reverse: true);
+    _loadNdmaContacts();
   }
 
   @override
@@ -70,6 +77,18 @@ class _AlertsScreenState extends State<AlertsScreen>
   }
 
   void _onUpdate() { if (mounted) setState(() {}); }
+
+  // P2: Load NDMA emergency contacts. Fails silently if backend not live.
+  Future<void> _loadNdmaContacts() async {
+    if (!mounted) return;
+    setState(() => _ndmaLoading = true);
+    try {
+      final contacts = await NdmaService.instance.getContacts();
+      if (mounted) setState(() { _ndmaContacts = contacts; _ndmaLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _ndmaLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +120,6 @@ class _AlertsScreenState extends State<AlertsScreen>
                   .toList()
                 ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
-              // severity counts
               final counts = <String, int>{
                 'CRITICAL': baseAlerts.where((a) => a.severity == 'CRITICAL').length,
                 'HIGH':     baseAlerts.where((a) => a.severity == 'HIGH').length,
@@ -110,7 +128,10 @@ class _AlertsScreenState extends State<AlertsScreen>
               };
 
               return RefreshIndicator(
-                onRefresh: _svc.refreshData,
+                onRefresh: () async {
+                  await _svc.refreshData();
+                  await _loadNdmaContacts();
+                },
                 color: _kCyan,
                 backgroundColor: _kCard,
                 child: CustomScrollView(
@@ -122,7 +143,6 @@ class _AlertsScreenState extends State<AlertsScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // ── title row ─────────────────────────────────
                             Row(
                               children: [
                                 const Text('Live Alerts',
@@ -133,20 +153,20 @@ class _AlertsScreenState extends State<AlertsScreen>
                                         letterSpacing: -0.5)),
                                 const Spacer(),
                                 IconButton(
-                                  onPressed: _svc.refreshData,
+                                  onPressed: () async {
+                                    await _svc.refreshData();
+                                    await _loadNdmaContacts();
+                                  },
                                   icon: const Icon(Icons.refresh_rounded,
                                       color: _kSub, size: 20),
                                   style: IconButton.styleFrom(
                                       backgroundColor:
                                           Colors.white.withOpacity(0.06),
-                                      padding:
-                                          const EdgeInsets.all(8)),
+                                      padding: const EdgeInsets.all(8)),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 12),
-
-                            // ── animated alert badge ────────────────────
                             AnimatedAlertBadge(
                               count: timelineAlerts.length,
                               isCritical: timelineAlerts
@@ -154,8 +174,6 @@ class _AlertsScreenState extends State<AlertsScreen>
                               label: 'Active Timeline Alerts',
                             ),
                             const SizedBox(height: 14),
-
-                            // ── severity count row ─────────────────────
                             Row(
                               children: [
                                 'CRITICAL', 'HIGH', 'MODERATE', 'LOW'
@@ -191,17 +209,13 @@ class _AlertsScreenState extends State<AlertsScreen>
                               }).toList(),
                             ),
                             const SizedBox(height: 16),
-
-                            // ── offline notice ──────────────────────────
                             if (!_svc.isOnline || _svc.isUsingCache)
                               Container(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color:
-                                      _kOrange.withOpacity(0.12),
-                                  borderRadius:
-                                      BorderRadius.circular(12),
+                                  color: _kOrange.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
                                       color: _kOrange.withOpacity(0.4)),
                                 ),
@@ -214,15 +228,12 @@ class _AlertsScreenState extends State<AlertsScreen>
                                       child: Text(
                                         'Offline — showing cached alerts.',
                                         style: TextStyle(
-                                            color: _kOrange,
-                                            fontSize: 12),
+                                            color: _kOrange, fontSize: 12),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-
-                            // ── gauge mini-cards ────────────────────────
                             Row(
                               children: const [
                                 Icon(Icons.water_drop,
@@ -258,7 +269,7 @@ class _AlertsScreenState extends State<AlertsScreen>
                       ),
                     ),
 
-                    // ── filter chips ─────────────────────────────────────
+                    // filter chips
                     SliverToBoxAdapter(
                       child: Padding(
                         padding:
@@ -298,13 +309,12 @@ class _AlertsScreenState extends State<AlertsScreen>
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if (s != 'ALL') ...
-                                        [
-                                          Text(_sevIcon(s),
-                                              style: const TextStyle(
-                                                  fontSize: 12)),
-                                          const SizedBox(width: 5),
-                                        ],
+                                      if (s != 'ALL') ...[
+                                        Text(_sevIcon(s),
+                                            style: const TextStyle(
+                                                fontSize: 12)),
+                                        const SizedBox(width: 5),
+                                      ],
                                       Text(s,
                                           style: TextStyle(
                                             color: selected
@@ -325,12 +335,12 @@ class _AlertsScreenState extends State<AlertsScreen>
                       ),
                     ),
 
-                    // ── timeline alerts ──────────────────────────────────
+                    // timeline alerts
                     if (timelineAlerts.isEmpty)
                       SliverToBoxAdapter(
                         child: Padding(
                           padding:
-                              const EdgeInsets.fromLTRB(18, 0, 18, 30),
+                              const EdgeInsets.fromLTRB(18, 0, 18, 16),
                           child: Container(
                             padding: const EdgeInsets.all(28),
                             decoration: BoxDecoration(
@@ -355,7 +365,7 @@ class _AlertsScreenState extends State<AlertsScreen>
                     else
                       SliverPadding(
                         padding:
-                            const EdgeInsets.fromLTRB(18, 0, 18, 30),
+                            const EdgeInsets.fromLTRB(18, 0, 18, 16),
                         sliver: SliverList(
                           delegate: SliverChildBuilderDelegate(
                             (_, i) {
@@ -374,6 +384,17 @@ class _AlertsScreenState extends State<AlertsScreen>
                           ),
                         ),
                       ),
+
+                    // P2: NDMA Emergency Contacts Card
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 30),
+                        child: _NdmaContactsCard(
+                          contacts: _ndmaContacts,
+                          loading:  _ndmaLoading,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               );
@@ -385,7 +406,226 @@ class _AlertsScreenState extends State<AlertsScreen>
   }
 }
 
-// ─── gauge mini card ──────────────────────────────────────────────────────────
+// ─── NDMA Emergency Contacts Card (P2) ─────────────────────────────────────────────
+// Calls NdmaService.instance.getContacts().
+// Shows a graceful empty state when /api/ndma/advisories not yet live.
+// Each contact row has a tap-to-call button using url_launcher.
+// ───────────────────────────────────────────────────────────────────────────────
+class _NdmaContactsCard extends StatelessWidget {
+  final List<NdmaContact> contacts;
+  final bool              loading;
+  const _NdmaContactsCard({required this.contacts, required this.loading});
+
+  Future<void> _call(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color:        _kCard,
+        borderRadius: BorderRadius.circular(16),
+        border:       Border.all(color: Colors.white.withOpacity(0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                const Text('🚨', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Emergency Contacts',
+                    style: TextStyle(
+                      color: _kText,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _kOrange.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _kOrange.withOpacity(0.5)),
+                  ),
+                  child: const Text(
+                    'NDMA',
+                    style: TextStyle(
+                        color: _kOrange,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withOpacity(0.07)),
+
+          // Hardcoded national helplines (always visible, no backend needed)
+          _ContactRow(
+            role:  'National Disaster Helpline',
+            name:  'NDMA 24x7',
+            phone: '1078',
+            onCall: _call,
+          ),
+          _ContactRow(
+            role:  'NDRF Emergency',
+            name:  'National Disaster Response Force',
+            phone: '011-24363260',
+            onCall: _call,
+          ),
+          _ContactRow(
+            role:  'Police Emergency',
+            name:  'National Helpline',
+            phone: '100',
+            onCall: _call,
+          ),
+          _ContactRow(
+            role:  'Ambulance',
+            name:  'National Helpline',
+            phone: '108',
+            onCall: _call,
+          ),
+
+          // Backend-driven contacts (state-specific SDRF, NDRF battalions)
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: _kCyan),
+                ),
+              ),
+            )
+          else if (contacts.isNotEmpty) ...[
+            Divider(height: 1, color: Colors.white.withOpacity(0.07)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+              child: Text(
+                'State-specific contacts',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.35),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5),
+              ),
+            ),
+            ...contacts.map((c) => _ContactRow(
+                  role:  c.role,
+                  name:  c.name,
+                  phone: c.phone,
+                  onCall: _call,
+                )),
+          ] else ...[
+            Divider(height: 1, color: Colors.white.withOpacity(0.07)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Text(
+                'ℹ️  State-specific contacts load when /api/ndma/advisories is live.',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.3), fontSize: 11),
+              ),
+            ),
+          ],
+
+          // Attribution
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+            child: Text(
+              'Source: National Disaster Management Authority (NDMA)',
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.22), fontSize: 9),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContactRow extends StatelessWidget {
+  final String                    role;
+  final String                    name;
+  final String                    phone;
+  final Future<void> Function(String) onCall;
+  const _ContactRow({
+    required this.role,
+    required this.name,
+    required this.phone,
+    required this.onCall,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onCall(phone),
+      borderRadius: BorderRadius.circular(0),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color:  _kGreen.withOpacity(0.12),
+                shape:  BoxShape.circle,
+                border: Border.all(color: _kGreen.withOpacity(0.35)),
+              ),
+              child: const Icon(Icons.phone_rounded,
+                  color: _kGreen, size: 16),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(role,
+                      style: const TextStyle(
+                          color: _kSub, fontSize: 10)),
+                  Text(name,
+                      style: const TextStyle(
+                          color: _kText,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13)),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color:        _kGreen.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border:       Border.all(color: _kGreen.withOpacity(0.4)),
+              ),
+              child: Text(
+                phone,
+                style: const TextStyle(
+                    color: _kGreen,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── gauge mini card ────────────────────────────────────────────────────────────────────
 class _GaugeCard extends StatelessWidget {
   final FloodData item;
   const _GaugeCard({required this.item});
@@ -404,10 +644,8 @@ class _GaugeCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // level indicator bar
           Container(
-            width: 4,
-            height: 52,
+            width: 4, height: 52,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(4),
               gradient: LinearGradient(
@@ -431,13 +669,10 @@ class _GaugeCard extends StatelessWidget {
                             fontSize: 14)),
                     const SizedBox(width: 6),
                     Text(item.riverName ?? '',
-                        style: const TextStyle(
-                            color: _kSub, fontSize: 11)),
+                        style: const TextStyle(color: _kSub, fontSize: 11)),
                     const Spacer(),
-                    Text(
-                        'D ${item.dangerLevel.toStringAsFixed(1)}',
-                        style: const TextStyle(
-                            color: _kSub, fontSize: 11)),
+                    Text('D ${item.dangerLevel.toStringAsFixed(1)}',
+                        style: const TextStyle(color: _kSub, fontSize: 11)),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -467,7 +702,6 @@ class _GaugeCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                // capacity bar
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: Stack(
@@ -510,7 +744,7 @@ class _GaugeCard extends StatelessWidget {
   }
 }
 
-// ─── alert card ───────────────────────────────────────────────────────────────
+// ─── alert card ───────────────────────────────────────────────────────────────────────
 class _AlertCard extends StatelessWidget {
   final dynamic              alert;
   final AnimationController  pulseCtrl;
@@ -587,7 +821,6 @@ class _AlertCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // severity colour header bar
             Container(
               height: 3,
               decoration: BoxDecoration(
@@ -603,7 +836,6 @@ class _AlertCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // timeline dot + line
                   Column(
                     children: [
                       Container(
@@ -679,11 +911,9 @@ class _AlertCard extends StatelessWidget {
                           spacing: 8,
                           runSpacing: 6,
                           children: [
-                            _Chip(
-                                Icons.location_on_outlined,
+                            _Chip(Icons.location_on_outlined,
                                 alert.city as String),
-                            _Chip(
-                                Icons.map_outlined,
+                            _Chip(Icons.map_outlined,
                                 alert.state as String),
                             _Chip(Icons.schedule_rounded, date),
                             if (alert.currentLevel != null)
