@@ -5,12 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../services/api_service.dart';
-import '../services/cwc_live_provider.dart';
 import '../services/real_time_service.dart';
+import '../screens/river_monitor_screen.dart';
 import '../theme/river_theme.dart';
 import '../widgets/animated_alert_badge.dart';
 import '../widgets/flood_gauge.dart';
@@ -264,6 +263,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                     // ── CWC station strip
                     if (cwcStations.isNotEmpty) ...[
                       _CwcStationStrip(stations: cwcStations.take(8).toList()),
+                      const SizedBox(height: 16),
+                      _CwcLiveSummaryCard(
+                        station: cwcStations.first,
+                        stationCount: cwcStations.length,
+                      ),
                       const SizedBox(height: 16),
                     ],
 
@@ -817,6 +821,112 @@ class _CwcStationStrip extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── CWC Live Summary Card ───────────────────────────────────────────────────
+class _CwcLiveSummaryCard extends StatelessWidget {
+  final CwcStationData station;
+  final int stationCount;
+  const _CwcLiveSummaryCard({
+    required this.station,
+    required this.stationCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = station.status == 'CRITICAL'
+        ? const Color(0xFFEF4444)
+        : station.status == 'WARNING'
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFF34C759);
+    final dangerStr = station.dangerLevel > 0
+        ? 'DL ${station.dangerLevel.toStringAsFixed(1)} m'
+        : 'WL ${station.warningLevel.toStringAsFixed(1)} m';
+    final updated = station.lastUpdate.toLocal();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1724),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.sensors, size: 18, color: Colors.white70),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Live CWC river feed',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700)),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(station.status,
+                  style: TextStyle(
+                      color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(station.stationName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(
+              '${station.riverName.isNotEmpty ? '${station.riverName} · ' : ''}${station.stateName}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Text('${station.riverLevel.toStringAsFixed(2)} m',
+                style: TextStyle(
+                    color: color, fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(width: 12),
+            Text(dangerStr,
+                style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            const Spacer(),
+            Text('Updated ${DateFormat('HH:mm').format(updated)}',
+                style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Text('Source: ${station.source}',
+                style: const TextStyle(color: Colors.white54, fontSize: 10)),
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const RiverMonitorScreen(),
+                ),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                backgroundColor: Colors.white.withValues(alpha: 0.05),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text('View $stationCount live stations'),
+            ),
+          ])
+        ],
+      ),
     );
   }
 }
