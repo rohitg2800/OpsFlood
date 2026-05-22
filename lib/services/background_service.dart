@@ -16,7 +16,7 @@
 //      by RealTimeService._initNotifications).
 //
 // NOTE: The foreground Timer.periodic in RealTimeService is kept for
-//       real-time refresh while the app is in the foreground.  The
+//       real-time refresh while the app is in the foreground. The
 //       workmanager task is the background safety net.
 
 import 'dart:convert';
@@ -72,7 +72,6 @@ Future<void> _runBackgroundRefresh() async {
     if (critical.isEmpty) return;
 
     // FIX: flutter_local_notifications v18+ uses named param `settings:`
-    //      (was positional in v16 and below)
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(
       settings: const InitializationSettings(
@@ -142,8 +141,11 @@ class BackgroundService {
       _uniqueName,
       taskName,
       // Android minimum is 15 minutes; iOS uses BGAppRefreshTask (best-effort)
-      frequency:          const Duration(minutes: 15),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      frequency: const Duration(minutes: 15),
+      // FIX: workmanager 0.6.0 split ExistingWorkPolicy into two separate enums:
+      //   ExistingWorkPolicy       → for registerOneOffTask()
+      //   ExistingPeriodicWorkPolicy → for registerPeriodicTask()  ← this one
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
