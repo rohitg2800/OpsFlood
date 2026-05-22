@@ -13,19 +13,20 @@ import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'api_service.dart';
-import 'cwc_direct_service.dart'; // P1: wire in the 4-source CWC cascade
+import 'cwc_direct_service.dart';
 
 void _log(String msg) {
   if (kDebugMode) debugPrint('[RTS] $msg');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIX #5: deterministic, collision-free notification ID
-// ─────────────────────────────────────────────────────────────────────────────
+// FIX: deterministic, collision-free notification ID using polynomial hash
 int _stableId(String city) =>
     city.codeUnits.fold(0, (int a, int b) => (a * 31 + b) & 0x7FFFFFFF);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// FIX: HIGH-severity offset uses XOR + constant to guarantee no overflow
+// into negatives regardless of _stableId output value.
+int _stableIdHigh(String city) => (_stableId(city) ^ 0x00100000) & 0x7FFFFFFF;
+
 class CwcStationData {
   final String stationName;
   final String stateName;
@@ -104,13 +105,13 @@ class CwcStationData {
   bool get isLiveCwc => source == 'CWC_API';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
   factory RealTimeService() => _instance;
   RealTimeService._internal();
 
-  static const String _cacheKey = 'opsflood_realtime_cache_v2';
+  // FIX: renamed from 'opsflood_realtime_cache_v2' -> 'equinox_realtime_cache_v2'
+  static const String _cacheKey = 'equinox_realtime_cache_v2';
 
   static const int      _wakeUpMaxAttempts = 20;
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
@@ -166,8 +167,6 @@ class RealTimeService extends ChangeNotifier {
   List<CwcStationData> _cwcStations    = <CwcStationData>[];
   String               _cwcSource      = '';
 
-  // P1: track CwcDirectService readings separately so the map screen
-  //     and station-detail screens can access full CwcLiveReading objects.
   List<CwcLiveReading> _cwcDirectReadings = <CwcLiveReading>[];
 
   final Map<String, List<RiverLevelSnapshot>> _historyByCity =
@@ -178,13 +177,12 @@ class RealTimeService extends ChangeNotifier {
   MultiLocationMonitoring? _cachedMonitoringData;
   int _monitoringDataHash = 0;
 
-  // ── Public getters ────────────────────────────────────────────────────────
+  // Public getters
   List<FloodData>        get liveLevels          => _liveLevels;
   List<FloodAlert>       get criticalAlerts      => _criticalAlerts;
   List<CwcStationData>   get cwcStations         => _cwcStations;
   String                 get cwcSource           => _cwcSource;
   bool                   get hasCwcLiveData      => _cwcStations.isNotEmpty;
-  /// P1: direct access to the 4-source CwcLiveReading list (for map + detail)
   List<CwcLiveReading>   get cwcDirectReadings   => _cwcDirectReadings;
   DateTime?              get lastFetchTime       => _lastFetchTime;
   String?                get error               => _error;
@@ -238,7 +236,6 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  /// P1: look up the CwcLiveReading for a specific city (used by detail screen)
   CwcLiveReading? cwcReadingForCity(String city) {
     final lc = city.toLowerCase();
     for (final r in _cwcDirectReadings) {
@@ -250,7 +247,7 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // ── Initialization ────────────────────────────────────────────────────────
+  // Initialization
   Future<void> initialize() async {
     if (_initialized) return;
     await _initNotifications();
@@ -269,7 +266,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Wake-up loop ──────────────────────────────────────────────────────────
+  // Wake-up loop
   void _scheduleWakeUpRetry() {
     if (_wakeAttempts >= _wakeUpMaxAttempts) return;
     _wakeUpTimer?.cancel();
@@ -298,7 +295,7 @@ class RealTimeService extends ChangeNotifier {
     });
   }
 
-  // ── Notifications ─────────────────────────────────────────────────────────
+  // Notifications
   Future<void> _initNotifications() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwinInit  = DarwinInitializationSettings(
@@ -331,7 +328,7 @@ class RealTimeService extends ChangeNotifier {
     );
   }
 
-  // ── Connectivity ──────────────────────────────────────────────────────────
+  // Connectivity
   Future<void> _initConnectivityListener() async {
     final connectivity = Connectivity();
     final initial = await connectivity.checkConnectivity();
@@ -361,7 +358,7 @@ class RealTimeService extends ChangeNotifier {
     return true;
   }
 
-  // ── Polling ───────────────────────────────────────────────────────────────
+  // Polling
   Future<void> startPolling({Duration? interval}) async {
     await initialize();
     if (_isPolling) return;
@@ -392,7 +389,7 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Core refresh ──────────────────────────────────────────────────────────
+  // Core refresh
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -408,14 +405,11 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ── Parallel fetch: backend API + CWC Direct (4-source cascade) ────────
-      // CwcDirectService runs its own A→B→C→D cascade per city internally,
-      // so we kick it off alongside the normal API calls at zero extra latency.
       final results = await Future.wait([
         _api.getAllLiveTelemetry(),
         _api.getLiveLevels(),
         _api.getCriticalAlerts(),
-        _fetchCwcDirectReadings(), // P1: 4-source CWC cascade
+        _fetchCwcDirectReadings(),
       ]);
 
       final telemetryResponse  = results[0] as Map<String, dynamic>;
@@ -431,7 +425,6 @@ class RealTimeService extends ChangeNotifier {
       _log('levels    status: ${levelsResponse["status"]}');
       _log('cwcDirect readings: ${cwcDirectList.length}');
 
-      // Store CWC direct readings for map + detail screens
       _cwcDirectReadings = cwcDirectList;
 
       final telemetryItems = _deepExtractList(telemetryResponse) ?? [];
@@ -439,10 +432,6 @@ class RealTimeService extends ChangeNotifier {
 
       _updateCwcStationsFromItems(telemetryItems);
 
-      // ── PASS 0: CwcDirectService readings (highest fidelity — real CWC data)
-      // These come from india-water.gov.in / WRIS / data.gov.in directly.
-      // They are used to enrich the FloodData list with the most accurate
-      // real river levels before falling through to backend telemetry.
       final cwcDirectMap = <String, CwcLiveReading>{};
       for (final r in cwcDirectList) {
         if (r.hasRealData) {
@@ -507,8 +496,6 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // P1: Run CwcDirectService.getAllLiveReadings() and swallow errors gracefully.
-  // If the 4-source cascade fails entirely we still have the backend as fallback.
   Future<List<CwcLiveReading>> _fetchCwcDirectReadings() async {
     try {
       return await CwcDirectService.instance
@@ -527,13 +514,7 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── Multi-source data fusion ──────────────────────────────────────────────
-  //
-  // Priority (highest → lowest fidelity):
-  //   Pass 0 — CwcDirectService (india-water.gov.in / WRIS / data.gov.in)
-  //   Pass 1 — Backend telemetry (/api/live-telemetry)
-  //   Pass 2 — Backend OPSFLOOD_MATRIX (/api/live-levels)
-  //   Pass 3 — Static monitoredCities fallback registry
+  // Multi-source data fusion (Pass 0-3)
   List<FloodData> _buildFusedLevels({
     required List<Map<String, dynamic>> telemetryItems,
     required List<Map<String, dynamic>> levelsItems,
@@ -543,14 +524,13 @@ class RealTimeService extends ChangeNotifier {
     final coveredStates = <String>{};
     final result        = <FloodData>[];
 
-    // ── PASS 0: CWC Direct (real instrument data) ─────────────────────────
+    // Pass 0: CWC Direct (real instrument data)
     for (final entry in cwcDirectMap.entries) {
       final r = entry.value;
       if (!r.hasRealData) continue;
       final cityLc = r.stationName.toLowerCase();
       if (coveredCities.contains(cityLc)) continue;
 
-      // Find the registry entry for this station to get lat/lon/river metadata
       Map<String, dynamic>? meta;
       for (final c in AppConstants.monitoredCities) {
         final cn = (c['city'] as String).toLowerCase();
@@ -588,7 +568,7 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 1: telemetry (station-level, highest API fidelity) ──────────────
+    // Pass 1: backend telemetry
     for (final item in telemetryItems) {
       final rawStation = (item['station'] ??
               item['stationName'] ??
@@ -612,7 +592,7 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 2: OPSFLOOD_MATRIX levels ────────────────────────────────────────
+    // Pass 2: OPSFLOOD_MATRIX levels
     final bestByState = <String, Map<String, dynamic>>{};
     for (final item in levelsItems) {
       final st = (item['state'] ?? '').toString().trim().toLowerCase();
@@ -671,7 +651,7 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 3: fill remaining monitoredCities ────────────────────────────────
+    // Pass 3: fill remaining monitoredCities from registry
     for (final c in AppConstants.monitoredCities) {
       final cityLc = (c['city'] as String).toLowerCase();
       if (coveredCities.contains(cityLc)) continue;
@@ -756,7 +736,6 @@ class RealTimeService extends ChangeNotifier {
     _cwcSource = _cwcStations.any((s) => s.isLiveCwc) ? 'CWC_API' : 'TACTICAL_REGISTRY';
   }
 
-  // ── Single authoritative list extractor ──────────────────────────────────
   List<dynamic>? _deepExtractList(dynamic node, {int depth = 0}) {
     if (depth > 6) return null;
     if (node is List) {
@@ -788,7 +767,6 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // ── Parsers ───────────────────────────────────────────────────────────────
   List<FloodAlert> _parseAlerts(Map<String, dynamic> response) {
     if (response['status'] == 'error') return <FloodAlert>[];
     final items = _deepExtractList(response);
@@ -874,8 +852,10 @@ class RealTimeService extends ChangeNotifier {
         );
         _notificationDedup.add(key);
       } else if (level.capacityPercent >= AppConstants.highThreshold) {
+        // FIX: was _stableId(city) + 100000 which could overflow 0x7FFFFFFF
+        // Now uses XOR bitmask — always stays within signed 32-bit positive range
         await _showNotification(
-          id:          _stableId(level.city) + 100000,
+          id:          _stableIdHigh(level.city),
           channelId:   AppConstants.warningAlertChannelId,
           channelName: AppConstants.warningAlertChannelName,
           title:       'High flood watch in ${level.city}',
