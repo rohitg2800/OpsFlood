@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
+import '../services/imd_service.dart';
 import '../services/real_time_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,7 +201,9 @@ class _WeatherScreenState extends State<WeatherScreen>
   bool        _loadingWeather = false;
   String      _weatherError   = '';
 
-  List<Map<String, dynamic>> _cwcAlerts = [];
+  List<Map<String, dynamic>> _cwcAlerts  = [];
+  List<ImdAlert>             _imdAlerts  = [];
+  bool                       _imdLoading = false;
   late TabController _chartTabs;
 
   @override
@@ -218,6 +221,7 @@ class _WeatherScreenState extends State<WeatherScreen>
     );
     _location = motihari;
     await _fetchWeather(motihari);
+    _loadImdAlerts(motihari.admin1);
   }
 
   @override
@@ -302,12 +306,27 @@ class _WeatherScreenState extends State<WeatherScreen>
     } catch (_) {}
   }
 
+  // P2: Load official IMD alerts for the selected state.
+  // Falls back silently if the backend endpoint is not yet live.
+  Future<void> _loadImdAlerts(String state) async {
+    if (!mounted) return;
+    setState(() => _imdLoading = true);
+    try {
+      final alerts = await ImdService.instance.getAlerts(state: state);
+      if (mounted) setState(() { _imdAlerts = alerts; _imdLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _imdLoading = false);
+    }
+  }
+
   void _selectSuggestion(_GeoResult r) {
     _searchCtrl.text = '${r.name}, ${r.admin1}';
     _searchFocus.unfocus();
     setState(() { _location = r; _suggestions = []; });
     _fetchWeather(r);
     _loadCwcAlerts();
+    // Reload IMD alerts for the newly selected state
+    if (r.admin1.isNotEmpty) _loadImdAlerts(r.admin1);
   }
 
   @override
@@ -368,6 +387,8 @@ class _WeatherScreenState extends State<WeatherScreen>
                                 weather:    _weather!,
                                 location:   _location!,
                                 chartTabs:  _chartTabs,
+                                imdAlerts:  _imdAlerts,
+                                imdLoading: _imdLoading,
                               ),
               ),
             ],
@@ -380,9 +401,6 @@ class _WeatherScreenState extends State<WeatherScreen>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CWC TICKER BAR
-// FIX: Each _TickerText is wrapped in SizedBox(width: _totalWidth) so the
-// inner Row is bounded. Without this, Flutter measures the Row at its natural
-// (unbounded) text width — hence the 26062px overflow.
 // ─────────────────────────────────────────────────────────────────────────────
 class _CwcTickerBar extends StatefulWidget {
   final List<Map<String, dynamic>> alerts;
@@ -456,9 +474,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   translation: Offset(-_ctrl.value, 0),
                   child: child,
                 ),
-                // FIX: OverflowBox lets the Row exceed clip bounds for scrolling,
-                // but each child is now bounded by SizedBox(width: _totalWidth)
-                // so Flutter knows exactly how wide to measure each text segment.
                 child: OverflowBox(
                   alignment: Alignment.centerLeft,
                   maxWidth: _totalWidth * 2,
@@ -598,10 +613,14 @@ class _WeatherBody extends StatelessWidget {
   final _Weather       weather;
   final _GeoResult     location;
   final TabController  chartTabs;
+  final List<ImdAlert> imdAlerts;
+  final bool           imdLoading;
   const _WeatherBody({
     required this.weather,
     required this.location,
     required this.chartTabs,
+    required this.imdAlerts,
+    required this.imdLoading,
   });
 
   @override
@@ -659,13 +678,224 @@ class _WeatherBody extends StatelessWidget {
         _DetailGrid(weather: weather),
         const SizedBox(height: 14),
         _SevenDayForecast(weather: weather),
+        // P2: Official IMD alerts card — appears below forecast
+        // Shows a skeleton while loading, empty state when no backend data yet
+        const SizedBox(height: 14),
+        _OfficialImdAlertsCard(alerts: imdAlerts, loading: imdLoading),
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IMD ALERT BANNER
+// OFFICIAL IMD ALERTS CARD (P2)
+// Calls ImdService.instance.getAlerts() via backend proxy.
+// Shows nothing when backend endpoint not yet live (graceful empty state).
+// Shows live alerts with severity colour-coding once backend is wired.
+// ─────────────────────────────────────────────────────────────────────────────
+class _OfficialImdAlertsCard extends StatelessWidget {
+  final List<ImdAlert> alerts;
+  final bool           loading;
+  const _OfficialImdAlertsCard({required this.alerts, required this.loading});
+
+  Color _severityColor(String s) {
+    switch (s) {
+      case 'RED':    return const Color(0xFFB71C1C);
+      case 'ORANGE': return const Color(0xFFF4511E);
+      case 'YELLOW': return const Color(0xFFFBC02D);
+      default:       return const Color(0xFF43A047);
+    }
+  }
+
+  String _severityEmoji(String s) {
+    switch (s) {
+      case 'RED':    return '🔴';
+      case 'ORANGE': return '🟠';
+      case 'YELLOW': return '🟡';
+      default:       return '🟢';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color:        Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border:       Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                const Text('🇳🇺', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Official IMD Alerts',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0DA7C2).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFF0DA7C2).withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'IMD',
+                    style: TextStyle(
+                        color: Color(0xFF0DA7C2),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
+
+          // Body
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: SizedBox(
+                  width: 20, height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Color(0xFF0DA7C2)),
+                ),
+              ),
+            )
+          else if (alerts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+              child: Row(
+                children: [
+                  const Text('ℹ️', style: TextStyle(fontSize: 16)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No active official IMD alerts for this state.\n'
+                      'Backend endpoint /api/imd/alerts not yet live.',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            ...alerts.map((alert) {
+              final color = _severityColor(alert.severity);
+              final emoji = _severityEmoji(alert.severity);
+              return Container(
+                margin: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color:        color.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border:       Border.all(color: color.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(emoji, style: const TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            alert.title,
+                            style: TextStyle(
+                                color: color,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12),
+                          ),
+                          if (alert.district.isNotEmpty)
+                            Text(
+                              alert.district,
+                              style: const TextStyle(
+                                  color: Colors.white60, fontSize: 11),
+                            ),
+                          if (alert.message.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(
+                                alert.message,
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 11),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          if (alert.rainfallMm > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                '💧 ${alert.rainfallMm.toStringAsFixed(0)} mm expected',
+                                style: TextStyle(
+                                    color: color,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Severity badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        alert.severity,
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          const SizedBox(height: 10),
+          // Attribution footer
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Text(
+              'Source: India Meteorological Department (IMD) via OpsFlood proxy',
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.25),
+                  fontSize: 9),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMD ALERT BANNER (local rainfall classification — unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 class _ImdAlertBanner extends StatelessWidget {
   final _RainfallClass rc;
