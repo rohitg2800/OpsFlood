@@ -16,6 +16,7 @@ import 'api_service.dart';
 import 'cwc_direct_service.dart';
 import 'imd_service.dart';
 import 'ndma_service.dart';
+import 'real_time_river_service.dart';
 
 void _log(String msg) {
   if (kDebugMode) debugPrint('[RTS] $msg');
@@ -136,6 +137,13 @@ class RealTimeService extends ChangeNotifier {
   }();
 
   final ApiService _api = ApiService();
+
+  // ── Pass 2.5: shared RealTimeRiverService instance ──────────────────────────
+  // Reuse the same singleton so its 5-min cache is shared with the Stations tab.
+  // This means when India Map calls _buildFusedLevels, the bulk CWC cache is
+  // already warm (Stations tab already filled it) → zero extra HTTP calls.
+  final RealTimeRiverService _liveRiverService = RealTimeRiverService();
+
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -171,7 +179,7 @@ class RealTimeService extends ChangeNotifier {
 
   // ── Pass 4: IMD + NDMA state ───────────────────────────────────────────────
   List<ImdAlert>         _imdAlerts         = <ImdAlert>[];
-  List<NdmaAdvisory>     _ndmaAdvisories    = <NdmaAdvisory>[];
+  List<NdmaAdvisory>     _ndmaAdvisories    = <NdmaAdvisory>[];;
   List<EmergencyContact> _emergencyContacts = <EmergencyContact>[];
 
   final Map<String, List<RiverLevelSnapshot>> _historyByCity =
@@ -451,7 +459,9 @@ class RealTimeService extends ChangeNotifier {
         .toList();
 
     try {
-      // Pass 0–3 + Pass 4 all fire in parallel — zero added latency
+      // Pass 0–3 + Pass 4 all fire in parallel — zero added latency.
+      // Pass 2.5 (_liveRiverService.fetchAll) also fires in parallel and
+      // provides the same 5-source CWC cascade used by the Stations tab.
       final results = await Future.wait([
         _api.getAllLiveTelemetry(),           // [0] backend telemetry
         _api.getLiveLevels(),                 // [1] OPSFLOOD_MATRIX levels
@@ -459,6 +469,7 @@ class RealTimeService extends ChangeNotifier {
         _fetchCwcDirectReadings(),            // [3] CWC direct (Pass 0)
         _fetchImdData(activeStates),          // [4] IMD alerts + rainfall
         _fetchNdmaData(activeStates),         // [5] NDMA advisories + NDRF contacts
+        _fetchLiveRiverResults(),             // [6] Pass 2.5 — RealTimeRiverService cascade
       ]);
 
       final telemetryResponse  = results[0] as Map<String, dynamic>;
@@ -467,6 +478,7 @@ class RealTimeService extends ChangeNotifier {
       final cwcDirectList      = results[3] as List<CwcLiveReading>;
       final imdResult          = results[4] as _ImdResult;
       final ndmaResult         = results[5] as _NdmaResult;
+      final liveRiverResults   = results[6] as List<LiveRiverResult>;
 
       _lastCwcRaw    = telemetryResponse;
       _lastLevelsRaw = levelsResponse;
@@ -475,6 +487,7 @@ class RealTimeService extends ChangeNotifier {
       _log('telemetry status: ${telemetryResponse["status"]}');
       _log('levels    status: ${levelsResponse["status"]}');
       _log('cwcDirect readings: ${cwcDirectList.length}');
+      _log('liveRiver results: ${liveRiverResults.length} (real: ${liveRiverResults.where((r) => r.source != "NO_DATA").length})');
       _log('IMD alerts: ${imdResult.alerts.length}, rainfall points: ${imdResult.rainfall.length}');
       _log('NDMA advisories: ${ndmaResult.advisories.length}, contacts: ${ndmaResult.contacts.length}');
 
@@ -497,11 +510,22 @@ class RealTimeService extends ChangeNotifier {
         }
       }
 
-      // Build fused levels (Pass 0–3)
+      // Build live river map (Pass 2.5): city_lowercase → LiveRiverResult
+      // Only include results that have an actual gauge reading (source != NO_DATA
+      // AND currentLevel > 0). This map is passed into _buildFusedLevels.
+      final liveRiverMap = <String, LiveRiverResult>{};
+      for (final r in liveRiverResults) {
+        if (r.source != 'NO_DATA' && r.station.current > 0) {
+          liveRiverMap[r.station.city.toLowerCase()] = r;
+        }
+      }
+
+      // Build fused levels (Pass 0–3 + Pass 2.5)
       final fused = _buildFusedLevels(
         telemetryItems: telemetryItems.whereType<Map<String, dynamic>>().toList(),
         levelsItems:    levelsItems.whereType<Map<String, dynamic>>().toList(),
         cwcDirectMap:   cwcDirectMap,
+        liveRiverMap:   liveRiverMap,
       );
 
       // Pass 4: enrich fused FloodData with IMD rainfall + severity
@@ -555,6 +579,20 @@ class RealTimeService extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  // ── Pass 2.5: fetch from RealTimeRiverService ─────────────────────────────
+  // Non-fatal: if it throws or times out, returns an empty list so the rest
+  // of the pipeline continues normally.
+  Future<List<LiveRiverResult>> _fetchLiveRiverResults() async {
+    try {
+      return await _liveRiverService
+          .fetchAll()
+          .timeout(const Duration(seconds: 30));
+    } catch (e) {
+      _log('Pass2.5 liveRiver error (non-fatal): $e');
+      return const [];
     }
   }
 
@@ -671,17 +709,29 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ─── Multi-source data fusion (Pass 0–3) ───────────────────────────────────
+  // ─── Multi-source data fusion (Pass 0 – 3, with 2.5 bridge) ──────────────
+  //
+  // Pass 0  : CwcDirectService live instrument readings
+  // Pass 1  : Backend telemetry (/api/live-telemetry)
+  // Pass 2  : OPSFLOOD_MATRIX best-by-state aggregate
+  // Pass 2.5: RealTimeRiverService 5-source CWC cascade (same source as
+  //           Stations tab).  Fills cities NOT covered by Pass 0/1/2.
+  //           Converts LiveRiverResult → FloodData using the real gauge
+  //           currentLevel and CWC thresholds.
+  // Pass 3  : FloodRiskEngine synthetic fallback — ONLY for cities where
+  //           all real sources returned NO_DATA (level == 0).
+  //
   List<FloodData> _buildFusedLevels({
     required List<Map<String, dynamic>> telemetryItems,
     required List<Map<String, dynamic>> levelsItems,
-    Map<String, CwcLiveReading> cwcDirectMap = const {},
+    Map<String, CwcLiveReading>  cwcDirectMap  = const {},
+    Map<String, LiveRiverResult> liveRiverMap  = const {},
   }) {
     final coveredCities = <String>{};
     final coveredStates = <String>{};
     final result        = <FloodData>[];
 
-    // Pass 0: CWC Direct (real instrument data)
+    // ── Pass 0: CWC Direct (real instrument data) ─────────────────────────
     for (final entry in cwcDirectMap.entries) {
       final r = entry.value;
       if (!r.hasRealData) continue;
@@ -724,7 +774,7 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // Pass 1: backend telemetry
+    // ── Pass 1: backend telemetry ─────────────────────────────────────────
     for (final item in telemetryItems) {
       final rawStation = (item['station'] ??
               item['stationName'] ??
@@ -748,7 +798,7 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // Pass 2: OPSFLOOD_MATRIX levels
+    // ── Pass 2: OPSFLOOD_MATRIX levels ────────────────────────────────────
     final bestByState = <String, Map<String, dynamic>>{};
     for (final item in levelsItems) {
       final st = (item['state'] ?? '').toString().trim().toLowerCase();
@@ -807,10 +857,70 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // Pass 3: fill remaining monitoredCities from registry
+    // ── Pass 2.5: RealTimeRiverService CWC cascade ─────────────────────────
+    // For every monitoredCity NOT yet covered, check liveRiverMap.
+    // If we have a real gauge reading (source != NO_DATA, level > 0),
+    // convert it to FloodData using the actual CWC numbers.
+    // This is the same data the Stations tab shows — now India Map shows it too.
+    for (final mc in AppConstants.monitoredCities) {
+      final cityName = mc['city'] as String;
+      final cityLc   = cityName.toLowerCase();
+      if (coveredCities.contains(cityLc)) continue;
+
+      final lrr = liveRiverMap[cityLc];
+      if (lrr == null) continue; // will be handled by Pass 3
+
+      final st  = lrr.station;
+      final wl  = st.warning > 0 ? st.warning : (mc['warning_level'] as double? ?? AppConstants.defaultWarningLevel);
+      final dl  = st.danger  > 0 ? st.danger  : (mc['danger_level']  as double? ?? AppConstants.defaultDangerLevel);
+      final sl  = (wl - 2.0).clamp(0.0, double.infinity);
+
+      // Derive risk label from real gauge position
+      final pct = dl > sl
+          ? ((st.current - sl) / (dl - sl) * 100).clamp(0.0, 100.0)
+          : 0.0;
+      final risk = pct >= AppConstants.criticalThreshold ? 'CRITICAL'
+          : pct >= AppConstants.highThreshold            ? 'HIGH'
+          : pct >= AppConstants.moderateThreshold        ? 'MODERATE'
+          : 'LOW';
+
+      final json = <String, dynamic>{
+        'id':            '$cityName-${mc['state']}',
+        'city':          cityName,
+        'station':       st.station.isNotEmpty ? st.station : '$cityName CWC Gauge',
+        'state':         mc['state'],
+        'river_name':    st.river.isNotEmpty ? st.river : mc['river'],
+        'lat':           mc['lat'],
+        'lon':           mc['lon'],
+        'river_level':   st.current,
+        'warning_level': wl,
+        'danger_level':  dl,
+        'safe_level':    sl,
+        'risk_level':    risk,
+        'status':        lrr.mlRiskLevel ?? st.trend ?? 'LIVE',
+        'flow_rate':     st.flowRate,
+        'rainfall_24h':  st.rainfallLastHour,
+        'timestamp':     st.lastUpdated ?? DateTime.now().toIso8601String(),
+        'source':        lrr.source,
+      };
+
+      final fd = FloodData.fromJson(json);
+      if (fd.city.isNotEmpty) {
+        result.add(fd);
+        coveredCities.add(cityLc);
+        _log('Pass2.5 LiveRiver: $cityName @ ${st.current}m '
+            '[${lrr.source} conf=${lrr.confidence.toStringAsFixed(2)}]');
+      }
+    }
+
+    // ── Pass 3: synthetic fallback — ONLY cities with zero real data ───────
+    // FloodRiskEngine is used here exclusively as a last resort when all
+    // live sources (CWC Direct, telemetry, OPSFLOOD_MATRIX, RealTimeRiverService)
+    // returned nothing. This keeps the "Estimated" label honest.
     for (final c in AppConstants.monitoredCities) {
       final cityLc = (c['city'] as String).toLowerCase();
       if (coveredCities.contains(cityLc)) continue;
+      _log('Pass3 Fallback (synthetic): ${c['city']} — all live sources returned NO_DATA');
       result.add(FloodData.fromMonitoredCity(c));
     }
 
