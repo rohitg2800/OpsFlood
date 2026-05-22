@@ -1,4 +1,4 @@
-// OpsFlood — NDMA / NDRF Service v2.1
+// OpsFlood — NDMA / NDRF Service v2.2
 // Emergency contacts: static real NDMA/NDRF numbers (no network needed)
 // Advisories: tries OpsFlood backend with circuit-breaker;
 //             falls back to static seasonal advisory when backend not live.
@@ -137,7 +137,7 @@ List<EmergencyContact> _getAllContacts() {
   return _allContactsCache = out;
 }
 
-// ── Static fallback advisory ───────────────────────────────────────────────────────────────────
+// ── Static fallback advisory ─────────────────────────────────────────────────────────────
 List<NdmaAdvisory> _seasonalAdvisories(String state) {
   final now = DateTime.now();
   final isMonsoon = now.month >= 6 && now.month <= 10;
@@ -158,13 +158,14 @@ List<NdmaAdvisory> _seasonalAdvisories(String state) {
   ];
 }
 
-// ── Circuit-breaker state ──────────────────────────────────────────────────────────────────────
-int       _advFailures = 0;
+// ── Circuit-breaker state ────────────────────────────────────────────────────────────────
+int       _advFailures     = 0;
 DateTime? _advBackoff;
-const     _advMaxFail   = 3;
-const     _advBackoffDur = Duration(minutes: 30);
+bool      _circuitLoggedOnce = false;   // ← prevents log spam across 93-city loop
+const     _advMaxFail        = 3;
+const     _advBackoffDur     = Duration(minutes: 30);
 
-// ── Service ──────────────────────────────────────────────────────────────────────────────────
+// ── Service ──────────────────────────────────────────────────────────────────────────────
 class NdmaService {
   NdmaService._();
   static final NdmaService instance = NdmaService._();
@@ -172,51 +173,67 @@ class NdmaService {
   final http.Client _client = http.Client();
   static const _timeout     = Duration(seconds: 12);
 
-  // ── Advisories ───────────────────────────────────────────────────────────────────────
+  // ── Advisories ─────────────────────────────────────────────────────────────────────────
   Future<List<NdmaAdvisory>> getAdvisories({required String state}) async {
-    if (_advBackoff == null || DateTime.now().isAfter(_advBackoff!)) {
-      try {
-        final res = await _client
-            .get(Uri.parse(
-                '${Env.baseUrl}/api/ndma/advisories?state=${Uri.encodeComponent(state)}'))
-            .timeout(_timeout);
-        final ct = res.headers['content-type'] ?? '';
-        if (res.statusCode == 200 &&
-            (ct.contains('application/json') || ct.contains('text/json'))) {
-          final payload = jsonDecode(res.body);
-          final items   = _extractList(payload);
-          final result  = items
-              .whereType<Map<String, dynamic>>()
-              .map(NdmaAdvisory.fromJson)
-              .toList(growable: false);
-          _advFailures = 0;
-          _advBackoff  = null;
-          return result;
-        }
-        _recordAdvFailure();
-      } catch (_) {
-        _recordAdvFailure();
+    // Circuit open: skip network, return fallback silently (log only once per window)
+    if (_advBackoff != null && DateTime.now().isBefore(_advBackoff!)) {
+      if (kDebugMode && !_circuitLoggedOnce) {
+        debugPrint('[NDMA] advisory circuit open — skipping network until '
+            '${_advBackoff!.toLocal().toString().substring(11, 16)}');
+        _circuitLoggedOnce = true;
       }
+      return _seasonalAdvisories(state);
+    }
+
+    // Reset log-once flag when backoff window expires
+    _circuitLoggedOnce = false;
+
+    try {
+      final res = await _client
+          .get(Uri.parse(
+              '${Env.baseUrl}/api/ndma/advisories?state=${Uri.encodeComponent(state)}'))
+          .timeout(_timeout);
+      final ct = res.headers['content-type'] ?? '';
+      if (res.statusCode == 200 &&
+          (ct.contains('application/json') || ct.contains('text/json'))) {
+        final payload = jsonDecode(res.body);
+        final items   = _extractList(payload);
+        final result  = items
+            .whereType<Map<String, dynamic>>()
+            .map(NdmaAdvisory.fromJson)
+            .toList(growable: false);
+        _advFailures = 0;
+        _advBackoff  = null;
+        return result;
+      }
+      _recordAdvFailure();
+    } catch (_) {
+      _recordAdvFailure();
     }
     return _seasonalAdvisories(state);
   }
 
-  // ── Emergency contacts ───────────────────────────────────────────────────────────────────
+  // ── Emergency contacts ──────────────────────────────────────────────────────────────────
   // Returns national contacts (once) + state-specific contacts.
   // Called per-state by real_time_service but global dedup ensures
   // nationals appear exactly once in the merged _emergencyContacts list.
   Future<List<EmergencyContact>> getContacts({required String state}) async {
     final all = _getAllContacts();
-    return all.where((c) =>
-        c.state == 'All India' || c.state == state).toList(growable: false);
+    return all
+        .where((c) => c.state == 'All India' || c.state == state)
+        .toList(growable: false);
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────────────────
   void _recordAdvFailure() {
     _advFailures++;
     if (_advFailures >= _advMaxFail) {
-      _advBackoff = DateTime.now().add(_advBackoffDur);
-      if (kDebugMode) debugPrint('[NDMA] circuit open — backing off 30 min');
+      _advBackoff        = DateTime.now().add(_advBackoffDur);
+      _circuitLoggedOnce = false;  // allow one fresh log when circuit first trips
+      if (kDebugMode) {
+        debugPrint('[NDMA] advisory circuit tripped after $_advFailures failures '
+            '— backing off for 30 min');
+      }
     }
   }
 
