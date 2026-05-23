@@ -12,6 +12,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
@@ -175,8 +176,7 @@ class _GaugeHeroCard extends StatelessWidget {
     final rc  = _riskColor(data.riskLevel);
     final pct = data.capacityPercent.clamp(0.0, 100.0);
 
-    // Source badge
-    final s    = data.status.toUpperCase();
+    final s      = data.status.toUpperCase();
     final isLive = s != 'ESTIMATED';
     final badgeLabel = isLive ? 'LIVE · CWC' : 'ESTIMATED';
     final badgeColor = isLive ? _kCyan : _kSub;
@@ -186,8 +186,8 @@ class _GaugeHeroCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: _kCard,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: rc.withOpacity(0.4)),
-        boxShadow: [BoxShadow(color: rc.withOpacity(0.08), blurRadius: 20)],
+        border: Border.all(color: rc.withValues(alpha: 0.4)),
+        boxShadow: [BoxShadow(color: rc.withValues(alpha: 0.08), blurRadius: 20)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,13 +209,12 @@ class _GaugeHeroCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Risk badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 decoration: BoxDecoration(
-                  color: rc.withOpacity(0.15),
+                  color: rc.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: rc.withOpacity(0.5)),
+                  border: Border.all(color: rc.withValues(alpha: 0.5)),
                 ),
                 child: Text(data.riskLevel,
                     style: TextStyle(
@@ -240,9 +239,9 @@ class _GaugeHeroCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: badgeColor.withOpacity(0.12),
+                    color: badgeColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: badgeColor.withOpacity(0.5)),
+                    border: Border.all(color: badgeColor.withValues(alpha: 0.5)),
                   ),
                   child: Text(badgeLabel,
                       style: TextStyle(
@@ -259,11 +258,10 @@ class _GaugeHeroCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: _imdColor(data.imdSeverity!).withOpacity(0.15),
+                      color: _imdColor(data.imdSeverity!).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color:
-                              _imdColor(data.imdSeverity!).withOpacity(0.5)),
+                          color: _imdColor(data.imdSeverity!).withValues(alpha: 0.5)),
                     ),
                     child: Text('IMD ${data.imdSeverity}',
                         style: TextStyle(
@@ -276,20 +274,19 @@ class _GaugeHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Capacity bar
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: Stack(
               children: [
                 Container(
-                    height: 8, color: Colors.white.withOpacity(0.06)),
+                    height: 8, color: Colors.white.withValues(alpha: 0.06)),
                 FractionallySizedBox(
                   widthFactor: pct / 100,
                   child: Container(
                     height: 8,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                          colors: [rc.withOpacity(0.6), rc]),
+                          colors: [rc.withValues(alpha: 0.6), rc]),
                     ),
                   ),
                 ),
@@ -312,7 +309,6 @@ class _GaugeHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Stats row
           Row(
             children: [
               if (data.flowRate != null)
@@ -348,9 +344,9 @@ class _StatChip extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -392,7 +388,7 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: _kCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,7 +471,7 @@ class _SparklinePainter extends CustomPainter {
 
 // ─── IMD Alert Tile ───────────────────────────────────────────────────────────
 class _ImdAlertTile extends StatelessWidget {
-  final dynamic alert; // ImdAlert
+  final dynamic alert;
   const _ImdAlertTile({required this.alert});
 
   @override
@@ -485,9 +481,9 @@ class _ImdAlertTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: c.withOpacity(0.07),
+        color: c.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: c.withOpacity(0.35)),
+        border: Border.all(color: c.withValues(alpha: 0.35)),
       ),
       child: Row(
         children: [
@@ -498,7 +494,7 @@ class _ImdAlertTile extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                      color: c.withOpacity(0.5), blurRadius: 5)
+                      color: c.withValues(alpha: 0.5), blurRadius: 5)
                 ]),
           ),
           const SizedBox(width: 10),
@@ -526,9 +522,9 @@ class _ImdAlertTile extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: c.withOpacity(0.18),
+              color: c.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: c.withOpacity(0.5)),
+              border: Border.all(color: c.withValues(alpha: 0.5)),
             ),
             child: Text(
                 (alert.severity as String? ?? '').toUpperCase(),
@@ -545,7 +541,7 @@ class _ImdAlertTile extends StatelessWidget {
 
 // ─── NDMA Advisory Tile ───────────────────────────────────────────────────────
 class _NdmaAdvisoryTile extends StatelessWidget {
-  final dynamic adv; // NdmaAdvisory
+  final dynamic adv;
   const _NdmaAdvisoryTile({required this.adv});
 
   @override
@@ -554,9 +550,9 @@ class _NdmaAdvisoryTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: _kOrange.withOpacity(0.06),
+        color: _kOrange.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kOrange.withOpacity(0.3)),
+        border: Border.all(color: _kOrange.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -600,7 +596,6 @@ class _EmergencyContactsCard extends StatelessWidget {
 
   Future<void> _call(String phone) async {
     final uri = Uri(scheme: 'tel', path: phone);
-    // ignore: deprecated_member_use
     if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
@@ -610,25 +605,25 @@ class _EmergencyContactsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: _kCard,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         children: [
-          _Row('NDMA Helpline', '1078'),
-          _Row('NDRF', '011-24363260'),
-          _Row('Police', '100'),
-          _Row('Ambulance', '108'),
+          _buildRow('NDMA Helpline', '1078'),
+          _buildRow('NDRF', '011-24363260'),
+          _buildRow('Police', '100'),
+          _buildRow('Ambulance', '108'),
           if (contacts.isNotEmpty) ...[
-            Divider(height: 1, color: Colors.white.withOpacity(0.07)),
+            Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
             ...contacts.take(4).map(
-                (c) => _Row(c.role.isNotEmpty ? c.role : c.name, c.phone)),
+                (c) => _buildRow(c.role.isNotEmpty ? c.role : c.name, c.phone)),
           ],
         ],
       ),
     );
   }
 
-  Widget _Row(String label, String phone) {
+  Widget _buildRow(String label, String phone) {
     return InkWell(
       onTap: () => _call(phone),
       child: Padding(
@@ -644,9 +639,9 @@ class _EmergencyContactsCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: _kGreen.withOpacity(0.10),
+                color: _kGreen.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _kGreen.withOpacity(0.4)),
+                border: Border.all(color: _kGreen.withValues(alpha: 0.4)),
               ),
               child: Text(phone,
                   style: const TextStyle(
@@ -672,8 +667,6 @@ class _PredictCta extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        // Navigate to PredictScreen passing city + pre-filled level.
-        // PredictScreen reads these via its constructor / route arguments.
         Navigator.pushNamed(
           context,
           '/predict',
@@ -693,7 +686,7 @@ class _PredictCta extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-                color: _kCyan.withOpacity(0.2),
+                color: _kCyan.withValues(alpha: 0.2),
                 blurRadius: 16,
                 spreadRadius: 1)
           ],
