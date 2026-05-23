@@ -1,26 +1,25 @@
-/// PredictionService (core implementation)
-/// Full Dart port of OpsFlood app.py KolhapurFloodPredictor logic.
-/// Implements the Hybrid Multi-Bundle Ensemble + Rule Engine from the backend.
-/// Since the Flutter app cannot load .pkl models, we carry the rule-engine
-/// (which drives 25-50 % of each prediction) fully, and use the backend
-/// /predict endpoint for the ML component — with graceful offline fallback.
+/// lib/services/prediction_service.dart
+/// Core prediction engine — NOT imported by screens directly.
+/// Screens use lib/services/predict.dart (PredictionService facade).
 ///
-/// STATE MATRIX: No longer hardcoded in this file.
-/// PredictionServiceImpl now delegates to PipelineService.instance.entryForState()
-/// which is fetched from /api/state-severity at startup and refreshed hourly.
-/// This keeps the Flutter app in sync with state_severity_matrix.py on the backend.
+/// Implements the Hybrid Multi-Bundle Ensemble + Rule Engine.
+/// ML models (.pkl) run on the OpsFlood backend (/predict/v2);
+/// the rule engine runs locally as offline fallback.
+///
+/// STATE MATRIX: delegated entirely to PipelineService.entryForState()
+/// which is fetched from /api/state-severity at startup (1-hour TTL).
 library;
 
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import '../constants.dart';
+import '../constants/app_constants.dart';
 import 'pipeline_service.dart';
 
-// ── Public type alias so predict.dart can import it cleanly ─────────────────
+// Public type alias used by predict.dart
 typedef CoreFloodPrediction = FloodPrediction;
 
-// ── Prediction result ────────────────────────────────────────────────────
+// ─── Prediction result ────────────────────────────────────────────────────────
 
 class FloodPrediction {
   final String severity;
@@ -52,8 +51,8 @@ class FloodPrediction {
   });
 
   String get alertEmoji =>
-      severity == 'CRITICAL' || severity == 'SEVERE' ? '🚨' :
-      severity == 'MODERATE' ? '⚠️' : '🟢';
+      severity == 'CRITICAL' || severity == 'SEVERE' ? '\uD83D\uDEA8' :
+      severity == 'MODERATE' ? '\u26A0\uFE0F' : '\uD83D\uDFE2';
 }
 
 class MonitoringProtocol {
@@ -74,7 +73,7 @@ class MonitoringProtocol {
       );
 }
 
-// ── Input model ─────────────────────────────────────────────────────
+// ─── Input model ──────────────────────────────────────────────────────────────
 
 class PredictionInput {
   final double peakFloodLevelM;
@@ -99,10 +98,10 @@ class PredictionInput {
   double get rainfall7d => t1d + t2d + t3d + t4d + t5d + t6d + t7d;
 
   Map<String, dynamic> toJson() => {
-        'Peak_Flood_Level_m': peakFloodLevelM,
+        'Peak_Flood_Level_m':  peakFloodLevelM,
         'Event_Duration_days': eventDurationDays,
-        'Time_to_Peak_days': timeToPeakDays,
-        'Recession_Time_day': recessionTimeDays,
+        'Time_to_Peak_days':   timeToPeakDays,
+        'Recession_Time_day':  recessionTimeDays,
         'T1d': t1d, 'T2d': t2d, 'T3d': t3d, 'T4d': t4d,
         'T5d': t5d, 'T6d': t6d, 'T7d': t7d,
         'state': state,
@@ -110,7 +109,7 @@ class PredictionInput {
       };
 }
 
-// ── Core service (singleton) ────────────────────────────────────────────
+// ─── Core service (singleton) ─────────────────────────────────────────────────
 
 class PredictionServiceImpl {
   PredictionServiceImpl._();
@@ -118,11 +117,10 @@ class PredictionServiceImpl {
 
   final http.Client _client = http.Client();
 
-  // Delegate state entry lookups to PipelineService so there is ONE source of truth.
   StateEntry _entry(String state) =>
       PipelineService.instance.entryForState(state);
 
-  // ── Backend prediction (app.py /predict/v2) ────────────────────────────
+  // ── Backend /predict/v2 ───────────────────────────────────────────────────
   Future<FloodPrediction> backendPredict(
       PredictionInput input, {double? liveLevel}) async {
     final response = await _client
@@ -136,9 +134,8 @@ class PredictionServiceImpl {
     if (response.statusCode != 200) {
       throw Exception('Backend ${response.statusCode}');
     }
-
-    final j = jsonDecode(response.body) as Map<String, dynamic>;
-    return _fromBackendJson(j);
+    return _fromBackendJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   FloodPrediction _fromBackendJson(Map<String, dynamic> j) {
@@ -147,7 +144,6 @@ class PredictionServiceImpl {
     if (rawProbs is Map) {
       rawProbs.forEach((k, v) => probs[k.toString()] = (v as num).toDouble());
     }
-
     final mon = j['monitoring'];
     final monitoring = mon is Map<String, dynamic>
         ? MonitoringProtocol.fromJson(mon)
@@ -169,18 +165,17 @@ class PredictionServiceImpl {
     );
   }
 
-  // ── Local Rule-Engine (offline fallback) ─────────────────────────────────
-  // Uses PipelineService.entryForState() — NOT a hardcoded matrix.
+  // ── Local Rule-Engine (offline fallback) ──────────────────────────────────
   FloodPrediction localRuleEnginePredict(
       PredictionInput input, {double? liveLevel}) {
-    final entry = _entry(input.state);
+    final entry     = _entry(input.state);
     final dailyRain = [input.t1d, input.t2d, input.t3d,
                        input.t4d, input.t5d, input.t6d, input.t7d];
-    final totalRain  = dailyRain.reduce((a, b) => a + b);
-    final avgRain    = totalRain / 7;
-    final maxDaily   = dailyRain.reduce(math.max);
-    final rainDelta  = dailyRain.last - dailyRain.first;
-    final peak       = input.peakFloodLevelM;
+    final totalRain = dailyRain.reduce((a, b) => a + b);
+    final avgRain   = totalRain / 7;
+    final maxDaily  = dailyRain.reduce(math.max);
+    final rainDelta = dailyRain.last - dailyRain.first;
+    final peak      = input.peakFloodLevelM;
 
     final peakMod  = peak / math.max(entry.peakLevelM['moderate']!,  0.001);
     final peakSev  = peak / math.max(entry.peakLevelM['severe']!,    0.001);
@@ -198,7 +193,8 @@ class PredictionServiceImpl {
 
     final scores = {
       'LOW':
-          math.max(0.05, 1.25 - math.max(peakMod, rainMod) - math.max(0.0, dangerR - 0.88)),
+          math.max(0.05, 1.25 - math.max(peakMod, rainMod)
+              - math.max(0.0, dangerR - 0.88)),
       'MODERATE':
           math.max(0.05, 0.82 * rainMod + 0.78 * peakMod + 0.12 * durR - 0.82),
       'SEVERE': math.max(
@@ -224,22 +220,26 @@ class PredictionServiceImpl {
         .reduce((a, b) => a.value >= b.value ? a : b)
         .key;
 
-    final riskWeights = {'LOW': 16, 'MODERATE': 46, 'SEVERE': 78, 'CRITICAL': 96};
+    const riskWeights = {'LOW': 16, 'MODERATE': 46, 'SEVERE': 78, 'CRITICAL': 96};
     final riskScore   = probs.entries
         .fold(0.0, (s, e) => s + e.value * riskWeights[e.key]!)
-        .round();
+        .round()
+        .clamp(0, 100);
 
     return FloodPrediction(
       severity:           severity,
       confidencePercent:  (probs[severity]! * 100).roundToDouble(),
       probabilities:      probs.map((k, v) => MapEntry(k, v * 100)),
       algorithm:          'Local Rule-Engine (offline fallback)',
-      dataSource:         liveLevel != null ? 'CWC Live + Rule Engine' : 'Tactical + Rule Engine',
-      riskScore:          riskScore.clamp(0, 100),
+      dataSource:         liveLevel != null
+          ? 'CWC Live + Rule Engine'
+          : 'Tactical + Rule Engine',
+      riskScore:          riskScore,
       dangerLevel:        entry.dangerLevelM,
-      proximityToDangerM: double.parse((entry.dangerLevelM - peak).toStringAsFixed(2)),
+      proximityToDangerM: double.parse(
+          (entry.dangerLevelM - peak).toStringAsFixed(2)),
       monitoring:         _monitoringFor(severity),
-      ensembleDetails:    {
+      ensembleDetails: {
         'rule_signals': {
           'peak_moderate_ratio': peakMod,
           'peak_severe_ratio':   peakSev,
@@ -248,12 +248,12 @@ class PredictionServiceImpl {
           'concentration_ratio': concR,
         },
       },
-      fromBackend:  false,
-      timestamp:    DateTime.now(),
+      fromBackend: false,
+      timestamp:   DateTime.now(),
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   Map<String, double> _normalise(Map<String, double> raw) {
     final total = raw.values.fold(0.0, (s, v) => s + math.max(0, v));

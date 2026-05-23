@@ -1,29 +1,40 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'firebase_options.dart';
 import 'providers/flood_providers.dart';
-import 'screens/splash_screen.dart';
-import 'theme/river_theme.dart';
 import 'providers/theme_provider.dart';
+import 'screens/splash_screen.dart';
+import 'services/background_service.dart';
+import 'services/fcm_service.dart';
 import 'services/pipeline_service.dart';
+import 'theme/river_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Preload image cache and enable shader warm-up.
-  // Reduces first-frame jank on lower-end devices.
+  // Defer first frame until all async init completes.
   WidgetsBinding.instance.deferFirstFrame();
 
   // Load .env — gracefully handles missing file in production.
   try {
     await dotenv.load(fileName: '.env', mergeWith: {});
   } catch (e) {
-    if (kDebugMode) debugPrint('⚠️  .env not found — running with defaults: $e');
+    if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
+  }
+
+  // Firebase — guard against duplicate-app init (background isolates may
+  // already have called Firebase.initializeApp).
+  if (Firebase.apps.isEmpty) {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -38,28 +49,44 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // Only surface errors in debug; swallow in release to avoid user-visible crashes.
+  // Global error handlers — debug only; release is silent to avoid crashes.
   FlutterError.onError = (FlutterErrorDetails details) {
     if (kDebugMode) {
       FlutterError.presentError(details);
-      debugPrint('❌ FlutterError: ${details.summary}');
+      debugPrint('\u274c FlutterError: ${details.summary}');
     }
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-    if (kDebugMode) debugPrint('❌ PlatformDispatcher: $error\n$stack');
-    return true; // prevents OS from killing the app
+    if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
+    return true;
   };
 
   await ThemeProvider().init();
 
-  // Fetch state severity matrix from the backend.
-  // Runs in parallel with the splash screen; failure is silently swallowed
-  // so the app still starts offline using built-in fallback thresholds.
-  // The matrix is cached for 1 hour and auto-refreshed on next launch.
+  // ── Background services (fire-and-forget; must not block runApp) ──────────
+
+  // 1. State severity matrix — fetched once, cached 1 hour.
+  //    If backend is cold (Render ~50 s cold-start) the app still launches
+  //    using built-in StateEntry.fallback thresholds.
   unawaited(
     PipelineService.instance.init().catchError((e) {
-      if (kDebugMode) debugPrint('⚠️  PipelineService.init failed: $e');
+      if (kDebugMode) debugPrint('\u26a0\ufe0f  PipelineService.init failed: $e');
+    }),
+  );
+
+  // 2. FCM — request push-notification permissions and register device token.
+  //    Must run after Firebase.initializeApp.
+  unawaited(
+    FcmService.instance.init().catchError((e) {
+      if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
+    }),
+  );
+
+  // 3. Workmanager background tasks — keep-alive ping + 15-min data refresh.
+  unawaited(
+    BackgroundService.init().catchError((e) {
+      if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
     }),
   );
 
@@ -82,7 +109,7 @@ class EquinoxApp extends ConsumerWidget {
       theme:                      RiverColors.lightTheme(),
       darkTheme:                  RiverColors.darkTheme(),
       home:                       const SplashScreen(),
-      // Clamp text scaling — prevents overflow on accessibility large-text.
+      // Clamp text scale — prevents overflow on accessibility large-text settings.
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(

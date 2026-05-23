@@ -1,18 +1,16 @@
 // lib/constants/constants.dart
-// Barrel export — import this single file everywhere instead of individual files.
+// Barrel export — import this single file everywhere.
 //
-// MIGRATION from lib/constants.dart:
-//   Old: import 'package:equinox_flood/constants.dart';
-//          AppConstants.baseUrl              → AppConfig.baseUrl
-//          AppConstants.criticalThreshold    → FloodThresholds.critical
-//          AppConstants.criticalAlertChannelId → AlertChannels.criticalId
-//          AppConstants.indianStates         → IndiaGeodata.states
-//          AppConstants.monitoredCities      → IndiaGeodata.monitoredCities
-//          AppConstants.riskColors           → FloodThresholds.riskColors
-//
-//   New: import 'package:equinox_flood/constants/constants.dart';
+// Usage: import '../constants/constants.dart';
+//   AppConfig.baseUrl               — env-driven API URL
+//   AppConstants.baseUrl            — same value, static alias for legacy files
+//   FloodThresholds.critical        — 85.0
+//   AlertChannels.criticalId        — 'flood_critical'
+//   IndiaGeodata.states             — list of all Indian states
+//   IndiaGeodata.monitoredCities    — monitored city metadata
 
-export 'app_config.dart';
-export 'flood_thresholds.dart';
-export 'alert_channels.dart';
-export 'india_geodata.dart';
+export 'app_config.dart';        // AppConfig  (dotenv-aware)
+export 'app_constants.dart';     // AppConstants (static, legacy + new fields)
+export 'flood_thresholds.dart';  // FloodThresholds
+export 'alert_channels.dart';    // AlertChannels
+export 'india_geodata.dart';     // IndiaGeodata

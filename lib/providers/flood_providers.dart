@@ -1,31 +1,26 @@
 // lib/providers/flood_providers.dart
 // ─────────────────────────────────────────────────────────────────────────────
-// Riverpod provider layer for OpsFlood.
+// Riverpod provider layer for OpsFlood / Equinox.
 //
 // DESIGN PRINCIPLES
-// ────────────────
+// ─────────────────
 // 1. RealTimeService singleton owns the main polling loop, cache,
 //    notification dispatch, and IMD/NDMA enrichment pipeline.
 //
 // 2. RealTimeRiverService singleton owns the 5-source CWC cascade cache.
-//    ALL screens (India Map, Stations tab, All Places) consume the SAME
-//    instance via liveRiverProvider — no duplicate HTTP calls, live data
-//    appears everywhere at the same time.
+//    ALL screens share the same instance via liveRiverProvider — no
+//    duplicate HTTP calls, live data appears everywhere at the same time.
 //
 // 3. Derived providers are "select" slices for granular widget rebuilds.
 //
-// USAGE IN SCREENS
-// ─────────────────
-//   // Watch all city river results:
-//   final results = ref.watch(liveRiverResultsProvider);
-//
-//   // Watch one city:
-//   final patna = ref.watch(cityLiveRiverProvider('Patna'));
+// 4. FCM alerts are surfaced via fcmAlertStreamProvider so any screen can
+//    listen without importing FcmService directly.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/flood_data.dart';
+import '../services/fcm_service.dart';
 import '../services/imd_service.dart';
 import '../services/ndma_service.dart';
 import '../services/real_time_river_service.dart';
@@ -44,14 +39,15 @@ final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
 
 /// Root provider for RealTimeRiverService (5-source CWC cascade).
 /// All screens share this singleton — Stations tab, India Map, All Places.
-/// Using this provider instead of constructing RealTimeRiverService() directly
-/// ensures:
-///   - One shared cache (no duplicate bulk HTTP calls)
-///   - Live data appears everywhere at the same time
-///   - Riverpod rebuilds widgets when notifyListeners() fires after fetchAll()
 final liveRiverProvider = ChangeNotifierProvider<RealTimeRiverService>(
   (ref) => RealTimeRiverService.instance,
   name: 'liveRiverProvider',
+);
+
+/// Stream of FCM flood alerts — widgets can use ref.listen / StreamProvider.
+final fcmAlertStreamProvider = StreamProvider<FcmFloodAlert>(
+  (ref) => FcmService.instance.alertStream,
+  name: 'fcmAlertStreamProvider',
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,21 +125,15 @@ final monitoringDataProvider = Provider(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// All LiveRiverResult items from the last fetchAll() call.
-/// Stations tab and All Places page should watch this instead of
-/// calling RealTimeRiverService() directly.
 final liveRiverResultsProvider = Provider<List<LiveRiverResult>>(
   (ref) => ref.watch(liveRiverProvider).lastResults,
   name: 'liveRiverResultsProvider',
 );
 
 /// LiveRiverResult for a specific city name (case-insensitive).
-/// Returns null if the city hasn't been fetched yet or returned NO_DATA.
-///
-/// Usage:
-///   final result = ref.watch(cityLiveRiverProvider('Patna'));
 final cityLiveRiverProvider = Provider.family<LiveRiverResult?, String>(
   (ref, cityName) {
-    final lc = cityName.toLowerCase();
+    final lc      = cityName.toLowerCase();
     final results = ref.watch(liveRiverResultsProvider);
     for (final r in results) {
       if (r.station.city.toLowerCase() == lc) return r;
@@ -172,7 +162,7 @@ final liveRiverCoverageProvider = Provider<({int live, int total})>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PASS 4 — IMD + NDMA PROVIDERS
+// IMD + NDMA PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// All IMD alerts across every monitored state.
@@ -193,19 +183,17 @@ final emergencyContactsProvider = Provider<List<EmergencyContact>>(
   name: 'emergencyContactsProvider',
 );
 
-/// Whether any active IMD RED or ORANGE alerts exist right now.
+/// True when any active IMD RED or ORANGE alert exists right now.
 final hasActiveImdWarningProvider = Provider<bool>(
   (ref) {
     final alerts = ref.watch(imdAlertsProvider);
-    return alerts.any(
-      (a) => a.severity == 'RED' || a.severity == 'ORANGE',
-    );
+    return alerts.any((a) => a.severity == 'RED' || a.severity == 'ORANGE');
   },
   name: 'hasActiveImdWarningProvider',
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PER-CITY — RealTimeService family
+// PER-CITY PROVIDERS — RealTimeService family
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Returns FloodData for a specific city name (case-insensitive).
@@ -227,17 +215,14 @@ final stateNdmaAdvisoriesProvider = Provider.family<List<NdmaAdvisory>, String>(
 );
 
 /// Emergency contacts (NDRF/SDRF) for a specific state.
-final stateEmergencyContactsProvider =
-    Provider.family<List<EmergencyContact>, String>(
-  (ref, state) =>
-      ref.watch(realTimeProvider).emergencyContactsForState(state),
+final stateEmergencyContactsProvider = Provider.family<List<EmergencyContact>, String>(
+  (ref, state) => ref.watch(realTimeProvider).emergencyContactsForState(state),
   name: 'stateEmergencyContactsProvider',
 );
 
 /// River trend history for a specific city (24-hr snapshots).
 final cityTrendProvider = Provider.family<List<dynamic>, String>(
-  (ref, cityName) =>
-      ref.watch(realTimeProvider).trendForCity(cityName),
+  (ref, cityName) => ref.watch(realTimeProvider).trendForCity(cityName),
   name: 'cityTrendProvider',
 );
 

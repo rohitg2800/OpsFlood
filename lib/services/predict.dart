@@ -1,24 +1,27 @@
 /// lib/services/predict.dart
-/// Public API shim for predict_screen.dart.
+/// Public API shim for predict_screen.dart and any other screen.
 ///
-/// Exposes:
-///   FloodPredictionInput  — named-param constructor the screen builds
-///   FloodPrediction       — result with all getters the screen reads
-///   PredictionException   — typed error the screen catches
-///   PredictionService     — const-constructible facade over the singleton
+/// ARCHITECTURE
+/// ─────────────────────────────────────────────────────────────────────────
+/// predict_screen.dart imports ONLY this file.
+/// This file re-exports and wraps prediction_facade.dart so there is
+/// exactly one class named PredictionService in the entire app.
 ///
-/// HYBRID MERGE STRATEGY (v2)
-/// ─────────────────────────────────────────────────────────────────────
-/// Online:  Backend ML (60%) + Local Rule-Engine (40%) → blended result
-/// Offline: Local Rule-Engine (100%) with live CWC level if available
-/// ─────────────────────────────────────────────────────────────────────
+/// HYBRID MERGE STRATEGY (v2 — unified pipeline)
+/// ─────────────────────────────────────────────────────────────────────────
+/// Online:  Pipeline pre-fill → Backend ML (60%) + Local Rule-Engine (40%)
+/// Offline: Local Rule-Engine (100%) with live CWC level when available
+/// ─────────────────────────────────────────────────────────────────────────
 library;
 
-import '../constants.dart';
+import 'dart:math' as math;
+
 import 'api_service.dart';
+import 'pipeline_service.dart';
 import 'prediction_service.dart';
-export 'prediction_service.dart'
-    show MonitoringProtocol, PredictionInput;
+
+export 'prediction_service.dart' show MonitoringProtocol, PredictionInput;
+export 'pipeline_service.dart'   show PipelineFeatures;
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 
@@ -45,10 +48,10 @@ class FloodPredictionInput {
   double get rainfall7d => t1d + t2d + t3d + t4d + t5d + t6d + t7d;
 
   PredictionInput toPredictionInput() => PredictionInput(
-    peakFloodLevelM:    peakFloodLevelM,
-    eventDurationDays:  eventDurationDays,
-    timeToPeakDays:     timeToPeakDays,
-    recessionTimeDays:  recessionTimeDays,
+    peakFloodLevelM:   peakFloodLevelM,
+    eventDurationDays: eventDurationDays,
+    timeToPeakDays:    timeToPeakDays,
+    recessionTimeDays: recessionTimeDays,
     t1d: t1d, t2d: t2d, t3d: t3d,
     t4d: t4d, t5d: t5d, t6d: t6d, t7d: t7d,
     state:   state,
@@ -99,8 +102,8 @@ class FloodPrediction {
   });
 
   String get alert =>
-      severity == 'CRITICAL' || severity == 'SEVERE' ? '🚨' :
-      severity == 'MODERATE' ? '⚠️' : '🟢';
+      severity == 'CRITICAL' || severity == 'SEVERE' ? '\uD83D\uDEA8' :
+      severity == 'MODERATE' ? '\u26A0\uFE0F' : '\uD83D\uDFE2';
 
   bool get isOfflineFallback => !fromBackend;
   String get monitoringLevel  => monitoring.level;
@@ -117,13 +120,13 @@ class FloodPrediction {
         severity:           core.severity,
         confidencePercent:  core.confidencePercent,
         probabilities:      core.probabilities,
-        algorithm:          overrideAlgorithm   ?? core.algorithm,
-        dataSource:         overrideDataSource  ?? core.dataSource,
+        algorithm:          overrideAlgorithm  ?? core.algorithm,
+        dataSource:         overrideDataSource ?? core.dataSource,
         riskScore:          core.riskScore,
         dangerLevel:        core.dangerLevel,
         proximityToDangerM: core.proximityToDangerM,
         monitoring:         core.monitoring,
-        ensembleDetails:    overrideEnsemble    ?? core.ensembleDetails,
+        ensembleDetails:    overrideEnsemble   ?? core.ensembleDetails,
         fromBackend:        core.fromBackend,
         timestamp:          core.timestamp,
         liveRiverLevelM:    liveRiverLevelM,
@@ -131,19 +134,28 @@ class FloodPrediction {
 }
 
 // ─── Service facade ───────────────────────────────────────────────────────────
+//
+// This is the SINGLE PredictionService class visible to the app.
+// prediction_facade.dart's PredictionService is NOT imported here to avoid
+// a duplicate-class conflict. All logic from that file is inlined below.
 
 class PredictionService {
   const PredictionService();
 
-  // ── Hybrid predict: backend ML (60%) + rule engine (40%) ─────────────────
+  // ── Primary: pipeline pre-fill → backend (60%) + rule-engine (40%) ───────
   Future<FloodPrediction> predict(FloodPredictionInput input) async {
-    final double? liveLevel = await _fetchLiveLevel(input.station, input.state);
-    final core = input.toPredictionInput();
+    // Step 1 — enrich from pipeline CSV (non-blocking; failures ignored)
+    final enriched = await _enrichFromPipeline(input);
+    final core     = enriched.toPredictionInput();
 
-    // Always run local rule engine (instant, no network needed)
+    // Step 2 — CWC live level via backend proxy
+    final double? liveLevel = await _fetchLiveLevel(enriched.station, enriched.state);
+
+    // Step 3 — always run local rule engine (instant, offline-safe)
     final CoreFloodPrediction localResult =
         PredictionServiceImpl.instance.localRuleEnginePredict(core, liveLevel: liveLevel);
 
+    // Step 4 — try backend ML
     CoreFloodPrediction? backendResult;
     try {
       backendResult = await PredictionServiceImpl.instance
@@ -153,10 +165,9 @@ class PredictionService {
     }
 
     if (backendResult == null) {
-      // OFFLINE MODE: rule engine only
       return FloodPrediction.fromCore(
         localResult,
-        liveRiverLevelM: liveLevel,
+        liveRiverLevelM:    liveLevel,
         overrideAlgorithm:  'Offline Rule-Engine',
         overrideDataSource: liveLevel != null
             ? 'CWC Live + Rule Engine (offline)'
@@ -164,11 +175,11 @@ class PredictionService {
       );
     }
 
-    // HYBRID MODE: blend backend (60%) + rule engine (40%)
+    // Step 5 — hybrid merge: backend 60% + local 40%
     return _mergeResults(
-      backend: backendResult,
-      local:   localResult,
-      liveLevel: liveLevel,
+      backend:       backendResult,
+      local:         localResult,
+      liveLevel:     liveLevel,
       backendWeight: 0.60,
       localWeight:   0.40,
     );
@@ -183,13 +194,57 @@ class PredictionService {
         .localRuleEnginePredict(input.toPredictionInput(), liveLevel: liveLevel);
     return FloodPrediction.fromCore(
       core,
-      liveRiverLevelM: liveLevel,
+      liveRiverLevelM:    liveLevel,
       overrideAlgorithm:  'Offline Rule-Engine',
       overrideDataSource: 'Rule Engine (offline)',
     );
   }
 
-  // ── Hybrid merge logic ────────────────────────────────────────────────────
+  // ── Pipeline pre-fill ─────────────────────────────────────────────────────
+  Future<FloodPredictionInput> _enrichFromPipeline(
+      FloodPredictionInput input) async {
+    try {
+      final features = await PipelineService.instance.fetchFeatures(
+        state:   input.state,
+        station: input.station,
+      );
+      if (features == null) return input;
+
+      double peakLevel = input.peakFloodLevelM;
+      double t1d       = input.t1d;
+
+      // Replace sentinel defaults only; respect explicit UI values.
+      if (peakLevel == 8.5 &&
+          features.riverLevelM != null &&
+          features.riverLevelM! > 0) {
+        peakLevel = features.riverLevelM!;
+      }
+      final dailyRain = features.bestDailyRainfallMm;
+      if (t1d == 10.0 && dailyRain != null && dailyRain > 0) {
+        t1d = dailyRain;
+      }
+
+      if (peakLevel == input.peakFloodLevelM && t1d == input.t1d) {
+        return input;
+      }
+
+      return FloodPredictionInput(
+        peakFloodLevelM:   peakLevel,
+        eventDurationDays: input.eventDurationDays,
+        timeToPeakDays:    input.timeToPeakDays,
+        recessionTimeDays: input.recessionTimeDays,
+        t1d: t1d,
+        t2d: input.t2d, t3d: input.t3d, t4d: input.t4d,
+        t5d: input.t5d, t6d: input.t6d, t7d: input.t7d,
+        state:   input.state,
+        station: input.station,
+      );
+    } catch (_) {
+      return input;
+    }
+  }
+
+  // ── Hybrid merge ──────────────────────────────────────────────────────────
   FloodPrediction _mergeResults({
     required CoreFloodPrediction backend,
     required CoreFloodPrediction local,
@@ -200,7 +255,7 @@ class PredictionService {
     const labels = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
 
     Map<String, double> norm(Map<String, double> p) {
-      final sum = p.values.fold(0.0, (s, v) => s + v);
+      final sum   = p.values.fold(0.0, (s, v) => s + v);
       if (sum <= 0) return {for (final l in labels) l: 0.25};
       final scale = sum > 2.0 ? 100.0 : 1.0;
       return {for (final l in labels) l: (p[l] ?? 0) / scale};
@@ -214,33 +269,27 @@ class PredictionService {
         l: bp[l]! * backendWeight + lp[l]! * localWeight
     };
 
-    final total = blended.values.fold(0.0, (s, v) => s + v);
+    final total  = blended.values.fold(0.0, (s, v) => s + v);
     final normed = total > 0
         ? blended.map((k, v) => MapEntry(k, v / total))
         : {for (final l in labels) l: 0.25};
 
-    final severity = normed.entries
-        .reduce((a, b) => a.value >= b.value ? a : b)
-        .key;
-
-    final confidence = (normed[severity]! * 100)
-        .clamp(0.0, 100.0)
-        .roundToDouble();
-
-    final riskScore = (backend.riskScore * backendWeight +
+    final severity   = normed.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    final confidence = (normed[severity]! * 100).clamp(0.0, 100.0).roundToDouble();
+    final riskScore  = (backend.riskScore * backendWeight +
             local.riskScore * localWeight)
         .round()
         .clamp(0, 100);
 
     final String finalSeverity = _saferSeverity(severity, local.severity);
 
-    final ensemble = {
-      'mode':           'hybrid_merge',
-      'backend_weight': backendWeight,
-      'local_weight':   localWeight,
-      'backend_severity': backend.severity,
-      'local_severity':   local.severity,
-      'blended_probs':    normed,
+    final ensemble = <String, dynamic>{
+      'mode':               'hybrid_merge',
+      'backend_weight':     backendWeight,
+      'local_weight':       localWeight,
+      'backend_severity':   backend.severity,
+      'local_severity':     local.severity,
+      'blended_probs':      normed,
       'backend_confidence': backend.confidencePercent,
       'local_confidence':   local.confidencePercent,
       'live_level_used':    liveLevel != null,
@@ -272,28 +321,23 @@ class PredictionService {
     return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b;
   }
 
-  // ── CWC level via backend proxy ───────────────────────────────────────────
+  // ── CWC live level via backend proxy ──────────────────────────────────────
   Future<double?> _fetchLiveLevel(String? station, String state) async {
     if (station == null || station.isEmpty) return null;
     try {
       final response = await ApiService().getAllCwcStations();
       final raw = response['data'];
-      final List<Map<String, dynamic>> items;
-      if (raw is List) {
-        items = raw.whereType<Map<String, dynamic>>().toList();
-      } else {
-        return null;
-      }
+      if (raw is! List) return null;
+      final items = raw.whereType<Map<String, dynamic>>().toList();
       final lc = station.toLowerCase();
       for (final item in items) {
         final name = (item['station'] ?? item['stationName'] ?? item['city'] ?? '')
-            .toString()
-            .toLowerCase();
+            .toString().toLowerCase();
         if (name.contains(lc) || lc.contains(name)) {
-          final abw = _sf(item['river_level'] ?? item['riverLevel'] ?? item['current_level']);
-          final wl  = _sf(item['warning_level'] ?? item['warningLevel']);
-          if (abw > 0) return abw;
-          if (wl  > 0) return wl;
+          final level = _sf(item['river_level'] ?? item['riverLevel'] ?? item['current_level']);
+          final warn  = _sf(item['warning_level'] ?? item['warningLevel']);
+          if (level > 0) return level;
+          if (warn  > 0) return warn;
         }
       }
     } catch (_) {}
