@@ -55,7 +55,7 @@ class ApiService {
           }
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            lastError = 'HTTP ${res.statusCode}';
+            lastError = 'HTTP \${res.statusCode}';
             if (res.statusCode >= 400 && res.statusCode < 500) break;
             if (attempt < _maxRetries) {
               await Future<void>.delayed(_retryBackoff * attempt);
@@ -66,7 +66,7 @@ class ApiService {
           final parsedBody = _safeDecode(res.body);
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
-          lastError = 'Request timed out after ${_timeout.inSeconds}s';
+          lastError = 'Request timed out after \${_timeout.inSeconds}s';
           if (attempt == _maxRetries) break;
           await Future<void>.delayed(_retryBackoff);
         } catch (e) {
@@ -107,30 +107,76 @@ class ApiService {
   // returning data for one state only. getAllLiveTelemetry now fetches without a
   // state filter so all monitored states are covered in a single call.
   Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 100}) =>
-      _get('${AppConstants.liveTelemetryEndpoint}?limit=$limit');
+      _get('\${AppConstants.liveTelemetryEndpoint}?limit=\$limit');
 
-  Future<Map<String, dynamic>> getLiveTelemetry({String? state, int limit = 10}) =>
-      _get('${AppConstants.liveTelemetryEndpoint}?state=${state ?? "Maharashtra"}&limit=$limit');
+  // FIX: added optional 'station' param — cwc_direct_service._fromTelemetry
+  // passes station: city to narrow the telemetry result to a single gauge.
+  Future<Map<String, dynamic>> getLiveTelemetry({
+    String? state,
+    String? station,
+    int limit = 10,
+  }) {
+    final qs = StringBuffer(
+        '\${AppConstants.liveTelemetryEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+    if (station != null && station.isNotEmpty) {
+      qs.write('&station=\${Uri.encodeComponent(station)}');
+    }
+    return _get(qs.toString());
+  }
+
+  // FIX: getDashboardData was called by real_time_river_service SOURCE 1 path
+  // but never defined. Aliased to getLiveTelemetry — same endpoint, same data.
+  Future<Map<String, dynamic>> getDashboardData({
+    String? state,
+    int limit = 10,
+  }) =>
+      getLiveTelemetry(state: state, limit: limit);
 
   // FIX: getLiveLevels was defaulting to state=Maharashtra and a limit of 20.
   // getAllLiveLevels fetches without a state filter so all states are covered.
   Future<Map<String, dynamic>> getAllLiveLevels({int limit = 100}) =>
-      _get('${AppConstants.liveLevelsEndpoint}?limit=$limit');
+      _get('\${AppConstants.liveLevelsEndpoint}?limit=\$limit');
 
   Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 20}) =>
-      _get('${AppConstants.liveLevelsEndpoint}?state=${state ?? "Maharashtra"}&limit=$limit');
+      _get('\${AppConstants.liveLevelsEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+
+  // FIX: getLiveLevelsByCity was called by cwc_direct_service SOURCE C but
+  // never defined. Routes to /api/live-levels?city=X.
+  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) =>
+      _get('\${AppConstants.liveLevelsEndpoint}?city=\${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
 
+  // FIX: predict() was called by real_time_river_service _buildResult but
+  // never defined — predictFlood() was the existing method. Added predict()
+  // as a direct alias so callers compile without renaming every call site.
+  Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
+      predictFlood(input);
+
   Future<Map<String, dynamic>> predictFlood(Map<String, dynamic> input) =>
       _post('/predict/v2', input);
 
+  // FIX: getFloodForecast was called by both real_time_river_service SOURCE 3
+  // and cwc_direct_service SOURCE A but never defined. Routes to the CWC FFS
+  // per-station endpoint /api/cwc-ffs/station?city=X&state=Y.
+  Future<Map<String, dynamic>> getFloodForecast({
+    required String city,
+    required String state,
+  }) =>
+      _get('/api/cwc-ffs/station?city=\${Uri.encodeComponent(city)}&state=\${Uri.encodeComponent(state)}');
+
+  // FIX: getReservoirLevels was called by real_time_river_service SOURCE 4
+  // and cwc_direct_service SOURCE D but never defined. Routes to the CWC
+  // reservoir endpoint /api/cwc-reservoir/state?state=X.
+  Future<Map<String, dynamic>> getReservoirLevels({required String state}) =>
+      _get('/api/cwc-reservoir/state?state=\${Uri.encodeComponent(state)}');
+
   Future<Map<String, dynamic>> getWeatherCurrent({required String location}) =>
-      _get('${AppConstants.weatherCurrentEndpoint}?location=$location');
+      _get('\${AppConstants.weatherCurrentEndpoint}?location=\$location');
 
   Future<Map<String, dynamic>> getWeatherForecast({required String location}) =>
-      _get('${AppConstants.weatherForecastEndpoint}?location=$location');
+      _get('\${AppConstants.weatherForecastEndpoint}?location=\$location');
 
   // ── Pipeline endpoints ──────────────────────────────────────────────────
 
@@ -138,18 +184,18 @@ class ApiService {
     required String state,
     String? station,
   }) {
-    final qs = StringBuffer('state=${Uri.encodeComponent(state)}');
+    final qs = StringBuffer('state=\${Uri.encodeComponent(state)}');
     if (station != null && station.isNotEmpty) {
-      qs.write('&station=${Uri.encodeComponent(station)}');
+      qs.write('&station=\${Uri.encodeComponent(station)}');
     }
-    return _get('/api/pipeline/features?$qs');
+    return _get('/api/pipeline/features?\$qs');
   }
 
   Future<Map<String, dynamic>> getStateSeverityMatrix() =>
       _get('/api/state-severity');
 
   Future<Map<String, dynamic>> getStateSeverityEntry(String state) =>
-      _get('/api/state-severity/${Uri.encodeComponent(state)}');
+      _get('/api/state-severity/\${Uri.encodeComponent(state)}');
 
   Future<Map<String, dynamic>> getPipelineManifest() =>
       _get('/api/pipeline/manifest');
