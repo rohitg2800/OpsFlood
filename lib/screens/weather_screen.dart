@@ -4,12 +4,10 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
-import '../providers/flood_providers.dart';
-import '../services/imd_service.dart';
+import '../services/real_time_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -17,7 +15,7 @@ import '../services/imd_service.dart';
 
 class _GeoResult {
   final String name;
-  final String admin1;
+  final String admin1; // state
   final String country;
   final double lat;
   final double lon;
@@ -37,6 +35,7 @@ class _GeoResult {
 }
 
 class _Weather {
+  // Current
   final double temp;
   final double feelsLike;
   final int humidity;
@@ -45,9 +44,11 @@ class _Weather {
   final double rainfall1h;
   final int uvIndex;
   final double visibility;
+  // Hourly (next 24h)
   final List<double> hourlyTemp;
   final List<double> hourlyRain;
   final List<DateTime> hourlyTime;
+  // Daily (7 days)
   final List<double> dailyMaxTemp;
   final List<double> dailyMinTemp;
   final List<double> dailyRain;
@@ -74,14 +75,21 @@ class _Weather {
   });
 
   factory _Weather.fromJson(Map<String, dynamic> j) {
-    final cur    = j['current'] as Map<String, dynamic>;
-    final hourly = j['hourly']  as Map<String, dynamic>;
-    final daily  = j['daily']   as Map<String, dynamic>;
+    final cur = j['current'] as Map<String, dynamic>;
+    final hourly = j['hourly'] as Map<String, dynamic>;
+    final daily = j['daily'] as Map<String, dynamic>;
 
-    List<double>   hTemp = (hourly['temperature_2m'] as List).map((e) => (e as num).toDouble()).toList();
-    List<double>   hRain = (hourly['precipitation']  as List).map((e) => (e as num).toDouble()).toList();
-    List<DateTime> hTime = (hourly['time'] as List).map((e) => DateTime.parse(e.toString())).toList();
+    List<double> hTemp = (hourly['temperature_2m'] as List)
+        .map((e) => (e as num).toDouble())
+        .toList();
+    List<double> hRain = (hourly['precipitation'] as List)
+        .map((e) => (e as num).toDouble())
+        .toList();
+    List<DateTime> hTime = (hourly['time'] as List)
+        .map((e) => DateTime.parse(e.toString()))
+        .toList();
 
+    // Only next 24 hours
     final now = DateTime.now();
     int startIdx = hTime.indexWhere((t) => t.isAfter(now.subtract(const Duration(hours: 1))));
     if (startIdx < 0) startIdx = 0;
@@ -91,22 +99,32 @@ class _Weather {
     hTime = hTime.sublist(startIdx, endIdx);
 
     return _Weather(
-      temp:        (cur['temperature_2m']       as num).toDouble(),
-      feelsLike:   (cur['apparent_temperature'] as num).toDouble(),
-      humidity:    (cur['relative_humidity_2m'] as num).toInt(),
-      windSpeed:   (cur['wind_speed_10m']       as num).toDouble(),
-      weatherCode: (cur['weather_code']         as num).toInt(),
-      rainfall1h:  (cur['precipitation']        as num?)?.toDouble() ?? 0.0,
-      uvIndex:     (cur['uv_index']             as num?)?.toInt()    ?? 0,
-      visibility:  (cur['visibility']           as num?)?.toDouble() ?? 0.0,
-      hourlyTemp:  hTemp,
-      hourlyRain:  hRain,
-      hourlyTime:  hTime,
-      dailyMaxTemp: (daily['temperature_2m_max']  as List).map((e) => (e as num).toDouble()).toList(),
-      dailyMinTemp: (daily['temperature_2m_min']  as List).map((e) => (e as num).toDouble()).toList(),
-      dailyRain:    (daily['precipitation_sum']   as List).map((e) => (e as num).toDouble()).toList(),
-      dailyDate:    (daily['time'] as List).map((e) => DateTime.parse(e.toString())).toList(),
-      dailyCode:    (daily['weather_code'] as List).map((e) => (e as num).toInt()).toList(),
+      temp: (cur['temperature_2m'] as num).toDouble(),
+      feelsLike: (cur['apparent_temperature'] as num).toDouble(),
+      humidity: (cur['relative_humidity_2m'] as num).toInt(),
+      windSpeed: (cur['wind_speed_10m'] as num).toDouble(),
+      weatherCode: (cur['weather_code'] as num).toInt(),
+      rainfall1h: (cur['precipitation'] as num?)?.toDouble() ?? 0.0,
+      uvIndex: (cur['uv_index'] as num?)?.toInt() ?? 0,
+      visibility: (cur['visibility'] as num?)?.toDouble() ?? 0.0,
+      hourlyTemp: hTemp,
+      hourlyRain: hRain,
+      hourlyTime: hTime,
+      dailyMaxTemp: (daily['temperature_2m_max'] as List)
+          .map((e) => (e as num).toDouble())
+          .toList(),
+      dailyMinTemp: (daily['temperature_2m_min'] as List)
+          .map((e) => (e as num).toDouble())
+          .toList(),
+      dailyRain: (daily['precipitation_sum'] as List)
+          .map((e) => (e as num).toDouble())
+          .toList(),
+      dailyDate: (daily['time'] as List)
+          .map((e) => DateTime.parse(e.toString()))
+          .toList(),
+      dailyCode: (daily['weather_code'] as List)
+          .map((e) => (e as num).toInt())
+          .toList(),
     );
   }
 }
@@ -115,9 +133,9 @@ class _Weather {
 // WMO WEATHER CODE → LABEL + ICON
 // ─────────────────────────────────────────────────────────────────────────────
 String _wmoLabel(int code) {
-  if (code == 0)  return 'Clear Sky';
-  if (code <= 2)  return 'Partly Cloudy';
-  if (code == 3)  return 'Overcast';
+  if (code == 0) return 'Clear Sky';
+  if (code <= 2) return 'Partly Cloudy';
+  if (code == 3) return 'Overcast';
   if (code <= 49) return 'Fog';
   if (code <= 59) return 'Drizzle';
   if (code <= 69) return 'Rain';
@@ -130,9 +148,9 @@ String _wmoLabel(int code) {
 }
 
 String _wmoEmoji(int code) {
-  if (code == 0)  return '☀️';
-  if (code <= 2)  return '⛅';
-  if (code == 3)  return '☁️';
+  if (code == 0) return '☀️';
+  if (code <= 2) return '⛅';
+  if (code == 3) return '☁️';
   if (code <= 49) return '🌫️';
   if (code <= 69) return '🌧️';
   if (code <= 79) return '❄️';
@@ -146,9 +164,9 @@ String _wmoEmoji(int code) {
 // IMD RAINFALL CLASSIFICATION
 // ─────────────────────────────────────────────────────────────────────────────
 _RainfallClass _imdClass(double mm) {
-  if (mm < 2.4)   return _RainfallClass.nil;
-  if (mm < 15.6)  return _RainfallClass.light;
-  if (mm < 64.5)  return _RainfallClass.moderate;
+  if (mm < 2.4) return _RainfallClass.nil;
+  if (mm < 15.6) return _RainfallClass.light;
+  if (mm < 64.5) return _RainfallClass.moderate;
   if (mm < 115.6) return _RainfallClass.heavy;
   if (mm < 204.5) return _RainfallClass.veryHeavy;
   return _RainfallClass.extremely;
@@ -159,10 +177,10 @@ enum _RainfallClass { nil, light, moderate, heavy, veryHeavy, extremely }
 extension _RainfallClassX on _RainfallClass {
   String get label {
     switch (this) {
-      case _RainfallClass.nil:       return 'No Rain';
-      case _RainfallClass.light:     return 'Light Rain';
-      case _RainfallClass.moderate:  return 'Moderate Rain';
-      case _RainfallClass.heavy:     return 'Heavy Rain ⚠️';
+      case _RainfallClass.nil: return 'No Rain';
+      case _RainfallClass.light: return 'Light Rain';
+      case _RainfallClass.moderate: return 'Moderate Rain';
+      case _RainfallClass.heavy: return 'Heavy Rain ⚠️';
       case _RainfallClass.veryHeavy: return 'Very Heavy Rain 🚨';
       case _RainfallClass.extremely: return 'Extremely Heavy Rain 🔴';
     }
@@ -170,10 +188,10 @@ extension _RainfallClassX on _RainfallClass {
 
   Color get color {
     switch (this) {
-      case _RainfallClass.nil:       return const Color(0xFF90CAF9);
-      case _RainfallClass.light:     return const Color(0xFF42A5F5);
-      case _RainfallClass.moderate:  return const Color(0xFF1E88E5);
-      case _RainfallClass.heavy:     return const Color(0xFFFB8C00);
+      case _RainfallClass.nil: return const Color(0xFF90CAF9);
+      case _RainfallClass.light: return const Color(0xFF42A5F5);
+      case _RainfallClass.moderate: return const Color(0xFF1E88E5);
+      case _RainfallClass.heavy: return const Color(0xFFFB8C00);
       case _RainfallClass.veryHeavy: return const Color(0xFFF4511E);
       case _RainfallClass.extremely: return const Color(0xFFB71C1C);
     }
@@ -181,47 +199,53 @@ extension _RainfallClassX on _RainfallClass {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN  ── ConsumerStatefulWidget (Riverpod-aware)
+// SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-class WeatherScreen extends ConsumerStatefulWidget {
+class WeatherScreen extends StatefulWidget {
   const WeatherScreen({super.key});
   @override
-  ConsumerState<WeatherScreen> createState() => _WeatherScreenState();
+  State<WeatherScreen> createState() => _WeatherScreenState();
 }
 
-class _WeatherScreenState extends ConsumerState<WeatherScreen>
+class _WeatherScreenState extends State<WeatherScreen>
     with TickerProviderStateMixin {
-  final _searchCtrl  = TextEditingController();
+  // Search
+  final _searchCtrl = TextEditingController();
   final _searchFocus = FocusNode();
-  List<_GeoResult> _suggestions  = [];
-  bool             _searching     = false;
-  Timer?           _debounce;
+  List<_GeoResult> _suggestions = [];
+  bool _searching = false;
+  Timer? _debounce;
 
+  // Selected location
   _GeoResult? _location;
-  _Weather?   _weather;
-  bool        _loadingWeather = false;
-  String      _weatherError   = '';
+  _Weather? _weather;
+  bool _loadingWeather = false;
+  String _weatherError = '';
 
-  // CWC ticker data — derived from Riverpod liveLevelsProvider
+  // CWC ticker — no ScrollController needed; AnimationController drives it
   List<Map<String, dynamic>> _cwcAlerts = [];
 
+  // Tab controller for charts
   late TabController _chartTabs;
 
   @override
   void initState() {
     super.initState();
     _chartTabs = TabController(length: 2, vsync: this);
+    _loadCwcAlerts();
     _loadDefault();
   }
 
   Future<void> _loadDefault() async {
-    const motihari = _GeoResult(
-      name: 'Motihari', admin1: 'Bihar',
-      country: 'India', lat: 26.6507, lon: 84.9172,
+    final mumbai = _GeoResult(
+      name: 'Mumbai',
+      admin1: 'Maharashtra',
+      country: 'India',
+      lat: 19.0760,
+      lon: 72.8777,
     );
-    setState(() => _location = motihari);
-    await _fetchWeather(motihari);
-    _refreshCwcAlerts();
+    _location = mumbai;
+    await _fetchWeather(mumbai);
   }
 
   @override
@@ -233,24 +257,12 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
     super.dispose();
   }
 
-  // ── CWC alerts now read from the shared Riverpod singleton ────────────────
-  void _refreshCwcAlerts() {
-    final levels = ref.read(liveLevelsProvider);
-    final alerts = levels
-        .where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL')
-        .map((l) => {
-              'city':     l.city,
-              'level':    l.riskLevel,
-              'river':    l.riverName ?? 'River',
-              'capacity': l.capacityPercent,
-            })
-        .toList();
-    if (mounted) setState(() => _cwcAlerts = alerts);
-  }
-
   Future<void> _onSearchChanged(String q) async {
     _debounce?.cancel();
-    if (q.trim().length < 2) { setState(() => _suggestions = []); return; }
+    if (q.trim().length < 2) {
+      setState(() => _suggestions = []);
+      return;
+    }
     _debounce = Timer(const Duration(milliseconds: 400), () async {
       setState(() => _searching = true);
       try {
@@ -261,7 +273,7 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
         );
         final res = await http.get(uri).timeout(const Duration(seconds: 8));
         if (res.statusCode == 200) {
-          final data    = jsonDecode(res.body) as Map<String, dynamic>;
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
           final results = (data['results'] as List? ?? [])
               .map((e) => _GeoResult.fromJson(e as Map<String, dynamic>))
               .toList()
@@ -305,21 +317,32 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
     }
   }
 
+  Future<void> _loadCwcAlerts() async {
+    try {
+      final levels = RealTimeService().liveLevels;
+      final alerts = levels
+          .where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL')
+          .map((l) => {
+                'city': l.city,
+                'level': l.riskLevel,
+                'river': l.riverName ?? 'River',
+                'capacity': l.capacityPercent,
+              })
+          .toList();
+      if (mounted) setState(() => _cwcAlerts = alerts);
+    } catch (_) {}
+  }
+
   void _selectSuggestion(_GeoResult r) {
     _searchCtrl.text = '${r.name}, ${r.admin1}';
     _searchFocus.unfocus();
     setState(() { _location = r; _suggestions = []; });
     _fetchWeather(r);
-    _refreshCwcAlerts();
+    _loadCwcAlerts();
   }
 
   @override
   Widget build(BuildContext context) {
-    // ── IMD alerts: reactive via stateImdAlertsProvider ───────────────────
-    final imdAlerts = _location != null && _location!.admin1.isNotEmpty
-        ? ref.watch(stateImdAlertsProvider(_location!.admin1))
-        : <ImdAlert>[];
-
     return Scaffold(
       backgroundColor: const Color(0xFF05141E),
       body: Container(
@@ -333,25 +356,28 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
         child: SafeArea(
           child: Column(
             children: [
+              // FIX 1: Ticker now uses AnimationController — no 30ms Timer
               _CwcTickerBar(alerts: _cwcAlerts),
+
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
                 child: Column(
                   children: [
                     _SearchBar(
                       controller: _searchCtrl,
-                      focusNode:  _searchFocus,
-                      searching:  _searching,
-                      onChanged:  _onSearchChanged,
+                      focusNode: _searchFocus,
+                      searching: _searching,
+                      onChanged: _onSearchChanged,
                     ),
                     if (_suggestions.isNotEmpty)
                       _SuggestionsList(
                         suggestions: _suggestions,
-                        onSelect:    _selectSuggestion,
+                        onSelect: _selectSuggestion,
                       ),
                   ],
                 ),
               ),
+
               Expanded(
                 child: _loadingWeather
                     ? const Center(
@@ -361,7 +387,8 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
                             CircularProgressIndicator(color: Color(0xFF0DA7C2)),
                             SizedBox(height: 14),
                             Text('Fetching weather...',
-                                style: TextStyle(color: Colors.white60, fontSize: 14)),
+                                style: TextStyle(
+                                    color: Colors.white60, fontSize: 14)),
                           ],
                         ),
                       )
@@ -370,13 +397,13 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
                         : _weather == null
                             ? const Center(
                                 child: Text('Search any city, village or state',
-                                    style: TextStyle(color: Colors.white38, fontSize: 15)),
+                                    style: TextStyle(
+                                        color: Colors.white38, fontSize: 15)),
                               )
                             : _WeatherBody(
-                                weather:   _weather!,
-                                location:  _location!,
+                                weather: _weather!,
+                                location: _location!,
                                 chartTabs: _chartTabs,
-                                imdAlerts: imdAlerts,
                               ),
               ),
             ],
@@ -388,7 +415,7 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC TICKER BAR
+// FIX 1: CWC TICKER — AnimationController-based scroll, no raw Timer
 // ─────────────────────────────────────────────────────────────────────────────
 class _CwcTickerBar extends StatefulWidget {
   final List<Map<String, dynamic>> alerts;
@@ -400,8 +427,10 @@ class _CwcTickerBar extends StatefulWidget {
 class _CwcTickerBarState extends State<_CwcTickerBar>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  static const double _segmentWidth    = 1800.0;
+
+  // Ticker scrolls at ~50 logical pixels per second — smooth & GPU-driven.
   static const double _pixelsPerSecond = 50.0;
+  static const double _totalWidth = 1800.0; // estimated text width
 
   @override
   void initState() {
@@ -409,7 +438,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
     _ctrl = AnimationController(
       vsync: this,
       duration: Duration(
-          milliseconds: (_segmentWidth / _pixelsPerSecond * 1000).round()),
+          milliseconds: (_totalWidth / _pixelsPerSecond * 1000).round()),
     )..repeat();
   }
 
@@ -435,7 +464,7 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                 '${a['level'] == 'CRITICAL' ? '🔴' : '🟠'}  CWC Alert: ${a['city']} — ${a['river']} at ${(a['capacity'] as double).toStringAsFixed(0)}% capacity [${a['level']}]  •  ')
             .toList();
 
-    final tickerText = '${items.join('   ')}          ${items.join('   ')}';
+    final tickerText = items.join('   ');
 
     return Container(
       height: 34,
@@ -458,30 +487,21 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
             child: ClipRect(
               child: AnimatedBuilder(
                 animation: _ctrl,
-                builder: (context, child) => FractionalTranslation(
-                  translation: Offset(-_ctrl.value, 0),
-                  child: child,
-                ),
+                builder: (context, child) {
+                  return FractionalTranslation(
+                    translation: Offset(-_ctrl.value, 0),
+                    child: child,
+                  );
+                },
                 child: OverflowBox(
                   alignment: Alignment.centerLeft,
-                  maxWidth: _segmentWidth * 2,
-                  maxHeight: 34,
-                  child: SizedBox(
-                    width: _segmentWidth * 2,
-                    height: 34,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        tickerText,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w500),
-                        maxLines: 1,
-                        softWrap: false,
-                        overflow: TextOverflow.clip,
-                      ),
-                    ),
+                  maxWidth: _totalWidth * 2,
+                  child: Row(
+                    children: [
+                      _TickerText(text: tickerText),
+                      const SizedBox(width: 60),
+                      _TickerText(text: tickerText), // seamless loop
+                    ],
                   ),
                 ),
               ),
@@ -493,48 +513,66 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
   }
 }
 
+class _TickerText extends StatelessWidget {
+  final String text;
+  const _TickerText({required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w500),
+      maxLines: 1,
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SEARCH BAR
 // ─────────────────────────────────────────────────────────────────────────────
 class _SearchBar extends StatelessWidget {
   final TextEditingController controller;
-  final FocusNode             focusNode;
-  final bool                  searching;
+  final FocusNode focusNode;
+  final bool searching;
   final void Function(String) onChanged;
-  const _SearchBar({
-    required this.controller,
-    required this.focusNode,
-    required this.searching,
-    required this.onChanged,
-  });
+  const _SearchBar(
+      {required this.controller,
+      required this.focusNode,
+      required this.searching,
+      required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white.withValues(alpha: 0.09),
+        color: Colors.white.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(14),
-        border:       Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
       ),
       child: TextField(
         controller: controller,
-        focusNode:  focusNode,
+        focusNode: focusNode,
         style: const TextStyle(color: Colors.white, fontSize: 14),
-        onChanged:  onChanged,
+        onChanged: onChanged,
         decoration: InputDecoration(
-          hintText:  'Search city, village, district, state...',
+          hintText: 'Search city, village, district, state...',
           hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
           prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
           suffixIcon: searching
               ? const SizedBox(
-                  width: 18, height: 18,
+                  width: 18,
+                  height: 18,
                   child: Padding(
                     padding: EdgeInsets.all(12),
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white54),
                   ))
               : null,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         ),
       ),
     );
@@ -545,35 +583,46 @@ class _SearchBar extends StatelessWidget {
 // SUGGESTIONS LIST
 // ─────────────────────────────────────────────────────────────────────────────
 class _SuggestionsList extends StatelessWidget {
-  final List<_GeoResult>          suggestions;
+  final List<_GeoResult> suggestions;
   final void Function(_GeoResult) onSelect;
-  const _SuggestionsList({required this.suggestions, required this.onSelect});
+  const _SuggestionsList(
+      {required this.suggestions, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 4),
       decoration: BoxDecoration(
-        color:        const Color(0xFF0D2232),
+        color: const Color(0xFF0D2232),
         borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
       child: ListView.separated(
         shrinkWrap: true,
-        physics:    const NeverScrollableScrollPhysics(),
-        itemCount:  math.min(suggestions.length, 6),
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: math.min(suggestions.length, 6),
         separatorBuilder: (_, __) =>
             Divider(height: 1, color: Colors.white.withValues(alpha: 0.08)),
         itemBuilder: (_, i) {
-          final r       = suggestions[i];
+          final r = suggestions[i];
           final isIndia = r.country.toLowerCase().contains('india');
           return ListTile(
-            dense:    true,
-            leading:  Text(isIndia ? '🇮🇳' : '🌍', style: const TextStyle(fontSize: 18)),
-            title:    Text(r.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-            subtitle: Text('${r.admin1}${r.admin1.isNotEmpty ? ', ' : ''}${r.country}',
-                style: const TextStyle(color: Colors.white54, fontSize: 11)),
-            trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 16),
+            dense: true,
+            leading: Text(
+              isIndia ? '🇮🇳' : '🌍',
+              style: const TextStyle(fontSize: 18),
+            ),
+            title: Text(r.name,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+            subtitle: Text(
+              '${r.admin1}${r.admin1.isNotEmpty ? ', ' : ''}${r.country}',
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+            trailing: const Icon(Icons.chevron_right,
+                color: Colors.white38, size: 16),
             onTap: () => onSelect(r),
           );
         },
@@ -583,23 +632,20 @@ class _SuggestionsList extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN WEATHER BODY  ── imdLoading removed (provider is synchronous)
+// MAIN WEATHER BODY
 // ─────────────────────────────────────────────────────────────────────────────
 class _WeatherBody extends StatelessWidget {
-  final _Weather       weather;
-  final _GeoResult     location;
-  final TabController  chartTabs;
-  final List<ImdAlert> imdAlerts;
-  const _WeatherBody({
-    required this.weather,
-    required this.location,
-    required this.chartTabs,
-    required this.imdAlerts,
-  });
+  final _Weather weather;
+  final _GeoResult location;
+  final TabController chartTabs;
+  const _WeatherBody(
+      {required this.weather,
+      required this.location,
+      required this.chartTabs});
 
   @override
   Widget build(BuildContext context) {
-    final rc           = _imdClass(weather.rainfall1h);
+    final rc = _imdClass(weather.rainfall1h);
     final maxDailyRain = weather.dailyRain.reduce(math.max);
     final highRainDays = weather.dailyRain.where((r) => r >= 64.5).length;
 
@@ -610,26 +656,30 @@ class _WeatherBody extends StatelessWidget {
             rc == _RainfallClass.veryHeavy ||
             rc == _RainfallClass.extremely)
           _ImdAlertBanner(rc: rc, locationName: location.name),
+
         const SizedBox(height: 8),
         _HeroWeatherCard(weather: weather, location: location),
         const SizedBox(height: 14),
+
         if (highRainDays > 0)
           _RainWarningBanner(days: highRainDays, maxRain: maxDailyRain),
+
         const SizedBox(height: 10),
+
         Container(
           decoration: BoxDecoration(
-            color:        Colors.white.withValues(alpha: 0.06),
+            color: Colors.white.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(18),
-            border:       Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
           child: Column(
             children: [
               TabBar(
-                controller:              chartTabs,
-                labelColor:              const Color(0xFF0DA7C2),
-                unselectedLabelColor:    Colors.white54,
-                indicatorColor:          const Color(0xFF0DA7C2),
-                indicatorSize:           TabBarIndicatorSize.label,
+                controller: chartTabs,
+                labelColor: const Color(0xFF0DA7C2),
+                unselectedLabelColor: Colors.white54,
+                indicatorColor: const Color(0xFF0DA7C2),
+                indicatorSize: TabBarIndicatorSize.label,
                 tabs: const [
                   Tab(text: '24h Temperature'),
                   Tab(text: '7-Day Rainfall'),
@@ -649,199 +699,13 @@ class _WeatherBody extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+
+        // FIX 5: Replace shrinkWrap GridView with Column+Row (no layout thrashing)
         _DetailGrid(weather: weather),
         const SizedBox(height: 14),
+
         _SevenDayForecast(weather: weather),
-        const SizedBox(height: 14),
-        _OfficialImdAlertsCard(alerts: imdAlerts),
       ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OFFICIAL IMD ALERTS CARD  ── loading spinner removed (provider is sync)
-// ─────────────────────────────────────────────────────────────────────────────
-class _OfficialImdAlertsCard extends StatelessWidget {
-  final List<ImdAlert> alerts;
-  const _OfficialImdAlertsCard({required this.alerts});
-
-  Color _severityColor(String s) {
-    switch (s) {
-      case 'RED':    return const Color(0xFFB71C1C);
-      case 'ORANGE': return const Color(0xFFF4511E);
-      case 'YELLOW': return const Color(0xFFFBC02D);
-      default:       return const Color(0xFF43A047);
-    }
-  }
-
-  String _severityEmoji(String s) {
-    switch (s) {
-      case 'RED':    return '🔴';
-      case 'ORANGE': return '🟠';
-      case 'YELLOW': return '🟡';
-      default:       return '🟢';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color:        Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border:       Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Row(
-              children: [
-                const Text('🌦', style: TextStyle(fontSize: 16)),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Official IMD Alerts',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0DA7C2).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: const Color(0xFF0DA7C2).withValues(alpha: 0.4)),
-                  ),
-                  child: const Text(
-                    'IMD',
-                    style: TextStyle(
-                        color: Color(0xFF0DA7C2),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
-          if (alerts.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-              child: Row(
-                children: [
-                  const Text('ℹ️', style: TextStyle(fontSize: 16)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'No active official IMD alerts for this state.\n'
-                      'Backend endpoint /api/imd/alerts not yet live.',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.45),
-                          fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...alerts.map((alert) {
-              final color = _severityColor(alert.severity);
-              final emoji = _severityEmoji(alert.severity);
-              return Container(
-                margin: const EdgeInsets.fromLTRB(10, 6, 10, 0),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color:        color.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
-                  border:       Border.all(color: color.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(emoji, style: const TextStyle(fontSize: 18)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            alert.title,
-                            style: TextStyle(
-                                color: color,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12),
-                          ),
-                          if (alert.district.isNotEmpty)
-                            Text(
-                              alert.district,
-                              style: const TextStyle(
-                                  color: Colors.white60, fontSize: 11),
-                            ),
-                          if (alert.message.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Text(
-                                alert.message,
-                                style: const TextStyle(
-                                    color: Colors.white54, fontSize: 11),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          if (alert.rainfallMm > 0)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                '💧 ${alert.rainfallMm.toStringAsFixed(0)} mm expected',
-                                style: TextStyle(
-                                    color: color,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        alert.severity,
-                        style: TextStyle(
-                            color: color,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            child: Text(
-              'Source: India Meteorological Department (IMD) via OpsFlood proxy',
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.25),
-                  fontSize: 9),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -851,18 +715,18 @@ class _OfficialImdAlertsCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ImdAlertBanner extends StatelessWidget {
   final _RainfallClass rc;
-  final String         locationName;
+  final String locationName;
   const _ImdAlertBanner({required this.rc, required this.locationName});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin:  const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color:        rc.color.withValues(alpha: 0.18),
+        color: rc.color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: rc.color.withValues(alpha: 0.6)),
+        border: Border.all(color: rc.color.withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
@@ -873,10 +737,17 @@ class _ImdAlertBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('IMD Warning — $locationName',
-                    style: TextStyle(color: rc.color, fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(rc.label,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(
+                  'IMD Warning — $locationName',
+                  style: TextStyle(
+                      color: rc.color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                ),
+                Text(
+                  rc.label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -890,7 +761,7 @@ class _ImdAlertBanner extends StatelessWidget {
 // HERO WEATHER CARD
 // ─────────────────────────────────────────────────────────────────────────────
 class _HeroWeatherCard extends StatelessWidget {
-  final _Weather   weather;
+  final _Weather weather;
   final _GeoResult location;
   const _HeroWeatherCard({required this.weather, required this.location});
 
@@ -902,14 +773,17 @@ class _HeroWeatherCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: [Color(0xFF0A3B52), Color(0xFF05141E)],
         ),
-        border:    Border.all(color: const Color(0xFF0DA7C2).withValues(alpha: 0.3)),
+        border: Border.all(
+            color: const Color(0xFF0DA7C2).withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
-            color:      const Color(0xFF0DA7C2).withValues(alpha: 0.08),
-            blurRadius: 24, spreadRadius: 2,
+            color: const Color(0xFF0DA7C2).withValues(alpha: 0.08),
+            blurRadius: 24,
+            spreadRadius: 2,
           ),
         ],
       ),
@@ -918,19 +792,19 @@ class _HeroWeatherCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.location_on, color: Color(0xFF0DA7C2), size: 16),
+              const Icon(Icons.location_on,
+                  color: Color(0xFF0DA7C2), size: 16),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   '${location.name}, ${location.admin1}',
                   style: const TextStyle(
-                      color: Colors.white70, fontSize: 13,
+                      color: Colors.white70,
+                      fontSize: 13,
                       fontWeight: FontWeight.w500),
                   overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
                 ),
               ),
-              const SizedBox(width: 8),
               Text(
                 DateFormat('dd MMM, HH:mm').format(DateTime.now()),
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
@@ -941,8 +815,10 @@ class _HeroWeatherCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_wmoEmoji(weather.weatherCode),
-                  style: const TextStyle(fontSize: 56)),
+              Text(
+                _wmoEmoji(weather.weatherCode),
+                style: const TextStyle(fontSize: 56),
+              ),
               const SizedBox(width: 16),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -950,16 +826,25 @@ class _HeroWeatherCard extends StatelessWidget {
                   Text(
                     '${weather.temp.toStringAsFixed(1)}°C',
                     style: const TextStyle(
-                        color: Colors.white, fontSize: 46,
-                        fontWeight: FontWeight.w200, height: 1.0),
+                      color: Colors.white,
+                      fontSize: 46,
+                      fontWeight: FontWeight.w200,
+                      height: 1.0,
+                    ),
                   ),
-                  Text(_wmoLabel(weather.weatherCode),
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 16,
-                          fontWeight: FontWeight.w400)),
+                  Text(
+                    _wmoLabel(weather.weatherCode),
+                    style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400),
+                  ),
                   const SizedBox(height: 4),
-                  Text('Feels like ${weather.feelsLike.toStringAsFixed(1)}°C',
-                      style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                  Text(
+                    'Feels like ${weather.feelsLike.toStringAsFixed(1)}°C',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 12),
+                  ),
                 ],
               ),
             ],
@@ -967,15 +852,19 @@ class _HeroWeatherCard extends StatelessWidget {
           const SizedBox(height: 14),
           if (weather.rainfall1h > 0)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color:        rc.color.withValues(alpha: 0.18),
+                color: rc.color.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(20),
-                border:       Border.all(color: rc.color.withValues(alpha: 0.5)),
+                border: Border.all(color: rc.color.withValues(alpha: 0.5)),
               ),
               child: Text(
                 '${weather.rainfall1h.toStringAsFixed(1)} mm/h  •  ${rc.label}',
-                style: TextStyle(color: rc.color, fontSize: 11, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    color: rc.color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600),
               ),
             ),
         ],
@@ -1004,33 +893,47 @@ class _HourlyTempChart extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
       child: LineChart(
         LineChartData(
-          minY: minY, maxY: maxY,
+          minY: minY,
+          maxY: maxY,
           clipData: const FlClipData.all(),
           gridData: FlGridData(
-            show: true, drawVerticalLine: false,
+            show: true,
+            drawVerticalLine: false,
             horizontalInterval: 5,
-            getDrawingHorizontalLine: (_) =>
-                FlLine(color: Colors.white.withValues(alpha: 0.07), strokeWidth: 1),
+            getDrawingHorizontalLine: (_) => FlLine(
+              color: Colors.white.withValues(alpha: 0.07),
+              strokeWidth: 1,
+            ),
           ),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
-                showTitles: true, reservedSize: 36,
-                getTitlesWidget: (v, _) => Text('${v.toInt()}°',
-                    style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                showTitles: true,
+                reservedSize: 36,
+                getTitlesWidget: (v, _) => Text(
+                  '${v.toInt()}°',
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 10),
+                ),
               ),
             ),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
-                showTitles: true, interval: 6,
+                showTitles: true,
+                interval: 6,
                 getTitlesWidget: (v, _) {
                   final idx = v.toInt();
-                  if (idx < 0 || idx >= weather.hourlyTime.length) return const SizedBox.shrink();
+                  if (idx < 0 || idx >= weather.hourlyTime.length) {
+                    return const SizedBox.shrink();
+                  }
                   return Text(
                     DateFormat('HH:mm').format(weather.hourlyTime[idx]),
-                    style: const TextStyle(color: Colors.white38, fontSize: 9),
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 9),
                   );
                 },
               ),
@@ -1039,13 +942,16 @@ class _HourlyTempChart extends StatelessWidget {
           borderData: FlBorderData(show: false),
           lineBarsData: [
             LineChartBarData(
-              spots: spots, isCurved: true,
-              color: const Color(0xFFFFA726), barWidth: 2.5,
+              spots: spots,
+              isCurved: true,
+              color: const Color(0xFFFFA726),
+              barWidth: 2.5,
               dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(
                 show: true,
                 gradient: LinearGradient(
-                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
                     const Color(0xFFFFA726).withValues(alpha: 0.3),
                     const Color(0xFFFFA726).withValues(alpha: 0.0),
@@ -1069,51 +975,76 @@ class _DailyRainfallChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bars = weather.dailyRain.asMap().entries.map((e) {
-      final rc = _imdClass(e.value);
-      return BarChartGroupData(
-        x: e.key,
-        barRods: [
-          BarChartRodData(
-            toY: e.value, color: rc.color, width: 18,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-          ),
-        ],
-      );
-    }).toList();
+    final bars = weather.dailyRain
+        .asMap()
+        .entries
+        .map((e) {
+          final rc = _imdClass(e.value);
+          return BarChartGroupData(
+            x: e.key,
+            barRods: [
+              BarChartRodData(
+                toY: e.value,
+                color: rc.color,
+                width: 18,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(6)),
+              ),
+            ],
+          );
+        })
+        .toList();
 
-    final maxY = math.max(weather.dailyRain.reduce(math.max) + 20, 80.0).ceilToDouble();
+    final maxY =
+        math.max(weather.dailyRain.reduce(math.max) + 20, 80.0).ceilToDouble();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
       child: BarChart(
         BarChartData(
-          maxY: maxY, barGroups: bars,
+          maxY: maxY,
+          barGroups: bars,
           gridData: FlGridData(
-            show: true, drawVerticalLine: false, horizontalInterval: 20,
-            getDrawingHorizontalLine: (_) =>
-                FlLine(color: Colors.white.withValues(alpha: 0.07), strokeWidth: 1),
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: 20,
+            getDrawingHorizontalLine: (_) => FlLine(
+              color: Colors.white.withValues(alpha: 0.07),
+              strokeWidth: 1,
+            ),
           ),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
-                showTitles: true, reservedSize: 34, interval: 20,
-                getTitlesWidget: (v, _) => Text('${v.toInt()}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                showTitles: true,
+                reservedSize: 34,
+                interval: 20,
+                getTitlesWidget: (v, _) => Text(
+                  '${v.toInt()}',
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 9),
+                ),
               ),
             ),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
                 getTitlesWidget: (v, _) {
                   final idx = v.toInt();
-                  if (idx < 0 || idx >= weather.dailyDate.length) return const SizedBox.shrink();
+                  if (idx < 0 || idx >= weather.dailyDate.length) {
+                    return const SizedBox.shrink();
+                  }
                   return Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text(DateFormat('E').format(weather.dailyDate[idx]),
-                        style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                    child: Text(
+                      DateFormat('E').format(weather.dailyDate[idx]),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 10),
+                    ),
                   );
                 },
               ),
@@ -1123,23 +1054,33 @@ class _DailyRainfallChart extends StatelessWidget {
           extraLinesData: ExtraLinesData(
             horizontalLines: [
               HorizontalLine(
-                y: 64.5, color: const Color(0xFFFB8C00),
-                strokeWidth: 1.4, dashArray: [5, 5],
+                y: 64.5,
+                color: const Color(0xFFFB8C00),
+                strokeWidth: 1.4,
+                dashArray: [5, 5],
                 label: HorizontalLineLabel(
-                  show: true, alignment: Alignment.topRight,
+                  show: true,
+                  alignment: Alignment.topRight,
                   labelResolver: (_) => ' Heavy ▶',
                   style: const TextStyle(
-                      color: Color(0xFFFB8C00), fontSize: 9, fontWeight: FontWeight.bold),
+                      color: Color(0xFFFB8C00),
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
               HorizontalLine(
-                y: 115.6, color: const Color(0xFFF4511E),
-                strokeWidth: 1.4, dashArray: [5, 5],
+                y: 115.6,
+                color: const Color(0xFFF4511E),
+                strokeWidth: 1.4,
+                dashArray: [5, 5],
                 label: HorizontalLineLabel(
-                  show: true, alignment: Alignment.topRight,
+                  show: true,
+                  alignment: Alignment.topRight,
                   labelResolver: (_) => ' V.Heavy ▶',
                   style: const TextStyle(
-                      color: Color(0xFFF4511E), fontSize: 9, fontWeight: FontWeight.bold),
+                      color: Color(0xFFF4511E),
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -1148,7 +1089,10 @@ class _DailyRainfallChart extends StatelessWidget {
             touchTooltipData: BarTouchTooltipData(
               getTooltipItem: (group, _, rod, __) => BarTooltipItem(
                 '${rod.toY.toStringAsFixed(1)} mm',
-                const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600),
               ),
             ),
           ),
@@ -1159,218 +1103,15 @@ class _DailyRainfallChart extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DETAIL GRID
+// FIX 5: DETAIL GRID — Column+Row instead of shrinkWrap GridView
 // ─────────────────────────────────────────────────────────────────────────────
 class _DetailGrid extends StatelessWidget {
   final _Weather weather;
   const _DetailGrid({required this.weather});
 
   String _uvLabel(int uv) {
-    if (uv <= 2)  return '$uv (Low)';
-    if (uv <= 5)  return '$uv (Moderate)';
-    if (uv <= 7)  return '$uv (High)';
+    if (uv <= 2) return '$uv (Low)';
+    if (uv <= 5) return '$uv (Moderate)';
+    if (uv <= 7) return '$uv (High)';
     if (uv <= 10) return '$uv (Very High)';
-    return '$uv (Extreme)';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final items = [
-      _DetailItem(Icons.water_drop, 'Humidity',    '${weather.humidity}%'),
-      _DetailItem(Icons.air,        'Wind Speed',  '${weather.windSpeed.toStringAsFixed(1)} km/h'),
-      _DetailItem(Icons.wb_sunny,   'UV Index',    _uvLabel(weather.uvIndex)),
-      _DetailItem(Icons.visibility, 'Visibility',  '${(weather.visibility / 1000).toStringAsFixed(1)} km'),
-    ];
-    return Column(
-      children: [
-        Row(children: [
-          Expanded(child: _DetailCard(item: items[0])),
-          const SizedBox(width: 10),
-          Expanded(child: _DetailCard(item: items[1])),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _DetailCard(item: items[2])),
-          const SizedBox(width: 10),
-          Expanded(child: _DetailCard(item: items[3])),
-        ]),
-      ],
-    );
-  }
-}
-
-class _DetailItem {
-  final IconData icon;
-  final String   label;
-  final String   value;
-  const _DetailItem(this.icon, this.label, this.value);
-}
-
-class _DetailCard extends StatelessWidget {
-  final _DetailItem item;
-  const _DetailCard({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color:        Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(14),
-        border:       Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Row(
-        children: [
-          Icon(item.icon, color: const Color(0xFF0DA7C2), size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                const SizedBox(height: 2),
-                Text(item.value, style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RAIN WARNING BANNER
-// ─────────────────────────────────────────────────────────────────────────────
-class _RainWarningBanner extends StatelessWidget {
-  final int    days;
-  final double maxRain;
-  const _RainWarningBanner({required this.days, required this.maxRain});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin:  const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color:        const Color(0xFFF4511E).withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: const Color(0xFFF4511E).withValues(alpha: 0.5)),
-      ),
-      child: Row(
-        children: [
-          const Text('🚨', style: TextStyle(fontSize: 18)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '$days day${days > 1 ? 's' : ''} of heavy rain forecast  •  Peak: ${maxRain.toStringAsFixed(1)} mm',
-              style: const TextStyle(
-                  color: Color(0xFFF4511E), fontWeight: FontWeight.w600, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 7-DAY FORECAST LIST
-// ─────────────────────────────────────────────────────────────────────────────
-class _SevenDayForecast extends StatelessWidget {
-  final _Weather weather;
-  const _SevenDayForecast({required this.weather});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color:        Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border:       Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        children: List.generate(weather.dailyDate.length, (i) {
-          final rc      = _imdClass(weather.dailyRain[i]);
-          final isToday = i == 0;
-          return Container(
-            decoration: BoxDecoration(
-              border: i < weather.dailyDate.length - 1
-                  ? Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)))
-                  : null,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 42,
-                  child: Text(
-                    isToday ? 'Today' : DateFormat('E').format(weather.dailyDate[i]),
-                    style: TextStyle(
-                        color: isToday ? const Color(0xFF0DA7C2) : Colors.white70,
-                        fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                        fontSize: 12),
-                  ),
-                ),
-                Text(_wmoEmoji(weather.dailyCode[i]),
-                    style: const TextStyle(fontSize: 20)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(_wmoLabel(weather.dailyCode[i]),
-                      style: const TextStyle(color: Colors.white60, fontSize: 11),
-                      overflow: TextOverflow.ellipsis),
-                ),
-                if (weather.dailyRain[i] >= 2.4)
-                  Container(
-                    margin:  const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color:        rc.color.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '${weather.dailyRain[i].toStringAsFixed(0)}mm',
-                      style: TextStyle(color: rc.color, fontSize: 10, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                Text(
-                  '${weather.dailyMaxTemp[i].toStringAsFixed(0)}° / ${weather.dailyMinTemp[i].toStringAsFixed(0)}°',
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
-                ),
-              ],
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ERROR PANEL
-// ─────────────────────────────────────────────────────────────────────────────
-class _ErrorPanel extends StatelessWidget {
-  final String error;
-  const _ErrorPanel({required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.cloud_off, color: Colors.white38, size: 48),
-            const SizedBox(height: 16),
-            Text(error,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-                textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
+    return '$uv (Extreme

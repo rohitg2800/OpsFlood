@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1071864126219",
+    "project_id": "device-streaming-e762727d",
+    "storage_bucket": "device-streaming-e762727d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1071864126219:android:fc5dc962ef143d4ae7e00e",
+        "android_client_info": {
+          "package_name": "com.example.floodops_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "REDACTED"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

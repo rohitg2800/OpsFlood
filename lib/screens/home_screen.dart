@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../providers/flood_providers.dart';
+import '../services/real_time_service.dart';
+import '../screens/india_rivers_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
@@ -9,33 +9,46 @@ import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
 import 'weather_screen.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
+Navigator.push(context, MaterialPageRoute(
+  builder: (_) => const IndiaRiversScreen(),
+));
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> {
+  // FIX 1: Only HomeScreen starts/stops polling. Individual screens must NOT
+  // call startPolling() themselves — that caused duplicate listeners + full
+  // rebuilds across all 7 screens on every poll tick.
+  final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
+  // FIX 2: Replace IndexedStack (keeps all 7 alive) with a lazy builder that
+  // only mounts the active screen. Off-screen widgets are fully unmounted,
+  // so they cannot receive notifyListeners() calls.
   static const _destinations = [
-    _NavEntry(label: 'Home',     icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard),
-    _NavEntry(label: 'Monitors', icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart),
-    _NavEntry(label: 'Alerts',   icon: Icons.notifications_outlined,  selectedIcon: Icons.notifications),
-    _NavEntry(label: 'Weather',  icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud),
-    _NavEntry(label: 'Predict',  icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
-    _NavEntry(label: 'Rivers',   icon: Icons.water_outlined,          selectedIcon: Icons.water),
+    _NavEntry(label: 'Home',       icon: Icons.dashboard_outlined,       selectedIcon: Icons.dashboard),
+    _NavEntry(label: 'Monitors',   icon: Icons.monitor_heart_outlined,   selectedIcon: Icons.monitor_heart),
+    _NavEntry(label: 'Alerts',     icon: Icons.notifications_outlined,   selectedIcon: Icons.notifications),
+    _NavEntry(label: 'Weather',    icon: Icons.cloud_outlined,           selectedIcon: Icons.cloud),
+    _NavEntry(label: 'Predict',    icon: Icons.model_training_outlined,  selectedIcon: Icons.model_training),
+    _NavEntry(label: 'Rivers',     icon: Icons.water_outlined,           selectedIcon: Icons.water),
+    _NavEntry(label: 'India',      icon: Icons.map_outlined,             selectedIcon: Icons.map),
   ];
 
   Widget _buildScreen(int index) {
     switch (index) {
-      case 0:  return const DashboardScreen();
-      case 1:  return const MonitorsScreen();
-      case 2:  return const AlertsScreen();
-      case 3:  return const WeatherScreen();
-      case 4:  return const PredictScreen();
-      case 5:  return const RiverMonitorScreen();
+      case 0: return const DashboardScreen();
+      case 1: return const MonitorsScreen();
+      case 2: return const AlertsScreen();
+      case 3: return const WeatherScreen();
+      case 4: return const PredictScreen();
+      case 5: return const RiverMonitorScreen();
+      case 6: return const IndiaRiverExplorerScreen();
       default: return const DashboardScreen();
     }
   }
@@ -43,18 +56,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    ref.read(realTimeProvider).startPolling();
+    _svc.startPolling();
   }
 
   @override
   void dispose() {
-    ref.read(realTimeProvider).stopPolling();
+    _svc.stopPolling();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Lazy: only the active screen is in the tree at any time.
       body: _buildScreen(_currentIndex),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
@@ -77,7 +91,7 @@ class _NavEntry {
     required this.icon,
     required this.selectedIcon,
   });
-  final String   label;
+  final String label;
   final IconData icon;
   final IconData selectedIcon;
 }
