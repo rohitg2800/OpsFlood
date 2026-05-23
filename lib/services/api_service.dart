@@ -12,7 +12,9 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
-  static const Duration _timeout      = Duration(seconds: 14);
+  // 60 s — sized to survive Render free-tier cold-start (~50 s).
+  // Warm requests typically complete in < 3 s.
+  static const Duration _timeout      = Duration(seconds: 60);
   static const int      _maxRetries   = 2;
   static const Duration _retryBackoff = Duration(seconds: 2);
 
