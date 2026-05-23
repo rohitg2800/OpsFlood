@@ -51,7 +51,8 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
-    - .env
+    # .env is loaded at runtime via flutter_dotenv — create a local .env file
+    # from .env.example. It is gitignored and must NOT be listed here as an asset.
     # - assets/icon/
     # - assets/images/
     # - assets/animations/
