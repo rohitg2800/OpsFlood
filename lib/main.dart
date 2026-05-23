@@ -10,6 +10,7 @@ import 'providers/flood_providers.dart';
 import 'screens/splash_screen.dart';
 import 'theme/river_theme.dart';
 import 'providers/theme_provider.dart';
+import 'services/pipeline_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,6 +52,16 @@ Future<void> main() async {
   };
 
   await ThemeProvider().init();
+
+  // Fetch state severity matrix from the backend.
+  // Runs in parallel with the splash screen; failure is silently swallowed
+  // so the app still starts offline using built-in fallback thresholds.
+  // The matrix is cached for 1 hour and auto-refreshed on next launch.
+  unawaited(
+    PipelineService.instance.init().catchError((e) {
+      if (kDebugMode) debugPrint('⚠️  PipelineService.init failed: $e');
+    }),
+  );
 
   WidgetsBinding.instance.allowFirstFrame();
 
