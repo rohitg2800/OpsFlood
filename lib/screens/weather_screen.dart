@@ -8,8 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
-import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
+import '../services/imd_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -181,7 +181,7 @@ extension _RainfallClassX on _RainfallClass {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN  ── now a ConsumerStatefulWidget (Riverpod-aware)
+// SCREEN  ── ConsumerStatefulWidget (Riverpod-aware)
 // ─────────────────────────────────────────────────────────────────────────────
 class WeatherScreen extends ConsumerStatefulWidget {
   const WeatherScreen({super.key});
