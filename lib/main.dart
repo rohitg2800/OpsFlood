@@ -14,8 +14,12 @@ import 'providers/theme_provider.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load .env — mergeWith ensures app still runs if file is absent (e.g. CI).
-  await dotenv.load(fileName: '.env', mergeWith: {});
+  // Load .env — gracefully handles missing file (CI, fresh clones, production).
+  try {
+    await dotenv.load(fileName: '.env', mergeWith: {});
+  } catch (e) {
+    if (kDebugMode) debugPrint('⚠️  .env not found — running with defaults: $e');
+  }
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor:                    Colors.transparent,
