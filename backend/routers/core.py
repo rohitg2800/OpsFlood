@@ -1,2 +1,3 @@
-# This file intentionally re-exports everything from the original core router.
-# /ping is registered directly on app in app.py below /health.
+from fastapi import APIRouter
+
+router = APIRouter()
