@@ -1,5 +1,11 @@
 """
 Prediction router: ML model predictions, artifacts, and state severity matrix endpoints.
+
+All endpoints now use pipeline_autofill_predict_input() so that:
+  - /predict/v2  auto-fills Peak_Flood_Level_m + T1d from the OperationalDataPipeline
+    features CSV before calling the ML model
+  - Manual values from the Flutter UI always take precedence (defaults are only
+    replaced when the caller sends the sentinel defaults: Peak=8.5, T1d=10.0)
 """
 
 import asyncio
@@ -14,15 +20,12 @@ from .dependencies import (
     operational_store,
     STATE_SEVERITY_MATRIX,
     get_state_severity_entry,
+    get_pipeline_features,
+    pipeline_autofill_predict_input,
 )
 from .model_artifacts import discover_model_artifacts, discover_model_bundles, discover_legacy_artifacts_outside_store
 
 router = APIRouter(tags=["prediction"])
-
-# Importing FloodPredictionInput from backend.app creates a circular import
-# (backend.app imports this router at module import-time). Define a local
-# compatible Pydantic model instead.
-from pydantic import BaseModel
 
 
 class FloodPredictionInput(BaseModel):
@@ -41,8 +44,7 @@ class FloodPredictionInput(BaseModel):
     station: str | None = None
 
 
-# ============= PYDANTIC SCHEMA =============
-
+# ============= HELPERS =============
 
 def persist_prediction_record(input_data, result):
     """Persist prediction record to storage."""
@@ -94,7 +96,9 @@ def persist_prediction_record(input_data, result):
     )
     return prediction_id
 
+
 # ============= MODEL ARTIFACTS ENDPOINTS =============
+
 @router.get("/model-artifacts")
 async def get_model_artifacts(predictor=None):
     """Get available model artifacts."""
@@ -116,8 +120,6 @@ async def get_model_artifacts(predictor=None):
             "artifacts": predictor.artifact_catalog,
             "ignored_legacy_artifacts": ignored_legacy_artifacts,
         }
-
-    # Fallback if predictor not initialized
     artifacts = discover_model_artifacts()
     bundles = discover_model_bundles(artifacts)
     return {
@@ -138,35 +140,16 @@ async def get_model_artifacts_for_state(state_name: str, predictor=None):
             "status": "success",
             "selection": predictor.describe_state_model_artifacts(state_name),
         }
-
-    return {
-        "status": "success",
-        "state": state_name,
-        "message": "Predictor not initialized",
-    }
+    return {"status": "success", "state": state_name, "message": "Predictor not initialized"}
 
 
 # ============= MODEL METRICS ENDPOINT =============
+
 @router.get("/model-metrics")
 async def get_model_metrics(predictor=None):
     """
     Return model quality metrics for the active bundle.
     Used by the Flutter Dashboard to display a model confidence card.
-
-    Returns:
-        {
-          "status": "success",
-          "model_trained": bool,
-          "algorithm": str,
-          "bundle_key": str,
-          "metrics": {
-            "accuracy": float,       # 0.0 - 1.0
-            "f1_score": float,       # macro-averaged
-            "precision": float,
-            "recall": float,
-            "training_samples": int,
-          }
-        }
     """
     if predictor and hasattr(predictor, "get_metrics"):
         try:
@@ -185,8 +168,6 @@ async def get_model_metrics(predictor=None):
                 "message": f"Metrics unavailable: {exc}",
                 "metrics": {},
             }
-
-    # Predictor not loaded or metrics not available — return graceful degradation
     return {
         "status": "unavailable",
         "model_trained": False,
@@ -196,6 +177,7 @@ async def get_model_metrics(predictor=None):
 
 
 # ============= STATE SEVERITY MATRIX ENDPOINTS =============
+
 @router.get("/state-severity-matrix")
 async def get_state_severity_matrix():
     """Get state severity matrix."""
@@ -218,22 +200,18 @@ async def get_state_severity_matrix_for_state(state_name: str):
 
 
 # ============= PREDICTION ENDPOINT (LEGACY) =============
+
 @router.post("/predict/legacy")
 async def predict_flood_legacy(
     input_data: FloodPredictionInput, predictor=None, cwc_scraper=None
 ):
-    """Predict flood risk for given input."""
+    """Predict flood risk — legacy endpoint (no pipeline auto-fill)."""
     try:
         source_policy = get_source_policy_payload()
         data_source = str(source_policy["prediction_data_source"])
-
-        # FIX: always initialise river_level_m before conditional branches
-        # so the Option-A guard is reliably invoked regardless of
-        # allow_live_cwc_in_app or cwc_scraper availability.
         river_level_m: float | None = None
 
         if source_policy.get("allow_live_cwc_in_app") and cwc_scraper:
-            print("🔄 Fetching live data from Central Water Commission...")
             try:
                 live_data = await asyncio.to_thread(
                     cwc_scraper.get_live_river_level,
@@ -241,7 +219,6 @@ async def predict_flood_legacy(
                 )
                 if live_data.get("status") in ["success", "success_fallback"]:
                     data_source = "Live CWC Data"
-                    # CWC scraper returns current_level_m; this feeds Option-A guard.
                     river_level_m = live_data.get("current_level_m")
             except Exception as e:
                 print(f"⚠️ Live CWC fetch failed, falling back: {e}")
@@ -254,7 +231,6 @@ async def predict_flood_legacy(
                 river_level_m=river_level_m,
             )
         else:
-            # Fallback to simple prediction if predictor not available
             result = {
                 "severity": "MODERATE",
                 "confidence_percent": 75.0,
@@ -268,10 +244,7 @@ async def predict_flood_legacy(
             }
 
         result["source_policy"] = source_policy
-
-        # Persist prediction record
         persist_prediction_record(input_data, result)
-
         return result
 
     except Exception as e:
@@ -284,28 +257,57 @@ async def predict_flood_legacy(
         }
 
 
-# ============= PREDICTION ENDPOINT V2 (AUTO-FILL FROM CWC) =============
+# ============= PREDICTION ENDPOINT V2 (PIPELINE AUTO-FILL) =============
+
 @router.post("/predict/v2")
 async def predict_flood_v2(
     input_data: FloodPredictionInput, predictor=None, cwc_scraper=None
 ):
     """
-    Auto-fill prediction: fetches live CWC telemetry for the requested
-    state/station before running inference.
+    Auto-fill prediction v2: pipeline-first, CWC-second, manual-third.
 
-    This endpoint allows zero-manual-input predictions from the Flutter app:
-    the app sends state + station only; Peak_Flood_Level_m, rainfall T1d-T7d
-    are auto-populated from the live CWC scraper when available.
+    Priority order for Peak_Flood_Level_m and T1d:
+      1. OperationalDataPipeline feature CSV  (most recent hourly run)
+      2. Live CWC scraper                     (real-time gauge, if enabled)
+      3. Values from the request body         (Flutter manual input)
 
-    Falls back to the provided input values if live data is unavailable.
+    This means the Flutter app can send state + station only and get
+    a fully data-driven prediction with zero manual field entry.
     """
     try:
         source_policy = get_source_policy_payload()
         data_source = str(source_policy["prediction_data_source"])
         river_level_m: float | None = None
         autofill_applied = False
+        pipeline_meta: dict | None = None
 
-        if cwc_scraper:
+        # ── Step 1: Pipeline auto-fill ────────────────────────────────────────
+        input_dict = model_to_dict(input_data)
+        enriched = pipeline_autofill_predict_input(
+            input_dict,
+            state_name=input_data.state,
+            station_name=input_data.station,
+        )
+        pipeline_meta = enriched.pop("_pipeline_autofill", None)
+        if pipeline_meta and pipeline_meta.get("applied"):
+            autofill_applied = True
+            data_source = "OperationalDataPipeline + " + data_source
+            # Rebuild input model with enriched values
+            input_data = input_data.model_copy(update={
+                k: v for k, v in enriched.items()
+                if k in FloodPredictionInput.model_fields and v is not None
+            })
+            # Extract river_level for Option-A guard
+            features = get_pipeline_features(input_data.state, input_data.station)
+            if features:
+                rl = features.get("river_level_m")
+                try:
+                    river_level_m = float(rl) if rl is not None else None
+                except (TypeError, ValueError):
+                    river_level_m = None
+
+        # ── Step 2: CWC live override (if available and pipeline didn't get level) ──
+        if cwc_scraper and river_level_m is None:
             try:
                 station_query = input_data.station or input_data.state
                 live_data = await asyncio.to_thread(
@@ -314,16 +316,17 @@ async def predict_flood_v2(
                 )
                 if live_data.get("status") in ["success", "success_fallback"]:
                     river_level_m = live_data.get("current_level_m")
-                    # Auto-fill Peak_Flood_Level_m from live gauge if not manually set
                     if river_level_m and input_data.Peak_Flood_Level_m == 8.5:
                         input_data = input_data.model_copy(
                             update={"Peak_Flood_Level_m": float(river_level_m)}
                         )
-                        autofill_applied = True
-                    data_source = "Live CWC Data (auto-fill)"
+                        if not autofill_applied:
+                            autofill_applied = True
+                        data_source = "Live CWC (real-time override)"
             except Exception as e:
-                print(f"⚠️ V2 CWC auto-fill failed, using manual input: {e}")
+                print(f"⚠️ V2 CWC auto-fill failed: {e}")
 
+        # ── Step 3: Run inference ─────────────────────────────────────────────
         if predictor:
             result = await asyncio.to_thread(
                 predictor.predict_flood,
@@ -347,9 +350,9 @@ async def predict_flood_v2(
         result["source_policy"] = source_policy
         result["autofill_applied"] = autofill_applied
         result["live_river_level_m"] = river_level_m
+        result["pipeline_context"] = pipeline_meta
 
         persist_prediction_record(input_data, result)
-
         return result
 
     except Exception as e:

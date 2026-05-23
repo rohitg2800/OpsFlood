@@ -16,7 +16,8 @@ import json
 import datetime
 import importlib.util as _importlib_util
 import requests
-from typing import Dict, Any, Tuple
+from pathlib import Path
+from typing import Dict, Any, Tuple, Optional
 from dotenv import load_dotenv
 from fastapi import HTTPException
 from sklearn.preprocessing import StandardScaler
@@ -30,6 +31,14 @@ FRONTEND_INDEX_PATH = os.path.join(FRONTEND_DIST_DIR, "index.html")
 DEFAULT_MODEL_ARTIFACTS_DIR = os.path.join(REPO_DIR, "artifacts", "dvc", "models")
 MODEL_ARTIFACT_BACKENDS = {"DVC", "FILESYSTEM"}
 DEFAULT_MODEL_ARTIFACT_FILES = ("flood_model.pkl", "flood_scaler.pkl")
+
+# ============= PIPELINE PATHS =============
+PIPELINE_FEATURES_LATEST = os.path.join(
+    REPO_DIR, "data", "features", "weather_water", "weather_water_features_latest.csv"
+)
+PIPELINE_MANIFEST_LATEST = os.path.join(
+    REPO_DIR, "data", "manifest", "latest_ingestion_summary.json"
+)
 
 # ============= WEATHER CONFIGURATION =============
 WEATHER_CACHE_TTL_SECONDS = 20 * 60
@@ -363,6 +372,150 @@ def calculate_rainfall_total(input_payload: Dict[str, Any]) -> float:
         3,
     )
 
+# ============= PIPELINE FEATURE UTILITIES =============
+
+def get_pipeline_features(
+    state_name: str,
+    station_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch the latest pipeline-computed feature row for a given state/station.
+
+    Reads from data/features/weather_water/weather_water_features_latest.csv
+    produced by OperationalDataPipeline.run_once().
+
+    Returns None when:
+    - The features CSV does not exist yet (pipeline hasn't run)
+    - No row matches the requested state
+    - Any read/parse error occurs
+
+    The returned dict is safe to use as default values for FloodPredictionInput:
+      rainfall_1h_mm  → T1d approximation
+      river_level_m   → Peak_Flood_Level_m
+      etc.
+    """
+    try:
+        import pandas as pd
+        if not os.path.isfile(PIPELINE_FEATURES_LATEST):
+            return None
+
+        df = pd.read_csv(PIPELINE_FEATURES_LATEST)
+        if df.empty:
+            return None
+
+        # Match on state (required)
+        mask = df["state_name"].str.strip().str.lower() == state_name.strip().lower()
+
+        # Optionally narrow to station
+        if station_name:
+            station_mask = (
+                df["requested_station_name"].str.strip().str.lower()
+                == station_name.strip().lower()
+            )
+            if (mask & station_mask).any():
+                mask = mask & station_mask
+
+        candidates = df[mask].copy()
+        if candidates.empty:
+            return None
+
+        # Return the most recently computed row
+        if "feature_ready_at" in candidates.columns:
+            candidates = candidates.sort_values("feature_ready_at", ascending=False)
+
+        row = candidates.iloc[0].to_dict()
+
+        # Coerce NaN → None for JSON safety
+        import math
+        return {
+            k: (None if isinstance(v, float) and math.isnan(v) else v)
+            for k, v in row.items()
+        }
+    except Exception as exc:
+        print(f"⚠️ get_pipeline_features failed: {exc}")
+        return None
+
+
+def get_pipeline_manifest() -> Optional[Dict[str, Any]]:
+    """Return the last ingestion summary manifest, or None."""
+    try:
+        if not os.path.isfile(PIPELINE_MANIFEST_LATEST):
+            return None
+        with open(PIPELINE_MANIFEST_LATEST, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as exc:
+        print(f"⚠️ get_pipeline_manifest failed: {exc}")
+        return None
+
+
+def pipeline_autofill_predict_input(
+    input_dict: Dict[str, Any],
+    state_name: str,
+    station_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Merge pipeline features into a prediction input dict.
+
+    Only fills fields that are still at their DEFAULT values so manual
+    overrides from the Flutter UI or API caller are always respected.
+
+    Mapping:
+      river_level_m            → Peak_Flood_Level_m   (if still 8.5)
+      rainfall_1h_mm * 24     → T1d                  (if still 10.0)
+      rainfall_last_hour_mm*24→ T1d fallback
+      hydro_meteorological_stress_index → injected as context only
+
+    Returns a new dict (does not mutate input_dict).
+    """
+    features = get_pipeline_features(state_name, station_name)
+    if not features:
+        return dict(input_dict)
+
+    out = dict(input_dict)
+    autofill_fields: list[str] = []
+
+    def _f(key: str) -> Optional[float]:
+        v = features.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # Peak flood level from live river gauge
+    river_level = _f("river_level_m")
+    if river_level is not None and river_level > 0 and float(out.get("Peak_Flood_Level_m", 8.5)) == 8.5:
+        out["Peak_Flood_Level_m"] = round(river_level, 3)
+        autofill_fields.append("Peak_Flood_Level_m")
+
+    # T1d from hourly rainfall (scaled to daily estimate)
+    rainfall_1h = _f("rainfall_1h_mm")
+    rainfall_lh = _f("rainfall_last_hour_mm")
+    daily_rain_est = None
+    if rainfall_1h is not None:
+        daily_rain_est = round(rainfall_1h * 24, 2)
+    elif rainfall_lh is not None:
+        daily_rain_est = round(rainfall_lh * 24, 2)
+
+    if daily_rain_est is not None and daily_rain_est > 0 and float(out.get("T1d", 10.0)) == 10.0:
+        out["T1d"] = daily_rain_est
+        autofill_fields.append("T1d")
+
+    # Attach pipeline metadata (not used by model — purely for response tracing)
+    out["_pipeline_autofill"] = {
+        "applied": bool(autofill_fields),
+        "fields": autofill_fields,
+        "state": state_name,
+        "station": station_name,
+        "feature_ready_at": features.get("feature_ready_at"),
+        "stress_index": features.get("hydro_meteorological_stress_index"),
+        "warning_headroom_m": features.get("warning_headroom_m"),
+        "danger_headroom_m": features.get("danger_headroom_m"),
+    }
+
+    return out
+
+
+# ============= SOURCE POLICY PAYLOAD =============
 def get_source_policy_payload() -> Dict[str, Any]:
     """Get source policy configuration."""
     mode = get_source_policy_mode()
