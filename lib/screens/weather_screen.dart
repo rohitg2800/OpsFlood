@@ -4,11 +4,12 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
-import '../services/imd_service.dart';
-import '../services/real_time_service.dart';
+import '../models/flood_data.dart';
+import '../providers/flood_providers.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -180,20 +181,20 @@ extension _RainfallClassX on _RainfallClass {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN
+// SCREEN  ── now a ConsumerStatefulWidget (Riverpod-aware)
 // ─────────────────────────────────────────────────────────────────────────────
-class WeatherScreen extends StatefulWidget {
+class WeatherScreen extends ConsumerStatefulWidget {
   const WeatherScreen({super.key});
   @override
-  State<WeatherScreen> createState() => _WeatherScreenState();
+  ConsumerState<WeatherScreen> createState() => _WeatherScreenState();
 }
 
-class _WeatherScreenState extends State<WeatherScreen>
+class _WeatherScreenState extends ConsumerState<WeatherScreen>
     with TickerProviderStateMixin {
   final _searchCtrl  = TextEditingController();
   final _searchFocus = FocusNode();
-  List<_GeoResult> _suggestions   = [];
-  bool             _searching      = false;
+  List<_GeoResult> _suggestions  = [];
+  bool             _searching     = false;
   Timer?           _debounce;
 
   _GeoResult? _location;
@@ -201,16 +202,15 @@ class _WeatherScreenState extends State<WeatherScreen>
   bool        _loadingWeather = false;
   String      _weatherError   = '';
 
-  List<Map<String, dynamic>> _cwcAlerts  = [];
-  List<ImdAlert>             _imdAlerts  = [];
-  bool                       _imdLoading = false;
+  // CWC ticker data — derived from Riverpod liveLevelsProvider
+  List<Map<String, dynamic>> _cwcAlerts = [];
+
   late TabController _chartTabs;
 
   @override
   void initState() {
     super.initState();
     _chartTabs = TabController(length: 2, vsync: this);
-    _loadCwcAlerts();
     _loadDefault();
   }
 
@@ -219,9 +219,9 @@ class _WeatherScreenState extends State<WeatherScreen>
       name: 'Motihari', admin1: 'Bihar',
       country: 'India', lat: 26.6507, lon: 84.9172,
     );
-    _location = motihari;
+    setState(() => _location = motihari);
     await _fetchWeather(motihari);
-    _loadImdAlerts(motihari.admin1);
+    _refreshCwcAlerts();
   }
 
   @override
@@ -231,6 +231,21 @@ class _WeatherScreenState extends State<WeatherScreen>
     _debounce?.cancel();
     _chartTabs.dispose();
     super.dispose();
+  }
+
+  // ── CWC alerts now read from the shared Riverpod singleton ────────────────
+  void _refreshCwcAlerts() {
+    final levels = ref.read(liveLevelsProvider);
+    final alerts = levels
+        .where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL')
+        .map((l) => {
+              'city':     l.city,
+              'level':    l.riskLevel,
+              'river':    l.riverName ?? 'River',
+              'capacity': l.capacityPercent,
+            })
+        .toList();
+    if (mounted) setState(() => _cwcAlerts = alerts);
   }
 
   Future<void> _onSearchChanged(String q) async {
@@ -290,44 +305,21 @@ class _WeatherScreenState extends State<WeatherScreen>
     }
   }
 
-  Future<void> _loadCwcAlerts() async {
-    try {
-      final levels = RealTimeService().liveLevels;
-      final alerts = levels
-          .where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL')
-          .map((l) => {
-                'city':     l.city,
-                'level':    l.riskLevel,
-                'river':    l.riverName ?? 'River',
-                'capacity': l.capacityPercent,
-              })
-          .toList();
-      if (mounted) setState(() => _cwcAlerts = alerts);
-    } catch (_) {}
-  }
-
-  Future<void> _loadImdAlerts(String state) async {
-    if (!mounted) return;
-    setState(() => _imdLoading = true);
-    try {
-      final alerts = await ImdService.instance.getAlerts(state: state);
-      if (mounted) setState(() { _imdAlerts = alerts; _imdLoading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _imdLoading = false);
-    }
-  }
-
   void _selectSuggestion(_GeoResult r) {
     _searchCtrl.text = '${r.name}, ${r.admin1}';
     _searchFocus.unfocus();
     setState(() { _location = r; _suggestions = []; });
     _fetchWeather(r);
-    _loadCwcAlerts();
-    if (r.admin1.isNotEmpty) _loadImdAlerts(r.admin1);
+    _refreshCwcAlerts();
   }
 
   @override
   Widget build(BuildContext context) {
+    // ── IMD alerts: reactive via stateImdAlertsProvider ───────────────────
+    final imdAlerts = _location != null && _location!.admin1.isNotEmpty
+        ? ref.watch(stateImdAlertsProvider(_location!.admin1))
+        : <ImdAlert>[];
+
     return Scaffold(
       backgroundColor: const Color(0xFF05141E),
       body: Container(
@@ -381,11 +373,10 @@ class _WeatherScreenState extends State<WeatherScreen>
                                     style: TextStyle(color: Colors.white38, fontSize: 15)),
                               )
                             : _WeatherBody(
-                                weather:    _weather!,
-                                location:   _location!,
-                                chartTabs:  _chartTabs,
-                                imdAlerts:  _imdAlerts,
-                                imdLoading: _imdLoading,
+                                weather:   _weather!,
+                                location:  _location!,
+                                chartTabs: _chartTabs,
+                                imdAlerts: imdAlerts,
                               ),
               ),
             ],
@@ -397,16 +388,7 @@ class _WeatherScreenState extends State<WeatherScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC TICKER BAR  (overflow-safe rewrite)
-//
-// Problem: inner Row(mainAxisSize: min) inside FractionalTranslation is still
-// measured by Flutter against the *constrained* parent width (367px), so any
-// content wider than that blows up with "overflowed by N pixels on the right".
-//
-// Fix: replace the inner Row+SizedBox pair with a single OverflowBox that
-// explicitly declares its maxWidth = segmentWidth*2, then puts the Text
-// directly inside. ClipRect (parent) ensures nothing outside [0, parentWidth]
-// is painted. No Row child = no RenderFlex overflow.
+// CWC TICKER BAR
 // ─────────────────────────────────────────────────────────────────────────────
 class _CwcTickerBar extends StatefulWidget {
   final List<Map<String, dynamic>> alerts;
@@ -453,7 +435,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                 '${a['level'] == 'CRITICAL' ? '🔴' : '🟠'}  CWC Alert: ${a['city']} — ${a['river']} at ${(a['capacity'] as double).toStringAsFixed(0)}% capacity [${a['level']}]  •  ')
             .toList();
 
-    // Double the text so the loop is seamless
     final tickerText = '${items.join('   ')}          ${items.join('   ')}';
 
     return Container(
@@ -461,7 +442,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
       color: bgColor,
       child: Row(
         children: [
-          // Static label badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             color: Colors.black26,
@@ -474,7 +454,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   letterSpacing: 1.2),
             ),
           ),
-          // Scrolling ticker — ClipRect prevents painting outside bounds
           Expanded(
             child: ClipRect(
               child: AnimatedBuilder(
@@ -483,9 +462,6 @@ class _CwcTickerBarState extends State<_CwcTickerBar>
                   translation: Offset(-_ctrl.value, 0),
                   child: child,
                 ),
-                // OverflowBox lets the child be as wide as it needs;
-                // it does NOT participate in the parent's flex layout,
-                // so RenderFlex never sees it as overflowing.
                 child: OverflowBox(
                   alignment: Alignment.centerLeft,
                   maxWidth: _segmentWidth * 2,
@@ -569,7 +545,7 @@ class _SearchBar extends StatelessWidget {
 // SUGGESTIONS LIST
 // ─────────────────────────────────────────────────────────────────────────────
 class _SuggestionsList extends StatelessWidget {
-  final List<_GeoResult>       suggestions;
+  final List<_GeoResult>          suggestions;
   final void Function(_GeoResult) onSelect;
   const _SuggestionsList({required this.suggestions, required this.onSelect});
 
@@ -607,20 +583,18 @@ class _SuggestionsList extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN WEATHER BODY
+// MAIN WEATHER BODY  ── imdLoading removed (provider is synchronous)
 // ─────────────────────────────────────────────────────────────────────────────
 class _WeatherBody extends StatelessWidget {
   final _Weather       weather;
   final _GeoResult     location;
   final TabController  chartTabs;
   final List<ImdAlert> imdAlerts;
-  final bool           imdLoading;
   const _WeatherBody({
     required this.weather,
     required this.location,
     required this.chartTabs,
     required this.imdAlerts,
-    required this.imdLoading,
   });
 
   @override
@@ -679,19 +653,18 @@ class _WeatherBody extends StatelessWidget {
         const SizedBox(height: 14),
         _SevenDayForecast(weather: weather),
         const SizedBox(height: 14),
-        _OfficialImdAlertsCard(alerts: imdAlerts, loading: imdLoading),
+        _OfficialImdAlertsCard(alerts: imdAlerts),
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OFFICIAL IMD ALERTS CARD (P2)
+// OFFICIAL IMD ALERTS CARD  ── loading spinner removed (provider is sync)
 // ─────────────────────────────────────────────────────────────────────────────
 class _OfficialImdAlertsCard extends StatelessWidget {
   final List<ImdAlert> alerts;
-  final bool           loading;
-  const _OfficialImdAlertsCard({required this.alerts, required this.loading});
+  const _OfficialImdAlertsCard({required this.alerts});
 
   Color _severityColor(String s) {
     switch (s) {
@@ -759,18 +732,7 @@ class _OfficialImdAlertsCard extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.all(20),
-              child: Center(
-                child: SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Color(0xFF0DA7C2)),
-                ),
-              ),
-            )
-          else if (alerts.isEmpty)
+          if (alerts.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
               child: Row(
