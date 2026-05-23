@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../services/real_time_service.dart';
 import '../screens/india_rivers_screen.dart';
+import '../screens/india_river_explorer_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
 import 'weather_screen.dart';
-
-Navigator.push(context, MaterialPageRoute(
-  builder: (_) => const IndiaRiversScreen(),
-));
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -31,13 +28,13 @@ class _HomeScreenState extends State<HomeScreen> {
   // only mounts the active screen. Off-screen widgets are fully unmounted,
   // so they cannot receive notifyListeners() calls.
   static const _destinations = [
-    _NavEntry(label: 'Home',       icon: Icons.dashboard_outlined,       selectedIcon: Icons.dashboard),
-    _NavEntry(label: 'Monitors',   icon: Icons.monitor_heart_outlined,   selectedIcon: Icons.monitor_heart),
-    _NavEntry(label: 'Alerts',     icon: Icons.notifications_outlined,   selectedIcon: Icons.notifications),
-    _NavEntry(label: 'Weather',    icon: Icons.cloud_outlined,           selectedIcon: Icons.cloud),
-    _NavEntry(label: 'Predict',    icon: Icons.model_training_outlined,  selectedIcon: Icons.model_training),
-    _NavEntry(label: 'Rivers',     icon: Icons.water_outlined,           selectedIcon: Icons.water),
-    _NavEntry(label: 'India',      icon: Icons.map_outlined,             selectedIcon: Icons.map),
+    _NavEntry(label: 'Home',     icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard),
+    _NavEntry(label: 'Monitors', icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart),
+    _NavEntry(label: 'Alerts',   icon: Icons.notifications_outlined,  selectedIcon: Icons.notifications),
+    _NavEntry(label: 'Weather',  icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud),
+    _NavEntry(label: 'Predict',  icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
+    _NavEntry(label: 'Rivers',   icon: Icons.water_outlined,          selectedIcon: Icons.water),
+    _NavEntry(label: 'India',    icon: Icons.map_outlined,            selectedIcon: Icons.map),
   ];
 
   Widget _buildScreen(int index) {
@@ -68,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Lazy: only the active screen is in the tree at any time.
       body: _buildScreen(_currentIndex),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
