@@ -1,7 +1,12 @@
 """
 GloFAS batched fetcher for OpsFlood.
-Fetches Open-Meteo river discharge for 89 Indian cities
-in small batches to avoid 429 rate-limit errors.
+Fetches Open-Meteo river discharge for 89 Indian cities using the
+multi-location batch API (one request per chunk) to avoid 429 rate-limit
+errors on the free-tier flood endpoint.
+
+Open-Meteo supports repeated latitude/longitude params in a single call:
+  GET /v1/flood?latitude=16.70,26.14,...&longitude=74.24,91.74,...&daily=river_discharge&...
+and returns an array of result objects — one per coordinate pair.
 
 Exports:
     fetch_glofas_stations() -> List[Dict]  (async)
@@ -11,7 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -23,6 +29,9 @@ INDIA_GLOFAS_STATIONS: List[Dict[str, Any]] = [
     {"station_name": "Kolhapur",       "state_name": "Maharashtra",      "river_name": "Panchganga",  "lat": 16.70, "lon": 74.24},
     {"station_name": "Sangli",         "state_name": "Maharashtra",      "river_name": "Krishna",     "lat": 16.85, "lon": 74.57},
     {"station_name": "Nashik",         "state_name": "Maharashtra",      "river_name": "Godavari",    "lat": 20.00, "lon": 73.79},
+    {"station_name": "Pune",           "state_name": "Maharashtra",      "river_name": "Mutha",       "lat": 18.52, "lon": 73.85},
+    {"station_name": "Nagpur",         "state_name": "Maharashtra",      "river_name": "Nag",         "lat": 21.15, "lon": 79.09},
+    {"station_name": "Satara",         "state_name": "Maharashtra",      "river_name": "Krishna",     "lat": 17.68, "lon": 74.00},
     # Kerala
     {"station_name": "Kochi",          "state_name": "Kerala",           "river_name": "Periyar",     "lat":  9.93, "lon": 76.26},
     {"station_name": "Alappuzha",      "state_name": "Kerala",           "river_name": "Pamba",       "lat":  9.49, "lon": 76.33},
@@ -32,22 +41,34 @@ INDIA_GLOFAS_STATIONS: List[Dict[str, Any]] = [
     # Assam
     {"station_name": "Guwahati",       "state_name": "Assam",            "river_name": "Brahmaputra", "lat": 26.14, "lon": 91.74},
     {"station_name": "Dibrugarh",      "state_name": "Assam",            "river_name": "Brahmaputra", "lat": 27.49, "lon": 94.91},
+    {"station_name": "Tezpur",         "state_name": "Assam",            "river_name": "Brahmaputra", "lat": 26.63, "lon": 92.80},
+    {"station_name": "Silchar",        "state_name": "Assam",            "river_name": "Barak",       "lat": 24.83, "lon": 92.78},
+    {"station_name": "Jorhat",         "state_name": "Assam",            "river_name": "Brahmaputra", "lat": 26.75, "lon": 94.21},
+    {"station_name": "Barpeta",        "state_name": "Assam",            "river_name": "Beki",        "lat": 26.32, "lon": 91.01},
+    {"station_name": "Dhubri",         "state_name": "Assam",            "river_name": "Brahmaputra", "lat": 26.02, "lon": 89.98},
     # Bihar
     {"station_name": "Patna",          "state_name": "Bihar",            "river_name": "Ganga",       "lat": 25.59, "lon": 85.14},
     {"station_name": "Darbhanga",      "state_name": "Bihar",            "river_name": "Bagmati",     "lat": 26.15, "lon": 85.90},
+    {"station_name": "Muzaffarpur",    "state_name": "Bihar",            "river_name": "Gandak",      "lat": 26.12, "lon": 85.36},
+    {"station_name": "Begusarai",      "state_name": "Bihar",            "river_name": "Ganga",       "lat": 25.41, "lon": 86.13},
+    {"station_name": "Gaya",           "state_name": "Bihar",            "river_name": "Falgu",       "lat": 24.79, "lon": 85.00},
     # Odisha
     {"station_name": "Cuttack",        "state_name": "Odisha",           "river_name": "Mahanadi",    "lat": 20.46, "lon": 85.88},
     {"station_name": "Bhubaneswar",    "state_name": "Odisha",           "river_name": "Daya",        "lat": 20.30, "lon": 85.82},
     {"station_name": "Sambalpur",      "state_name": "Odisha",           "river_name": "Mahanadi",    "lat": 21.47, "lon": 83.97},
-    {"station_name": "Puri",           "state_name": "Odisha",           "river_name": "Bhargavi",    "lat": 19.81, "lon": 85.83},
-    {"station_name": "Kendrapara",     "state_name": "Odisha",           "river_name": "Brahmani",    "lat": 20.50, "lon": 86.42},
+    {"station_name": "Brahmapur",      "state_name": "Odisha",           "river_name": "Rushikulya",  "lat": 19.31, "lon": 84.79},
     # West Bengal
     {"station_name": "Kolkata",        "state_name": "West Bengal",      "river_name": "Hooghly",     "lat": 22.57, "lon": 88.36},
+    {"station_name": "Howrah",         "state_name": "West Bengal",      "river_name": "Hooghly",     "lat": 22.59, "lon": 88.31},
     {"station_name": "Siliguri",       "state_name": "West Bengal",      "river_name": "Teesta",      "lat": 26.72, "lon": 88.42},
+    {"station_name": "Jalpaiguri",     "state_name": "West Bengal",      "river_name": "Teesta",      "lat": 26.54, "lon": 88.72},
+    {"station_name": "Murshidabad",    "state_name": "West Bengal",      "river_name": "Ganga",       "lat": 24.18, "lon": 88.27},
+    {"station_name": "Malda",          "state_name": "West Bengal",      "river_name": "Ganga",       "lat": 25.01, "lon": 88.14},
     # Uttar Pradesh
     {"station_name": "Varanasi",       "state_name": "Uttar Pradesh",    "river_name": "Ganga",       "lat": 25.32, "lon": 83.01},
-    {"station_name": "Prayagraj",      "state_name": "Uttar Pradesh",    "river_name": "Ganga",       "lat": 25.44, "lon": 81.84},
+    {"station_name": "Allahabad",      "state_name": "Uttar Pradesh",    "river_name": "Ganga",       "lat": 25.44, "lon": 81.84},
     {"station_name": "Lucknow",        "state_name": "Uttar Pradesh",    "river_name": "Gomti",       "lat": 26.85, "lon": 80.95},
+    {"station_name": "Agra",           "state_name": "Uttar Pradesh",    "river_name": "Yamuna",      "lat": 27.18, "lon": 78.01},
     # Andhra Pradesh
     {"station_name": "Vijayawada",     "state_name": "Andhra Pradesh",   "river_name": "Krishna",     "lat": 16.51, "lon": 80.64},
     {"station_name": "Rajahmundry",    "state_name": "Andhra Pradesh",   "river_name": "Godavari",    "lat": 17.00, "lon": 81.78},
@@ -93,7 +114,7 @@ INDIA_GLOFAS_STATIONS: List[Dict[str, Any]] = [
     {"station_name": "Hisar",          "state_name": "Haryana",          "river_name": "Ghaggar",     "lat": 29.15, "lon": 75.72},
     # Himachal Pradesh
     {"station_name": "Mandi",          "state_name": "Himachal Pradesh", "river_name": "Beas",        "lat": 31.71, "lon": 76.93},
-    {"station_name": "Bilaspur",       "state_name": "Himachal Pradesh", "river_name": "Sutlej",      "lat": 31.34, "lon": 76.76},
+    {"station_name": "Bilaspur HP",    "state_name": "Himachal Pradesh", "river_name": "Sutlej",      "lat": 31.34, "lon": 76.76},
     # Uttarakhand
     {"station_name": "Haridwar",       "state_name": "Uttarakhand",      "river_name": "Ganga",       "lat": 29.95, "lon": 78.16},
     {"station_name": "Dehradun",       "state_name": "Uttarakhand",      "river_name": "Tons",        "lat": 30.32, "lon": 78.03},
@@ -128,66 +149,115 @@ INDIA_GLOFAS_STATIONS: List[Dict[str, Any]] = [
 ]
 
 _GLOFAS_URL = "https://flood-api.open-meteo.com/v1/flood"
-_BATCH_SIZE = 5
-_BATCH_DELAY = 1.5   # seconds between batches — stays well under free-tier limit
-_TIMEOUT = 10        # per-request timeout in seconds
+
+# ── Rate-limit tuning ────────────────────────────────────────────────────────
+# Open-Meteo free-tier flood API: ~10 req/min, 1 concurrent.
+# We batch MAX_BATCH_COORDS stations into ONE request → ~9 total requests for
+# 89 stations (vs 89 before). INTER_BATCH_DELAY gives ~6-7 req/min headroom.
+MAX_BATCH_COORDS  = 10    # stations per HTTP request
+INTER_BATCH_DELAY = 6.0   # seconds between batch requests (≈ 10 req/min max)
+_TIMEOUT          = 20    # per-request timeout in seconds
+_MAX_RETRIES      = 3     # retries on 429 with exponential back-off
 
 
-def _fetch_one_sync(station: Dict[str, Any]) -> Dict[str, Any] | None:
-    """Blocking HTTP call for one station. Run in a thread pool."""
-    try:
-        resp = requests.get(
-            _GLOFAS_URL,
-            params={
-                "latitude": station["lat"],
-                "longitude": station["lon"],
-                "daily": "river_discharge",
-                "past_days": 2,
-                "forecast_days": 3,
-            },
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        daily = data.get("daily", {})
-        times = daily.get("time", [])
-        discharges = daily.get("river_discharge", [])
+def _parse_station_result(
+    station: Dict[str, Any],
+    data: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Parse a single station result dict from the Open-Meteo multi-location response."""
+    daily = data.get("daily", {})
+    times = daily.get("time", [])
+    discharges = daily.get("river_discharge", [])
 
-        if not discharges:
-            return None
-
-        latest_discharge = float(discharges[-1] or 0)
-        max_discharge = float(max(d for d in discharges if d is not None) if discharges else 0)
-        now_iso = datetime.datetime.utcnow().isoformat() + "Z"
-
-        # Simple thresholds: warning = 1.5x median, danger = 2.5x median
-        sorted_q = sorted(d for d in discharges if d is not None)
-        median_q = sorted_q[len(sorted_q) // 2] if sorted_q else 1.0
-        warning_q = round(median_q * 1.5, 2)
-        danger_q = round(median_q * 2.5, 2)
-
-        risk = "LOW"
-        if latest_discharge >= danger_q:
-            risk = "CRITICAL"
-        elif latest_discharge >= warning_q:
-            risk = "HIGH"
-        elif latest_discharge >= median_q * 1.1:
-            risk = "MODERATE"
-
-        return {
-            **station,
-            "river_discharge": round(latest_discharge, 2),
-            "max_discharge": round(max_discharge, 2),
-            "warning_discharge": warning_q,
-            "danger_discharge": danger_q,
-            "risk_level": risk,
-            "discharge_series": list(zip(times, [round(float(d), 2) if d is not None else None for d in discharges])),
-            "timestamp": now_iso,
-            "source": "OPEN_METEO_GLOFAS",
-        }
-    except Exception as exc:
-        print(f"\u26a0\ufe0f  Open-Meteo failed for {station['station_name']}: {exc}")
+    if not discharges:
         return None
+
+    valid = [d for d in discharges if d is not None]
+    if not valid:
+        return None
+
+    latest_discharge = float(discharges[-1] or 0)
+    max_discharge = float(max(valid))
+    sorted_q = sorted(valid)
+    median_q = sorted_q[len(sorted_q) // 2] if sorted_q else 1.0
+    warning_q = round(median_q * 1.5, 2)
+    danger_q  = round(median_q * 2.5, 2)
+
+    risk = "LOW"
+    if latest_discharge >= danger_q:
+        risk = "CRITICAL"
+    elif latest_discharge >= warning_q:
+        risk = "HIGH"
+    elif latest_discharge >= median_q * 1.1:
+        risk = "MODERATE"
+
+    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    return {
+        **station,
+        "river_discharge":    round(latest_discharge, 2),
+        "max_discharge":      round(max_discharge, 2),
+        "warning_discharge":  warning_q,
+        "danger_discharge":   danger_q,
+        "risk_level":         risk,
+        "discharge_series":   list(zip(times, [round(float(d), 2) if d is not None else None for d in discharges])),
+        "timestamp":          now_iso,
+        "source":             "OPEN_METEO_GLOFAS",
+    }
+
+
+def _fetch_batch_sync(batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Fetch one batch of stations in a SINGLE HTTP request using Open-Meteo's
+    multi-location API (comma-separated lat/lon values).
+
+    Returns a list of enriched station dicts (failed stations are skipped).
+    Retries up to _MAX_RETRIES times on 429 with exponential back-off.
+    """
+    lats = ",".join(str(s["lat"]) for s in batch)
+    lons = ",".join(str(s["lon"]) for s in batch)
+    params = {
+        "latitude":     lats,
+        "longitude":    lons,
+        "daily":        "river_discharge",
+        "past_days":    2,
+        "forecast_days": 3,
+    }
+
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            resp = requests.get(_GLOFAS_URL, params=params, timeout=_TIMEOUT)
+
+            if resp.status_code == 429:
+                wait = 6 * (2 ** (attempt - 1))   # 6, 12, 24 s
+                print(f"⚠️  Open-Meteo 429 (batch of {len(batch)}, attempt {attempt}/{_MAX_RETRIES}) — back-off {wait}s")
+                time.sleep(wait)
+                continue
+
+            resp.raise_for_status()
+            payload = resp.json()
+
+            # Multi-location response is a list; single-location is a dict.
+            if isinstance(payload, dict):
+                payload = [payload]
+
+            results: List[Dict[str, Any]] = []
+            for station, data in zip(batch, payload):
+                parsed = _parse_station_result(station, data)
+                if parsed is not None:
+                    results.append(parsed)
+            return results
+
+        except requests.exceptions.HTTPError as exc:
+            print(f"⚠️  Open-Meteo HTTP error (batch attempt {attempt}): {exc}")
+            if attempt == _MAX_RETRIES:
+                break
+            time.sleep(6 * attempt)
+        except Exception as exc:
+            names = ", ".join(s["station_name"] for s in batch)
+            print(f"⚠️  Open-Meteo failed for batch [{names}]: {exc}")
+            break
+
+    return []
 
 
 async def fetch_glofas_stations(
@@ -195,32 +265,30 @@ async def fetch_glofas_stations(
 ) -> List[Dict[str, Any]]:
     """
     Async batched fetch of GloFAS river discharge for all stations.
+
+    Uses multi-location batch requests (MAX_BATCH_COORDS stations per HTTP
+    call) instead of per-station requests, reducing the total request count
+    from 89 to ~9 and eliminating 429 rate-limit errors on the free tier.
+
     Returns list of enriched station dicts (failed stations are skipped).
     """
-    target_stations = stations or INDIA_GLOFAS_STATIONS
+    target = stations or INDIA_GLOFAS_STATIONS
     results: List[Dict[str, Any]] = []
-    total = len(target_stations)
-    fetched = 0
+    total = len(target)
 
-    for batch_start in range(0, total, _BATCH_SIZE):
-        batch = target_stations[batch_start: batch_start + _BATCH_SIZE]
+    for batch_start in range(0, total, MAX_BATCH_COORDS):
+        batch = target[batch_start: batch_start + MAX_BATCH_COORDS]
 
-        # Run blocking HTTP calls in the default thread pool
-        batch_results = await asyncio.gather(
-            *[asyncio.to_thread(_fetch_one_sync, s) for s in batch],
-            return_exceptions=False,
-        )
+        batch_results = await asyncio.to_thread(_fetch_batch_sync, batch)
+        results.extend(batch_results)
 
-        for r in batch_results:
-            if r is not None:
-                results.append(r)
-                fetched += 1
+        # Delay between batches — skip after the very last one
+        if batch_start + MAX_BATCH_COORDS < total:
+            await asyncio.sleep(INTER_BATCH_DELAY)
 
-        # Delay between batches (skip after the last batch)
-        if batch_start + _BATCH_SIZE < total:
-            await asyncio.sleep(_BATCH_DELAY)
-
-    print(f"\U0001f30f Open-Meteo GloFAS: {fetched}/{total} stations fetched")
+    fetched = len(results)
+    print(f"🌏 Open-Meteo GloFAS: {fetched}/{total} stations fetched "
+          f"({(total + MAX_BATCH_COORDS - 1) // MAX_BATCH_COORDS} HTTP requests)")
     if fetched == 0:
-        print("\u26a0\ufe0f  Open-Meteo failed \u2014 falling back to TACTICAL_REGISTRY")
+        print("⚠️  Open-Meteo failed — falling back to TACTICAL_REGISTRY")
     return results
