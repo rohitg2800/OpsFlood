@@ -2,8 +2,11 @@
 // Unit tests for the 4 new domain-split constant files.
 // Run: flutter test test/constants_domain_test.dart
 
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:equinox_flood/constants/constants.dart';
+import 'package:equinox_flood/constants.dart'; // deprecated shim — only for backward-compat tests
 
 void main() {
   // ── AppConfig ──────────────────────────────────────────────────────────────
@@ -103,7 +106,6 @@ void main() {
     });
 
     test('contains 8 UTs', () {
-      // Delhi, J&K, Ladakh, Chandigarh, Puducherry, A&N, Lakshadweep, DNHDD
       const uts = [
         'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Chandigarh',
         'Puducherry', 'Andaman and Nicobar Islands',
@@ -164,7 +166,7 @@ void main() {
       }
     });
 
-    test('lat is in India bounding box (6–36°N)', () {
+    test('lat is in India bounding box (6–37°N)', () {
       for (final city in IndiaGeodata.monitoredCities) {
         final lat = (city['lat'] as num).toDouble();
         expect(lat, inInclusiveRange(6.0, 37.0),
@@ -172,7 +174,7 @@ void main() {
       }
     });
 
-    test('lon is in India bounding box (68–98°E)', () {
+    test('lon is in India bounding box (67–98°E)', () {
       for (final city in IndiaGeodata.monitoredCities) {
         final lon = (city['lon'] as num).toDouble();
         expect(lon, inInclusiveRange(67.0, 98.0),
@@ -180,7 +182,7 @@ void main() {
       }
     });
 
-    test('Delhi has MSL danger_level around 204–207', () {
+    test('Delhi has MSL danger_level around 200–210', () {
       final delhi = IndiaGeodata.monitoredCities
           .firstWhere((c) => c['city'] == 'Delhi');
       expect(delhi['danger_level'], inInclusiveRange(200.0, 210.0));
@@ -202,17 +204,14 @@ void main() {
   // ── Backward-compat: AppConstants delegates correctly ─────────────────────
   group('AppConstants backward-compat shim', () {
     test('AppConstants.criticalThreshold == FloodThresholds.critical', () {
-      // ignore: deprecated_member_use
       expect(AppConstants.criticalThreshold, FloodThresholds.critical);
     });
 
     test('AppConstants.indianStates == IndiaGeodata.states', () {
-      // ignore: deprecated_member_use
       expect(AppConstants.indianStates, IndiaGeodata.states);
     });
 
     test('AppConstants.criticalAlertChannelId == AlertChannels.criticalId', () {
-      // ignore: deprecated_member_use
       expect(AppConstants.criticalAlertChannelId, AlertChannels.criticalId);
     });
   });
