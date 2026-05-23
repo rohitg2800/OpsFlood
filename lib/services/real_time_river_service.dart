@@ -9,17 +9,21 @@
 //             50-second timeout before the cascade falls through.
 //
 //   SOURCE 1: /api/live-telemetry?state=X&limit=500
-//             Per-state fallback for cities missed in bulk call.
+//             Per-state fallback — only used when bulk was NOT attempted
+//             (i.e. cache was pre-populated for single-city fetchCity calls).
+//             Skipped when bulk was attempted — _stateCache already has data.
 //
 //   SOURCE 2: /api/live-levels
 //             OpsFlood aggregated state-wise levels.
 //
 //   SOURCE 3: /api/cwc-ffs/station?name=CITY&state=STATE
 //             CWC Flood Forecasting Service — per-city, authoritative.
+//             ONLY used when bulk was NOT attempted (single-city calls).
+//             Skipped in fetchAll() to avoid 93 serial HTTP calls.
 //
 //   SOURCE 4: /api/cwc-reservoir/state?state=STATE
 //             Reservoir level for dam-adjacent cities.
-//             Cached per-state for the full cache TTL.
+//             ONLY used when bulk was NOT attempted (single-city calls).
 //
 // DATA INTEGRITY RULES:
 //   1. A level must be > 0 to be used. Never display 0 as a real reading.
@@ -80,6 +84,7 @@ class RealTimeRiverService extends ChangeNotifier {
 
   // ── Shared cache ──────────────────────────────────────────────────────────
   List<dynamic>                    _bulkList       = [];
+  bool                             _bulkAttempted  = false; // true once _warmCache ran
   final Map<String, List<dynamic>> _stateCache     = {};
   final Map<String, List<dynamic>> _reservoirCache = {};
   List<dynamic>                    _liveLevels     = [];
@@ -166,8 +171,9 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   void _invalidateCache() {
-    _cacheTime = null;
-    _bulkList  = [];
+    _cacheTime      = null;
+    _bulkList       = [];
+    _bulkAttempted  = false;
     _stateCache.clear();
     _reservoirCache.clear();
     _liveLevels   = [];
@@ -203,8 +209,10 @@ class RealTimeRiverService extends ChangeNotifier {
     }
 
     // ── SOURCE 1: Per-state telemetry (lazy-fetched) ──────────────────────
+    // Skip HTTP fetch when bulk was attempted — _warmCache already populated
+    // _stateCache from bulk data, so no new network call is needed.
     final stKey = _stateKey(state);
-    if (!_stateCache.containsKey(stKey)) {
+    if (!_bulkAttempted && !_stateCache.containsKey(stKey)) {
       try {
         final r = await _api.getDashboardData(state: state, limit: 500)
             .timeout(_stateTimeout);
@@ -245,64 +253,64 @@ class RealTimeRiverService extends ChangeNotifier {
       }
     }
 
-    // ── SOURCE 3: CWC FFS per-city (direct, slower) ───────────────────────
-    try {
-      final ffs = await _api.getFloodForecast(city: city, state: state)
-          .timeout(_ffsTimeout);
-      final fl = _deepList(ffs);
-      for (final item in fl.whereType<Map<String, dynamic>>()) {
-        final lv = _extractLevel(item);
-        if (lv > 0) {
-          return _buildResult(
-            city: city, state: state, river: river,
-            wl: warningLevel, dl: dangerLevel, hfl: hfl,
-            lv: lv, record: item,
-            source: 'CWC_FFS', confidence: 0.85,
-          );
+    // ── SOURCE 3: CWC FFS per-city ────────────────────────────────────────
+    // ONLY used when bulk was not attempted (single-city fetchCity calls).
+    // In fetchAll(), bulk is always attempted first — skipping SOURCE 3
+    // here eliminates 93 serial HTTP calls per poll cycle.
+    if (!_bulkAttempted) {
+      try {
+        final ffs = await _api.getFloodForecast(city: city, state: state)
+            .timeout(_ffsTimeout);
+        final fl = _deepList(ffs);
+        for (final item in fl.whereType<Map<String, dynamic>>()) {
+          final lv = _extractLevel(item);
+          if (lv > 0) {
+            return _buildResult(
+              city: city, state: state, river: river,
+              wl: warningLevel, dl: dangerLevel, hfl: hfl,
+              lv: lv, record: item,
+              source: 'CWC_FFS', confidence: 0.85,
+            );
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── SOURCE 4: Reservoir levels ────────────────────────────────────────
+    // ONLY used when bulk was not attempted (single-city fetchCity calls).
+    if (!_bulkAttempted) {
+      if (!_reservoirCache.containsKey(stKey)) {
+        try {
+          final res = await _api.getReservoirLevels(state: state)
+              .timeout(_resTimeout);
+          _reservoirCache[stKey] = _deepList(res);
+        } catch (_) {
+          _reservoirCache[stKey] = [];
         }
       }
-    } catch (_) {}
-
-    // ── SOURCE 4: Reservoir levels (dam-adjacent cities) ──────────────────
-    if (!_reservoirCache.containsKey(stKey)) {
-      try {
-        final res = await _api.getReservoirLevels(state: state)
-            .timeout(_resTimeout);
-        _reservoirCache[stKey] = _deepList(res);
-      } catch (_) {
-        _reservoirCache[stKey] = [];
-      }
-    }
-    final rl = _reservoirCache[stKey] ?? [];
-    if (rl.isNotEmpty) {
-      final m = _bestMatch(rl, city, state, river);
-      if (m != null && m.confidence >= 0.40) {
-        final lv = _fp(
-          m.record['current_level_m'] ?? m.record['current_level'] ??
-          m.record['wl']              ?? m.record['water_level'],
-        );
-        if (lv > 0) {
-          return _buildResult(
-            city: city, state: state, river: river,
-            wl: warningLevel, dl: dangerLevel, hfl: hfl,
-            lv: lv, record: m.record,
-            source: 'RESERVOIR', confidence: m.confidence,
+      final rl = _reservoirCache[stKey] ?? [];
+      if (rl.isNotEmpty) {
+        final m = _bestMatch(rl, city, state, river);
+        if (m != null && m.confidence >= 0.40) {
+          final lv = _fp(
+            m.record['current_level_m'] ?? m.record['current_level'] ??
+            m.record['wl']              ?? m.record['water_level'],
           );
+          if (lv > 0) {
+            return _buildResult(
+              city: city, state: state, river: river,
+              wl: warningLevel, dl: dangerLevel, hfl: hfl,
+              lv: lv, record: m.record,
+              source: 'RESERVOIR', confidence: m.confidence,
+            );
+          }
         }
       }
     }
 
     // ── ALL SOURCES EXHAUSTED — NO_DATA ───────────────────────────────────
-    // Log only the FIRST time this city hits NO_DATA in the current cache
-    // window. fetchAll() will emit a single summary line for all NO_DATA
-    // cities at the end, so per-city lines here are only for single-city
-    // fetchCity() calls or genuinely new failures.
     final cityKey = '${city.toLowerCase()}-${state.toLowerCase()}';
-    if (_noDataLogged.add(cityKey)) {
-      // Only logged once per cache window — fetchAll() suppresses bulk repeats
-      // via its own summary, so this fires only for fetchCity() calls or the
-      // very first occurrence in a new cache window.
-    }
+    _noDataLogged.add(cityKey);
     return LiveRiverResult(
       station: RiverStation(
         city: city, state: state, river: river,
@@ -318,10 +326,6 @@ class RealTimeRiverService extends ChangeNotifier {
 
   // ══════════════════════════════════════════════════════════════════════════
   // CACHE WARMER  (with cold-start retry)
-  //
-  // First attempt uses _bulkTimeout (28 s).  If the Render free-tier pod is
-  // sleeping, it may not respond in time and the list comes back empty.
-  // In that case we retry once with _bulkRetryTimeout (50 s).
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _warmCache({bool force = false}) async {
     if (!force && _cacheValid) return;
@@ -349,6 +353,10 @@ class RealTimeRiverService extends ChangeNotifier {
         bulkResult = [];
       }
     }
+
+    // Mark bulk as attempted regardless of result — this suppresses
+    // per-city SOURCE 1/3/4 HTTP calls in _fetchCity.
+    _bulkAttempted = true;
 
     if (bulkResult.isNotEmpty) {
       _bulkList = bulkResult;
@@ -470,14 +478,6 @@ class RealTimeRiverService extends ChangeNotifier {
 
   // ══════════════════════════════════════════════════════════════════════════
   // MATCHING ENGINE — confidence-scored
-  // T0 (1.00): exact city name
-  // T1 (0.90): city name contained in station or vice versa
-  // T2 (0.85): city token + river + state
-  // T3 (0.80): city token match
-  // T4 (0.70): river + state both match
-  // T5 (0.60): river match only
-  // T6 (0.45): state match + partial river token
-  // <0.40: rejected
   // ══════════════════════════════════════════════════════════════════════════
   _MatchResult? _bestMatch(
       List<dynamic> list, String city, String state, String river) {
@@ -524,7 +524,7 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // LEVEL EXTRACTOR — 35 known field-name variants from CWC/WRIS/OpsFlood
+  // LEVEL EXTRACTOR
   // ══════════════════════════════════════════════════════════════════════════
   double _extractLevel(Map<String, dynamic> d) => _fp(
     d['river_level']      ?? d['riverLevel']        ?? d['current_level']   ??
@@ -538,9 +538,6 @@ class RealTimeRiverService extends ChangeNotifier {
     d['currentObs']       ?? d['river_stage']         ?? d['gaugeReading'],
   );
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // TREND DERIVATION
-  // ══════════════════════════════════════════════════════════════════════════
   String _deriveTrend(double lv, double wl, double dl) {
     if (wl <= 0) return 'STEADY';
     final ratio = lv / wl;
@@ -550,7 +547,7 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DEEP LIST EXTRACTOR — handles arbitrary JSON nesting (up to depth 8)
+  // DEEP LIST EXTRACTOR
   // ══════════════════════════════════════════════════════════════════════════
   List<dynamic> _deepList(dynamic payload, {int depth = 0}) {
     if (depth > 8) return [];
