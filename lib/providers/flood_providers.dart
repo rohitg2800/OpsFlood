@@ -1,40 +1,26 @@
 // lib/providers/flood_providers.dart
 // ─────────────────────────────────────────────────────────────────────────────
-// Riverpod provider layer for Equinox Flood.
+// Riverpod provider layer for OpsFlood.
 //
 // DESIGN PRINCIPLES
 // ────────────────
-// 1. RealTimeService singleton is NOT replaced — it owns the polling loop,
-//    cache, notification dispatch, and IMD/NDMA enrichment pipeline.
-//    Riverpod wraps it via a ChangeNotifierProvider so every widget that
-//    does ref.watch(realTimeProvider) rebuilds only on notifyListeners().
+// 1. RealTimeService singleton owns the main polling loop, cache,
+//    notification dispatch, and IMD/NDMA enrichment pipeline.
 //
-// 2. Derived providers are "select" slices — widgets that only care about
-//    live levels, or only alerts, or only IMD data get granular rebuilds
-//    (zero overhead for unrelated state changes).
+// 2. RealTimeRiverService singleton owns the 5-source CWC cascade cache.
+//    ALL screens (India Map, Stations tab, All Places) consume the SAME
+//    instance via liveRiverProvider — no duplicate HTTP calls, live data
+//    appears everywhere at the same time.
 //
-// 3. ThemeProvider singleton is similarly wrapped.  The legacy
-//    ListenableBuilder pattern in main.dart is replaced by ref.watch(themeProvider).
-//
-// 4. All providers are global constants — compatible with both
-//    ConsumerWidget and Consumer (no context gymnastics).
+// 3. Derived providers are "select" slices for granular widget rebuilds.
 //
 // USAGE IN SCREENS
 // ─────────────────
-//   // Extend ConsumerWidget instead of StatelessWidget
-//   class HomeScreen extends ConsumerWidget {
-//     @override
-//     Widget build(BuildContext context, WidgetRef ref) {
-//       // Full service (rebuilds on every notifyListeners)
-//       final rts = ref.watch(realTimeProvider);
+//   // Watch all city river results:
+//   final results = ref.watch(liveRiverResultsProvider);
 //
-//       // Granular slice (rebuilds ONLY when liveLevels list changes)
-//       final levels = ref.watch(liveLevelsProvider);
-//
-//       // Async refresh on button tap
-//       ref.read(realTimeProvider).refreshData();
-//     }
-//   }
+//   // Watch one city:
+//   final patna = ref.watch(cityLiveRiverProvider('Patna'));
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,30 +28,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/flood_data.dart';
 import '../services/imd_service.dart';
 import '../services/ndma_service.dart';
+import '../services/real_time_river_service.dart';
 import '../services/real_time_service.dart';
 import 'theme_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CORE SERVICE PROVIDER
+// CORE SERVICE PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Root provider for the entire RealTimeService.
-/// ChangeNotifierProvider automatically subscribes to notifyListeners(),
-/// so ref.watch(realTimeProvider) rebuilds whenever any service state changes.
-///
-/// This is a singleton-backed provider: RealTimeService() always returns
-/// the same instance regardless of how many times the provider is read.
+/// Root provider for RealTimeService (IMD/NDMA enrichment + polling loop).
 final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
   (ref) => RealTimeService(),
   name: 'realTimeProvider',
 );
 
+/// Root provider for RealTimeRiverService (5-source CWC cascade).
+/// All screens share this singleton — Stations tab, India Map, All Places.
+/// Using this provider instead of constructing RealTimeRiverService() directly
+/// ensures:
+///   - One shared cache (no duplicate bulk HTTP calls)
+///   - Live data appears everywhere at the same time
+///   - Riverpod rebuilds widgets when notifyListeners() fires after fetchAll()
+final liveRiverProvider = ChangeNotifierProvider<RealTimeRiverService>(
+  (ref) => RealTimeRiverService.instance,
+  name: 'liveRiverProvider',
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
-// DERIVED "SELECT" PROVIDERS — granular rebuilds
+// DERIVED — RealTimeService slices
 // ─────────────────────────────────────────────────────────────────────────────
-// Each derived provider reads a slice of RealTimeService.
-// Riverpod only rebuilds widgets that watch a specific slice when THAT
-// specific slice changes — preventing unnecessary rebuilds across screens.
 
 /// List of all fused + IMD-enriched FloodData items, sorted by capacity.
 final liveLevelsProvider = Provider<List<FloodData>>(
@@ -134,6 +125,53 @@ final monitoringDataProvider = Provider(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DERIVED — RealTimeRiverService slices
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// All LiveRiverResult items from the last fetchAll() call.
+/// Stations tab and All Places page should watch this instead of
+/// calling RealTimeRiverService() directly.
+final liveRiverResultsProvider = Provider<List<LiveRiverResult>>(
+  (ref) => ref.watch(liveRiverProvider).lastResults,
+  name: 'liveRiverResultsProvider',
+);
+
+/// LiveRiverResult for a specific city name (case-insensitive).
+/// Returns null if the city hasn't been fetched yet or returned NO_DATA.
+///
+/// Usage:
+///   final result = ref.watch(cityLiveRiverProvider('Patna'));
+final cityLiveRiverProvider = Provider.family<LiveRiverResult?, String>(
+  (ref, cityName) {
+    final lc = cityName.toLowerCase();
+    final results = ref.watch(liveRiverResultsProvider);
+    for (final r in results) {
+      if (r.station.city.toLowerCase() == lc) return r;
+    }
+    return null;
+  },
+  name: 'cityLiveRiverProvider',
+);
+
+/// True when at least one city has real (non-NO_DATA) live river data.
+final hasLiveRiverDataProvider = Provider<bool>(
+  (ref) => ref.watch(liveRiverResultsProvider).any((r) => r.source != 'NO_DATA'),
+  name: 'hasLiveRiverDataProvider',
+);
+
+/// Count of cities with real live data vs total monitored.
+final liveRiverCoverageProvider = Provider<({int live, int total})>(
+  (ref) {
+    final results = ref.watch(liveRiverResultsProvider);
+    return (
+      live:  results.where((r) => r.source != 'NO_DATA').length,
+      total: results.length,
+    );
+  },
+  name: 'liveRiverCoverageProvider',
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PASS 4 — IMD + NDMA PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -167,14 +205,10 @@ final hasActiveImdWarningProvider = Provider<bool>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PER-CITY PROVIDER FAMILY
+// PER-CITY — RealTimeService family
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Returns FloodData for a specific city name (case-insensitive).
-/// City detail screens use this instead of searching liveLevels manually.
-///
-/// Usage:
-///   final data = ref.watch(cityDataProvider('Patna'));
 final cityDataProvider = Provider.family<FloodData?, String>(
   (ref, cityName) => ref.watch(realTimeProvider).dataForCity(cityName),
   name: 'cityDataProvider',
@@ -201,8 +235,7 @@ final stateEmergencyContactsProvider =
 );
 
 /// River trend history for a specific city (24-hr snapshots).
-final cityTrendProvider =
-    Provider.family<List<dynamic>, String>(
+final cityTrendProvider = Provider.family<List<dynamic>, String>(
   (ref, cityName) =>
       ref.watch(realTimeProvider).trendForCity(cityName),
   name: 'cityTrendProvider',
@@ -213,8 +246,6 @@ final cityTrendProvider =
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// ThemeProvider wrapped in a ChangeNotifierProvider.
-/// main.dart replaces ListenableBuilder + ThemeProvider() singleton calls
-/// with ref.watch(themeProvider).mode / .label / .icon.
 final themeProvider = ChangeNotifierProvider<ThemeProvider>(
   (ref) => ThemeProvider(),
   name: 'themeProvider',

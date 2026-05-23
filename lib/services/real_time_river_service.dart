@@ -1,12 +1,12 @@
 // lib/services/real_time_river_service.dart
-// OpsFlood — Real-Time River Data Service  (Dr. APJ Abdul Kalam Edition v5)
+// OpsFlood — Real-Time River Data Service  (Dr. APJ Abdul Kalam Edition v6)
 //
 // ARCHITECTURE — 5-source cascade per city:
 //
 //   SOURCE 0: /api/live-telemetry?all_states=true&limit=1000
 //             Single bulk call — warms ALL states at once.
-//             This is the most important optimisation: one request vs 28.
-//             If Render is cold, we retry with a longer timeout.
+//             Cold-start guard: if bulk returns empty, retried once with a
+//             50-second timeout before the cascade falls through.
 //
 //   SOURCE 1: /api/live-telemetry?state=X&limit=500
 //             Per-state fallback for cities missed in bulk call.
@@ -19,9 +19,7 @@
 //
 //   SOURCE 4: /api/cwc-reservoir/state?state=STATE
 //             Reservoir level for dam-adjacent cities.
-//             NOTE: Results are cached per-state for the full cache TTL.
-//             Each state is fetched at most once per poll cycle, not once
-//             per city. This eliminates the N+1 fan-out (95 calls → 28).
+//             Cached per-state for the full cache TTL.
 //
 // DATA INTEGRITY RULES:
 //   1. A level must be > 0 to be used. Never display 0 as a real reading.
@@ -29,10 +27,14 @@
 //   3. NO_DATA is honest. Phantom values are unacceptable.
 //   4. ML prediction only runs with real confirmed levels.
 //
-// "Science is the key to our future. If you don't believe in science,
-//  then you're holding everybody else back." — APJ Abdul Kalam
+// SINGLETON RULE:
+//   Always use RealTimeRiverService.instance.
+//   All screens (India Map, Stations tab, All Places) share one cache.
+//   This means zero duplicate HTTP calls and live data appears everywhere
+//   at the same time.
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../constants.dart';
 import '../models/river_station.dart';
 import 'api_service.dart';
@@ -58,34 +60,42 @@ class LiveRiverResult {
   });
 }
 
-// ── Service ───────────────────────────────────────────────────────────────────
-class RealTimeRiverService {
-  final ApiService _api;
+void _log(String msg) {
+  if (kDebugMode) debugPrint('[RTRS] $msg');
+}
 
-  // ── Single shared cache ───────────────────────────────────────────────────
-  // bulkList: all stations from /api/live-telemetry?all_states=true
-  // stateCache: per-state telemetry lists (populated lazily)
-  // liveLevels: from /api/live-levels
-  // reservoirCache: per-state reservoir lists (SOURCE 4) — dedup N+1 fan-out
+// ── Service ───────────────────────────────────────────────────────────────────
+class RealTimeRiverService extends ChangeNotifier {
+  // ── True singleton ────────────────────────────────────────────────────────
+  static final RealTimeRiverService instance = RealTimeRiverService._internal();
+  factory RealTimeRiverService() => instance;
+  RealTimeRiverService._internal();
+
+  final ApiService _api = ApiService();
+
+  // ── Shared cache ──────────────────────────────────────────────────────────
   List<dynamic>                    _bulkList       = [];
   final Map<String, List<dynamic>> _stateCache     = {};
   final Map<String, List<dynamic>> _reservoirCache = {};
   List<dynamic>                    _liveLevels     = [];
   DateTime?                        _cacheTime;
-  static const Duration _cacheTTL = Duration(minutes: 5);
+  bool                             _warmingUp      = false;
+  List<LiveRiverResult>            _lastResults    = [];
 
-  // Render free tier cold-start can take up to 25s
-  static const _bulkTimeout   = Duration(seconds: 28);
-  static const _stateTimeout  = Duration(seconds: 16);
-  static const _ffsTimeout    = Duration(seconds: 12);
-  static const _resTimeout    = Duration(seconds: 10);
-  static const _predTimeout   = Duration(seconds: 8);
-
-  RealTimeRiverService({ApiService? api}) : _api = api ?? ApiService();
+  static const Duration _cacheTTL    = Duration(minutes: 5);
+  static const _bulkTimeout          = Duration(seconds: 28);
+  static const _bulkRetryTimeout     = Duration(seconds: 50); // cold-start retry
+  static const _stateTimeout         = Duration(seconds: 16);
+  static const _ffsTimeout           = Duration(seconds: 12);
+  static const _resTimeout           = Duration(seconds: 10);
+  static const _predTimeout          = Duration(seconds: 8);
 
   bool get _cacheValid =>
       _cacheTime != null &&
       DateTime.now().difference(_cacheTime!) < _cacheTTL;
+
+  // Public: last fetched results (empty until first fetchAll completes)
+  List<LiveRiverResult> get lastResults => _lastResults;
 
   // ══════════════════════════════════════════════════════════════════════════
   // PUBLIC: Fetch all monitored cities
@@ -100,7 +110,10 @@ class RealTimeRiverService {
           warningLevel: _fp(mc['warning_level']),
           dangerLevel:  _fp(mc['danger_level']),
         ));
-    return Future.wait(futures);
+    final results = await Future.wait(futures);
+    _lastResults = results;
+    notifyListeners();
+    return results;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -129,12 +142,16 @@ class RealTimeRiverService {
   // PUBLIC: Force refresh
   // ══════════════════════════════════════════════════════════════════════════
   Future<List<LiveRiverResult>> refresh() async {
+    _invalidateCache();
+    return fetchAll();
+  }
+
+  void _invalidateCache() {
     _cacheTime = null;
     _bulkList  = [];
     _stateCache.clear();
     _reservoirCache.clear();
     _liveLevels = [];
-    return fetchAll();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -149,7 +166,7 @@ class RealTimeRiverService {
   }) async {
     final hfl = dangerLevel > 0 ? dangerLevel * 1.10 : warningLevel * 1.25;
 
-    // ── SOURCE 0: Bulk all-states list (fastest, already in memory) ──────
+    // ── SOURCE 0: Bulk all-states list ────────────────────────────────────
     if (_bulkList.isNotEmpty) {
       final m = _bestMatch(_bulkList, city, state, river);
       if (m != null && m.confidence >= 0.40) {
@@ -165,7 +182,7 @@ class RealTimeRiverService {
       }
     }
 
-    // ── SOURCE 1: Per-state telemetry (lazy-fetched) ─────────────────────
+    // ── SOURCE 1: Per-state telemetry (lazy-fetched) ──────────────────────
     final stKey = _stateKey(state);
     if (!_stateCache.containsKey(stKey)) {
       try {
@@ -192,7 +209,7 @@ class RealTimeRiverService {
       }
     }
 
-    // ── SOURCE 2: Live levels (global aggregated list) ───────────────────
+    // ── SOURCE 2: Live levels (global aggregated list) ────────────────────
     if (_liveLevels.isNotEmpty) {
       final m = _bestMatch(_liveLevels, city, state, river);
       if (m != null && m.confidence >= 0.40) {
@@ -208,7 +225,7 @@ class RealTimeRiverService {
       }
     }
 
-    // ── SOURCE 3: CWC FFS per-city (direct, slower) ──────────────────────
+    // ── SOURCE 3: CWC FFS per-city (direct, slower) ───────────────────────
     try {
       final ffs = await _api.getFloodForecast(city: city, state: state)
           .timeout(_ffsTimeout);
@@ -226,10 +243,7 @@ class RealTimeRiverService {
       }
     } catch (_) {}
 
-    // ── SOURCE 4: Reservoir levels (dam-adjacent cities) ─────────────────
-    // FIX: Cache per-state so each state is fetched at most once per poll cycle.
-    // Previously this fired one HTTP call per city, causing ~95 duplicate
-    // reservoir calls (same state hit 4-6x) per cycle → Render health timeouts.
+    // ── SOURCE 4: Reservoir levels (dam-adjacent cities) ──────────────────
     if (!_reservoirCache.containsKey(stKey)) {
       try {
         final res = await _api.getReservoirLevels(state: state)
@@ -258,7 +272,13 @@ class RealTimeRiverService {
       }
     }
 
-    // ── ALL SOURCES EXHAUSTED — honest NO_DATA ───────────────────────────
+    // ── ALL SOURCES EXHAUSTED — honest NO_DATA ────────────────────────────
+    // Only log if we are not in the middle of a cold-start wake-up retry
+    // (during retry _warmingUp is true — the per-city message would spam
+    //  the log 63 times before the retry result is even known).
+    if (!_warmingUp) {
+      _log('NO_DATA: $city ($state) — all 5 sources exhausted');
+    }
     return LiveRiverResult(
       station: RiverStation(
         city: city, state: state, river: river,
@@ -273,32 +293,55 @@ class RealTimeRiverService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // CACHE WARMER
-  // Key insight: one bulk call /api/live-telemetry?all_states=true&limit=1000
-  // returns all stations in a single HTTP round-trip.
-  // This avoids 28 parallel state calls hammering the Render free-tier.
-  // If Render is cold (first wake), we use a 28-second timeout.
+  // CACHE WARMER  (with cold-start retry)
+  //
+  // First attempt uses _bulkTimeout (28 s).  If the Render free-tier pod is
+  // sleeping, it may not respond in time and the list comes back empty.
+  // In that case we retry once with _bulkRetryTimeout (50 s) while setting
+  // _warmingUp = true so per-city NO_DATA log lines are suppressed.
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _warmCache({bool force = false}) async {
     if (!force && _cacheValid) return;
 
-    // ── Bulk all-states fetch ─────────────────────────────────────────────
+    // ── First attempt: 28-second bulk fetch ───────────────────────────────
+    List<dynamic> bulkResult = [];
     try {
       final bulk = await _api.getAllLiveTelemetry().timeout(_bulkTimeout);
-      final list = _deepList(bulk);
-      if (list.isNotEmpty) {
-        _bulkList = list;
-        // Also populate per-state sub-caches from bulk data
-        // (avoids redundant per-state calls later)
-        for (final item in list.whereType<Map<String, dynamic>>()) {
-          final st = _s(item['state_name'] ?? item['state'] ?? item['stateName'] ?? '');
-          if (st.isNotEmpty) {
-            _stateCache.putIfAbsent(st, () => []).add(item);
-          }
+      bulkResult = _deepList(bulk);
+    } catch (_) {
+      bulkResult = [];
+    }
+
+    // ── Cold-start guard: retry with longer timeout if bulk was empty ──────
+    if (bulkResult.isEmpty) {
+      _log('Bulk empty on first try — Render may be cold-starting. Retrying with 50 s timeout...');
+      _warmingUp = true;
+      try {
+        final bulk2 = await _api.getAllLiveTelemetry().timeout(_bulkRetryTimeout);
+        bulkResult = _deepList(bulk2);
+        if (bulkResult.isNotEmpty) {
+          _log('Cold-start retry succeeded: ${bulkResult.length} stations received');
+        } else {
+          _log('Cold-start retry also returned empty — backend may be down');
+        }
+      } catch (e) {
+        _log('Cold-start retry failed: $e');
+        bulkResult = [];
+      } finally {
+        _warmingUp = false;
+      }
+    }
+
+    if (bulkResult.isNotEmpty) {
+      _bulkList = bulkResult;
+      // Populate per-state sub-caches from bulk data
+      for (final item in bulkResult.whereType<Map<String, dynamic>>()) {
+        final st = _s(item['state_name'] ?? item['state'] ?? item['stateName'] ?? '');
+        if (st.isNotEmpty) {
+          _stateCache.putIfAbsent(_stateKey(st), () => []).add(item);
         }
       }
-    } catch (_) {
-      // Render cold-start or network error — bulk failed, per-state will fallback
+    } else {
       _bulkList = [];
     }
 
@@ -328,7 +371,6 @@ class RealTimeRiverService {
     required String source,
     required double confidence,
   }) async {
-    // Extract all fields, falling back to caller-supplied thresholds
     final wlR = _fp(record['warning_level'] ?? record['warningLevel'] ?? record['wl'])
         .let((v) => v > 0 ? v : wl);
     final dlR = _fp(record['danger_level']  ?? record['dangerLevel']  ?? record['dl'])
@@ -434,12 +476,12 @@ class RealTimeRiverService {
                   ?? item['river_basin']  ?? item['basin']        ?? item['River'] ?? '');
 
       double conf = 0.0;
-      if      (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', ''))     conf = 1.00;
-      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))            conf = 0.90;
+      if      (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', ''))          conf = 1.00;
+      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))                conf = 0.90;
       else if (_tok(sc, lc) && lr.isNotEmpty && rv.contains(lr) && ist.contains(ls)) conf = 0.85;
-      else if (_tok(sc, lc))                                                       conf = 0.80;
+      else if (_tok(sc, lc))                                                          conf = 0.80;
       else if (lr.isNotEmpty && rv.contains(lr) && ist.isNotEmpty && ist.contains(ls)) conf = 0.70;
-      else if (lr.isNotEmpty && rv.contains(lr))                                  conf = 0.60;
+      else if (lr.isNotEmpty && rv.contains(lr))                                      conf = 0.60;
       else if (ls.isNotEmpty && ist.contains(ls) && lr.isNotEmpty && _rvTok(rv, lr)) conf = 0.45;
 
       if (conf > (best?.confidence ?? 0)) {
@@ -507,7 +549,6 @@ class RealTimeRiverService {
           if (inner.isNotEmpty) return inner;
         }
       }
-      // If the map itself is a station record, wrap it
       if (payload.containsKey('river_level')   ||
           payload.containsKey('water_level')   ||
           payload.containsKey('gauge_reading') ||
@@ -524,9 +565,6 @@ class RealTimeRiverService {
   // ══════════════════════════════════════════════════════════════════════════
   // HELPERS
   // ══════════════════════════════════════════════════════════════════════════
-
-  // Unique state cache key that avoids collisions like
-  // 'Bilaspur, Chhattisgarh' vs 'Bilaspur, Himachal Pradesh'
   String _stateKey(String state) => state.toLowerCase().replaceAll(' ', '_');
 
   static double _fp(dynamic v) =>
