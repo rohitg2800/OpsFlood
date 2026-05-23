@@ -9,7 +9,6 @@ plugins {
     // END: FlutterFire Configuration
     id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
 }
 
 extensions.configure<ApplicationExtension> {
