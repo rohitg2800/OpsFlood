@@ -2,29 +2,28 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-import '../services/cwc_live_provider.dart';
-import '../services/real_time_service.dart';
+import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 import '../widgets/flood_gauge.dart';
 import '../widgets/river_level_visualizer.dart';
 
 // ─── color palette ────────────────────────────────────────────────────────────
-const _kBg       = Color(0xFF060D14);
-const _kCard     = Color(0xFF0D1B26);
-const _kCardBdr  = Color(0xFF1A2E3E);
-const _kCyan     = Color(0xFF00C2DE);
-const _kGreen    = Color(0xFF22C55E);
-const _kYellow   = Color(0xFFF59E0B);
-const _kOrange   = Color(0xFFEA580C);
-const _kRed      = Color(0xFFEF4444);
-const _kPurple   = Color(0xFF8B5CF6);
-const _kText     = Color(0xFFE2EAF0);
-const _kSub      = Color(0xFF6B8699);
+const _kBg      = Color(0xFF060D14);
+const _kCard    = Color(0xFF0D1B26);
+const _kCyan    = Color(0xFF00C2DE);
+const _kGreen   = Color(0xFF22C55E);
+const _kYellow  = Color(0xFFF59E0B);
+const _kOrange  = Color(0xFFEA580C);
+const _kRed     = Color(0xFFEF4444);
+const _kPurple  = Color(0xFF8B5CF6);
+const _kText    = Color(0xFFE2EAF0);
+const _kSub     = Color(0xFF6B8699);
 
 Color _riskColor(String risk) {
   switch (risk) {
@@ -45,22 +44,19 @@ String _riskEmoji(String risk) {
 }
 
 // ─── screen ───────────────────────────────────────────────────────────────────
-class MonitorsScreen extends StatefulWidget {
+class MonitorsScreen extends ConsumerStatefulWidget {
   const MonitorsScreen({super.key});
   @override
-  State<MonitorsScreen> createState() => _MonitorsScreenState();
+  ConsumerState<MonitorsScreen> createState() => _MonitorsScreenState();
 }
 
-class _MonitorsScreenState extends State<MonitorsScreen>
+class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
     with SingleTickerProviderStateMixin {
-  final RealTimeService _svc = RealTimeService();
   late AnimationController _pulseCtrl;
-  int _lastHash = 0;
 
   @override
   void initState() {
     super.initState();
-    _svc.addListener(_onUpdate);
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -69,42 +65,33 @@ class _MonitorsScreenState extends State<MonitorsScreen>
 
   @override
   void dispose() {
-    _svc.removeListener(_onUpdate);
     _pulseCtrl.dispose();
     super.dispose();
   }
 
-  void _onUpdate() {
-    final h = _svc.liveLevels.length ^
-        (_svc.lastFetchTime?.millisecondsSinceEpoch ?? 0);
-    if (h != _lastHash) {
-      _lastHash = h;
-      if (mounted) setState(() {});
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final levels = List<FloodData>.from(_svc.liveLevels)
+    final svc      = ref.watch(realTimeProvider);
+    final levels   = List<FloodData>.from(svc.liveLevels)
       ..sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
 
-    final critical  = levels.where((l) => l.riskLevel == 'CRITICAL').length;
-    final highRisk  = levels.where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL').length;
-    final liveTime  = _svc.lastFetchTime == null
+    final critical = levels.where((l) => l.riskLevel == 'CRITICAL').length;
+    final highRisk = levels.where((l) => l.riskLevel == 'HIGH' || l.riskLevel == 'CRITICAL').length;
+    final liveTime = svc.lastFetchTime == null
         ? 'Waiting…'
-        : 'Live at ${DateFormat('HH:mm:ss').format(_svc.lastFetchTime!.toLocal())}';
+        : 'Live at ${DateFormat('HH:mm:ss').format(svc.lastFetchTime!.toLocal())}';
 
     return Scaffold(
       backgroundColor: _kBg,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _svc.refreshData,
+          onRefresh: svc.refreshData,
           color: _kCyan,
           backgroundColor: _kCard,
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              // ── header ──────────────────────────────────────────────────────
+              // ── header ────────────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
@@ -120,7 +107,6 @@ class _MonitorsScreenState extends State<MonitorsScreen>
                                   fontSize: 24,
                                   letterSpacing: -0.5)),
                           const Spacer(),
-                          // pulsing LIVE badge
                           AnimatedBuilder(
                             animation: _pulseCtrl,
                             builder: (_, __) => Container(
@@ -164,30 +150,25 @@ class _MonitorsScreenState extends State<MonitorsScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(liveTime,
-                          style: const TextStyle(
-                              color: _kSub, fontSize: 12)),
+                          style: const TextStyle(color: _kSub, fontSize: 12)),
                       const SizedBox(height: 14),
-                      // ── summary strip ────────────────────────────────────
                       Row(
                         children: [
-                          Expanded(
-                              child: _SummaryTile(
+                          Expanded(child: _SummaryTile(
                             value: '${levels.length}',
                             label: 'Stations',
                             icon: Icons.sensors,
                             accent: _kCyan,
                           )),
                           const SizedBox(width: 10),
-                          Expanded(
-                              child: _SummaryTile(
+                          Expanded(child: _SummaryTile(
                             value: '$highRisk',
                             label: 'High Risk',
                             icon: Icons.warning_amber_rounded,
                             accent: _kOrange,
                           )),
                           const SizedBox(width: 10),
-                          Expanded(
-                              child: _SummaryTile(
+                          Expanded(child: _SummaryTile(
                             value: '$critical',
                             label: 'Critical',
                             icon: Icons.crisis_alert,
@@ -201,7 +182,7 @@ class _MonitorsScreenState extends State<MonitorsScreen>
                 ),
               ),
 
-              // ── cards ────────────────────────────────────────────────────
+              // ── cards ──────────────────────────────────────────────────────
               if (levels.isEmpty)
                 const SliverFillRemaining(
                     child: Center(
@@ -213,7 +194,7 @@ class _MonitorsScreenState extends State<MonitorsScreen>
                     delegate: SliverChildBuilderDelegate(
                       (ctx, i) {
                         final item    = levels[i];
-                        final history = _svc.trendForCity(item.city);
+                        final history = svc.trendForCity(item.city);
                         return _MonitorCard(
                           key: ValueKey(item.city),
                           item: item,
@@ -236,10 +217,10 @@ class _MonitorsScreenState extends State<MonitorsScreen>
 
 // ─── summary tile ─────────────────────────────────────────────────────────────
 class _SummaryTile extends StatelessWidget {
-  final String value;
-  final String label;
+  final String   value;
+  final String   label;
   final IconData icon;
-  final Color accent;
+  final Color    accent;
   const _SummaryTile({
     required this.value,
     required this.label,
@@ -269,8 +250,7 @@ class _SummaryTile extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                       fontSize: 18)),
               Text(label,
-                  style: const TextStyle(
-                      color: _kSub, fontSize: 10)),
+                  style: const TextStyle(color: _kSub, fontSize: 10)),
             ],
           ),
         ],
@@ -281,10 +261,10 @@ class _SummaryTile extends StatelessWidget {
 
 // ─── monitor card ─────────────────────────────────────────────────────────────
 class _MonitorCard extends StatelessWidget {
-  final FloodData item;
+  final FloodData              item;
   final List<RiverLevelSnapshot> history;
-  final AnimationController pulseCtrl;
-  final int rank;
+  final AnimationController    pulseCtrl;
+  final int                    rank;
   const _MonitorCard({
     super.key,
     required this.item,
@@ -295,12 +275,12 @@ class _MonitorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final riskC    = _riskColor(item.riskLevel);
-    final isCrit   = item.capacityPercent >= 85.0;
-    final pct      = item.capacityPercent.clamp(0.0, 100.0) / 100.0;
-    final lvlText  = item.currentLevel.toStringAsFixed(2);
-    final dangerM  = item.dangerLevel.toStringAsFixed(1);
-    final warnM    = item.warningLevel.toStringAsFixed(1);
+    final riskC   = _riskColor(item.riskLevel);
+    final isCrit  = item.capacityPercent >= 85.0;
+    final pct     = item.capacityPercent.clamp(0.0, 100.0) / 100.0;
+    final lvlText = item.currentLevel.toStringAsFixed(2);
+    final dangerM = item.dangerLevel.toStringAsFixed(1);
+    final warnM   = item.warningLevel.toStringAsFixed(1);
 
     return AnimatedBuilder(
       animation: pulseCtrl,
@@ -320,10 +300,7 @@ class _MonitorCard extends StatelessWidget {
               width: isCrit ? 1.5 : 1.0,
             ),
             boxShadow: [
-              BoxShadow(
-                  color: glow,
-                  blurRadius: 20,
-                  spreadRadius: 2)
+              BoxShadow(color: glow, blurRadius: 20, spreadRadius: 2)
             ],
           ),
           child: child,
@@ -332,13 +309,11 @@ class _MonitorCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── top row: level viz + gauge + info ───────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // rank badge
                 Container(
                   width: 26, height: 26,
                   margin: const EdgeInsets.only(right: 10, top: 2),
@@ -380,7 +355,7 @@ class _MonitorCard extends StatelessWidget {
             ),
           ),
 
-          // ── capacity bar ────────────────────────────────────────────────
+          // ── capacity bar ──────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Column(
@@ -389,9 +364,10 @@ class _MonitorCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Capacity',
-                        style: const TextStyle(
-                            color: _kSub, fontSize: 10,
+                    const Text('Capacity',
+                        style: TextStyle(
+                            color: _kSub,
+                            fontSize: 10,
                             fontWeight: FontWeight.w500)),
                     Text(
                       '${item.capacityPercent.toStringAsFixed(0)}%  ${_riskEmoji(item.riskLevel)} ${item.riskLevel}',
@@ -425,7 +401,6 @@ class _MonitorCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      // warning tick at 70%
                       Positioned(
                         left: MediaQuery.of(context).size.width * 0.70 * 0.62,
                         child: Container(
@@ -440,36 +415,28 @@ class _MonitorCard extends StatelessWidget {
             ),
           ),
 
-          // ── threshold chips ─────────────────────────────────────────────
+          // ── chips ─────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Wrap(
               spacing: 8,
               runSpacing: 6,
               children: [
-                _Chip(
-                    icon: Icons.warning_amber_rounded,
-                    label: 'Danger: $dangerM m',
-                    color: _kRed),
-                _Chip(
-                    icon: Icons.trending_up,
-                    label: 'Warning: $warnM m',
-                    color: _kYellow),
-                _Chip(
-                    icon: Icons.water,
-                    label: '$lvlText m now',
-                    color: riskC),
+                _Chip(icon: Icons.warning_amber_rounded,
+                    label: 'Danger: $dangerM m', color: _kRed),
+                _Chip(icon: Icons.trending_up,
+                    label: 'Warning: $warnM m',  color: _kYellow),
+                _Chip(icon: Icons.water,
+                    label: '$lvlText m now',      color: riskC),
                 if (item.expectedPeakLevel != null)
-                  _Chip(
-                      icon: Icons.show_chart,
-                      label:
-                          'Peak: ${item.expectedPeakLevel!.toStringAsFixed(1)} m',
+                  _Chip(icon: Icons.show_chart,
+                      label: 'Peak: ${item.expectedPeakLevel!.toStringAsFixed(1)} m',
                       color: _kPurple),
               ],
             ),
           ),
 
-          // ── sparkline ───────────────────────────────────────────────────
+          // ── sparkline ─────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
             child: Row(
@@ -491,7 +458,6 @@ class _MonitorCard extends StatelessWidget {
             ),
           ),
 
-          // ── critical banner ─────────────────────────────────────────────
           if (isCrit)
             Container(
               width: double.infinity,
@@ -503,12 +469,11 @@ class _MonitorCard extends StatelessWidget {
                     bottomLeft: Radius.circular(20),
                     bottomRight: Radius.circular(20)),
                 border: Border(
-                    top: BorderSide(
-                        color: _kRed.withOpacity(0.25))),
+                    top: BorderSide(color: _kRed.withOpacity(0.25))),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.notification_important_rounded,
+                  const Icon(Icons.notification_important_rounded,
                       color: _kRed, size: 14),
                   const SizedBox(width: 6),
                   const Text('Critical threshold breached',
@@ -532,8 +497,7 @@ class _Chip extends StatelessWidget {
   final IconData icon;
   final String   label;
   final Color    color;
-  const _Chip(
-      {required this.icon, required this.label, required this.color});
+  const _Chip({required this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -578,9 +542,9 @@ class _GradientSparkline extends StatelessWidget {
     final pts = List<RiverLevelSnapshot>.from(history)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     if (pts.length < 2) {
-      return Center(
+      return const Center(
         child: Text('More data soon…',
-            style: const TextStyle(color: _kSub, fontSize: 10)),
+            style: TextStyle(color: _kSub, fontSize: 10)),
       );
     }
     final clipped = pts.length > 24 ? pts.sublist(pts.length - 24) : pts;
@@ -602,8 +566,7 @@ class _GradientSparkline extends StatelessWidget {
             drawVerticalLine: false,
             horizontalInterval: (maxY - minY) / 3,
             getDrawingHorizontalLine: (_) => FlLine(
-                color: Colors.white.withOpacity(0.05),
-                strokeWidth: 1),
+                color: Colors.white.withOpacity(0.05), strokeWidth: 1),
           ),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
@@ -612,17 +575,13 @@ class _GradientSparkline extends StatelessWidget {
                 reservedSize: 34,
                 getTitlesWidget: (v, _) => Text(
                   v.toStringAsFixed(0),
-                  style:
-                      const TextStyle(color: _kSub, fontSize: 8.5),
+                  style: const TextStyle(color: _kSub, fontSize: 8.5),
                 ),
               ),
             ),
-            rightTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false)),
+            rightTitles:  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles:    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
           borderData: FlBorderData(show: false),
           lineBarsData: [
@@ -647,33 +606,29 @@ class _GradientSparkline extends StatelessWidget {
           ],
           extraLinesData: ExtraLinesData(horizontalLines: [
             HorizontalLine(
-              y:           warningLevel,
-              color:       _kYellow.withOpacity(0.7),
+              y: warningLevel,
+              color: _kYellow.withOpacity(0.7),
               strokeWidth: 1,
-              dashArray:   [4, 4],
+              dashArray: [4, 4],
               label: HorizontalLineLabel(
                 show: true,
                 alignment: Alignment.topRight,
                 labelResolver: (_) => ' W ',
                 style: const TextStyle(
-                    color: _kYellow,
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold),
+                    color: _kYellow, fontSize: 8, fontWeight: FontWeight.bold),
               ),
             ),
             HorizontalLine(
-              y:           dangerLevel,
-              color:       _kRed.withOpacity(0.7),
+              y: dangerLevel,
+              color: _kRed.withOpacity(0.7),
               strokeWidth: 1.2,
-              dashArray:   [5, 4],
+              dashArray: [5, 4],
               label: HorizontalLineLabel(
                 show: true,
                 alignment: Alignment.topRight,
                 labelResolver: (_) => ' D ',
                 style: const TextStyle(
-                    color: _kRed,
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold),
+                    color: _kRed, fontSize: 8, fontWeight: FontWeight.bold),
               ),
             ),
           ]),

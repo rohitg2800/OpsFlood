@@ -1,69 +1,46 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-import '../services/real_time_service.dart';
+import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 import '../widgets/flood_gauge.dart';
 import '../widgets/river_level_visualizer.dart';
 
-class IndiaRiverExplorerScreen extends StatefulWidget {
+class IndiaRiverExplorerScreen extends ConsumerStatefulWidget {
   const IndiaRiverExplorerScreen({super.key});
 
   @override
-  State<IndiaRiverExplorerScreen> createState() =>
+  ConsumerState<IndiaRiverExplorerScreen> createState() =>
       _IndiaRiverExplorerScreenState();
 }
 
 class _IndiaRiverExplorerScreenState
-    extends State<IndiaRiverExplorerScreen> {
-  final RealTimeService _svc = RealTimeService();
-  int _lastHash = 0;
-
-  String _selectedState = 'All India';
+    extends ConsumerState<IndiaRiverExplorerScreen> {
+  String  _selectedState = 'All India';
   String? _selectedCity;
-  String _searchQuery = '';
-  String _riskFilter = 'ALL';
+  String  _searchQuery   = '';
+  String  _riskFilter    = 'ALL';
 
   final TextEditingController _searchCtrl = TextEditingController();
 
   @override
-  void initState() {
-    super.initState();
-    // FIX 1: Do NOT call startPolling() — HomeScreen owns polling.
-    _svc.addListener(_onUpdate);
-  }
-
-  @override
   void dispose() {
-    _svc.removeListener(_onUpdate);
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  // FIX 4: Only rebuild when data actually changes.
-  void _onUpdate() {
-    final h = _svc.liveLevels.length ^
-        (_svc.lastFetchTime?.millisecondsSinceEpoch ?? 0);
-    if (h != _lastHash) {
-      _lastHash = h;
-      if (mounted) setState(() {});
-    }
-  }
-
-  List<FloodData> get _filtered {
-    return _svc.liveLevels.where((d) {
-      final stateMatch =
-          _selectedState == 'All India' || d.state == _selectedState;
-      final cityMatch =
-          _selectedCity == null || d.city == _selectedCity;
-      final riskMatch =
-          _riskFilter == 'ALL' || d.riskLevel == _riskFilter;
-      final q = _searchQuery.toLowerCase();
-      final textMatch = q.isEmpty ||
+  List<FloodData> _filtered(List<FloodData> source) {
+    return source.where((d) {
+      final stateMatch = _selectedState == 'All India' || d.state == _selectedState;
+      final cityMatch  = _selectedCity == null || d.city == _selectedCity;
+      final riskMatch  = _riskFilter == 'ALL' || d.riskLevel == _riskFilter;
+      final q          = _searchQuery.toLowerCase();
+      final textMatch  = q.isEmpty ||
           d.city.toLowerCase().contains(q) ||
           (d.riverName ?? '').toLowerCase().contains(q) ||
           d.state.toLowerCase().contains(q);
@@ -95,9 +72,10 @@ class _IndiaRiverExplorerScreenState
 
   @override
   Widget build(BuildContext context) {
-    final rc = RiverColors.of(context);
-    final cs = Theme.of(context).colorScheme;
-    final rows = _filtered;
+    final svc  = ref.watch(realTimeProvider);
+    final rc   = RiverColors.of(context);
+    final cs   = Theme.of(context).colorScheme;
+    final rows = _filtered(svc.liveLevels);
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -113,7 +91,7 @@ class _IndiaRiverExplorerScreenState
         actions: [
           IconButton(
             icon: Icon(Icons.refresh, color: rc.riverNormal),
-            onPressed: _svc.refreshData,
+            onPressed: svc.refreshData,
           ),
         ],
       ),
@@ -124,18 +102,14 @@ class _IndiaRiverExplorerScreenState
             child: rows.isEmpty
                 ? Center(
                     child: Text('No rivers match the current filter.',
-                        style:
-                            TextStyle(color: rc.textSecondary)))
+                        style: TextStyle(color: rc.textSecondary)))
                 : RefreshIndicator(
-                    onRefresh: _svc.refreshData,
-                    // FIX 3: SliverList (via ListView.builder) — lazy rendering,
-                    // no shrinkWrap.
+                    onRefresh: svc.refreshData,
                     child: ListView.builder(
-                      padding:
-                          const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                       itemCount: rows.length,
                       itemBuilder: (ctx, i) =>
-                          _RiverCard(data: rows[i], svc: _svc),
+                          _RiverCard(data: rows[i], svc: svc),
                     ),
                   ),
           ),
@@ -160,8 +134,7 @@ class _IndiaRiverExplorerScreenState
               prefixIcon: Icon(Icons.search, color: rc.riverNormal),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon:
-                          Icon(Icons.clear, color: rc.textSecondary),
+                      icon: Icon(Icons.clear, color: rc.textSecondary),
                       onPressed: () {
                         _searchCtrl.clear();
                         setState(() => _searchQuery = '');
@@ -169,8 +142,7 @@ class _IndiaRiverExplorerScreenState
                   : null,
               filled: true,
               fillColor: rc.cardBg,
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(30),
                 borderSide: BorderSide.none,
@@ -189,7 +161,7 @@ class _IndiaRiverExplorerScreenState
                   cs: cs,
                   onChanged: (v) => setState(() {
                     _selectedState = v ?? 'All India';
-                    _selectedCity = null;
+                    _selectedCity  = null;
                   }),
                 ),
               ),
@@ -216,9 +188,7 @@ class _IndiaRiverExplorerScreenState
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                for (final lvl in [
-                  'ALL', 'LOW', 'MODERATE', 'HIGH', 'CRITICAL'
-                ])
+                for (final lvl in ['ALL', 'LOW', 'MODERATE', 'HIGH', 'CRITICAL'])
                   Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: ChoiceChip(
@@ -234,8 +204,7 @@ class _IndiaRiverExplorerScreenState
                           ? rc.riverNormal
                           : _riskColor(lvl, context),
                       backgroundColor: rc.chipBg,
-                      onSelected: (_) =>
-                          setState(() => _riskFilter = lvl),
+                      onSelected: (_) => setState(() => _riskFilter = lvl),
                     ),
                   ),
               ],
@@ -247,18 +216,17 @@ class _IndiaRiverExplorerScreenState
   }
 }
 
-// ── River card (const-safe) ───────────────────────────────────────────────
-
+// ─── River card ───────────────────────────────────────────────────────────────
 class _RiverCard extends StatelessWidget {
   const _RiverCard({required this.data, required this.svc});
-  final FloodData data;
-  final RealTimeService svc;
+  final FloodData      data;
+  final dynamic        svc;   // RealTimeService — avoids import cycle with service
 
   @override
   Widget build(BuildContext context) {
-    final rc = RiverColors.of(context);
-    final history = svc.trendForCity(data.city);
-    final danger = data.capacityPercent >= 85.0;
+    final rc      = RiverColors.of(context);
+    final history = (svc.trendForCity(data.city) as List).cast<dynamic>();
+    final danger  = data.capacityPercent >= 85.0;
 
     Color statusColor;
     switch (data.riskLevel) {
@@ -314,8 +282,8 @@ class _RiverCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: statusColor.withOpacity(0.5)),
+                    border:
+                        Border.all(color: statusColor.withOpacity(0.5)),
                   ),
                   child: Text(data.riskLevel,
                       style: TextStyle(
@@ -379,8 +347,8 @@ class _RiverCard extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   'Updated ${DateFormat('HH:mm').format(svc.lastFetchTime!.toLocal())}',
-                  style:
-                      TextStyle(color: rc.textSecondary, fontSize: 10),
+                  style: TextStyle(
+                      color: rc.textSecondary, fontSize: 10),
                 ),
               ),
           ],
@@ -393,8 +361,8 @@ class _RiverCard extends StatelessWidget {
 class _Chip extends StatelessWidget {
   const _Chip({required this.icon, required this.text, required this.color});
   final IconData icon;
-  final String text;
-  final Color color;
+  final String   text;
+  final Color    color;
   @override
   Widget build(BuildContext context) {
     final rc = RiverColors.of(context);
@@ -410,7 +378,8 @@ class _Chip extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 12),
           const SizedBox(width: 4),
-          Text(text, style: TextStyle(color: rc.textSecondary, fontSize: 11)),
+          Text(text,
+              style: TextStyle(color: rc.textSecondary, fontSize: 11)),
         ],
       ),
     );
@@ -424,13 +393,15 @@ class _Sparkline extends StatelessWidget {
     required this.dangerLevel,
     required this.lineColor,
   });
-  final List<RiverLevelSnapshot> history;
-  final double warningLevel;
-  final double dangerLevel;
-  final Color lineColor;
+  final List<dynamic> history;
+  final double        warningLevel;
+  final double        dangerLevel;
+  final Color         lineColor;
   @override
   Widget build(BuildContext context) {
-    final pts = List<RiverLevelSnapshot>.from(history)
+    final pts = history
+        .whereType<RiverLevelSnapshot>()
+        .toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     if (pts.length < 2) {
       return Center(
@@ -441,8 +412,9 @@ class _Sparkline extends StatelessWidget {
       );
     }
     final clipped = pts.length > 24 ? pts.sublist(pts.length - 24) : pts;
-    final spots = List.generate(
-        clipped.length, (i) => FlSpot(i.toDouble(), clipped[i].level));
+    final spots   = List.generate(
+        clipped.length,
+        (i) => FlSpot(i.toDouble(), clipped[i].level));
     return LineChart(
       LineChartData(
         minY: 0,
@@ -450,16 +422,18 @@ class _Sparkline extends StatelessWidget {
         titlesData: const FlTitlesData(show: false),
         borderData: FlBorderData(
             show: true,
-            border: Border.all(color: lineColor.withOpacity(0.15))),
+            border:
+                Border.all(color: lineColor.withOpacity(0.15))),
         lineBarsData: [
           LineChartBarData(
-            spots: spots,
+            spots:    spots,
             isCurved: true,
             barWidth: 2,
-            color: lineColor,
-            dotData: const FlDotData(show: false),
-            belowBarData:
-                BarAreaData(show: true, color: lineColor.withOpacity(0.18)),
+            color:    lineColor,
+            dotData:  const FlDotData(show: false),
+            belowBarData: BarAreaData(
+                show: true,
+                color: lineColor.withOpacity(0.18)),
           ),
         ],
         extraLinesData: ExtraLinesData(horizontalLines: [
@@ -488,11 +462,11 @@ class _Dropdown extends StatelessWidget {
     required this.cs,
     required this.onChanged,
   });
-  final String? value;
-  final List<String> items;
-  final String hint;
-  final RiverColors rc;
-  final ColorScheme cs;
+  final String?            value;
+  final List<String>       items;
+  final String             hint;
+  final RiverColors        rc;
+  final ColorScheme        cs;
   final ValueChanged<String?> onChanged;
   @override
   Widget build(BuildContext context) {
@@ -507,8 +481,7 @@ class _Dropdown extends StatelessWidget {
         child: DropdownButton<String>(
           value: items.contains(value) ? value : null,
           hint: Text(hint,
-              style:
-                  TextStyle(color: rc.textSecondary, fontSize: 13)),
+              style: TextStyle(color: rc.textSecondary, fontSize: 13)),
           isExpanded: true,
           dropdownColor: rc.cardBg,
           iconEnabledColor: rc.riverNormal,
