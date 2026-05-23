@@ -3,6 +3,10 @@
 // P0 FIX: Timer.periodic stops when the app is backgrounded on Android.
 // workmanager schedules a real OS-level periodic task that survives the
 // app being backgrounded or the screen being locked.
+//
+// FIX: callbackDispatcher runs in its own Dart isolate. Workmanager must be
+// re-initialized inside the isolate before executeTask is called, otherwise
+// any internal Workmanager call throws NotInitializedError.
 
 import 'dart:convert';
 
@@ -16,6 +20,12 @@ import '../constants.dart';
 // ── Top-level callback required by workmanager (must be top-level / static) ──
 @pragma('vm:entry-point')
 void callbackDispatcher() {
+  // CRITICAL: Workmanager runs callbackDispatcher in a SEPARATE Dart isolate.
+  // The isolate has no knowledge of the main isolate's Workmanager state.
+  // We must call initialize() here (with isInDebugMode: false — we don't want
+  // the green notification badge in background tasks) before executeTask.
+  Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+
   Workmanager().executeTask((taskName, inputData) async {
     if (taskName != BackgroundService.taskName) return Future.value(true);
     try {
@@ -64,10 +74,8 @@ Future<void> _runBackgroundRefresh() async {
     if (critical.isEmpty) return;
 
     final plugin = FlutterLocalNotificationsPlugin();
-
-    // FIX: flutter_local_notifications v18+ requires named 'settings:' param
     await plugin.initialize(
-        const InitializationSettings(
+      const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS:     DarwinInitializationSettings(),
       ),
@@ -79,25 +87,24 @@ Future<void> _runBackgroundRefresh() async {
         .toString();
     final count = critical.length;
 
-    // FIX: flutter_local_notifications v18+ requires all named params for show()
-   await plugin.show(
-  _bgSummaryNotifId,
-  '🚨 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
-  '$firstCity and ${count - 1} other station${count > 1 ? 's are' : ' is'} at critical flood risk.',
-  const NotificationDetails(
-    android: AndroidNotificationDetails(
-      AppConstants.criticalAlertChannelId,
-      AppConstants.criticalAlertChannelName,
-      importance: Importance.max,
-      priority:   Priority.max,
-    ),
-    iOS: DarwinNotificationDetails(
-      presentAlert: true,
-      presentSound: true,
-    ),
-  ),
-  payload: 'background_critical',
-);
+    await plugin.show(
+      _bgSummaryNotifId,
+      '🚨 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
+      '$firstCity and ${count - 1} other station${count > 1 ? 's are' : ' is'} at critical flood risk.',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          AppConstants.criticalAlertChannelId,
+          AppConstants.criticalAlertChannelName,
+          importance: Importance.max,
+          priority:   Priority.max,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentSound: true,
+        ),
+      ),
+      payload: 'background_critical',
+    );
   } finally {
     client.close();
   }
@@ -124,6 +131,8 @@ class BackgroundService {
 
   static Future<void> init() async {
     if (_registered) return;
+    // Main isolate initialization. isInDebugMode shows a test notification
+    // badge on Android so you can verify the task fires during development.
     await Workmanager().initialize(
       callbackDispatcher,
       isInDebugMode: kDebugMode,
