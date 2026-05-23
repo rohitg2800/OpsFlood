@@ -7,6 +7,19 @@ can serve real data.
 Usage (called from app.py startup):
     from backend.glofas_cache import start_glofas_refresh_loop, INDIA_STATIONS
     asyncio.create_task(start_glofas_refresh_loop())
+
+Notes on rate-limiting
+----------------------
+Open-Meteo free-tier flood API allows ~10 req/min with 1 concurrent connection.
+We batch BATCH_SIZE stations into ONE request and space batches INTER_BATCH_DELAY
+seconds apart (sequential, NOT concurrent) to stay safely below the limit.
+
+  87 stations ÷ 10 per batch = 9 HTTP requests per refresh cycle.
+  9 requests × 7 s delay     ≈ 63 s total fetch time per cycle.
+
+The CACHE_READY flag lets callers (e.g. /api/live-telemetry) detect whether the
+first cycle has finished and serve tactical fallback data immediately on startup
+instead of waiting and timing out.
 """
 from __future__ import annotations
 
@@ -19,8 +32,6 @@ import httpx
 
 # ---------------------------------------------------------------------------
 # Indian river gauge stations — lat/lon for Open-Meteo GloFAS
-# Fields: station_name, state_name, river_name, lat, lon,
-#         warning_discharge (m3/s), danger_discharge (m3/s)
 # ---------------------------------------------------------------------------
 INDIA_STATIONS: List[Dict[str, Any]] = [
     # Maharashtra
@@ -138,9 +149,14 @@ INDIA_STATIONS: List[Dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Open-Meteo GloFAS endpoint
 # ---------------------------------------------------------------------------
-GLOFAS_API = "https://flood-api.open-meteo.com/v1/flood"
+GLOFAS_API            = "https://flood-api.open-meteo.com/v1/flood"
 REFRESH_INTERVAL_SECONDS = 3600   # re-fetch every 60 minutes
-BATCH_SIZE = 10                    # stations per API call (Open-Meteo supports multi-location)
+BATCH_SIZE            = 10        # stations per API call
+INTER_BATCH_DELAY     = 7.0       # seconds between sequential batches (≈ 8 req/min)
+
+# Callers can read this flag to decide whether the cache is warm.
+# Set to True after the first successful fetch cycle completes.
+CACHE_READY: bool = False
 
 
 async def _fetch_glofas_batch(
@@ -148,19 +164,19 @@ async def _fetch_glofas_batch(
     stations: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
-    Fetch GloFAS river_discharge for a batch of stations.
+    Fetch GloFAS river_discharge for a single batch of stations.
     Open-Meteo flood API supports comma-separated lat/lon lists.
-    Returns a list of enriched station dicts.
+    Returns a list of enriched station dicts (empty on any error).
     """
     lats = ",".join(str(s["lat"]) for s in stations)
     lons = ",".join(str(s["lon"]) for s in stations)
 
     params = {
-        "latitude":         lats,
-        "longitude":        lons,
-        "daily":            "river_discharge",
-        "forecast_days":    1,
-        "models":           "seamless_v4",
+        "latitude":      lats,
+        "longitude":     lons,
+        "daily":         "river_discharge",
+        "forecast_days": 1,
+        "models":        "seamless_v4",
     }
 
     try:
@@ -171,7 +187,6 @@ async def _fetch_glofas_batch(
         print(f"[glofas_cache] ⚠️  batch fetch failed: {exc}")
         return []
 
-    # Open-Meteo returns a list when multiple locations are requested
     locations = payload if isinstance(payload, list) else [payload]
     results: List[Dict[str, Any]] = []
     now_iso = datetime.datetime.utcnow().isoformat() + "Z"
@@ -197,34 +212,48 @@ async def _fetch_glofas_batch(
             risk = "LOW"
 
         results.append({
-            "station_name":       station["station_name"],
-            "state_name":         station["state_name"],
-            "river_name":         station["river_name"],
-            "lat":                station["lat"],
-            "lon":                station["lon"],
-            "river_discharge":    round(discharge, 2),
-            "warning_discharge":  warning_q,
-            "danger_discharge":   danger_q,
-            "risk_level":         risk,
-            "timestamp":          now_iso,
-            "source":             "OPEN_METEO_GLOFAS",
+            "station_name":      station["station_name"],
+            "state_name":        station["state_name"],
+            "river_name":        station["river_name"],
+            "lat":               station["lat"],
+            "lon":               station["lon"],
+            "river_discharge":   round(discharge, 2),
+            "warning_discharge": warning_q,
+            "danger_discharge":  danger_q,
+            "risk_level":        risk,
+            "timestamp":         now_iso,
+            "source":            "OPEN_METEO_GLOFAS",
         })
 
     return results
 
 
 async def fetch_all_glofas() -> List[Dict[str, Any]]:
-    """Fetch GloFAS discharge for all INDIA_STATIONS in parallel batches."""
+    """
+    Fetch GloFAS discharge for all INDIA_STATIONS using sequential batches
+    with INTER_BATCH_DELAY between each to avoid 429 rate-limit errors.
+
+    Sequential (not concurrent) is intentional — Open-Meteo free tier
+    allows only 1 concurrent connection and ~10 req/min.
+    """
     all_results: List[Dict[str, Any]] = []
+    total = len(INDIA_STATIONS)
+    num_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+
     async with httpx.AsyncClient() as client:
-        tasks = [
-            _fetch_glofas_batch(client, INDIA_STATIONS[i: i + BATCH_SIZE])
-            for i in range(0, len(INDIA_STATIONS), BATCH_SIZE)
-        ]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-        for batch in batch_results:
-            if isinstance(batch, list):
-                all_results.extend(batch)
+        for batch_num, start in enumerate(range(0, total, BATCH_SIZE), start=1):
+            batch = INDIA_STATIONS[start: start + BATCH_SIZE]
+            batch_results = await _fetch_glofas_batch(client, batch)
+            all_results.extend(batch_results)
+            print(
+                f"[glofas_cache] batch {batch_num}/{num_batches} "
+                f"({len(batch_results)}/{len(batch)} ok)"
+            )
+            # Wait between batches to stay under the rate limit.
+            # Skip the delay after the very last batch.
+            if start + BATCH_SIZE < total:
+                await asyncio.sleep(INTER_BATCH_DELAY)
+
     return all_results
 
 
@@ -241,14 +270,27 @@ async def start_glofas_refresh_loop():
     """
     Background asyncio task: fetch GloFAS data immediately on startup,
     then refresh every REFRESH_INTERVAL_SECONDS.
+
+    Sets CACHE_READY = True once the first cycle completes so that
+    /api/live-telemetry can serve tactical fallback instead of blocking.
     """
+    global CACHE_READY
     while True:
         try:
-            print(f"[glofas_cache] 🔄 Fetching GloFAS data for {len(INDIA_STATIONS)} stations...")
+            print(
+                f"[glofas_cache] 🔄 Fetching GloFAS data for "
+                f"{len(INDIA_STATIONS)} stations "
+                f"({(len(INDIA_STATIONS) + BATCH_SIZE - 1) // BATCH_SIZE} batches, "
+                f"{INTER_BATCH_DELAY}s delay each)..."
+            )
             stations = await fetch_all_glofas()
             if stations:
                 _write_to_app_cache(stations)
-                print(f"[glofas_cache] ✅ Cache updated: {len(stations)} stations from OPEN_METEO_GLOFAS")
+                CACHE_READY = True
+                print(
+                    f"[glofas_cache] ✅ Cache updated: "
+                    f"{len(stations)} stations from OPEN_METEO_GLOFAS"
+                )
             else:
                 print("[glofas_cache] ⚠️  GloFAS fetch returned 0 stations — cache not updated")
         except Exception as exc:
