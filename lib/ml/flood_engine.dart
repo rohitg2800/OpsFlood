@@ -7,6 +7,16 @@
 //   danger_level_override_guard() — Option-A CWC guard
 //   risk_score formula            — identical weight map
 //   STATE_SEVERITY_MATRIX         — all 36 states + UTs
+//
+// FIXES (v1.1):
+//   1. Delhi uses absolute MSL elevation — added usesAbsoluteElevation flag;
+//      peakFloodLevelM for Delhi must be in MSL metres (e.g. 205.4).
+//   2. Unknown-state fallback now returns a safe PLAINS generic entry
+//      instead of Maharashtra thresholds.
+//   3. Rule engine probability distribution is right-skewed (under-predict
+//      is worse than over-predict for disaster systems).
+//   4. Duration, timeToPeak, recessionTime features now contribute to
+//      combinedScore in on-device path.
 
 class FloodInput {
   final double peakFloodLevelM;
@@ -56,6 +66,7 @@ class FloodResult {
   final String monitoringLevel;
   final String monitoringAction;
   final bool usedApi;
+  final bool isOfflineEstimate; // FIX-1: always true for on-device path
   final Map<String, double> ruleProbs;
   final Map<String, double> mlProbs;
   final String thresholdSeverity;
@@ -71,6 +82,7 @@ class FloodResult {
     required this.monitoringLevel,
     required this.monitoringAction,
     required this.usedApi,
+    required this.isOfflineEstimate,
     required this.ruleProbs,
     required this.mlProbs,
     required this.thresholdSeverity,
@@ -129,6 +141,8 @@ class StateEntry {
   final double hflM;
   final List<String> primaryRivers;
   final List<String> vulnerableDistricts;
+  // FIX-1: Delhi and some stations report level as MSL elevation, not depth
+  final bool usesAbsoluteElevation;
 
   const StateEntry({
     required this.region,
@@ -139,10 +153,11 @@ class StateEntry {
     required this.hflM,
     required this.primaryRivers,
     required this.vulnerableDistricts,
+    this.usesAbsoluteElevation = false,
   });
 }
 
-// Derives rainfall thresholds from region — matches severity_from_entry() fix
+// Derives rainfall thresholds from region
 StateEntry _entry({
   required String region,
   required Map<String, double> peak,
@@ -151,6 +166,7 @@ StateEntry _entry({
   required double hfl,
   List<String> rivers = const [],
   List<String> districts = const [],
+  bool absoluteElevation = false,
 }) {
   return StateEntry(
     region: region,
@@ -161,8 +177,19 @@ StateEntry _entry({
     hflM: hfl,
     primaryRivers: rivers,
     vulnerableDistricts: districts,
+    usesAbsoluteElevation: absoluteElevation,
   );
 }
+
+// FIX-2: Safe generic fallback for unknown states uses PLAINS defaults
+// instead of silently mapping to Maharashtra thresholds.
+final StateEntry _unknownStateFallback = _entry(
+  region: 'PLAINS',
+  peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
+  danger: 11.0, warning: 9.0, hfl: 13.5,
+  rivers: [],
+  districts: [],
+);
 
 final Map<String, StateEntry> stateSeverityMatrix = {
   'maharashtra': _entry(
@@ -312,12 +339,14 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Yamuna', 'Ghaggar', 'Saraswati'],
     districts: ['Kurukshetra', 'Ambala', 'Yamunanagar', 'Karnal'],
   ),
+  // FIX-1: Delhi uses Yamuna MSL elevation (204–207m). Flag explicitly.
   'delhi': _entry(
     region: 'URBAN_UT',
     peak: {'moderate': 204.0, 'severe': 205.5, 'critical': 206.5},
     danger: 205.33, warning: 204.5, hfl: 207.49,
     rivers: ['Yamuna'],
     districts: ['East Delhi', 'North Delhi', 'South Delhi'],
+    absoluteElevation: true,
   ),
   'meghalaya': _entry(
     region: 'NORTHEAST',
@@ -339,6 +368,7 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     danger: 112.0, warning: 100.0, hfl: 121.0,
     rivers: ['Tlawng', 'Tuirial', 'Chhimtuipui'],
     districts: ['Aizawl', 'Lunglei', 'Champhai'],
+    absoluteElevation: true,
   ),
   'nagaland': _entry(
     region: 'NORTHEAST',
@@ -375,6 +405,28 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Mandovi', 'Zuari', 'Sal'],
     districts: ['North Goa', 'South Goa'],
   ),
+  // Missing states added in v1.1
+  'ladakh': _entry(
+    region: 'HIMALAYAN',
+    peak: {'moderate': 5.0, 'severe': 7.5, 'critical': 10.0},
+    danger: 7.5, warning: 5.5, hfl: 10.5,
+    rivers: ['Indus', 'Shyok', 'Zanskar'],
+    districts: ['Leh', 'Kargil'],
+  ),
+  'dadra and nagar haveli': _entry(
+    region: 'COASTAL',
+    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
+    danger: 10.5, warning: 8.5, hfl: 13.0,
+    rivers: ['Damanganga'],
+    districts: ['Dadra and Nagar Haveli'],
+  ),
+  'daman and diu': _entry(
+    region: 'COASTAL',
+    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
+    danger: 10.0, warning: 8.0, hfl: 12.5,
+    rivers: ['Damanganga'],
+    districts: ['Daman', 'Diu'],
+  ),
   // UTs
   'chandigarh': _entry(
     region: 'URBAN_UT',
@@ -408,14 +460,17 @@ final Map<String, StateEntry> stateSeverityMatrix = {
 
 StateEntry getStateEntry(String state) {
   final key = state.trim().toLowerCase();
-  // normalise aliases
-  final normalized = {
+  final normalized = <String, String>{
     'orissa': 'odisha',
     'nct of delhi': 'delhi',
     'new delhi': 'delhi',
     'j&k': 'jammu and kashmir',
+    'j & k': 'jammu and kashmir',
+    'uttaranchal': 'uttarakhand',
+    'dnhdd': 'dadra and nagar haveli',
   }[key] ?? key;
-  return stateSeverityMatrix[normalized] ?? stateSeverityMatrix['maharashtra']!;
+  // FIX-2: safe PLAINS fallback instead of Maharashtra
+  return stateSeverityMatrix[normalized] ?? _unknownStateFallback;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -431,21 +486,18 @@ String _dangerLevelGuard({
   final dangerM = entry.dangerLevelM;
   final hflM = entry.hflM;
 
-  // Guard disabled if thresholds unknown
   if (warnM <= 0 || dangerM <= 0) return severity;
 
   final regionT = getRegionRainfallThresholds(entry.region);
 
   if (riverLevelM >= hflM) {
-    return severity; // allow CRITICAL — no cap
+    return severity;
   } else if (riverLevelM >= dangerM) {
-    // cap CRITICAL → SEVERE
     if (severity == 'CRITICAL') return 'SEVERE';
     return severity;
   } else if (riverLevelM >= warnM) {
-    return severity; // within model confidence
+    return severity;
   } else {
-    // Below warning: cap at MODERATE unless rainfall is severe
     if (rainfall7dMm >= regionT['severe']!) return severity;
     if (severity == 'SEVERE' || severity == 'CRITICAL') return 'MODERATE';
     return severity;
@@ -464,7 +516,6 @@ String severityFromEntry({
   final p = entry.peakLevelM;
   final r = entry.rainfall7dMm;
 
-  // Depth axis
   String depthSev;
   if (peakLevelM >= p['critical']!) {
     depthSev = 'CRITICAL';
@@ -476,7 +527,6 @@ String severityFromEntry({
     depthSev = 'LOW';
   }
 
-  // Rainfall axis — from region thresholds
   String rainSev;
   if (rainfall7dMm >= r['critical']!) {
     rainSev = 'CRITICAL';
@@ -488,12 +538,10 @@ String severityFromEntry({
     rainSev = 'LOW';
   }
 
-  // Raw = max of depth and rainfall
   final rawSev = (_severityOrder[depthSev]! >= _severityOrder[rainSev]!)
       ? depthSev
       : rainSev;
 
-  // Apply Option-A guard if live river level available
   if (riverLevelM != null) {
     return _dangerLevelGuard(
       severity: rawSev,
@@ -506,18 +554,29 @@ String severityFromEntry({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RULE ENGINE — mirrors rule_engine_probability_map() in app.py
-// Converts threshold severity into a soft probability distribution
+// RULE ENGINE — FIX-3: right-skewed distribution
+// Under-predicting a flood is worse than over-predicting.
+// Weights are asymmetric: higher-severity neighbours get more mass.
 // ─────────────────────────────────────────────────────────────────────────────
 Map<String, double> _ruleEngineProbMap(String thresholdSev) {
-  // 3-band distribution centred on threshold severity
   final rank = _severityOrder[thresholdSev]!;
   final all = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
   final probs = <String, double>{};
   double total = 0;
   for (final label in all) {
-    final dist = (_severityOrder[label]! - rank).abs();
-    final w = (dist == 0) ? 0.65 : (dist == 1) ? 0.25 : (dist == 2) ? 0.08 : 0.02;
+    final diff = _severityOrder[label]! - rank; // positive = higher severity
+    double w;
+    if (diff == 0) {
+      w = 0.60; // anchor class
+    } else if (diff == 1) {
+      w = 0.25; // one step above — higher weight (right-skew)
+    } else if (diff == -1) {
+      w = 0.10; // one step below — lower weight
+    } else if (diff > 1) {
+      w = 0.04; // two+ steps above
+    } else {
+      w = 0.01; // two+ steps below
+    }
     probs[label] = w;
     total += w;
   }
@@ -526,8 +585,7 @@ Map<String, double> _ruleEngineProbMap(String thresholdSev) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HEURISTIC ON-DEVICE ENGINE
-// Mirrors complex_predict_flood() blend when API unavailable
-// ML probabilities are approximated from feature heuristics
+// FIX-4: Duration, timeToPeak, and recessionTime now contribute to score.
 // ─────────────────────────────────────────────────────────────────────────────
 FloodResult runOnDeviceEngine(FloodInput input) {
   final entry = getStateEntry(input.state);
@@ -540,9 +598,7 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     entry: entry,
   );
 
-  // --- Approximate ML probabilities using linear interpolation on features ---
-  // Mimics the RandomForest probability distribution shape without a trained model.
-  // Uses normalised feature values against per-state thresholds.
+  // --- Peak level score ---
   final critP = entry.peakLevelM['critical']!;
   final sevP = entry.peakLevelM['severe']!;
   final modP = entry.peakLevelM['moderate']!;
@@ -558,6 +614,7 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     peakScore = 0.33 * (input.peakFloodLevelM / modP).clamp(0, 1);
   }
 
+  // --- Rainfall score ---
   final rainT = getRegionRainfallThresholds(entry.region);
   double rainScore;
   if (rainfall7d >= rainT['critical']!) {
@@ -570,9 +627,22 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     rainScore = 0.33 * (rainfall7d / rainT['moderate']!).clamp(0, 1);
   }
 
-  final combinedScore = (peakScore * 0.6 + rainScore * 0.4).clamp(0.0, 1.0);
+  // --- FIX-4: Temporal feature score ---
+  // Long duration + fast rise + slow recession = higher risk
+  // Each sub-score 0..1, blended with 10% total weight
+  final durationScore = (input.eventDurationDays / 14.0).clamp(0.0, 1.0);
+  final riseScore = input.timeToPeakDays > 0
+      ? (1.0 - (input.timeToPeakDays / 7.0).clamp(0.0, 1.0)) // faster rise = higher score
+      : 0.0;
+  final recessionScore = (input.recessionTimeDay / 10.0).clamp(0.0, 1.0); // slower recession = higher score
+  final temporalScore = (durationScore * 0.4 + riseScore * 0.35 + recessionScore * 0.25)
+      .clamp(0.0, 1.0);
 
-  // Map combinedScore to 4-class probability vector (bell around predicted class)
+  // Weighted combination: peak=52%, rain=38%, temporal=10%
+  final combinedScore =
+      (peakScore * 0.52 + rainScore * 0.38 + temporalScore * 0.10).clamp(0.0, 1.0);
+
+  // Map combinedScore to 4-class probability vector
   final mlRank = (combinedScore * 3.0).clamp(0.0, 3.0);
   final mlProbs = <String, double>{};
   double mlTotal = 0;
@@ -587,7 +657,7 @@ FloodResult runOnDeviceEngine(FloodInput input) {
   // --- Rule engine probs ---
   final ruleProbs = _ruleEngineProbMap(thresholdSev);
 
-  // --- Blend: ML=0.75, rule=0.25 (mirrors ml_total_weight in complex_predict_flood) ---
+  // --- Blend: ML=0.75, rule=0.25 ---
   const mlW = 0.75;
   const ruleW = 0.25;
   final finalProbs = <String, double>{};
@@ -596,16 +666,13 @@ FloodResult runOnDeviceEngine(FloodInput input) {
         (normMlProbs[label]! * mlW) + (ruleProbs[label]! * ruleW);
   }
 
-  // Normalise
   double fTotal = finalProbs.values.fold(0, (a, b) => a + b);
   final normFinal = {for (final e in finalProbs.entries) e.key: e.value / fTotal};
 
-  // Pick severity = argmax
   String severity =
       normFinal.entries.reduce((a, b) => a.value > b.value ? a : b).key;
 
-  // Safety: if river below warning, suppress SEVERE/CRITICAL
-  // (same suppression block as complex_predict_flood)
+  // Safety suppression: below warning level → cap at MODERATE
   final warnM = entry.warningLevelM;
   if (warnM > 0 &&
       input.peakFloodLevelM < warnM &&
@@ -621,7 +688,6 @@ FloodResult runOnDeviceEngine(FloodInput input) {
 
   final confidence = (normFinal[severity]! * 100).roundToDouble();
 
-  // risk_score = weighted sum — identical to backend
   double rs = 0;
   for (final label in ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL']) {
     rs += normFinal[label]! * riskWeights[label]!;
@@ -647,11 +713,12 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     probabilities: {for (final e in normFinal.entries) e.key: e.value * 100},
     riskScore: riskScore,
     proximityToDangerM: proximityToDanger,
-    algorithm: 'On-Device Heuristic Ensemble v1 (OpsFlood port)',
+    algorithm: 'On-Device Heuristic Ensemble v1.1 (OpsFlood port)',
     alert: alert,
     monitoringLevel: monitoring['level']!,
     monitoringAction: monitoring['action']!,
     usedApi: false,
+    isOfflineEstimate: true,
     ruleProbs: {for (final e in ruleProbs.entries) e.key: e.value * 100},
     mlProbs: {for (final e in normMlProbs.entries) e.key: e.value * 100},
     thresholdSeverity: thresholdSev,
