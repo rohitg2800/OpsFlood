@@ -65,7 +65,13 @@ export const usePredictionAPI = () => {
 };
 
 /**
- * Hook for managing sensor data fetching
+ * Hook for managing sensor data fetching.
+ *
+ * Timeout raised to 30 000 ms so the backend has time to warm up the
+ * GloFAS cache on first startup (≈ 63 s total fetch, but the route
+ * returns tactical fallback immediately if cache isn't ready yet).
+ * The catch block always falls back to tacticalSensors so the UI stays
+ * functional even if the backend is temporarily unreachable.
  */
 export const useSensorAPI = () => {
   const { state, dispatch } = useAppState();
@@ -101,9 +107,11 @@ export const useSensorAPI = () => {
           station: selectedStation,
         };
 
+        // 30 s timeout — backend returns tactical fallback immediately on
+        // cold-start so this budget is almost never fully consumed.
         const response = await axios.get(apiUrl('/api/live-telemetry'), {
           params,
-          timeout: 15000,
+          timeout: 30000,
         });
 
         const sensorPayload = Array.isArray(response.data)
@@ -135,10 +143,8 @@ export const useSensorAPI = () => {
 
         return mergedSensors;
       } catch (error) {
-        dispatch({
-          type: 'SET_ERROR',
-          payload: `Failed to fetch sensors: ${error}`
-        });
+        // Always surface tactical data so the UI remains functional.
+        console.warn('Sensor fetch failed — using tactical registry:', error);
         recentResultRef.current = { key: requestKey, timestamp: Date.now(), data: tacticalSensors };
         dispatch({ type: 'SET_SENSOR_DATA', payload: tacticalSensors });
         return tacticalSensors;
@@ -183,7 +189,6 @@ export const useAlertNotifications = () => {
   const playAlertSound = useCallback(() => {
     if (!state.preferences.alertSound) return;
 
-    // Create a simple beep sound
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
@@ -251,7 +256,6 @@ export const useSystemInit = () => {
       dispatch({ type: 'SET_API_STATUS', payload: 'INITIALIZING' });
 
       try {
-        // Check API connectivity
         const healthResponse = await axios.get(apiUrl('/health'), {
           timeout: 5000
         });
@@ -268,7 +272,6 @@ export const useSystemInit = () => {
         dispatch({ type: 'INIT_SYSTEM' });
         dispatch({ type: 'SET_API_STATUS', payload: 'ONLINE' });
 
-        // Request notification permission
         if ('Notification' in window && Notification.permission === 'default') {
           Notification.requestPermission();
         }
@@ -288,12 +291,11 @@ export const useSystemInit = () => {
 /**
  * Hook for managing form validation
  * PEAK_LEVEL_MAX raised to 999 to support MSL-datum CWC gauges
- * (e.g. Aizawl/Mizoram 115.10 m, Delhi Yamuna 204.83 m)
  */
 export const useFormValidation = (formData: any) => {
   const { dispatch } = useAppState();
   const PEAK_LEVEL_MIN = 0;
-  const PEAK_LEVEL_MAX = 999;  // raised from 100 — supports high MSL-datum gauges
+  const PEAK_LEVEL_MAX = 999;
   const RAINFALL_7D_MIN = 0;
   const RAINFALL_7D_MAX = 5000;
 
@@ -341,7 +343,6 @@ export const useFormValidation = (formData: any) => {
 
 /**
  * Hook for CWC (Central Water Commission) live data integration
- * Fetches real-time flood level data from Indian government sources
  */
 export const useCWCIntegration = () => {
   const { state, dispatch } = useAppState();
@@ -371,7 +372,7 @@ export const useCWCIntegration = () => {
       try {
         const cwcResult = await axios.get(apiUrl('/api/live-telemetry'), {
           params: { state: selectedState, station: selectedStation, limit: 8 },
-          timeout: 10000
+          timeout: 30000
         });
 
         const responseData = cwcResult.data as any;
@@ -601,7 +602,6 @@ export const useIndianStateModels = () => {
 
 /**
  * Hook for enhanced prediction with full ML model integration
- * Includes CWC data, state-specific models, and comprehensive monitoring
  */
 export const useEnhancedPrediction = () => {
   const { state, dispatch } = useAppState();
@@ -614,13 +614,10 @@ export const useEnhancedPrediction = () => {
     dispatch({ type: 'SET_PREDICTION_LOADING', payload: true });
 
     try {
-      // Update rainfall stats
       updateRainfallStats();
 
-      // Fetch live CWC data
       const cwcData = await fetchCWCData({ force: true });
 
-      // If CWC data available, use it to override peak level
       if (typeof cwcData?.currentLevel === 'number') {
         dispatch({
           type: 'SET_FORM_DATA',
@@ -637,7 +634,6 @@ export const useEnhancedPrediction = () => {
           ? cwcData.currentLevel
           : Number(state.form.data.Peak_Flood_Level_m || 0);
 
-      // Make prediction with state-specific model
       const predictionPayload = {
         ...state.form.data,
         Peak_Flood_Level_m: peakLevelForPrediction,
@@ -646,7 +642,6 @@ export const useEnhancedPrediction = () => {
 
       const result = await basePred(predictionPayload);
 
-      // Update monitoring protocols based on prediction
       const monitoringConfig = {
         CRITICAL: {
           level: 'CRITICAL' as const,
