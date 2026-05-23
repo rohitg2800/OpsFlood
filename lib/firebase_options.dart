@@ -6,10 +6,13 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
+/// SECURITY: API keys have been redacted from version control.
+/// Run `flutterfire configure` locally to regenerate this file,
+/// or set keys via environment variables / CI secrets.
+///
 /// Example:
 /// ```dart
 /// import 'firebase_options.dart';
-/// // ...
 /// await Firebase.initializeApp(
 ///   options: DefaultFirebaseOptions.currentPlatform,
 /// );
@@ -18,8 +21,8 @@ class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
+        'DefaultFirebaseOptions have not been configured for web. '
+        'Run flutterfire configure to regenerate.',
       );
     }
     switch (defaultTargetPlatform) {
@@ -27,23 +30,21 @@ class DefaultFirebaseOptions {
         return android;
       case TargetPlatform.iOS:
         throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+          'DefaultFirebaseOptions have not been configured for ios. '
+          'Run flutterfire configure to regenerate.',
         );
       case TargetPlatform.macOS:
         throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+          'DefaultFirebaseOptions have not been configured for macos. '
+          'Run flutterfire configure to regenerate.',
         );
       case TargetPlatform.windows:
         throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+          'DefaultFirebaseOptions have not been configured for windows.',
         );
       case TargetPlatform.linux:
         throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
+          'DefaultFirebaseOptions have not been configured for linux.',
         );
       default:
         throw UnsupportedError(
@@ -52,11 +53,13 @@ class DefaultFirebaseOptions {
     }
   }
 
+  // SECURITY: Replace FIREBASE_API_KEY and FIREBASE_APP_ID with your actual
+  // values from the Firebase console. Never commit real keys to git.
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'REDACTED',
-    appId: '1:1071864126219:android:fc5dc962ef143d4ae7e00e',
-    messagingSenderId: '1071864126219',
-    projectId: 'device-streaming-e762727d',
-    storageBucket: 'device-streaming-e762727d.firebasestorage.app',
+    apiKey:             String.fromEnvironment('FIREBASE_API_KEY',    defaultValue: 'REPLACE_WITH_YOUR_API_KEY'),
+    appId:              String.fromEnvironment('FIREBASE_APP_ID',     defaultValue: 'REPLACE_WITH_YOUR_APP_ID'),
+    messagingSenderId:  String.fromEnvironment('FIREBASE_SENDER_ID',  defaultValue: '1071864126219'),
+    projectId:          'device-streaming-e762727d',
+    storageBucket:      'device-streaming-e762727d.firebasestorage.app',
   );
 }

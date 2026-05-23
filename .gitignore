@@ -5,11 +5,9 @@
 *.swp
 .DS_Store
 .atom/
-.build/
 .buildlog/
 .history
 .svn/
-.swiftpm/
 migrate_working_dir/
 
 # IntelliJ related
@@ -18,20 +16,18 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# VS Code
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
-/coverage/
+build/
 
 # Symbolication related
 app.*.symbols
@@ -44,11 +40,14 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# IDE metadata — never commit these
-.metadata
+# ── SECURITY: Firebase / Google config files with real API keys ──────────────
+# Download from Firebase Console and place locally. Never commit.
+lib/firebase_options.dart
+google-services.json
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
 
-# Environment secrets
+# Environment / secrets
 .env
 .env.*
-.env
-.env
+secrets.dart

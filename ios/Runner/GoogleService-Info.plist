@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- SECURITY: Real API_KEY and GOOGLE_APP_ID have been removed from version control.
+     Obtain the real GoogleService-Info.plist from Firebase Console and place it
+     locally. Never commit the real file to git. -->
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>REDACTED</string>
+	<string>REPLACE_WITH_YOUR_FIREBASE_IOS_API_KEY</string>
 	<key>GCM_SENDER_ID</key>
 	<string>1071864126219</string>
 	<key>PLIST_VERSION</key>
@@ -25,6 +28,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:1071864126219:ios:19f4cf0a0b4dbda8e7e00e</string>
+	<string>REPLACE_WITH_YOUR_FIREBASE_IOS_APP_ID</string>
 </dict>
 </plist>
