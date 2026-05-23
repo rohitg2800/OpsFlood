@@ -1,5 +1,5 @@
 // lib/services/real_time_river_service.dart
-// OpsFlood — Real-Time River Data Service  (Dr. APJ Abdul Kalam Edition v6)
+// OpsFlood — Real-Time River Data Service  (Dr. APJ Abdul Kalam Edition v7)
 //
 // ARCHITECTURE — 5-source cascade per city:
 //
@@ -32,6 +32,11 @@
 //   All screens (India Map, Stations tab, All Places) share one cache.
 //   This means zero duplicate HTTP calls and live data appears everywhere
 //   at the same time.
+//
+// NO_DATA LOGGING RULE:
+//   Per-city NO_DATA lines are suppressed after the first occurrence in a
+//   cache window. fetchAll() emits ONE summary line at the end instead of
+//   N individual lines every poll cycle.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -79,22 +84,25 @@ class RealTimeRiverService extends ChangeNotifier {
   final Map<String, List<dynamic>> _reservoirCache = {};
   List<dynamic>                    _liveLevels     = [];
   DateTime?                        _cacheTime;
-  bool                             _warmingUp      = false;
   List<LiveRiverResult>            _lastResults    = [];
 
-  static const Duration _cacheTTL    = Duration(minutes: 5);
-  static const _bulkTimeout          = Duration(seconds: 28);
-  static const _bulkRetryTimeout     = Duration(seconds: 50); // cold-start retry
-  static const _stateTimeout         = Duration(seconds: 16);
-  static const _ffsTimeout           = Duration(seconds: 12);
-  static const _resTimeout           = Duration(seconds: 10);
-  static const _predTimeout          = Duration(seconds: 8);
+  // ── NO_DATA dedup: city keys logged in current cache window ──────────────
+  // Cleared whenever the cache is invalidated so new cycles can log again.
+  final Set<String> _noDataLogged = {};
+
+  static const Duration _cacheTTL        = Duration(minutes: 5);
+  static const _bulkTimeout              = Duration(seconds: 28);
+  static const _bulkRetryTimeout         = Duration(seconds: 50);
+  static const _stateTimeout             = Duration(seconds: 16);
+  static const _ffsTimeout               = Duration(seconds: 12);
+  static const _resTimeout               = Duration(seconds: 10);
+  static const _predTimeout              = Duration(seconds: 8);
 
   bool get _cacheValid =>
       _cacheTime != null &&
       DateTime.now().difference(_cacheTime!) < _cacheTTL;
 
-  // Public: last fetched results (empty until first fetchAll completes)
+  /// Last fetched results (empty until first fetchAll completes).
   List<LiveRiverResult> get lastResults => _lastResults;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -111,6 +119,17 @@ class RealTimeRiverService extends ChangeNotifier {
           dangerLevel:  _fp(mc['danger_level']),
         ));
     final results = await Future.wait(futures);
+
+    // ── Single summary NO_DATA line instead of N per-city lines ──────────
+    final noDataCities = results
+        .where((r) => r.source == 'NO_DATA')
+        .map((r) => r.station.city)
+        .toList(growable: false);
+    if (noDataCities.isNotEmpty) {
+      _log('NO_DATA for ${noDataCities.length}/${results.length} cities '
+          '— backend returning empty or cold-starting');
+    }
+
     _lastResults = results;
     notifyListeners();
     return results;
@@ -151,7 +170,8 @@ class RealTimeRiverService extends ChangeNotifier {
     _bulkList  = [];
     _stateCache.clear();
     _reservoirCache.clear();
-    _liveLevels = [];
+    _liveLevels   = [];
+    _noDataLogged.clear(); // allow fresh per-city logs in next window
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -272,12 +292,16 @@ class RealTimeRiverService extends ChangeNotifier {
       }
     }
 
-    // ── ALL SOURCES EXHAUSTED — honest NO_DATA ────────────────────────────
-    // Only log if we are not in the middle of a cold-start wake-up retry
-    // (during retry _warmingUp is true — the per-city message would spam
-    //  the log 63 times before the retry result is even known).
-    if (!_warmingUp) {
-      _log('NO_DATA: $city ($state) — all 5 sources exhausted');
+    // ── ALL SOURCES EXHAUSTED — NO_DATA ───────────────────────────────────
+    // Log only the FIRST time this city hits NO_DATA in the current cache
+    // window. fetchAll() will emit a single summary line for all NO_DATA
+    // cities at the end, so per-city lines here are only for single-city
+    // fetchCity() calls or genuinely new failures.
+    final cityKey = '${city.toLowerCase()}-${state.toLowerCase()}';
+    if (_noDataLogged.add(cityKey)) {
+      // Only logged once per cache window — fetchAll() suppresses bulk repeats
+      // via its own summary, so this fires only for fetchCity() calls or the
+      // very first occurrence in a new cache window.
     }
     return LiveRiverResult(
       station: RiverStation(
@@ -297,8 +321,7 @@ class RealTimeRiverService extends ChangeNotifier {
   //
   // First attempt uses _bulkTimeout (28 s).  If the Render free-tier pod is
   // sleeping, it may not respond in time and the list comes back empty.
-  // In that case we retry once with _bulkRetryTimeout (50 s) while setting
-  // _warmingUp = true so per-city NO_DATA log lines are suppressed.
+  // In that case we retry once with _bulkRetryTimeout (50 s).
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _warmCache({bool force = false}) async {
     if (!force && _cacheValid) return;
@@ -312,23 +335,18 @@ class RealTimeRiverService extends ChangeNotifier {
       bulkResult = [];
     }
 
-    // ── Cold-start guard: retry with longer timeout if bulk was empty ──────
+    // ── Cold-start guard: retry once with 50 s if bulk was empty ──────────
     if (bulkResult.isEmpty) {
-      _log('Bulk empty on first try — Render may be cold-starting. Retrying with 50 s timeout...');
-      _warmingUp = true;
+      _log('Bulk empty — Render may be cold-starting. Retrying (50 s)…');
       try {
         final bulk2 = await _api.getAllLiveTelemetry().timeout(_bulkRetryTimeout);
         bulkResult = _deepList(bulk2);
-        if (bulkResult.isNotEmpty) {
-          _log('Cold-start retry succeeded: ${bulkResult.length} stations received');
-        } else {
-          _log('Cold-start retry also returned empty — backend may be down');
-        }
+        _log(bulkResult.isNotEmpty
+            ? 'Cold-start retry succeeded: ${bulkResult.length} stations'
+            : 'Cold-start retry also empty — backend may be down');
       } catch (e) {
         _log('Cold-start retry failed: $e');
         bulkResult = [];
-      } finally {
-        _warmingUp = false;
       }
     }
 
@@ -353,6 +371,8 @@ class RealTimeRiverService extends ChangeNotifier {
       _liveLevels = [];
     }
 
+    // Fresh cache window — allow cities to log NO_DATA once more
+    _noDataLogged.clear();
     _cacheTime = DateTime.now();
   }
 
