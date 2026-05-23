@@ -253,8 +253,8 @@ Background polling runs every **5 minutes** via WorkManager. FCM handles server-
 
 ## 👤 Author
 
-**Rohit Kashyap** — MCA Student, IMCC Pune  
-IBM Data Science Professional (12 Certifications)  
+
+**Rohit Raj  
 GitHub: [@rohitg2800](https://github.com/rohitg2800)
 
 ---
