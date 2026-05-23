@@ -7,15 +7,15 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:workmanager/workmanager.dart';
 
-import '../constants.dart';
+import '../constants/constants.dart';
 
-// FIX: callbackDispatcher runs in a SEPARATE Dart isolate.
+// callbackDispatcher runs in a SEPARATE Dart isolate.
 // WidgetsFlutterBinding.ensureInitialized() MUST be called first,
 // otherwise Workmanager().initialize() crashes with
 // "Binding has not yet been initialized".
 @pragma('vm:entry-point')
 void callbackDispatcher() {
-  WidgetsFlutterBinding.ensureInitialized();          // ← FIX
+  WidgetsFlutterBinding.ensureInitialized();
   Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
 
   Workmanager().executeTask((taskName, inputData) async {
@@ -36,11 +36,14 @@ void callbackDispatcher() {
 Future<void> _runKeepAlivePing() async {
   final client = http.Client();
   try {
-    final url = Uri.parse('${AppConstants.baseUrl}${AppConstants.healthEndpoint}');
+    final url =
+        Uri.parse('${AppConstants.baseUrl}${AppConstants.healthEndpoint}');
     final res = await client.get(url).timeout(const Duration(seconds: 10));
     if (kDebugMode) debugPrint('[BGS] keep-alive ping → ${res.statusCode}');
   } catch (e) {
-    if (kDebugMode) debugPrint('[BGS] keep-alive ping failed (non-fatal): $e');
+    if (kDebugMode) {
+      debugPrint('[BGS] keep-alive ping failed (non-fatal): $e');
+    }
   } finally {
     client.close();
   }
@@ -91,10 +94,21 @@ Future<void> _runBackgroundRefresh() async {
         .toString();
     final count = critical.length;
 
+    // FIX: notification body was grammatically wrong for count == 1:
+    // "Mumbai and 0 other stations are at critical flood risk."
+    // — '0 other stations' when there is only one station is nonsensical.
+    // Fixed to:
+    //   count == 1 → "Mumbai is at critical flood risk."
+    //   count  > 1 → "Mumbai and N other stations are at critical flood risk."
+    final notifBody = count == 1
+        ? '$firstCity is at critical flood risk.'
+        : '$firstCity and ${count - 1} other '
+          'station${count - 1 == 1 ? '' : 's'} are at critical flood risk.';
+
     await plugin.show(
       _bgSummaryNotifId,
-      '🚨 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
-      '$firstCity and ${count - 1} other station${count > 1 ? 's are' : ' is'} at critical flood risk.',
+      '\uD83D\uDEA8 Equinox Flood — $count critical alert${count > 1 ? 's' : ''}',
+      notifBody,
       const NotificationDetails(
         android: AndroidNotificationDetails(
           AppConstants.criticalAlertChannelId,
@@ -149,7 +163,7 @@ class BackgroundService {
     await Workmanager().registerPeriodicTask(
       _refreshUniqueName,
       refreshTaskName,
-      frequency: const Duration(minutes: 15),
+      frequency:   const Duration(minutes: 15),
       constraints: Constraints(networkType: NetworkType.connected),
     );
 

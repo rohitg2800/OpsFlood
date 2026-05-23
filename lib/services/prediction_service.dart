@@ -13,7 +13,13 @@ library;
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import '../constants/app_constants.dart';
+// FIX: was importing '../constants/app_constants.dart' directly.
+// That file exports AppConstants (compile-time const baseUrl).
+// We need AppConstants.baseUrl which IS a const, so the direct import was
+// technically fine — but to stay consistent with every other service file
+// and avoid a future drift we import the barrel. The barrel re-exports
+// app_constants.dart so AppConstants is still in scope.
+import '../constants/constants.dart';
 import 'pipeline_service.dart';
 
 // Public type alias used by predict.dart
@@ -159,9 +165,11 @@ class PredictionServiceImpl {
       dangerLevel:        (j['danger_level'] as num?)?.toDouble() ?? 12.0,
       proximityToDangerM: (j['proximity_to_danger_m'] as num?)?.toDouble() ?? 0,
       monitoring:         monitoring,
-      ensembleDetails:    j['ensemble'] is Map ? j['ensemble'] as Map<String, dynamic> : {},
-      fromBackend:        true,
-      timestamp:          DateTime.now(),
+      ensembleDetails:    j['ensemble'] is Map
+          ? j['ensemble'] as Map<String, dynamic>
+          : {},
+      fromBackend: true,
+      timestamp:   DateTime.now(),
     );
   }
 
@@ -238,7 +246,7 @@ class PredictionServiceImpl {
       dangerLevel:        entry.dangerLevelM,
       proximityToDangerM: double.parse(
           (entry.dangerLevelM - peak).toStringAsFixed(2)),
-      monitoring:         _monitoringFor(severity),
+      monitoring:  _monitoringFor(severity),
       ensembleDetails: {
         'rule_signals': {
           'peak_moderate_ratio': peakMod,
@@ -257,32 +265,42 @@ class PredictionServiceImpl {
 
   Map<String, double> _normalise(Map<String, double> raw) {
     final total = raw.values.fold(0.0, (s, v) => s + math.max(0, v));
-    if (total <= 0) return {'LOW': 1.0, 'MODERATE': 0, 'SEVERE': 0, 'CRITICAL': 0};
+    if (total <= 0) {
+      return {'LOW': 1.0, 'MODERATE': 0, 'SEVERE': 0, 'CRITICAL': 0};
+    }
     return raw.map((k, v) => MapEntry(k, math.max(0, v) / total));
   }
 
   MonitoringProtocol _monitoringFor(String severity) {
     switch (severity) {
-      case 'CRITICAL': return const MonitoringProtocol(
-        level:  'CRITICAL EMERGENCY',
-        action: 'Evacuate vulnerable river basins immediately.',
-        priorityZones: ['Primary Catchment', 'Downstream Villages', 'Low-lying urban zones'],
-      );
-      case 'SEVERE': return const MonitoringProtocol(
-        level:  'HIGH ALERT',
-        action: 'Deploy monitoring teams & prepare contingency measures.',
-        priorityZones: ['Primary Catchment', 'Downstream Villages'],
-      );
-      case 'MODERATE': return const MonitoringProtocol(
-        level:  'ELEVATED ALERT',
-        action: 'Deploy monitoring teams & prep pumps.',
-        priorityZones: ['Drainage bottlenecks', 'Main river gauge'],
-      );
-      default: return const MonitoringProtocol(
-        level:  'STANDARD PROTOCOL',
-        action: 'Maintain normal surveillance.',
-        priorityZones: ['None'],
-      );
+      case 'CRITICAL':
+        return const MonitoringProtocol(
+          level:  'CRITICAL EMERGENCY',
+          action: 'Evacuate vulnerable river basins immediately.',
+          priorityZones: [
+            'Primary Catchment',
+            'Downstream Villages',
+            'Low-lying urban zones'
+          ],
+        );
+      case 'SEVERE':
+        return const MonitoringProtocol(
+          level:  'HIGH ALERT',
+          action: 'Deploy monitoring teams & prepare contingency measures.',
+          priorityZones: ['Primary Catchment', 'Downstream Villages'],
+        );
+      case 'MODERATE':
+        return const MonitoringProtocol(
+          level:  'ELEVATED ALERT',
+          action: 'Deploy monitoring teams & prep pumps.',
+          priorityZones: ['Drainage bottlenecks', 'Main river gauge'],
+        );
+      default:
+        return const MonitoringProtocol(
+          level:  'STANDARD PROTOCOL',
+          action: 'Maintain normal surveillance.',
+          priorityZones: ['None'],
+        );
     }
   }
 }
