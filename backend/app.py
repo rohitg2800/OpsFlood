@@ -346,17 +346,17 @@ CLASS_LABEL_MAP = {
     "CRITICAL": "CRITICAL",
 }
 EXPECTED_FEATURE_COLUMNS = [
-    "Peak_Flood_Level_m",
-    "Event_Duration_days",
-    "Time_to_Peak_days",
-    "Recession_Time_day",
-    "T1d",
-    "T2d",
-    "T3d",
-    "T4d",
-    "T5d",
-    "T6d",
-    "T7d",
+    "river_level_m",
+    "warning_level_m",
+    "danger_level_m",
+    "flow_rate",
+    "rainfall_last_hour_mm",
+    "level_to_danger",
+    "level_to_warning",
+    "danger_ratio",
+    "warning_ratio",
+    "trend_encoded",
+    "status_encoded",
 ]
 _FEATURE_ALIAS_MAP = {
     "peakfloodlevelm": "Peak_Flood_Level_m",
