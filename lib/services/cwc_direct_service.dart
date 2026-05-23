@@ -10,10 +10,12 @@
 // ║  No direct calls to ffs.india-water.gov.in or indiawris.gov.in.        ║
 // ║  The backend handles CWC/GloFAS data via Open-Meteo + CWC FFS proxy.   ║
 // ║                                                                          ║
-// ║  SOURCE A — /api/cwc-ffs/state   (CWC FFS normalised per state)        ║
-// ║  SOURCE B — /api/live-telemetry  (GloFAS river discharge, 93 cities)   ║
-// ║  SOURCE C — /api/live-levels     (aggregated gauge levels)              ║
-// ║  SOURCE D — /api/cwc-reservoir   (reservoir levels via data.gov.in)    ║
+// ║  SOURCE A — /api/cwc-ffs/station   (CWC FFS normalised per station)    ║
+// ║  SOURCE B — /api/live-telemetry    (GloFAS river discharge, 93 cities) ║
+// ║  SOURCE C — /api/live-levels       (aggregated gauge levels)            ║
+// ║  SOURCE D — /api/cwc-reservoir     (reservoir levels via data.gov.in)  ║
+// ║                                                                          ║
+// ║  TIMEOUTS: 55 / 55 / 45 / 35 s — sized to survive Render cold-start.  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 library;
@@ -110,6 +112,12 @@ class CwcDirectService {
 
   final _api = ApiService();
 
+  // Timeouts sized to survive Render free-tier cold-start (~50 s)
+  static const _tA = Duration(seconds: 55); // cwc-ffs/station
+  static const _tB = Duration(seconds: 55); // live-telemetry
+  static const _tC = Duration(seconds: 45); // live-levels
+  static const _tD = Duration(seconds: 35); // cwc-reservoir
+
   // 5-minute client-side cache
   final Map<String, CwcLiveReading> _cache   = {};
   final Map<String, DateTime>       _cacheTs = {};
@@ -133,19 +141,15 @@ class CwcDirectService {
     final key = '${city.toLowerCase()}_${state.toLowerCase()}';
     if (_isCacheValid(key) && _cache.containsKey(key)) return _cache[key]!;
 
-    // SOURCE A — /api/cwc-ffs/station (CWC FFS normalised)
     final a = await _fromFfsStation(city, state, river, warningLevel, dangerLevel);
     if (a != null && a.hasRealData) { _put(key, a); return a; }
 
-    // SOURCE B — /api/live-telemetry (GloFAS discharge, all cities)
     final b = await _fromTelemetry(city, state, river, warningLevel, dangerLevel);
     if (b != null && b.hasRealData) { _put(key, b); return b; }
 
-    // SOURCE C — /api/live-levels
     final c = await _fromLiveLevels(city, state, river, warningLevel, dangerLevel);
     if (c != null && c.hasRealData) { _put(key, c); return c; }
 
-    // SOURCE D — /api/cwc-reservoir
     final d = await _fromReservoir(city, state, river, warningLevel, dangerLevel);
     if (d != null && d.hasRealData) { _put(key, d); return d; }
 
@@ -191,7 +195,7 @@ class CwcDirectService {
       String river, double wl, double dl) async {
     try {
       final res = await _api.getFloodForecast(city: city, state: state)
-          .timeout(const Duration(seconds: 12));
+          .timeout(_tA);
       if (res['status'] == 'error') return null;
       final items = _list(res);
       if (items.isEmpty) return null;
@@ -211,7 +215,7 @@ class CwcDirectService {
       String river, double wl, double dl) async {
     try {
       final res = await _api.getLiveTelemetry(state: state, station: city)
-          .timeout(const Duration(seconds: 12));
+          .timeout(_tB);
       if (res['status'] == 'error') return null;
       final items = _list(res);
       if (items.isEmpty) return null;
@@ -230,8 +234,7 @@ class CwcDirectService {
   Future<CwcLiveReading?> _fromLiveLevels(String city, String state,
       String river, double wl, double dl) async {
     try {
-      final res = await _api.getLiveLevelsByCity(city)
-          .timeout(const Duration(seconds: 10));
+      final res = await _api.getLiveLevelsByCity(city).timeout(_tC);
       if (res['status'] == 'error') return null;
       final items = _list(res);
       if (items.isEmpty) return null;
@@ -250,8 +253,7 @@ class CwcDirectService {
   Future<CwcLiveReading?> _fromReservoir(String city, String state,
       String river, double wl, double dl) async {
     try {
-      final res = await _api.getReservoirLevels(state: state)
-          .timeout(const Duration(seconds: 8));
+      final res = await _api.getReservoirLevels(state: state).timeout(_tD);
       if (res['status'] == 'error') return null;
       final items = _list(res);
       if (items.isEmpty) return null;
@@ -320,26 +322,27 @@ class CwcDirectService {
     final ls = state.toLowerCase().trim();
     final lr = river.toLowerCase().trim();
     for (final item in list.whereType<Map<String, dynamic>>()) {
-      final sc = _s(item['station'] ?? item['stationName'] ?? item['station_name']
+      final sc  = _s(item['station'] ?? item['stationName'] ?? item['station_name']
           ?? item['city'] ?? item['location'] ?? item['name']);
       final ist = _s(item['state_name'] ?? item['state'] ?? item['stateName']);
       final rv  = _s(item['river_name'] ?? item['river'] ?? item['riverName']);
       double c = 0;
-      if (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', '')) c = 1.00;
-      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))  c = 0.90;
-      else if (_tok(sc, lc) && rv.contains(lr) && ist.contains(ls))    c = 0.85;
-      else if (_tok(sc, lc))                                             c = 0.80;
-      else if (lr.isNotEmpty && rv.contains(lr) && ist.contains(ls))    c = 0.70;
-      else if (lr.isNotEmpty && rv.contains(lr))                        c = 0.60;
-      if (c > (best?.conf ?? 0)) best = _M(item, c);
+      if (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', '')) { c = 1.00; }
+      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))  { c = 0.90; }
+      else if (_tok(sc, lc) && rv.contains(lr) && ist.contains(ls))    { c = 0.85; }
+      else if (_tok(sc, lc))                                             { c = 0.80; }
+      else if (lr.isNotEmpty && rv.contains(lr) && ist.contains(ls))    { c = 0.70; }
+      else if (lr.isNotEmpty && rv.contains(lr))                        { c = 0.60; }
+      if (c > (best?.conf ?? 0)) { best = _M(item, c); }
       if (c >= 1.0) { break; }
     }
     return best;
   }
 
   bool _tok(String src, String tgt) {
-    for (final t in src.split(RegExp(r'[\s_\-,()+]+')))
-      if (t.length >= 4 && tgt.contains(t)) return true;
+    for (final t in src.split(RegExp(r'[\s_\-,()+]+'))) {
+      if (t.length >= 4 && tgt.contains(t)) { return true; }
+    }
     return false;
   }
 
@@ -375,9 +378,9 @@ class CwcDirectService {
   );
 
   String _colour(double lv, double wl, double dl) {
-    if (dl > 0 && lv >= dl)         return 'RED';
-    if (wl > 0 && lv >= wl)         return 'ORANGE';
-    if (wl > 0 && lv >= wl * 0.85)  return 'YELLOW';
+    if (dl > 0 && lv >= dl)        return 'RED';
+    if (wl > 0 && lv >= wl)        return 'ORANGE';
+    if (wl > 0 && lv >= wl * 0.85) return 'YELLOW';
     return 'GREEN';
   }
 
