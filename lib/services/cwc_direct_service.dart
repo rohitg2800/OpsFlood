@@ -332,7 +332,7 @@ class CwcDirectService {
       else if (lr.isNotEmpty && rv.contains(lr) && ist.contains(ls))    c = 0.70;
       else if (lr.isNotEmpty && rv.contains(lr))                        c = 0.60;
       if (c > (best?.conf ?? 0)) best = _M(item, c);
-      if (c >= 1.0) break;
+      if (c >= 1.0) { break; }
     }
     return best;
   }
