@@ -1,4 +1,4 @@
-// OpsFlood — NDMA / NDRF Service v2.2
+// OpsFlood — NDMA / NDRF Service v2.3
 // Emergency contacts: static real NDMA/NDRF numbers (no network needed)
 // Advisories: tries OpsFlood backend with circuit-breaker;
 //             falls back to static seasonal advisory when backend not live.
@@ -159,9 +159,9 @@ List<NdmaAdvisory> _seasonalAdvisories(String state) {
 }
 
 // ── Circuit-breaker state ────────────────────────────────────────────────────────────────
-int       _advFailures     = 0;
+int       _advFailures       = 0;
 DateTime? _advBackoff;
-bool      _circuitLoggedOnce = false;   // ← prevents log spam across 93-city loop
+bool      _circuitLoggedOnce = false;
 const     _advMaxFail        = 3;
 const     _advBackoffDur     = Duration(minutes: 30);
 
@@ -186,7 +186,11 @@ class NdmaService {
     }
 
     // Reset log-once flag when backoff window expires
-    _circuitLoggedOnce = false;
+    if (_advBackoff != null && DateTime.now().isAfter(_advBackoff!)) {
+      _circuitLoggedOnce = false;
+      _advFailures = 0;
+      _advBackoff  = null;
+    }
 
     try {
       final res = await _client
@@ -204,6 +208,7 @@ class NdmaService {
             .toList(growable: false);
         _advFailures = 0;
         _advBackoff  = null;
+        _circuitLoggedOnce = false;
         return result;
       }
       _recordAdvFailure();
@@ -214,9 +219,6 @@ class NdmaService {
   }
 
   // ── Emergency contacts ──────────────────────────────────────────────────────────────────
-  // Returns national contacts (once) + state-specific contacts.
-  // Called per-state by real_time_service but global dedup ensures
-  // nationals appear exactly once in the merged _emergencyContacts list.
   Future<List<EmergencyContact>> getContacts({required String state}) async {
     final all = _getAllContacts();
     return all
@@ -228,11 +230,17 @@ class NdmaService {
   void _recordAdvFailure() {
     _advFailures++;
     if (_advFailures >= _advMaxFail) {
-      _advBackoff        = DateTime.now().add(_advBackoffDur);
-      _circuitLoggedOnce = false;  // allow one fresh log when circuit first trips
-      if (kDebugMode) {
-        debugPrint('[NDMA] advisory circuit tripped after $_advFailures failures '
-            '— backing off for 30 min');
+      // Only log + set backoff once when circuit first trips at this threshold.
+      // Do NOT reset _circuitLoggedOnce here — that would re-enable the log
+      // on every subsequent call (failures 4, 5, 6...) during the same window.
+      if (!_circuitLoggedOnce) {
+        _advBackoff = DateTime.now().add(_advBackoffDur);
+        if (kDebugMode) {
+          debugPrint('[NDMA] advisory circuit tripped after $_advFailures failures '
+              '— backing off for 30 min');
+        }
+        // Mark logged so repeated calls in same window stay silent.
+        _circuitLoggedOnce = true;
       }
     }
   }

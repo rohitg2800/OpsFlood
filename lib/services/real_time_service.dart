@@ -625,8 +625,14 @@ class RealTimeService extends ChangeNotifier {
       final allAdvisories = (allResults[0] as List<List<NdmaAdvisory>>)
           .expand((list) => list)
           .toList(growable: false);
-      final allContacts   = (allResults[1] as List<List<EmergencyContact>>)
+
+      // Deduplicate contacts by phone+state key — getContacts() returns
+      // national contacts (All India) for every state call, so without
+      // dedup the same 3 national entries appear once per state (~20×).
+      final seenContactKeys = <String>{};
+      final allContacts = (allResults[1] as List<List<EmergencyContact>>)
           .expand((list) => list)
+          .where((c) => seenContactKeys.add('${c.phone}-${c.state}'))
           .toList(growable: false);
 
       _log('NDMA fetched: ${allAdvisories.length} advisories, ${allContacts.length} contacts');
