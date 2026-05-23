@@ -5,25 +5,25 @@
 /// (which drives 25-50 % of each prediction) fully, and use the backend
 /// /predict endpoint for the ML component — with graceful offline fallback.
 ///
-/// NOTE: CwcService has been removed. Live CWC data is now fetched by the
-/// PredictionService facade in predict.dart via ApiService (backend proxy).
-/// This class no longer makes any direct network calls to CWC endpoints.
+/// STATE MATRIX: No longer hardcoded in this file.
+/// PredictionServiceImpl now delegates to PipelineService.instance.entryForState()
+/// which is fetched from /api/state-severity at startup and refreshed hourly.
+/// This keeps the Flutter app in sync with state_severity_matrix.py on the backend.
 library;
 
 import 'dart:convert';
 import 'dart:math' as math;
-
 import 'package:http/http.dart' as http;
-
 import '../constants.dart';
+import 'pipeline_service.dart';
 
-// ── Public type alias so predict.dart can import it cleanly ──────────────────
+// ── Public type alias so predict.dart can import it cleanly ─────────────────
 typedef CoreFloodPrediction = FloodPrediction;
 
-// ── Prediction result ─────────────────────────────────────────────────────────
+// ── Prediction result ────────────────────────────────────────────────────
 
 class FloodPrediction {
-  final String severity;          // LOW | MODERATE | SEVERE | CRITICAL
+  final String severity;
   final double confidencePercent;
   final Map<String, double> probabilities;
   final String algorithm;
@@ -74,7 +74,7 @@ class MonitoringProtocol {
       );
 }
 
-// ── Input model ───────────────────────────────────────────────────────────────
+// ── Input model ─────────────────────────────────────────────────────
 
 class PredictionInput {
   final double peakFloodLevelM;
@@ -110,86 +110,7 @@ class PredictionInput {
       };
 }
 
-// ── State severity matrix ─────────────────────────────────────────────────────
-
-class _StateEntry {
-  final double dangerLevelM;
-  final double warningLevelM;
-  final Map<String, double> peakLevelM;
-  final Map<String, double> rainfall7dMm;
-
-  const _StateEntry({
-    required this.dangerLevelM,
-    required this.warningLevelM,
-    required this.peakLevelM,
-    required this.rainfall7dMm,
-  });
-}
-
-const _stateMatrix = <String, _StateEntry>{
-  'Maharashtra': _StateEntry(
-    dangerLevelM: 14.0, warningLevelM: 12.05,
-    peakLevelM:    {'moderate': 10.5, 'severe': 12.5, 'critical': 14.5},
-    rainfall7dMm:  {'moderate': 200,  'severe': 400,  'critical': 650},
-  ),
-  'Odisha': _StateEntry(
-    dangerLevelM: 16.5, warningLevelM: 14.19,
-    peakLevelM:    {'moderate': 12.0, 'severe': 14.5, 'critical': 17.0},
-    rainfall7dMm:  {'moderate': 250,  'severe': 500,  'critical': 800},
-  ),
-  'Assam': _StateEntry(
-    dangerLevelM: 15.0, warningLevelM: 12.9,
-    peakLevelM:    {'moderate': 11.0, 'severe': 13.5, 'critical': 15.5},
-    rainfall7dMm:  {'moderate': 300,  'severe': 600,  'critical': 900},
-  ),
-  'West Bengal': _StateEntry(
-    dangerLevelM: 12.5, warningLevelM: 10.75,
-    peakLevelM:    {'moderate': 9.5,  'severe': 11.0, 'critical': 13.0},
-    rainfall7dMm:  {'moderate': 200,  'severe': 400,  'critical': 650},
-  ),
-  'Bihar': _StateEntry(
-    dangerLevelM: 13.5, warningLevelM: 11.6,
-    peakLevelM:    {'moderate': 10.0, 'severe': 12.0, 'critical': 14.0},
-    rainfall7dMm:  {'moderate': 250,  'severe': 500,  'critical': 800},
-  ),
-  'Kerala': _StateEntry(
-    dangerLevelM: 12.0, warningLevelM: 10.32,
-    peakLevelM:    {'moderate': 9.0,  'severe': 10.5, 'critical': 12.5},
-    rainfall7dMm:  {'moderate': 300,  'severe': 600,  'critical': 950},
-  ),
-  'Andhra Pradesh': _StateEntry(
-    dangerLevelM: 13.0, warningLevelM: 11.18,
-    peakLevelM:    {'moderate': 10.0, 'severe': 11.5, 'critical': 13.5},
-    rainfall7dMm:  {'moderate': 200,  'severe': 420,  'critical': 700},
-  ),
-  'Karnataka': _StateEntry(
-    dangerLevelM: 12.5, warningLevelM: 10.75,
-    peakLevelM:    {'moderate': 9.5,  'severe': 11.0, 'critical': 13.0},
-    rainfall7dMm:  {'moderate': 250,  'severe': 500,  'critical': 800},
-  ),
-  'Gujarat': _StateEntry(
-    dangerLevelM: 10.5, warningLevelM: 9.03,
-    peakLevelM:    {'moderate': 8.0,  'severe': 9.5,  'critical': 11.0},
-    rainfall7dMm:  {'moderate': 180,  'severe': 350,  'critical': 600},
-  ),
-  'Uttar Pradesh': _StateEntry(
-    dangerLevelM: 11.5, warningLevelM: 9.89,
-    peakLevelM:    {'moderate': 8.5,  'severe': 10.5, 'critical': 12.0},
-    rainfall7dMm:  {'moderate': 200,  'severe': 400,  'critical': 650},
-  ),
-};
-
-_StateEntry _getStateEntry(String state) =>
-    _stateMatrix[state] ??
-    const _StateEntry(
-      dangerLevelM: 12.0, warningLevelM: 10.32,
-      peakLevelM:    {'moderate': 9.0, 'severe': 11.0, 'critical': 13.0},
-      rainfall7dMm:  {'moderate': 200, 'severe': 400,  'critical': 650},
-    );
-
-// ── Core service (singleton) ──────────────────────────────────────────────────
-// Named PredictionServiceImpl so predict.dart can expose a const-constructible
-// PredictionService facade without name collision.
+// ── Core service (singleton) ────────────────────────────────────────────
 
 class PredictionServiceImpl {
   PredictionServiceImpl._();
@@ -197,8 +118,11 @@ class PredictionServiceImpl {
 
   final http.Client _client = http.Client();
 
-  // ── Backend prediction (app.py /predict/v2) ───────────────────────────────
-  // Public so predict.dart facade can delegate to it.
+  // Delegate state entry lookups to PipelineService so there is ONE source of truth.
+  StateEntry _entry(String state) =>
+      PipelineService.instance.entryForState(state);
+
+  // ── Backend prediction (app.py /predict/v2) ────────────────────────────
   Future<FloodPrediction> backendPredict(
       PredictionInput input, {double? liveLevel}) async {
     final response = await _client
@@ -245,11 +169,11 @@ class PredictionServiceImpl {
     );
   }
 
-  // ── Local Rule-Engine ─────────────────────────────────────────────────────
-  // Public so predict.dart facade can delegate to it.
+  // ── Local Rule-Engine (offline fallback) ─────────────────────────────────
+  // Uses PipelineService.entryForState() — NOT a hardcoded matrix.
   FloodPrediction localRuleEnginePredict(
       PredictionInput input, {double? liveLevel}) {
-    final entry = _getStateEntry(input.state);
+    final entry = _entry(input.state);
     final dailyRain = [input.t1d, input.t2d, input.t3d,
                        input.t4d, input.t5d, input.t6d, input.t7d];
     final totalRain  = dailyRain.reduce((a, b) => a + b);
@@ -259,17 +183,18 @@ class PredictionServiceImpl {
     final peak       = input.peakFloodLevelM;
 
     final peakMod  = peak / math.max(entry.peakLevelM['moderate']!,  0.001);
-    final peakSev  = peak / math.max(entry.peakLevelM['severe']!,   0.001);
-    final peakCrit = peak / math.max(entry.peakLevelM['critical']!, 0.001);
+    final peakSev  = peak / math.max(entry.peakLevelM['severe']!,    0.001);
+    final peakCrit = peak / math.max(entry.peakLevelM['critical']!,  0.001);
     final rainMod  = totalRain / math.max(entry.rainfall7dMm['moderate']!,  0.001);
-    final rainSev  = totalRain / math.max(entry.rainfall7dMm['severe']!,   0.001);
-    final rainCrit = totalRain / math.max(entry.rainfall7dMm['critical']!, 0.001);
-    final dangerR  = peak / math.max(entry.peakLevelM['critical']!, 0.001);
+    final rainSev  = totalRain / math.max(entry.rainfall7dMm['severe']!,    0.001);
+    final rainCrit = totalRain / math.max(entry.rainfall7dMm['critical']!,  0.001);
+    final dangerR  = peak / math.max(entry.peakLevelM['critical']!,  0.001);
     final concR    = maxDaily / math.max(avgRain, 1.0);
     final durR     = input.eventDurationDays / 4.0;
     final flashR   = math.max(0.0, (2.5 - input.timeToPeakDays) / 2.5);
     final recR     = math.min(1.5, input.recessionTimeDays / 3.0);
-    final trendR   = math.max(-1.0, math.min(1.0, rainDelta / math.max(totalRain, 1.0) * 7.0));
+    final trendR   = math.max(-1.0, math.min(1.0,
+        rainDelta / math.max(totalRain, 1.0) * 7.0));
 
     final scores = {
       'LOW':
@@ -278,22 +203,15 @@ class PredictionServiceImpl {
           math.max(0.05, 0.82 * rainMod + 0.78 * peakMod + 0.12 * durR - 0.82),
       'SEVERE': math.max(
           0.05,
-          0.95 * rainSev +
-              0.96 * peakSev +
-              0.20 * concR +
-              0.12 * durR +
-              0.10 * math.max(0.0, trendR) -
-              1.12),
+          0.95 * rainSev + 0.96 * peakSev + 0.20 * concR +
+          0.12 * durR + 0.10 * math.max(0.0, trendR) - 1.12),
       'CRITICAL': math.max(
           0.02,
-          1.08 * rainCrit +
-              1.12 * peakCrit +
-              0.34 * math.max(0.0, dangerR - 1.0) +
-              0.18 * math.max(0.0, concR - 1.35) +
-              0.18 * flashR +
-              0.10 * recR +
-              0.12 * math.max(0.0, trendR) -
-              1.25),
+          1.08 * rainCrit + 1.12 * peakCrit +
+          0.34 * math.max(0.0, dangerR - 1.0) +
+          0.18 * math.max(0.0, concR - 1.35) +
+          0.18 * flashR + 0.10 * recR +
+          0.12 * math.max(0.0, trendR) - 1.25),
     };
 
     if (liveLevel != null && liveLevel < entry.warningLevelM) {
@@ -335,7 +253,7 @@ class PredictionServiceImpl {
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
   Map<String, double> _normalise(Map<String, double> raw) {
     final total = raw.values.fold(0.0, (s, v) => s + math.max(0, v));
