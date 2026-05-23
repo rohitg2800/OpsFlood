@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants.dart';
@@ -26,7 +27,6 @@ void _log(String msg) {
 int _stableId(String city) =>
     city.codeUnits.fold(0, (int a, int b) => (a * 31 + b) & 0x7FFFFFFF);
 
-// HIGH-severity offset — XOR bitmask, always stays in signed 32-bit positive range
 int _stableIdHigh(String city) => (_stableId(city) ^ 0x00100000) & 0x7FFFFFFF;
 
 class CwcStationData {
@@ -62,44 +62,22 @@ class CwcStationData {
     double sf(dynamic v) =>
         (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
     return CwcStationData(
-      stationName: (j['station'] ??
-              j['stationName'] ??
-              j['station_name'] ??
-              j['city'] ??
-              j['name'] ??
-              '')
-          .toString(),
-      stateName: (j['state'] ?? j['stateName'] ?? j['state_name'] ?? '')
-          .toString(),
-      riverName: (j['river'] ?? j['riverName'] ?? j['river_name'] ?? '')
-          .toString(),
-      riverLevel: sf(j['river_level'] ??
-          j['riverLevel'] ??
-          j['current_level'] ??
-          j['level'] ??
-          j['gauge_reading']),
-      warningLevel:
-          sf(j['warning_level'] ?? j['warningLevel'] ?? j['wl']),
-      dangerLevel:
-          sf(j['danger_level'] ?? j['dangerLevel'] ?? j['dl']),
-      flowRate:
-          sf(j['flow_rate'] ?? j['flowRate'] ?? j['discharge']),
-      rainfallLastHour: sf(
-          j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
-      status: (j['status'] ?? j['alert_status'] ?? 'ACTIVE')
-          .toString()
-          .toUpperCase(),
-      trend: (j['trend'] ?? j['water_trend'] ?? 'STEADY')
-          .toString()
-          .toUpperCase(),
-      source: (j['source'] ?? j['data_source'] ?? 'UNKNOWN').toString(),
+      stationName: (j['station'] ?? j['stationName'] ?? j['station_name'] ??
+              j['city'] ?? j['name'] ?? '').toString(),
+      stateName:  (j['state'] ?? j['stateName'] ?? j['state_name'] ?? '').toString(),
+      riverName:  (j['river'] ?? j['riverName'] ?? j['river_name'] ?? '').toString(),
+      riverLevel: sf(j['river_level'] ?? j['riverLevel'] ?? j['current_level'] ??
+          j['level'] ?? j['gauge_reading']),
+      warningLevel: sf(j['warning_level'] ?? j['warningLevel'] ?? j['wl']),
+      dangerLevel:  sf(j['danger_level']  ?? j['dangerLevel']  ?? j['dl']),
+      flowRate:     sf(j['flow_rate']     ?? j['flowRate']     ?? j['discharge']),
+      rainfallLastHour: sf(j['rainfall_last_hour'] ?? j['rainfallLastHour'] ?? j['rainfall']),
+      status:   (j['status']    ?? j['alert_status'] ?? 'ACTIVE').toString().toUpperCase(),
+      trend:    (j['trend']     ?? j['water_trend']  ?? 'STEADY').toString().toUpperCase(),
+      source:   (j['source']    ?? j['data_source']  ?? 'UNKNOWN').toString(),
       lastUpdate: DateTime.tryParse(
-              (j['last_update'] ??
-                      j['lastUpdate'] ??
-                      j['updated_at'] ??
-                      j['timestamp'] ??
-                      '')
-                  .toString()) ??
+        (j['last_update'] ?? j['lastUpdate'] ?? j['updated_at'] ??
+                j['timestamp'] ?? '').toString()) ??
           DateTime.now(),
     );
   }
@@ -117,6 +95,10 @@ class RealTimeService extends ChangeNotifier {
   static const int      _wakeUpMaxAttempts = 20;
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
+
+  // ── Keep-alive: pings the Render backend every 10 min so it never cold-starts.
+  static const Duration _keepAliveInterval = Duration(minutes: 10);
+  Timer? _keepAliveTimer;
 
   static final Map<String, Map<String, dynamic>> _cityByState = () {
     final m = <String, Map<String, dynamic>>{};
@@ -137,13 +119,7 @@ class RealTimeService extends ChangeNotifier {
   }();
 
   final ApiService _api = ApiService();
-
-  // ── Pass 2.5: shared RealTimeRiverService instance ──────────────────────────
-  // Reuse the same singleton so its 5-min cache is shared with the Stations tab.
-  // This means when India Map calls _buildFusedLevels, the bulk CWC cache is
-  // already warm (Stations tab already filled it) → zero extra HTTP calls.
   final RealTimeRiverService _liveRiverService = RealTimeRiverService();
-
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -177,7 +153,6 @@ class RealTimeService extends ChangeNotifier {
 
   List<CwcLiveReading> _cwcDirectReadings = <CwcLiveReading>[];
 
-  // ── Pass 4: IMD + NDMA state ───────────────────────────────────────────────
   List<ImdAlert>         _imdAlerts         = <ImdAlert>[];
   List<NdmaAdvisory>     _ndmaAdvisories    = <NdmaAdvisory>[];
   List<EmergencyContact> _emergencyContacts = <EmergencyContact>[];
@@ -190,7 +165,7 @@ class RealTimeService extends ChangeNotifier {
   MultiLocationMonitoring? _cachedMonitoringData;
   int _monitoringDataHash = 0;
 
-  // ─── Public getters ───────────────────────────────────────────────────────────
+  // ─── Public getters ───────────────────────────────────────────────────────
   List<FloodData>        get liveLevels          => _liveLevels;
   List<FloodAlert>       get criticalAlerts      => _criticalAlerts;
   List<CwcStationData>   get cwcStations         => _cwcStations;
@@ -208,7 +183,6 @@ class RealTimeService extends ChangeNotifier {
   bool                   get isWakingUp          =>
       _isOnline && !_liveDataEverReceived && !_hasRealFetchTime;
 
-  // Pass 4 getters — safe to read at any time (return empty list if not yet fetched)
   List<ImdAlert>         get imdAlerts         => _imdAlerts;
   List<NdmaAdvisory>     get ndmaAdvisories    => _ndmaAdvisories;
   List<EmergencyContact> get emergencyContacts => _emergencyContacts;
@@ -265,9 +239,6 @@ class RealTimeService extends ChangeNotifier {
     return null;
   }
 
-  // ── Pass 4 lookup helpers ───────────────────────────────────────────────
-
-  /// Returns IMD alerts for a given state (case-insensitive).
   List<ImdAlert> imdAlertsForState(String state) {
     final lc = state.toLowerCase();
     return _imdAlerts
@@ -275,7 +246,6 @@ class RealTimeService extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  /// Returns emergency contacts (NDRF/SDRF) for a given state.
   List<EmergencyContact> emergencyContactsForState(String state) {
     final lc = state.toLowerCase();
     return _emergencyContacts
@@ -283,7 +253,6 @@ class RealTimeService extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  /// Returns NDMA advisories for a given state.
   List<NdmaAdvisory> ndmaAdvisoriesForState(String state) {
     final lc = state.toLowerCase();
     return _ndmaAdvisories
@@ -291,13 +260,14 @@ class RealTimeService extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  // ─── Initialization ───────────────────────────────────────────────────────────
+  // ─── Initialization ───────────────────────────────────────────────────────
   Future<void> initialize() async {
     if (_initialized) return;
     await _initNotifications();
     _loadFallbackImmediately();
     await _restoreFromCache();
     await _initConnectivityListener();
+    _startKeepAlive();   // <-- keep Render backend warm
     _initialized = true;
     _scheduleWakeUpRetry();
   }
@@ -310,7 +280,23 @@ class RealTimeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ─── Wake-up loop ────────────────────────────────────────────────────────────
+  // ─── Keep-alive ping ─────────────────────────────────────────────────────
+  // Sends a lightweight GET /ping every 10 minutes so Render never cold-starts.
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(_keepAliveInterval, (_) async {
+      if (!_isOnline) return;
+      try {
+        final uri = Uri.parse('${AppConstants.baseUrl}/ping');
+        await http.get(uri).timeout(const Duration(seconds: 8));
+        _log('keep-alive ping OK');
+      } catch (e) {
+        _log('keep-alive ping failed (non-fatal): $e');
+      }
+    });
+  }
+
+  // ─── Wake-up loop ─────────────────────────────────────────────────────────
   void _scheduleWakeUpRetry() {
     if (_wakeAttempts >= _wakeUpMaxAttempts) return;
     _wakeUpTimer?.cancel();
@@ -339,7 +325,7 @@ class RealTimeService extends ChangeNotifier {
     });
   }
 
-  // ─── Notifications ────────────────────────────────────────────────────────────
+  // ─── Notifications ────────────────────────────────────────────────────────
   Future<void> _initNotifications() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const darwinInit  = DarwinInitializationSettings(
@@ -347,13 +333,9 @@ class RealTimeService extends ChangeNotifier {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-   await _notifications.initialize(
-    const InitializationSettings(
-    android: androidInit,
-    iOS:     darwinInit,
-    macOS:   darwinInit,
-  ),
-);
+    await _notifications.initialize(
+      const InitializationSettings(android: androidInit, iOS: darwinInit, macOS: darwinInit),
+    );
     final androidPlatform = _notifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
@@ -375,7 +357,7 @@ class RealTimeService extends ChangeNotifier {
     );
   }
 
-  // ─── Connectivity ────────────────────────────────────────────────────────────
+  // ─── Connectivity ──────────────────────────────────────────────────────────
   Future<void> _initConnectivityListener() async {
     final connectivity = Connectivity();
     final initial = await connectivity.checkConnectivity();
@@ -405,7 +387,7 @@ class RealTimeService extends ChangeNotifier {
     return true;
   }
 
-  // ─── Polling ───────────────────────────────────────────────────────────────────
+  // ─── Polling ──────────────────────────────────────────────────────────────
   Future<void> startPolling({Duration? interval}) async {
     await initialize();
     if (_isPolling) return;
@@ -432,11 +414,12 @@ class RealTimeService extends ChangeNotifier {
     _pollingTimer?.cancel();
     _pollingTimer = null;
     _wakeUpTimer?.cancel();
+    _keepAliveTimer?.cancel();
     _isPolling = false;
     notifyListeners();
   }
 
-  // ─── Core refresh ────────────────────────────────────────────────────────────
+  // ─── Core refresh ──────────────────────────────────────────────────────────
   Future<void> refreshData({bool forceOnlineAttempt = false}) async {
     if (_isLoading) return;
     if (!_isOnline && !forceOnlineAttempt) {
@@ -457,16 +440,14 @@ class RealTimeService extends ChangeNotifier {
         .toList();
 
     try {
-      // All passes fire in parallel — zero added latency.
-      // [6] Pass 2.5: same 5-source CWC cascade used by the Stations tab.
       final results = await Future.wait([
-        _api.getAllLiveTelemetry(),           // [0] backend telemetry
-        _api.getLiveLevels(),                 // [1] OPSFLOOD_MATRIX levels
-        _api.getCriticalAlerts(),             // [2] backend alerts
-        _fetchCwcDirectReadings(),            // [3] CWC direct (Pass 0)
-        _fetchImdData(activeStates),          // [4] IMD alerts + rainfall
-        _fetchNdmaData(activeStates),         // [5] NDMA advisories + NDRF contacts
-        _fetchLiveRiverResults(),             // [6] Pass 2.5 — RealTimeRiverService cascade
+        _api.getAllLiveTelemetry(),          // [0]
+        _api.getLiveLevels(),               // [1]
+        _api.getCriticalAlerts(),            // [2]
+        _fetchCwcDirectReadings(),           // [3]
+        _fetchImdData(activeStates),         // [4] — 25 s timeout
+        _fetchNdmaData(activeStates),        // [5]
+        _fetchLiveRiverResults(),            // [6]
       ]);
 
       final telemetryResponse  = results[0] as Map<String, dynamic>;
@@ -489,7 +470,6 @@ class RealTimeService extends ChangeNotifier {
       _log('NDMA advisories: ${ndmaResult.advisories.length}, contacts: ${ndmaResult.contacts.length}');
 
       _cwcDirectReadings = cwcDirectList;
-
       _imdAlerts         = imdResult.alerts;
       _ndmaAdvisories    = ndmaResult.advisories;
       _emergencyContacts = ndmaResult.contacts;
@@ -498,17 +478,13 @@ class RealTimeService extends ChangeNotifier {
       final levelsItems    = _deepExtractList(levelsResponse)    ?? [];
 
       _log('Pass1 telemetry items: ${telemetryItems.length}');
-
       _updateCwcStationsFromItems(telemetryItems);
 
       final cwcDirectMap = <String, CwcLiveReading>{};
       for (final r in cwcDirectList) {
-        if (r.hasRealData) {
-          cwcDirectMap[r.stationName.toLowerCase()] = r;
-        }
+        if (r.hasRealData) cwcDirectMap[r.stationName.toLowerCase()] = r;
       }
 
-      // Pass 2.5 map: city_lowercase → LiveRiverResult (real gauge only)
       final liveRiverMap = <String, LiveRiverResult>{};
       for (final r in liveRiverResults) {
         if (r.source != 'NO_DATA' && r.station.current > 0) {
@@ -575,9 +551,6 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── Pass 2.5: fetch from RealTimeRiverService ─────────────────────────────
-  // Non-fatal: if it throws or times out, returns empty list so the rest
-  // of the pipeline continues normally.
   Future<List<LiveRiverResult>> _fetchLiveRiverResults() async {
     try {
       return await _liveRiverService
@@ -589,8 +562,6 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── Pass 4 fetch helpers ──────────────────────────────────────────────────
-
   Future<_ImdResult> _fetchImdData(List<String> states) async {
     try {
       final alertFutures    = states.map((s) => ImdService.instance.getAlerts(state: s));
@@ -598,14 +569,13 @@ class RealTimeService extends ChangeNotifier {
       final allResults = await Future.wait([
         Future.wait(alertFutures),
         Future.wait(rainfallFutures),
-      ]).timeout(const Duration(seconds: 55));
+      // FIX: was 12 s — too short for slow mobile connections
+      ]).timeout(const Duration(seconds: 25));
 
       final allAlerts   = (allResults[0] as List<List<ImdAlert>>)
-          .expand((list) => list)
-          .toList(growable: false);
+          .expand((list) => list).toList(growable: false);
       final allRainfall = (allResults[1] as List<List<ImdRainfallPoint>>)
-          .expand((list) => list)
-          .toList(growable: false);
+          .expand((list) => list).toList(growable: false);
 
       _log('IMD fetched: ${allAlerts.length} alerts, ${allRainfall.length} rainfall pts');
       return _ImdResult(alerts: allAlerts, rainfall: allRainfall);
@@ -625,12 +595,8 @@ class RealTimeService extends ChangeNotifier {
       ]).timeout(const Duration(seconds: 55));
 
       final allAdvisories = (allResults[0] as List<List<NdmaAdvisory>>)
-          .expand((list) => list)
-          .toList(growable: false);
+          .expand((list) => list).toList(growable: false);
 
-      // Deduplicate contacts by phone+state key — getContacts() returns
-      // national contacts (All India) for every state call, so without
-      // dedup the same 3 national entries appear once per state (~20×).
       final seenContactKeys = <String>{};
       final allContacts = (allResults[1] as List<List<EmergencyContact>>)
           .expand((list) => list)
@@ -645,7 +611,6 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ── Pass 4 enrichment ───────────────────────────────────────────────────
   List<FloodData> _enrichWithImd(
     List<FloodData> levels,
     List<ImdRainfallPoint> rainfall,
@@ -674,10 +639,7 @@ class RealTimeService extends ChangeNotifier {
       final rain   = rainfallByState[stateKey];
       final sev    = alertsByState[stateKey];
       if (rain == null && sev == null) return fd;
-      return fd.copyWith(
-        imdRainfallMm: rain,
-        imdSeverity:   sev,
-      );
+      return fd.copyWith(imdRainfallMm: rain, imdSeverity: sev);
     }).toList(growable: false);
   }
 
@@ -689,7 +651,6 @@ class RealTimeService extends ChangeNotifier {
     _        => 0,
   };
 
-  // 60 s — gives CwcDirectService time to survive Render cold-start.
   Future<List<CwcLiveReading>> _fetchCwcDirectReadings() async {
     try {
       return await CwcDirectService.instance
@@ -708,15 +669,6 @@ class RealTimeService extends ChangeNotifier {
     }
   }
 
-  // ─── Multi-source data fusion (Pass 0 – 3, with 2.5 bridge) ──────────────
-  //
-  // Pass 0  : CwcDirectService live instrument readings
-  // Pass 1  : Backend telemetry (/api/live-telemetry)
-  // Pass 2  : OPSFLOOD_MATRIX best-by-state aggregate
-  // Pass 2.5: RealTimeRiverService 5-source CWC cascade (same as Stations tab)
-  //           Converts LiveRiverResult → FloodData with real gauge level.
-  // Pass 3  : FloodRiskEngine synthetic — ONLY when all live sources = NO_DATA
-  //
   List<FloodData> _buildFusedLevels({
     required List<Map<String, dynamic>> telemetryItems,
     required List<Map<String, dynamic>> levelsItems,
@@ -727,7 +679,7 @@ class RealTimeService extends ChangeNotifier {
     final coveredStates = <String>{};
     final result        = <FloodData>[];
 
-    // ── Pass 0: CWC Direct ────────────────────────────────────────────────
+    // Pass 0 — CWC Direct
     for (final entry in cwcDirectMap.entries) {
       final r = entry.value;
       if (!r.hasRealData) continue;
@@ -770,22 +722,12 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 1: backend telemetry ─────────────────────────────────────────
+    // Pass 1 — backend telemetry
     for (final item in telemetryItems) {
-      final rawStation = (item['station'] ??
-              item['stationName'] ??
-              item['station_name'] ??
-              item['city'] ??
-              '')
-          .toString()
-          .trim();
-      // state_name is the backend field; fall back to state
-      final rawState = (item['state_name'] ??
-              item['state'] ??
-              item['stateName'] ??
-              '')
-          .toString()
-          .trim();
+      final rawStation = (item['station'] ?? item['stationName'] ??
+              item['station_name'] ?? item['city'] ?? '').toString().trim();
+      final rawState = (item['state_name'] ?? item['state'] ??
+              item['stateName'] ?? '').toString().trim();
       if (rawStation.isEmpty || rawStation == 'Unknown') continue;
       if (coveredCities.contains(rawStation.toLowerCase())) continue;
 
@@ -801,12 +743,11 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 2: OPSFLOOD_MATRIX levels ────────────────────────────────────
+    // Pass 2 — OPSFLOOD_MATRIX best-by-state
     final bestByState = <String, Map<String, dynamic>>{};
     for (final item in levelsItems) {
       final st = (item['state'] ?? '').toString().trim().toLowerCase();
-      if (st.isEmpty) continue;
-      if (coveredStates.contains(st)) continue;
+      if (st.isEmpty || coveredStates.contains(st)) continue;
       final existing = bestByState[st];
       final pct = (item['capacity_percent'] as num?)?.toDouble() ?? 0.0;
       final exPct = (existing?['capacity_percent'] as num?)?.toDouble() ?? -1.0;
@@ -822,18 +763,13 @@ class RealTimeService extends ChangeNotifier {
       final liveRisk = (item['risk_level'] ?? 'MODERATE').toString().toUpperCase();
       Map<String, dynamic> bestCity = registryCities.first;
       for (final c in registryCities) {
-        if ((c['risk'] as String).toUpperCase() == liveRisk) {
-          bestCity = c;
-          break;
-        }
+        if ((c['risk'] as String).toUpperCase() == liveRisk) { bestCity = c; break; }
       }
 
       final cityNameLc = (bestCity['city'] as String).toLowerCase();
       if (coveredCities.contains(cityNameLc)) continue;
 
-      final liveLevel = (item['river_level'] ??
-              item['current_level'] ??
-              item['level']) as num?;
+      final liveLevel = (item['river_level'] ?? item['current_level'] ?? item['level']) as num?;
       final merged = <String, dynamic>{
         ...bestCity,
         'station':          bestCity['city'],
@@ -860,15 +796,14 @@ class RealTimeService extends ChangeNotifier {
       }
     }
 
-    // ── Pass 2.5: RealTimeRiverService CWC cascade ────────────────────────
-    // Same 5-source data the Stations tab shows — now India Map shows it too.
+    // Pass 2.5 — RealTimeRiverService CWC cascade
     for (final mc in AppConstants.monitoredCities) {
       final cityName = mc['city'] as String;
       final cityLc   = cityName.toLowerCase();
       if (coveredCities.contains(cityLc)) continue;
 
       final lrr = liveRiverMap[cityLc];
-      if (lrr == null) continue; // handled by Pass 3
+      if (lrr == null) continue;
 
       final st = lrr.station;
       final wl = st.warning > 0 ? st.warning : (mc['warning_level'] as double? ?? AppConstants.defaultWarningLevel);
@@ -907,12 +842,11 @@ class RealTimeService extends ChangeNotifier {
       if (fd.city.isNotEmpty) {
         result.add(fd);
         coveredCities.add(cityLc);
-        _log('Pass2.5 LiveRiver: $cityName @ ${st.current}m '
-            '[${lrr.source} conf=${lrr.confidence.toStringAsFixed(2)}]');
+        _log('Pass2.5 LiveRiver: $cityName @ ${st.current}m [${lrr.source}]');
       }
     }
 
-    // ── Pass 3: synthetic fallback — last resort only ─────────────────────
+    // Pass 3 — synthetic fallback, last resort only
     for (final c in AppConstants.monitoredCities) {
       final cityLc = (c['city'] as String).toLowerCase();
       if (coveredCities.contains(cityLc)) continue;
@@ -939,17 +873,14 @@ class RealTimeService extends ChangeNotifier {
     if (match == null) {
       for (final c in cities) {
         final cn = (c['city'] as String).toLowerCase();
-        if (station.toLowerCase().contains(cn) ||
-            cn.contains(station.toLowerCase())) {
+        if (station.toLowerCase().contains(cn) || cn.contains(station.toLowerCase())) {
           match = c;
           break;
         }
       }
     }
 
-    if (match == null) {
-      return {...item, 'station': station, 'city': station};
-    }
+    if (match == null) return {...item, 'station': station, 'city': station};
 
     return <String, dynamic>{
       ...item,
@@ -1054,11 +985,10 @@ class RealTimeService extends ChangeNotifier {
               city:     e.city,
               state:    e.state,
               severity: e.capacityPercent >= AppConstants.criticalThreshold
-                  ? 'CRITICAL'
-                  : 'HIGH',
-              title:   '${e.city} river alert',
-              message: '${e.riverName ?? 'River'} is at '
-                       '${e.capacityPercent.toStringAsFixed(0)}% capacity.',
+                  ? 'CRITICAL' : 'HIGH',
+              title:    '${e.city} river alert',
+              message:  '${e.riverName ?? 'River'} is at '
+                        '${e.capacityPercent.toStringAsFixed(0)}% capacity.',
               timestamp: now,
               resolved:  false,
               riverName:    e.riverName,
@@ -1151,13 +1081,11 @@ class RealTimeService extends ChangeNotifier {
     );
     const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true);
     await _notifications.show(
-      id,
-      title,
-      body,
+      id, title, body,
       NotificationDetails(android: android, iOS: ios),
       payload: payload,
     );
-}
+  }
 
   Future<void> _persistCache() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1232,7 +1160,6 @@ class RealTimeService extends ChangeNotifier {
   }
 }
 
-// ── Private result containers for parallel fetch ─────────────────────────────
 class _ImdResult {
   final List<ImdAlert> alerts;
   final List<ImdRainfallPoint> rainfall;

@@ -14,7 +14,11 @@ import 'providers/theme_provider.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load .env — gracefully handles missing file (CI, fresh clones, production).
+  // Preload image cache and enable shader warm-up.
+  // Reduces first-frame jank on lower-end devices.
+  WidgetsBinding.instance.deferFirstFrame();
+
+  // Load .env — gracefully handles missing file in production.
   try {
     await dotenv.load(fileName: '.env', mergeWith: {});
   } catch (e) {
@@ -33,17 +37,22 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
+  // Only surface errors in debug; swallow in release to avoid user-visible crashes.
   FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details);
-    if (kDebugMode) debugPrint('\u274c FlutterError: ${details.summary}');
+    if (kDebugMode) {
+      FlutterError.presentError(details);
+      debugPrint('❌ FlutterError: ${details.summary}');
+    }
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-    if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error');
-    return true;
+    if (kDebugMode) debugPrint('❌ PlatformDispatcher: $error\n$stack');
+    return true; // prevents OS from killing the app
   };
 
   await ThemeProvider().init();
+
+  WidgetsBinding.instance.allowFirstFrame();
 
   runApp(const ProviderScope(child: EquinoxApp()));
 }
@@ -62,6 +71,7 @@ class EquinoxApp extends ConsumerWidget {
       theme:                      RiverColors.lightTheme(),
       darkTheme:                  RiverColors.darkTheme(),
       home:                       const SplashScreen(),
+      // Clamp text scaling — prevents overflow on accessibility large-text.
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(
