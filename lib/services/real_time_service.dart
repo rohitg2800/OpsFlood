@@ -497,6 +497,8 @@ class RealTimeService extends ChangeNotifier {
       final telemetryItems = _deepExtractList(telemetryResponse) ?? [];
       final levelsItems    = _deepExtractList(levelsResponse)    ?? [];
 
+      _log('Pass1 telemetry items: ${telemetryItems.length}');
+
       _updateCwcStationsFromItems(telemetryItems);
 
       final cwcDirectMap = <String, CwcLiveReading>{};
@@ -580,7 +582,7 @@ class RealTimeService extends ChangeNotifier {
     try {
       return await _liveRiverService
           .fetchAll()
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 55));
     } catch (e) {
       _log('Pass2.5 liveRiver error (non-fatal): $e');
       return const [];
@@ -596,7 +598,7 @@ class RealTimeService extends ChangeNotifier {
       final allResults = await Future.wait([
         Future.wait(alertFutures),
         Future.wait(rainfallFutures),
-      ]).timeout(const Duration(seconds: 14));
+      ]).timeout(const Duration(seconds: 55));
 
       final allAlerts   = (allResults[0] as List<List<ImdAlert>>)
           .expand((list) => list)
@@ -620,7 +622,7 @@ class RealTimeService extends ChangeNotifier {
       final allResults = await Future.wait([
         Future.wait(advisoryFutures),
         Future.wait(contactFutures),
-      ]).timeout(const Duration(seconds: 14));
+      ]).timeout(const Duration(seconds: 55));
 
       final allAdvisories = (allResults[0] as List<List<NdmaAdvisory>>)
           .expand((list) => list)
@@ -687,11 +689,12 @@ class RealTimeService extends ChangeNotifier {
     _        => 0,
   };
 
+  // 60 s — gives CwcDirectService time to survive Render cold-start.
   Future<List<CwcLiveReading>> _fetchCwcDirectReadings() async {
     try {
       return await CwcDirectService.instance
           .getAllLiveReadings()
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 60));
     } catch (e) {
       _log('CwcDirect error (non-fatal): $e');
       return const [];
@@ -776,7 +779,11 @@ class RealTimeService extends ChangeNotifier {
               '')
           .toString()
           .trim();
-      final rawState = (item['state'] ?? item['stateName'] ?? '')
+      // state_name is the backend field; fall back to state
+      final rawState = (item['state_name'] ??
+              item['state'] ??
+              item['stateName'] ??
+              '')
           .toString()
           .trim();
       if (rawStation.isEmpty || rawStation == 'Unknown') continue;
@@ -788,6 +795,9 @@ class RealTimeService extends ChangeNotifier {
         result.add(fd);
         coveredCities.add(fd.city.toLowerCase());
         if (rawState.isNotEmpty) coveredStates.add(rawState.toLowerCase());
+        _log('Pass1 accepted: ${fd.city} (${fd.state})');
+      } else {
+        _log('Pass1 rejected: station=$rawStation state=$rawState city=${fd.city}');
       }
     }
 
