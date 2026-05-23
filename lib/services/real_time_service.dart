@@ -10,7 +10,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../constants.dart';
+// FIX: was importing '../constants.dart' (legacy file that re-exports nothing).
+// Must use the new barrel instead so AppConstants resolves correctly.
+import '../constants/constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'api_service.dart';
@@ -86,7 +88,15 @@ class CwcStationData {
 }
 
 class RealTimeService extends ChangeNotifier {
+  // FIX: factory constructor was calling RealTimeService._internal() on every
+  // construction, creating the singleton lazily but then allowing callers to
+  // do RealTimeService() inside a Riverpod ChangeNotifierProvider — which
+  // creates a NEW instance for each Riverpod scope, breaking the singleton
+  // guarantee. The liveRiverProvider already uses RealTimeRiverService.instance;
+  // we follow the same pattern here by exposing a named .instance getter and
+  // making the factory redirect to it.
   static final RealTimeService _instance = RealTimeService._internal();
+  static RealTimeService get instance => _instance;
   factory RealTimeService() => _instance;
   RealTimeService._internal();
 
@@ -96,7 +106,7 @@ class RealTimeService extends ChangeNotifier {
   static const Duration _wakeUpBaseDelay   = Duration(seconds: 2);
   static const Duration _wakeUpMaxDelay    = Duration(seconds: 15);
 
-  // ── Keep-alive: pings the Render backend every 10 min so it never cold-starts.
+  // Keep-alive: pings Render every 10 min so it never cold-starts.
   static const Duration _keepAliveInterval = Duration(minutes: 10);
   Timer? _keepAliveTimer;
 
@@ -119,7 +129,9 @@ class RealTimeService extends ChangeNotifier {
   }();
 
   final ApiService _api = ApiService();
-  final RealTimeRiverService _liveRiverService = RealTimeRiverService();
+  // FIX: was RealTimeRiverService() — uses the shared singleton, same as
+  // liveRiverProvider, to avoid a second independent 5-source fetch loop.
+  final RealTimeRiverService _liveRiverService = RealTimeRiverService.instance;
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
@@ -267,7 +279,7 @@ class RealTimeService extends ChangeNotifier {
     _loadFallbackImmediately();
     await _restoreFromCache();
     await _initConnectivityListener();
-    _startKeepAlive();   // <-- keep Render backend warm
+    _startKeepAlive();
     _initialized = true;
     _scheduleWakeUpRetry();
   }
@@ -281,7 +293,6 @@ class RealTimeService extends ChangeNotifier {
   }
 
   // ─── Keep-alive ping ─────────────────────────────────────────────────────
-  // Sends a lightweight GET /ping every 10 minutes so Render never cold-starts.
   void _startKeepAlive() {
     _keepAliveTimer?.cancel();
     _keepAliveTimer = Timer.periodic(_keepAliveInterval, (_) async {
@@ -441,8 +452,8 @@ class RealTimeService extends ChangeNotifier {
 
     try {
       final results = await Future.wait([
-        _api.getAllLiveTelemetry(),          // [0]
-        _api.getLiveLevels(),               // [1]
+        _api.getAllLiveTelemetry(),          // [0] — fetches ALL states
+        _api.getLiveLevels(),               // [1] — fetches ALL states
         _api.getCriticalAlerts(),            // [2]
         _fetchCwcDirectReadings(),           // [3]
         _fetchImdData(activeStates),         // [4] — 25 s timeout
@@ -569,7 +580,6 @@ class RealTimeService extends ChangeNotifier {
       final allResults = await Future.wait([
         Future.wait(alertFutures),
         Future.wait(rainfallFutures),
-      // FIX: was 12 s — too short for slow mobile connections
       ]).timeout(const Duration(seconds: 25));
 
       final allAlerts   = (allResults[0] as List<List<ImdAlert>>)

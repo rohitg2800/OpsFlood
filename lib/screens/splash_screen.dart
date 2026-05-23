@@ -1,13 +1,20 @@
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'home_screen.dart';
 import '../services/api_service.dart';
-import '../services/background_service.dart';
-import '../services/fcm_service.dart';
 import '../theme/river_theme.dart';
 import '../providers/flood_providers.dart';
+
+// NOTE: BackgroundService and FcmService are NOT imported here.
+// Both are initialised in main() via unawaited() fire-and-forget calls.
+// Calling them again here would create a double-init:
+//   - BackgroundService.init() would re-register Workmanager tasks.
+//   - FcmService.instance.init() would re-request notification permissions,
+//     which on Android 13+ triggers a second permission dialog.
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -84,8 +91,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 
   Future<void> _bootServices() async {
+    // Start the Riverpod polling loop (idempotent — no-op if already started).
     await ref.read(realTimeProvider).startPolling();
-    await BackgroundService.init();
     _checkBackend();
   }
 
@@ -96,13 +103,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         health['status'] != 'offline' && health['status'] != 'error';
     _setStatus(
         _backendOnline ? 'Systems online  \u2705' : 'Backend waking up  \u23f3');
-
-    // ── P1: Initialise FCM after backend is confirmed reachable ─────────────
-    // We init here (not in main()) so Firebase runs after WidgetsBinding and
-    // after the user has already seen the splash — less cold-start jank.
-    _setStatus('Setting up push alerts...');
-    await FcmService.instance.init();
-    _setStatus(_backendOnline ? 'Systems online  \u2705' : 'Backend waking up  \u23f3');
 
     await Future.delayed(const Duration(milliseconds: 1600));
     if (!mounted) return;

@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../constants.dart';
+import '../constants/constants.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -55,7 +55,7 @@ class ApiService {
           }
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            lastError = 'HTTP \${res.statusCode}';
+            lastError = 'HTTP ${res.statusCode}';
             if (res.statusCode >= 400 && res.statusCode < 500) break;
             if (attempt < _maxRetries) {
               await Future<void>.delayed(_retryBackoff * attempt);
@@ -66,7 +66,7 @@ class ApiService {
           final parsedBody = _safeDecode(res.body);
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
-          lastError = 'Request timed out after \${_timeout.inSeconds}s';
+          lastError = 'Request timed out after ${_timeout.inSeconds}s';
           if (attempt == _maxRetries) break;
           await Future<void>.delayed(_retryBackoff);
         } catch (e) {
@@ -103,11 +103,22 @@ class ApiService {
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
+  // FIX: getLiveTelemetry was defaulting to state=Maharashtra and a limit of 10,
+  // returning data for one state only. getAllLiveTelemetry now fetches without a
+  // state filter so all monitored states are covered in a single call.
+  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 100}) =>
+      _get('${AppConstants.liveTelemetryEndpoint}?limit=$limit');
+
   Future<Map<String, dynamic>> getLiveTelemetry({String? state, int limit = 10}) =>
-      _get('\${AppConstants.liveTelemetryEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+      _get('${AppConstants.liveTelemetryEndpoint}?state=${state ?? "Maharashtra"}&limit=$limit');
+
+  // FIX: getLiveLevels was defaulting to state=Maharashtra and a limit of 20.
+  // getAllLiveLevels fetches without a state filter so all states are covered.
+  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 100}) =>
+      _get('${AppConstants.liveLevelsEndpoint}?limit=$limit');
 
   Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 20}) =>
-      _get('\${AppConstants.liveLevelsEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+      _get('${AppConstants.liveLevelsEndpoint}?state=${state ?? "Maharashtra"}&limit=$limit');
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
@@ -116,45 +127,41 @@ class ApiService {
       _post('/predict/v2', input);
 
   Future<Map<String, dynamic>> getWeatherCurrent({required String location}) =>
-      _get('\${AppConstants.weatherCurrentEndpoint}?location=\$location');
+      _get('${AppConstants.weatherCurrentEndpoint}?location=$location');
 
   Future<Map<String, dynamic>> getWeatherForecast({required String location}) =>
-      _get('\${AppConstants.weatherForecastEndpoint}?location=\$location');
+      _get('${AppConstants.weatherForecastEndpoint}?location=$location');
 
-  // ── Pipeline endpoints (new — unified data pipeline bridge) ──────────────
+  // ── Pipeline endpoints ──────────────────────────────────────────────────
 
-  /// Fetch latest OperationalDataPipeline feature row for [state]/[station].
-  /// Returns null-safe map; check ['status'] == 'success'.
   Future<Map<String, dynamic>> getPipelineFeatures({
     required String state,
     String? station,
   }) {
-    final qs = StringBuffer('state=\${Uri.encodeComponent(state)}');
+    final qs = StringBuffer('state=${Uri.encodeComponent(state)}');
     if (station != null && station.isNotEmpty) {
-      qs.write('&station=\${Uri.encodeComponent(station)}');
+      qs.write('&station=${Uri.encodeComponent(station)}');
     }
-    return _get('/api/pipeline/features?\$qs');
+    return _get('/api/pipeline/features?$qs');
   }
 
-  /// Fetch the full state severity matrix from the backend.
-  /// Flutter should call this once at startup via PipelineService.init().
   Future<Map<String, dynamic>> getStateSeverityMatrix() =>
       _get('/api/state-severity');
 
-  /// Fetch severity entry for a single [state].
   Future<Map<String, dynamic>> getStateSeverityEntry(String state) =>
-      _get('/api/state-severity/\${Uri.encodeComponent(state)}');
+      _get('/api/state-severity/${Uri.encodeComponent(state)}');
 
-  /// Fetch last ingestion run summary.
   Future<Map<String, dynamic>> getPipelineManifest() =>
       _get('/api/pipeline/manifest');
 
-  /// Trigger a manual ingestion run (admin use, requires network).
   Future<Map<String, dynamic>> triggerIngestion() =>
       _post('/ingestion/run', {});
 
-  // ── Model quality ────────────────────────────────────────────────────
+  // ── CWC stations (used by predict.dart _fetchLiveLevel) ─────────────────
+  Future<Map<String, dynamic>> getAllCwcStations() =>
+      _get('/api/cwc-stations');
 
+  // ── Model quality ────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getModelMetrics() =>
       _get('/model-metrics');
 }
