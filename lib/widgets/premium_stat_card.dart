@@ -1,6 +1,11 @@
-import 'dart:ui';
+// lib/widgets/premium_stat_card.dart
+//
+// OpsFlood — PremiumStatCard (redesigned)
+// Glass card with glow border, large value, accent gradient line at bottom.
+library;
 
 import 'package:flutter/material.dart';
+import '../theme/river_theme.dart';
 
 class PremiumStatCard extends StatelessWidget {
   final IconData icon;
@@ -20,66 +25,69 @@ class PremiumStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              color: Colors.white.withValues(alpha: 0.08),
-              border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.16)),
-              boxShadow: [
-                BoxShadow(
-                  color:       accent.withValues(alpha: 0.18),
-                  blurRadius:  18,
-                  spreadRadius: 1,
+    final rc = RiverColors.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      decoration: BoxDecoration(
+        color: rc.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: 0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.07),
+            blurRadius: 10, offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              ],
-            ),
-            // FIX: wrap in ClipRect so content never bleeds outside the card,
-            // and use Flexible text widgets so they shrink to fit.
-            child: ClipRect(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: accent, size: 18),
-                  const SizedBox(height: 6),
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color:      Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize:   17,   // was 20 — reduced to fit compact cards
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 11),  // was 12
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 9.5),  // was 10
-                  ),
-                ],
+                child: Icon(icon, color: accent, size: 16),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(title,
+                    style: TextStyle(
+                      color: rc.textSecondary,
+                      fontSize: 11, fontWeight: FontWeight.w600,
+                    )),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(value,
+              style: TextStyle(
+                color: accent,
+                fontSize: 26, fontWeight: FontWeight.w900,
+                letterSpacing: -1,
+              )),
+          const SizedBox(height: 2),
+          Text(subtitle,
+              style: TextStyle(color: rc.textSecondary, fontSize: 10),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 10),
+          // Accent gradient line at bottom
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.only(
+                bottomLeft:  Radius.circular(16),
+                bottomRight: Radius.circular(16),
+              ),
+              gradient: LinearGradient(
+                colors: [accent.withValues(alpha: 0.7), accent.withValues(alpha: 0.1)],
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
