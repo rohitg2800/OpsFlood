@@ -29,25 +29,28 @@ Future<void> main() async {
     if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
   }
 
-  // Firebase — guard against duplicate-app init (background isolates may
-  // already have called Firebase.initializeApp).
-  if (Firebase.apps.isEmpty) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+  // Firebase — skip on web (no web config); guard against duplicate-app init.
+  if (!kIsWeb) {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
   }
 
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:                    Colors.transparent,
-    statusBarIconBrightness:           Brightness.light,
-    systemNavigationBarColor:          AppPalette.carbon0,
-    systemNavigationBarIconBrightness: Brightness.light,
-  ));
+  if (!kIsWeb) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor:                    Colors.transparent,
+      statusBarIconBrightness:           Brightness.light,
+      systemNavigationBarColor:          AppPalette.carbon0,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ));
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  }
 
   // Global error handlers — debug only; release is silent to avoid crashes.
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -64,31 +67,29 @@ Future<void> main() async {
 
   await ThemeProvider().init();
 
-  // ── Background services (fire-and-forget; must not block runApp) ──────────
+  // ── Background services (native only — not supported on web) ─────────────
+  if (!kIsWeb) {
+    // 1. State severity matrix — fetched once, cached 1 hour.
+    unawaited(
+      PipelineService.instance.init().catchError((e) {
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  PipelineService.init failed: $e');
+      }),
+    );
 
-  // 1. State severity matrix — fetched once, cached 1 hour.
-  //    If backend is cold (Render ~50 s cold-start) the app still launches
-  //    using built-in StateEntry.fallback thresholds.
-  unawaited(
-    PipelineService.instance.init().catchError((e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  PipelineService.init failed: $e');
-    }),
-  );
+    // 2. FCM — request push-notification permissions and register device token.
+    unawaited(
+      FcmService.instance.init().catchError((e) {
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
+      }),
+    );
 
-  // 2. FCM — request push-notification permissions and register device token.
-  //    Must run after Firebase.initializeApp.
-  unawaited(
-    FcmService.instance.init().catchError((e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
-    }),
-  );
-
-  // 3. Workmanager background tasks — keep-alive ping + 15-min data refresh.
-  unawaited(
-    BackgroundService.init().catchError((e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
-    }),
-  );
+    // 3. Workmanager background tasks — keep-alive ping + 15-min data refresh.
+    unawaited(
+      BackgroundService.init().catchError((e) {
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
+      }),
+    );
+  }
 
   WidgetsBinding.instance.allowFirstFrame();
 
