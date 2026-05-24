@@ -76,8 +76,6 @@ class AppConstants {
   static const double lowThreshold      = 30.0;
 
   // ── Polling & retry ───────────────────────────────────────────────────────
-  // FIX: was 5 seconds in app_constants.dart — changed to 5 minutes to match
-  // app_config.dart. 5-second polling hammers the Render free-tier backend.
   static const Duration pollingInterval = Duration(minutes: 5);
   static const int      maxRetries      = 3;
 
@@ -91,18 +89,14 @@ class AppConstants {
   static const Duration mediumAnimDuration = Duration(milliseconds: 320);
   static const Duration longAnimDuration   = Duration(milliseconds: 600);
 
-  // ── Notification channels ─────────────────────────────────────────────────
-  static const String criticalAlertChannelId   = 'flood_critical';
+  // ── Notification channels (synced with AlertChannels) ────────────────────
+  static const String criticalAlertChannelId   = 'opsflood_critical';
   static const String criticalAlertChannelName = 'Critical Flood Alerts';
-  static const String warningAlertChannelId    = 'flood_warning';
+  static const String warningAlertChannelId    = 'opsflood_warning';
   static const String warningAlertChannelName  = 'Flood Warnings';
 
-  // ── Indian states + UTs list (used by state-filter dropdowns) ────────────
-  // FIX: AppConstants.indianStates was referenced in india_rivers_screen.dart
-  // and india_river_explorer_screen.dart but was absent from this file,
-  // causing 'Member not found: indianStates' compile errors in both screens.
+  // ── Indian states + UTs list (synced with IndiaGeodata.states) ───────────
   static const List<String> indianStates = [
-    'All India',
     'Andhra Pradesh',
     'Arunachal Pradesh',
     'Assam',
