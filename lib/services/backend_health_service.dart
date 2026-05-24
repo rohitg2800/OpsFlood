@@ -1,10 +1,11 @@
 // lib/services/backend_health_service.dart
-// Fetches /health once at startup and exposes structured backend state
-// to the entire app via BackendHealthNotifier (used by backendHealthProvider).
+//
+// Backend health probe. Uses AppConfig timeouts — no magic numbers here.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'api_service.dart';
+import 'flood_api.dart';
+import '../config/app_config.dart';
 
 class BackendHealth {
   final bool isOnline;
@@ -38,16 +39,16 @@ class BackendHealth {
     final ingestion = j['ingestion'] as Map<String, dynamic>? ?? {};
     final policy    = j['source_policy'] as Map<String, dynamic>? ?? {};
     return BackendHealth(
-      isOnline:        j['status'] == 'ok',
-      modelReady:      j['model_ready'] == true,
-      artifactCount:   (j['artifact_count'] as num?)?.toInt() ?? 0,
-      bundleCount:     (j['bundle_count']   as num?)?.toInt() ?? 0,
-      version:         j['version']?.toString() ?? 'unknown',
-      dbReady:         db['ready'] == true,
+      isOnline:         j['status'] == 'ok',
+      modelReady:       j['model_ready'] == true,
+      artifactCount:    (j['artifact_count'] as num?)?.toInt() ?? 0,
+      bundleCount:      (j['bundle_count']   as num?)?.toInt() ?? 0,
+      version:          j['version']?.toString() ?? 'unknown',
+      dbReady:          db['ready'] == true,
       ingestionRunning: ingestion['running'] == true,
-      sourceMode:      policy['mode']?.toString() ?? '',
-      sourceLabel:     policy['label']?.toString() ?? '',
-      fetchedAt:       DateTime.tryParse(j['time']?.toString() ?? ''),
+      sourceMode:       policy['mode']?.toString()  ?? '',
+      sourceLabel:      policy['label']?.toString() ?? '',
+      fetchedAt:        DateTime.tryParse(j['time']?.toString() ?? ''),
     );
   }
 
@@ -60,38 +61,31 @@ class BackendHealth {
 
 class BackendHealthNotifier extends ChangeNotifier {
   BackendHealth _health = BackendHealth.offline;
-  bool _loading = false;
+  bool          _loading = false;
 
   BackendHealth get health  => _health;
   bool          get loading => _loading;
 
-  // FIX #5: Health check timeout raised to 65s to cover Render cold-start
-  // (previously 10s caused false-offline during backend wake-up).
-  // We also retry once automatically on timeout before marking offline.
-  Future<void> fetch() async {
+  // On first open the backend may be cold (~50s wake). We probe with
+  // coldStartTimeout and retry once automatically before marking offline.
+  Future<void> fetch({bool coldStart = true}) async {
     if (_loading) return;
     _loading = true;
     notifyListeners();
 
-    const warmUpTimeout = Duration(seconds: 65);
-
-    for (int attempt = 1; attempt <= 2; attempt++) {
+    for (int attempt = 1; attempt <= AppConfig.healthRetries; attempt++) {
       try {
-        final raw = await ApiService().checkHealth()
-            .timeout(warmUpTimeout, onTimeout: () => {'status': 'timeout'});
-
-        if (raw['status'] == 'timeout' && attempt < 2) {
-          // Backend still waking up — wait 5s then retry once.
+        final raw = await FloodApi.instance.healthCheck(coldStart: coldStart);
+        if (raw['status'] == 'error' && attempt < AppConfig.healthRetries) {
           await Future<void>.delayed(const Duration(seconds: 5));
           continue;
         }
-
-        _health = raw['status'] == 'timeout'
-            ? BackendHealth.offline
-            : BackendHealth.fromJson(raw);
+        _health = (raw['status'] == 'ok' || raw['model_ready'] != null)
+            ? BackendHealth.fromJson(raw)
+            : BackendHealth.offline;
         break;
       } catch (e) {
-        if (kDebugMode) debugPrint('[BackendHealth] fetch error: $e');
+        if (kDebugMode) debugPrint('[BackendHealth] $e');
         _health = BackendHealth.offline;
         break;
       }
