@@ -10,10 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'firebase_options.dart';
 import 'providers/flood_providers.dart';
 import 'providers/theme_provider.dart';
+import 'screens/alerts_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/background_service.dart';
 import 'services/fcm_service.dart';
 import 'services/pipeline_service.dart';
+import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
 Future<void> main() async {
@@ -52,7 +54,7 @@ Future<void> main() async {
     ]);
   }
 
-  // Global error handlers — debug only; release is silent to avoid crashes.
+  // Global error handlers.
   FlutterError.onError = (FlutterErrorDetails details) {
     if (kDebugMode) {
       FlutterError.presentError(details);
@@ -67,7 +69,7 @@ Future<void> main() async {
 
   await ThemeProvider().init();
 
-  // ── Background services (native only — not supported on web) ─────────────
+  // ── Background services (native only — not supported on web) ────────────────────
   if (!kIsWeb) {
     // 1. State severity matrix — fetched once, cached 1 hour.
     unawaited(
@@ -87,6 +89,14 @@ Future<void> main() async {
     unawaited(
       BackgroundService.init().catchError((e) {
         if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
+      }),
+    );
+
+    // 4. Threshold alert engine — polls GloFAS every 15 min for all 93 cities
+    //    + 31 Bihar gauges; fires local FCM notifications on ≥ Warning breach.
+    unawaited(
+      ThresholdAlertService.instance.start().catchError((e) {
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
       }),
     );
   }
@@ -110,6 +120,9 @@ class EquinoxApp extends ConsumerWidget {
       theme:                      RiverColors.lightTheme(),
       darkTheme:                  RiverColors.darkTheme(),
       home:                       const SplashScreen(),
+      routes: {
+        AlertsScreen.route: (_) => const AlertsScreen(),
+      },
       // Clamp text scale — prevents overflow on accessibility large-text settings.
       builder: (context, child) {
         final mq = MediaQuery.of(context);

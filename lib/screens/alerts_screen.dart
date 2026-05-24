@@ -2,44 +2,45 @@
 //
 // OpsFlood — AlertsScreen
 // Full-screen list of threshold breach alerts, grouped by severity.
+// Uses Riverpod ConsumerStatefulWidget, matching the rest of the app.
 library;
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../models/threshold_alert.dart';
 import '../providers/alerts_provider.dart';
 
-class AlertsScreen extends StatefulWidget {
+class AlertsScreen extends ConsumerStatefulWidget {
   const AlertsScreen({super.key});
-
   static const route = '/alerts';
 
   @override
-  State<AlertsScreen> createState() => _AlertsScreenState();
+  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsScreenState extends State<AlertsScreen> {
+class _AlertsScreenState extends ConsumerState<AlertsScreen> {
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AlertsProvider>().markAllSeen();
+      ref.read(alertsProvider).markAllSeen();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<AlertsProvider>();
+    final provider = ref.watch(alertsProvider);
     final alerts   = provider.filtered;
-    final theme    = Theme.of(context);
+    final critical = provider.critical;
+    final loading  = provider.loading;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('River Alerts'),
         actions: [
-          if (provider.loading)
+          if (loading)
             const Padding(
               padding: EdgeInsets.only(right: 16),
               child: SizedBox(
@@ -50,7 +51,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
           else
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: provider.refresh,
+              onPressed: () => ref.read(alertsProvider).refresh(),
               tooltip: 'Refresh now',
             ),
           _FilterMenu(provider: provider),
@@ -58,16 +59,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
       ),
       body: Column(
         children: [
-          // Active summary bar
-          if (provider.critical.isNotEmpty)
-            _CriticalBanner(count: provider.critical.length),
-
-          // Alert list
+          if (critical.isNotEmpty)
+            _CriticalBanner(count: critical.length),
           Expanded(
             child: alerts.isEmpty
-                ? _EmptyState(loading: provider.loading)
+                ? _EmptyState(loading: loading)
                 : RefreshIndicator(
-                    onRefresh: provider.refresh,
+                    onRefresh: () => ref.read(alertsProvider).refresh(),
                     child: ListView.builder(
                       padding: const EdgeInsets.all(12),
                       itemCount: alerts.length,
@@ -98,7 +96,8 @@ class _CriticalBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Text(
             '$count station${count > 1 ? 's' : ''} at or above Danger level',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -113,7 +112,7 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme     = Theme.of(context);
+    final theme      = Theme.of(context);
     final levelColor = alert.level.color;
     final ts         = DateFormat('dd MMM, HH:mm').format(alert.timestamp.toLocal());
 
@@ -140,23 +139,24 @@ class _AlertCard extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
-                // New badge
                 if (alert.isNew)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: levelColor,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: const Text('NEW',
-                        style: TextStyle(color: Colors.white, fontSize: 10,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
                             fontWeight: FontWeight.bold)),
                   ),
               ],
             ),
             const SizedBox(height: 6),
 
-            // Sub-header: state, river
             Text(
               '${alert.state} · ${alert.river}',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -164,19 +164,17 @@ class _AlertCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // Gauge bar
             _GaugeBar(
-              current:  alert.currentValue,
-              warning:  alert.warningLevel,
-              danger:   alert.dangerLevel,
-              hfl:      alert.hfl,
-              fill:     alert.fillPercent,
-              color:    levelColor,
-              unit:     alert.unitLabel,
+              current: alert.currentValue,
+              warning: alert.warningLevel,
+              danger:  alert.dangerLevel,
+              hfl:     alert.hfl,
+              fill:    alert.fillPercent,
+              color:   levelColor,
+              unit:    alert.unitLabel,
             ),
             const SizedBox(height: 10),
 
-            // Metrics row
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -202,7 +200,6 @@ class _AlertCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            // Footer
             Text(
               ts,
               style: theme.textTheme.labelSmall?.copyWith(
@@ -215,19 +212,14 @@ class _AlertCard extends StatelessWidget {
   }
 }
 
-// ─── Gauge bar ────────────────────────────────────────────────────────────────
+// ─── Gauge bar ───────────────────────────────────────────────────────────────
 class _GaugeBar extends StatelessWidget {
   final double current, warning, danger, hfl, fill;
   final Color color;
   final String unit;
-
   const _GaugeBar({
-    required this.current,
-    required this.warning,
-    required this.danger,
-    required this.hfl,
-    required this.fill,
-    required this.color,
+    required this.current, required this.warning, required this.danger,
+    required this.hfl, required this.fill, required this.color,
     required this.unit,
   });
 
@@ -275,7 +267,8 @@ class _MetricChip extends StatelessWidget {
     return Column(
       children: [
         Text(label,
-            style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+            style: TextStyle(
+                fontSize: 10, color: color, fontWeight: FontWeight.bold)),
         Text(value, style: const TextStyle(fontSize: 11)),
       ],
     );
@@ -289,16 +282,18 @@ class _FilterMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasFilter = provider.filterLevel != null || provider.filterState != null;
+    final hasFilter =
+        provider.filterLevel != null || provider.filterState != null;
     return PopupMenuButton<String>(
       icon: Icon(Icons.filter_list,
-          color: hasFilter ? Theme.of(context).colorScheme.primary : null),
+          color: hasFilter
+              ? Theme.of(context).colorScheme.primary
+              : null),
       onSelected: (val) {
-        if (val == 'clear') {
-          provider.clearFilters();
-          return;
-        }
-        final level = AlertLevel.values.where((l) => l.name == val).firstOrNull;
+        if (val == 'clear') { provider.clearFilters(); return; }
+        final level = AlertLevel.values
+            .where((l) => l.name == val)
+            .firstOrNull;
         if (level != null) provider.setFilterLevel(level);
       },
       itemBuilder: (_) => [
@@ -336,7 +331,10 @@ class _EmptyState extends StatelessWidget {
               children: [
                 Icon(Icons.check_circle_outline,
                     size: 64,
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.4)),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withOpacity(0.4)),
                 const SizedBox(height: 16),
                 const Text('All rivers within safe levels',
                     style: TextStyle(fontSize: 16)),
