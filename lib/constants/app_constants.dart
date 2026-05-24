@@ -7,7 +7,6 @@ class AppConstants {
   static const String baseUrl       = 'https://opsflood.onrender.com';
   static const String backupBaseUrl = 'https://opsflood-backend.onrender.com';
 
-  /// Ordered list tried in sequence; first successful response wins.
   static const List<String> apiBaseUrls = [
     'https://opsflood.onrender.com',
     'https://opsflood-backend.onrender.com',
@@ -21,7 +20,6 @@ class AppConstants {
   static const String weatherCurrentEndpoint  = '/weather/current';
   static const String weatherForecastEndpoint = '/weather/forecast';
 
-  // ── Pipeline endpoints (new — mirrors OpsFlood backend) ──────────────────
   static const String pipelineFeaturesEndpoint  = '/api/pipeline/features';
   static const String pipelineManifestEndpoint  = '/api/pipeline/manifest';
   static const String stateSeverityEndpoint     = '/api/state-severity';
@@ -54,7 +52,7 @@ class AppConstants {
     {'city': 'Varanasi',    'state': 'Uttar Pradesh',   'river': 'Ganga',       'lat': 25.3176, 'lon': 82.9739, 'warning_level': 70.26, 'danger_level': 71.26, 'risk': 'MODERATE'},
     {'city': 'Prayagraj',   'state': 'Uttar Pradesh',   'river': 'Ganga',       'lat': 25.4358, 'lon': 81.8463, 'warning_level': 84.73, 'danger_level': 85.73, 'risk': 'MODERATE'},
     {'city': 'Haridwar',    'state': 'Uttarakhand',     'river': 'Ganga',       'lat': 29.9457, 'lon': 78.1642, 'warning_level': 293.00,'danger_level': 294.00,'risk': 'MODERATE'},
-    {'city': 'Srinagar',    'state': 'Jammu & Kashmir', 'river': 'Jhelum',      'lat': 34.0837, 'lon': 74.7973, 'warning_level':  4.00, 'danger_level':  5.50, 'risk': 'HIGH'},
+    {'city': 'Srinagar',    'state': 'Jammu and Kashmir','river': 'Jhelum',     'lat': 34.0837, 'lon': 74.7973, 'warning_level':  4.00, 'danger_level':  5.50, 'risk': 'HIGH'},
     {'city': 'Agartala',    'state': 'Tripura',         'river': 'Howrah',      'lat': 23.8315, 'lon': 91.2868, 'warning_level':  6.10, 'danger_level':  7.60, 'risk': 'HIGH'},
     {'city': 'Imphal',      'state': 'Manipur',         'river': 'Imphal',      'lat': 24.8170, 'lon': 93.9368, 'warning_level':  2.50, 'danger_level':  3.00, 'risk': 'MODERATE'},
     {'city': 'Shillong',    'state': 'Meghalaya',       'river': 'Umkhrah',     'lat': 25.5788, 'lon': 91.8933, 'warning_level':  2.00, 'danger_level':  3.00, 'risk': 'MODERATE'},
@@ -70,8 +68,9 @@ class AppConstants {
   ];
 
   // ── CWC threshold levels (%) ──────────────────────────────────────────────
-  static const double criticalThreshold = 85.0;
-  static const double highThreshold     = 70.0;
+  // Synced with FloodThresholds.critical = 90.0
+  static const double criticalThreshold = 90.0;
+  static const double highThreshold     = 75.0;
   static const double moderateThreshold = 50.0;
   static const double lowThreshold      = 30.0;
 
@@ -95,43 +94,18 @@ class AppConstants {
   static const String warningAlertChannelId    = 'opsflood_warning';
   static const String warningAlertChannelName  = 'Flood Warnings';
 
-  // ── Indian states + UTs list (synced with IndiaGeodata.states) ───────────
+  // ── Indian states + UTs (exactly mirrors IndiaGeodata.states) ────────────
   static const List<String> indianStates = [
-    'Andhra Pradesh',
-    'Arunachal Pradesh',
-    'Assam',
-    'Bihar',
-    'Chhattisgarh',
-    'Goa',
-    'Gujarat',
-    'Haryana',
-    'Himachal Pradesh',
-    'Jammu & Kashmir',
-    'Jharkhand',
-    'Karnataka',
-    'Kerala',
-    'Ladakh',
-    'Madhya Pradesh',
-    'Maharashtra',
-    'Manipur',
-    'Meghalaya',
-    'Mizoram',
-    'Nagaland',
-    'Odisha',
-    'Punjab',
-    'Rajasthan',
-    'Sikkim',
-    'Tamil Nadu',
-    'Telangana',
-    'Tripura',
-    'Uttar Pradesh',
-    'Uttarakhand',
-    'West Bengal',
-    'Andaman & Nicobar Islands',
-    'Chandigarh',
-    'Dadra & Nagar Haveli and Daman & Diu',
-    'Delhi',
-    'Lakshadweep',
-    'Puducherry',
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar',
+    'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
+    'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
+    'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
+    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana',
+    'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Andaman and Nicobar Islands', 'Chandigarh',
+    'Dadra and Nagar Haveli and Daman and Diu',
+    'Delhi', 'Jammu and Kashmir', 'Ladakh',
+    'Lakshadweep', 'Puducherry',
   ];
 }
