@@ -9,13 +9,6 @@ import '../services/api_service.dart';
 import '../theme/river_theme.dart';
 import '../providers/flood_providers.dart';
 
-// NOTE: BackgroundService and FcmService are NOT imported here.
-// Both are initialised in main() via unawaited() fire-and-forget calls.
-// Calling them again here would create a double-init:
-//   - BackgroundService.init() would re-register Workmanager tasks.
-//   - FcmService.instance.init() would re-request notification permissions,
-//     which on Android 13+ triggers a second permission dialog.
-
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
@@ -41,13 +34,27 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late AnimationController _statusCtrl;
   late Animation<double>   _statusOpacity;
 
+  // Status cycling
+  late AnimationController _dotCtrl;
+  int _dotFrame = 0;
+
   String _statusText    = 'Initializing...';
   bool   _backendOnline = false;
+
+  static const _statusMessages = [
+    'Connecting to backend',
+    'Loading flood data',
+    'Calibrating sensors',
+    'Almost there',
+  ];
+  int _msgIndex = 0;
+  Timer? _msgTimer;
 
   @override
   void initState() {
     super.initState();
 
+    // ── Entrance animation ────────────────────────────────────────────
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400));
     _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
@@ -64,6 +71,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             parent: _entranceCtrl,
             curve: const Interval(0.4, 0.9, curve: Curves.easeOutCubic)));
 
+    // ── Pulse ring ────────────────────────────────────────────────────
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1600))
       ..repeat(reverse: true);
@@ -72,39 +80,78 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     _pulseOpacity = Tween<double>(begin: 0.35, end: 0.0).animate(
         CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeIn));
 
+    // ── Sweep line ────────────────────────────────────────────────────
     _sweepCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900));
     _sweepPos = Tween<double>(begin: -1.0, end: 1.0).animate(
         CurvedAnimation(parent: _sweepCtrl, curve: Curves.easeInOut));
 
+    // ── Status fade-in ────────────────────────────────────────────────
     _statusCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400));
     _statusOpacity = CurvedAnimation(
         parent: _statusCtrl, curve: Curves.easeIn);
+
+    // ── Animated dots ────────────────────────────────────────────────
+    _dotCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 500))
+      ..addListener(() {
+        if (!mounted) return;
+        setState(() => _dotFrame = (_dotFrame + 1) % 4);
+      })
+      ..repeat();
 
     _entranceCtrl.forward().then((_) {
       _sweepCtrl.forward();
       _statusCtrl.forward();
     });
 
+    // Cycle status messages every 1.2 s so the screen feels active
+    _msgTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
+      if (!mounted) return;
+      setState(() {
+        _msgIndex = (_msgIndex + 1) % _statusMessages.length;
+        if (!_backendOnline) {
+          _statusText = _statusMessages[_msgIndex];
+        }
+      });
+    });
+
     _bootServices();
   }
 
   Future<void> _bootServices() async {
-    // Start the Riverpod polling loop (idempotent — no-op if already started).
-    await ref.read(realTimeProvider).startPolling();
+    // Fire-and-forget: start polling without awaiting it
+    ref.read(realTimeProvider).startPolling();
+
+    // Check backend with a hard 3-second timeout — never block splash longer
     _checkBackend();
   }
 
   Future<void> _checkBackend() async {
-    _setStatus('Connecting to backend...');
-    final health = await ApiService().checkHealth();
-    _backendOnline =
-        health['status'] != 'offline' && health['status'] != 'error';
-    _setStatus(
-        _backendOnline ? 'Systems online  \u2705' : 'Backend waking up  \u23f3');
+    try {
+      final health = await ApiService()
+          .checkHealth()
+          .timeout(const Duration(seconds: 3));
+      _backendOnline =
+          health['status'] != 'offline' && health['status'] != 'error';
+    } catch (_) {
+      _backendOnline = false; // timeout or network error — proceed anyway
+    }
 
-    await Future.delayed(const Duration(milliseconds: 1600));
+    if (!mounted) return;
+    setState(() {
+      _statusText = _backendOnline
+          ? 'Systems online  \u2705'
+          : 'Loading data  \u23f3';
+    });
+
+    // Show the final status for 800 ms then navigate — always
+    await Future.delayed(const Duration(milliseconds: 800));
+    _navigate();
+  }
+
+  void _navigate() {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
@@ -118,19 +165,18 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     );
   }
 
-  void _setStatus(String s) {
-    if (!mounted) return;
-    setState(() => _statusText = s);
-  }
-
   @override
   void dispose() {
     _entranceCtrl.dispose();
     _pulseCtrl.dispose();
     _sweepCtrl.dispose();
     _statusCtrl.dispose();
+    _dotCtrl.dispose();
+    _msgTimer?.cancel();
     super.dispose();
   }
+
+  String get _dots => '.' * (_dotFrame % 4);
 
   @override
   Widget build(BuildContext context) {
@@ -139,23 +185,20 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       backgroundColor: AppPalette.carbon0,
       body: Stack(
         children: [
+          // Background radial gradient
           Container(
             decoration: const BoxDecoration(
               gradient: RadialGradient(
                 center: Alignment(0, -0.2),
                 radius: 0.9,
-                colors: [
-                  Color(0xFF300000),
-                  AppPalette.carbon0,
-                ],
+                colors: [Color(0xFF300000), AppPalette.carbon0],
                 stops: [0.0, 1.0],
               ),
             ),
           ),
-          CustomPaint(
-            size: size,
-            painter: _CarbonGridPainter(),
-          ),
+          // Carbon grid
+          CustomPaint(size: size, painter: _CarbonGridPainter()),
+          // Sweep line
           AnimatedBuilder(
             animation: _sweepCtrl,
             builder: (_, __) {
@@ -178,10 +221,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               );
             },
           ),
+          // Main content
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Logo with pulse
                 AnimatedBuilder(
                   animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
                   builder: (_, __) {
@@ -235,6 +280,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   },
                 ),
                 const SizedBox(height: 28),
+                // Title
                 SlideTransition(
                   position: _titleSlide,
                   child: FadeTransition(
@@ -271,24 +317,41 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   ),
                 ),
                 const SizedBox(height: 64),
+                // Status area
                 FadeTransition(
                   opacity: _statusOpacity,
                   child: Column(
                     children: [
-                      SizedBox(
-                        width: 20, height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            _backendOnline
-                                ? AppPalette.safe
-                                : AppPalette.ferrari,
+                      // Animated progress indicator
+                      if (!_backendOnline)
+                        SizedBox(
+                          width: 200, height: 2,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              backgroundColor:
+                                  AppPalette.ferrari.withOpacity(0.15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                AppPalette.ferrari.withOpacity(0.8),
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        SizedBox(
+                          width: 20, height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              AppPalette.safe,
+                            ),
                           ),
                         ),
-                      ),
                       const SizedBox(height: 14),
                       Text(
-                        _statusText,
+                        _backendOnline
+                            ? _statusText
+                            : '$_statusText$_dots',
                         style: const TextStyle(
                           color: AppPalette.textGrey, fontSize: 13,
                           fontWeight: FontWeight.w500, letterSpacing: 0.3,
@@ -300,6 +363,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               ],
             ),
           ),
+          // Version badge
           Positioned(
             bottom: 32, left: 0, right: 0,
             child: Center(
