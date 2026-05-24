@@ -12,6 +12,13 @@
 //
 //   ON MOBILE / DESKTOP:
 //     Original 5-source backend cascade unchanged.
+//
+// GAUGE SANITY RULE:
+//   Indian river gauge heights (metres MSL / above datum) are always
+//   in the range 0.01 – 200 m.  Any value outside this range is NOT
+//   a gauge reading — it is a discharge (m³/s), an error code, or a
+//   column-parsing artifact.  _extractLevel() enforces this clamp;
+//   values outside it are treated as 0 (→ NO_DATA fallback).
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -73,6 +80,11 @@ class RealTimeRiverService extends ChangeNotifier {
   static const _resTimeout               = Duration(seconds: 12);
   static const _predTimeout              = Duration(seconds: 8);
   static const double _minConfidence     = 0.35;
+
+  // Gauge heights for Indian river stations are always 0.01 – 200 m.
+  // Anything outside this is a discharge value, error code, or wrong column.
+  static const double _gaugeMin = 0.01;
+  static const double _gaugeMax = 200.0;
 
   bool get _cacheValid =>
       _cacheTime != null &&
@@ -433,10 +445,12 @@ class RealTimeRiverService extends ChangeNotifier {
             m.record['current_level_m'] ?? m.record['current_level'] ??
             m.record['wl']              ?? m.record['water_level'],
           );
-          if (lv > 0) {
+          // Reservoir levels are also m MSL — apply same sanity clamp
+          final lvSane = _sanityClamp(lv);
+          if (lvSane > 0) {
             return _buildResult(city: city, state: state, river: river,
                 wl: warningLevel, dl: dangerLevel, hfl: hfl,
-                lv: lv, record: m.record, source: 'RESERVOIR', confidence: m.confidence);
+                lv: lvSane, record: m.record, source: 'RESERVOIR', confidence: m.confidence);
           }
         }
       }
@@ -616,18 +630,35 @@ class RealTimeRiverService extends ChangeNotifier {
     return lr.split(RegExp(r'[\s_\-]+')).any((t) => t.length >= 4 && rv.contains(t));
   }
 
+  // ── Gauge sanity clamp ────────────────────────────────────────────────────
+  // Returns 0.0 (→ NO_DATA) if value is outside the physically plausible
+  // range for Indian river gauge heights (metres MSL / above datum).
+  // This rejects discharge values (m³/s) and parse errors.
+  double _sanityClamp(double v) {
+    if (v < _gaugeMin || v > _gaugeMax) {
+      _log('SANITY_REJECT: $v m is outside [$_gaugeMin, $_gaugeMax] — treating as NO_DATA');
+      return 0.0;
+    }
+    return v;
+  }
+
   // ── Level extractor ──────────────────────────────────────────────────────
-  double _extractLevel(Map<String, dynamic> d) => _fp(
-    d['river_level']     ?? d['riverLevel']      ?? d['current_level']  ??
-    d['water_level']     ?? d['gauge_reading']    ?? d['currentLevel']   ??
-    d['level']           ?? d['gauge_level']      ?? d['water_stage']    ??
-    d['stage']           ?? d['obs_level']        ?? d['observed_level'] ??
-    d['gauge']           ?? d['rl']               ?? d['wl']             ??
-    d['current']         ?? d['present_level']    ?? d['today_level']    ??
-    d['live_level']      ?? d['liveLevel']         ?? d['gauge_value']   ??
-    d['water_elevation'] ?? d['elevation']         ?? d['obsLevel']      ??
-    d['currentObs']      ?? d['river_stage']       ?? d['gaugeReading'],
-  );
+  // Tries every known field name in priority order, then applies the
+  // sanity clamp so discharge/error values never become gauge readings.
+  double _extractLevel(Map<String, dynamic> d) {
+    final raw = _fp(
+      d['river_level']     ?? d['riverLevel']      ?? d['current_level']  ??
+      d['water_level']     ?? d['gauge_reading']    ?? d['currentLevel']   ??
+      d['level']           ?? d['gauge_level']      ?? d['water_stage']    ??
+      d['stage']           ?? d['obs_level']        ?? d['observed_level'] ??
+      d['gauge']           ?? d['rl']               ?? d['wl']             ??
+      d['current']         ?? d['present_level']    ?? d['today_level']    ??
+      d['live_level']      ?? d['liveLevel']         ?? d['gauge_value']   ??
+      d['water_elevation'] ?? d['elevation']         ?? d['obsLevel']      ??
+      d['currentObs']      ?? d['river_stage']       ?? d['gaugeReading'],
+    );
+    return _sanityClamp(raw);
+  }
 
   String _deriveTrend(double lv, double wl, double dl) {
     if (wl <= 0) return 'STEADY';
