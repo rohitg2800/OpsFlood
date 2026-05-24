@@ -1,6 +1,28 @@
 import '../constants.dart';
 import 'flood_data.dart';
 
+class CwcStationData {
+  final String stationName;
+  final String riverName;
+  final String stateName;
+  final double riverLevel;
+  final double warningLevel;
+  final double dangerLevel;
+  final String trend; // 'RISING', 'FALLING', 'FLAT'
+  final String status; // 'CRITICAL', 'WARNING', 'NORMAL'
+
+  CwcStationData({
+    required this.stationName,
+    required this.riverName,
+    required this.stateName,
+    required this.riverLevel,
+    required this.warningLevel,
+    required this.dangerLevel,
+    required this.trend,
+    required this.status,
+  });
+}
+
 class RiverLevelSnapshot {
   final DateTime timestamp;
   final double level;

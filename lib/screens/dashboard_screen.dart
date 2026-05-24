@@ -1,4 +1,9 @@
 import 'dart:convert';
+import "../models/river_monitoring.dart";
+import "../models/river_monitoring.dart";
+
+import "../models/river_station.dart";
+
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
@@ -145,7 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       children: [
                         Icon(Icons.water_drop, color: rc.riverNormal),
                         const SizedBox(width: 8),
-                        Text('OpsFlood Command',
+                        Text('FloodOps Command Hub',
                             style: TextStyle(
                               color: rc.textPrimary,
                               fontWeight: FontWeight.w800,
@@ -649,7 +654,7 @@ class _OfflineBanner extends StatelessWidget {
 
 // ── CWC Station Strip ─────────────────────────────────────────────────────────
 class _CwcStationStrip extends StatelessWidget {
-  final List<CwcStationData> stations;
+  final List<dynamic> stations;
   const _CwcStationStrip({required this.stations});
 
   @override
