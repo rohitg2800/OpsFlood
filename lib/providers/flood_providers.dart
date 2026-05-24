@@ -15,17 +15,41 @@
 //
 // 4. FCM alerts are surfaced via fcmAlertStreamProvider so any screen can
 //    listen without importing FcmService directly.
+//
+// 5. backendHealthProvider exposes the full /health response (model_ready,
+//    artifact_count, version, ingestion status, source_policy) app-wide.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/flood_data.dart';
+import '../services/backend_health_service.dart';
 import '../services/fcm_service.dart';
 import '../services/imd_service.dart';
 import '../services/ndma_service.dart';
 import '../services/real_time_river_service.dart';
 import '../services/real_time_service.dart';
 import 'theme_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKEND HEALTH PROVIDER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Exposes full /health data app-wide: model_ready, artifact_count, version,
+/// ingestion status, source_policy. Fetched once at startup from splash screen.
+final backendHealthProvider = ChangeNotifierProvider<BackendHealthNotifier>(
+  (ref) => BackendHealthNotifier(),
+  name: 'backendHealthProvider',
+);
+
+/// Quick bool — true when backend is online AND model is ready.
+final isBackendReadyProvider = Provider<bool>(
+  (ref) {
+    final h = ref.watch(backendHealthProvider).health;
+    return h.isOnline && h.modelReady;
+  },
+  name: 'isBackendReadyProvider',
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORE SERVICE PROVIDERS
