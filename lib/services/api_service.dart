@@ -12,7 +12,6 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
-  // 60 s — sized to survive Render free-tier cold-start (~50 s).
   static const Duration _timeout      = Duration(seconds: 60);
   static const int      _maxRetries   = 2;
   static const Duration _retryBackoff = Duration(seconds: 2);
@@ -55,7 +54,7 @@ class ApiService {
           }
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            lastError = 'HTTP \${res.statusCode}';
+            lastError = 'HTTP ${res.statusCode}';
             if (res.statusCode >= 400 && res.statusCode < 500) break;
             if (attempt < _maxRetries) {
               await Future<void>.delayed(_retryBackoff * attempt);
@@ -66,7 +65,7 @@ class ApiService {
           final parsedBody = _safeDecode(res.body);
           return _normalizeSuccess(parsedBody, base, path);
         } on TimeoutException {
-          lastError = 'Request timed out after \${_timeout.inSeconds}s';
+          lastError = 'Request timed out after ${_timeout.inSeconds}s';
           if (attempt == _maxRetries) break;
           await Future<void>.delayed(_retryBackoff);
         } catch (e) {
@@ -103,21 +102,21 @@ class ApiService {
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
-  // FIX: added all_states=true so the backend returns every monitored state,
-  // not just the default state. Without this flag only one state was returned
-  // and all other cities fell through to NO_DATA.
-  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 1000}) =>
-      _get('\${AppConstants.liveTelemetryEndpoint}?all_states=true&limit=\$limit');
+  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 1000}) {
+    final ep = AppConstants.liveTelemetryEndpoint;
+    return _get('$ep?all_states=true&limit=$limit');
+  }
 
   Future<Map<String, dynamic>> getLiveTelemetry({
     String? state,
     String? station,
     int limit = 10,
   }) {
-    final qs = StringBuffer(
-        '\${AppConstants.liveTelemetryEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+    final ep = AppConstants.liveTelemetryEndpoint;
+    final st = state ?? 'Maharashtra';
+    final qs = StringBuffer('$ep?state=$st&limit=$limit');
     if (station != null && station.isNotEmpty) {
-      qs.write('&station=\${Uri.encodeComponent(station)}');
+      qs.write('&station=${Uri.encodeComponent(station)}');
     }
     return _get(qs.toString());
   }
@@ -128,23 +127,23 @@ class ApiService {
   }) =>
       getLiveTelemetry(state: state, limit: limit);
 
-  // FIX: getAllLiveLevels now passes all_states=true so the backend returns
-  // levels for every monitored state in one call.
-  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200}) =>
-      _get('\${AppConstants.liveLevelsEndpoint}?all_states=true&limit=\$limit');
-
-  // FIX: getLiveLevels (used in RealTimeService) also fetches all states so
-  // the fusing Pass-2 matrix has data for every state.
-  Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 200}) {
-    if (state != null && state.isNotEmpty) {
-      return _get(
-          '\${AppConstants.liveLevelsEndpoint}?state=\${Uri.encodeComponent(state)}&limit=\$limit');
-    }
-    return _get('\${AppConstants.liveLevelsEndpoint}?all_states=true&limit=\$limit');
+  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200}) {
+    final ep = AppConstants.liveLevelsEndpoint;
+    return _get('$ep?all_states=true&limit=$limit');
   }
 
-  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) =>
-      _get('\${AppConstants.liveLevelsEndpoint}?city=\${Uri.encodeComponent(city)}');
+  Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 200}) {
+    final ep = AppConstants.liveLevelsEndpoint;
+    if (state != null && state.isNotEmpty) {
+      return _get('$ep?state=${Uri.encodeComponent(state)}&limit=$limit');
+    }
+    return _get('$ep?all_states=true&limit=$limit');
+  }
+
+  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) {
+    final ep = AppConstants.liveLevelsEndpoint;
+    return _get('$ep?city=${Uri.encodeComponent(city)}');
+  }
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
@@ -159,16 +158,20 @@ class ApiService {
     required String city,
     required String state,
   }) =>
-      _get('/api/cwc-ffs/station?city=\${Uri.encodeComponent(city)}&state=\${Uri.encodeComponent(state)}');
+      _get('/api/cwc-ffs/station?city=${Uri.encodeComponent(city)}&state=${Uri.encodeComponent(state)}');
 
   Future<Map<String, dynamic>> getReservoirLevels({required String state}) =>
-      _get('/api/cwc-reservoir/state?state=\${Uri.encodeComponent(state)}');
+      _get('/api/cwc-reservoir/state?state=${Uri.encodeComponent(state)}');
 
-  Future<Map<String, dynamic>> getWeatherCurrent({required String location}) =>
-      _get('\${AppConstants.weatherCurrentEndpoint}?location=\$location');
+  Future<Map<String, dynamic>> getWeatherCurrent({required String location}) {
+    final ep = AppConstants.weatherCurrentEndpoint;
+    return _get('$ep?location=$location');
+  }
 
-  Future<Map<String, dynamic>> getWeatherForecast({required String location}) =>
-      _get('\${AppConstants.weatherForecastEndpoint}?location=\$location');
+  Future<Map<String, dynamic>> getWeatherForecast({required String location}) {
+    final ep = AppConstants.weatherForecastEndpoint;
+    return _get('$ep?location=$location');
+  }
 
   // ── Pipeline endpoints ──────────────────────────────────────────────────
 
@@ -176,18 +179,18 @@ class ApiService {
     required String state,
     String? station,
   }) {
-    final qs = StringBuffer('state=\${Uri.encodeComponent(state)}');
+    final qs = StringBuffer('state=${Uri.encodeComponent(state)}');
     if (station != null && station.isNotEmpty) {
-      qs.write('&station=\${Uri.encodeComponent(station)}');
+      qs.write('&station=${Uri.encodeComponent(station)}');
     }
-    return _get('/api/pipeline/features?\$qs');
+    return _get('/api/pipeline/features?$qs');
   }
 
   Future<Map<String, dynamic>> getStateSeverityMatrix() =>
       _get('/api/state-severity');
 
   Future<Map<String, dynamic>> getStateSeverityEntry(String state) =>
-      _get('/api/state-severity/\${Uri.encodeComponent(state)}');
+      _get('/api/state-severity/${Uri.encodeComponent(state)}');
 
   Future<Map<String, dynamic>> getPipelineManifest() =>
       _get('/api/pipeline/manifest');
