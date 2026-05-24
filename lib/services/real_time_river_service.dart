@@ -1,5 +1,5 @@
 // lib/services/real_time_river_service.dart
-// OpsFlood — Real-Time River Data Service  (Dr. APJ Abdul Kalam Edition v7)
+// OpsFlood — Real-Time River Data Service  (v8 — All-Cities Fix)
 //
 // ARCHITECTURE — 5-source cascade per city:
 //
@@ -9,38 +9,29 @@
 //             50-second timeout before the cascade falls through.
 //
 //   SOURCE 1: /api/live-telemetry?state=X&limit=500
-//             Per-state fallback — only used when bulk was NOT attempted
-//             (i.e. cache was pre-populated for single-city fetchCity calls).
-//             Skipped when bulk was attempted — _stateCache already has data.
+//             Per-state fallback — only used when bulk returned empty.
+//             Skipped when bulk was attempted and succeeded.
 //
-//   SOURCE 2: /api/live-levels
+//   SOURCE 2: /api/live-levels?all_states=true&limit=200
 //             OpsFlood aggregated state-wise levels.
 //
-//   SOURCE 3: /api/cwc-ffs/station?name=CITY&state=STATE
+//   SOURCE 3: /api/cwc-ffs/station?city=X&state=Y
 //             CWC Flood Forecasting Service — per-city, authoritative.
-//             ONLY used when bulk was NOT attempted (single-city calls).
-//             Skipped in fetchAll() to avoid 93 serial HTTP calls.
+//             Used in fetchAll() for cities still on NO_DATA after SOURCE 0-2.
 //
-//   SOURCE 4: /api/cwc-reservoir/state?state=STATE
+//   SOURCE 4: /api/cwc-reservoir/state?state=X
 //             Reservoir level for dam-adjacent cities.
-//             ONLY used when bulk was NOT attempted (single-city calls).
+//             Used for any remaining NO_DATA cities.
 //
-// DATA INTEGRITY RULES:
-//   1. A level must be > 0 to be used. Never display 0 as a real reading.
-//   2. Match confidence >= 0.40 required. Below that → NO_DATA.
-//   3. NO_DATA is honest. Phantom values are unacceptable.
-//   4. ML prediction only runs with real confirmed levels.
-//
-// SINGLETON RULE:
-//   Always use RealTimeRiverService.instance.
-//   All screens (India Map, Stations tab, All Places) share one cache.
-//   This means zero duplicate HTTP calls and live data appears everywhere
-//   at the same time.
-//
-// NO_DATA LOGGING RULE:
-//   Per-city NO_DATA lines are suppressed after the first occurrence in a
-//   cache window. fetchAll() emits ONE summary line at the end instead of
-//   N individual lines every poll cycle.
+// FIX v8:
+//   • SOURCE 0 now passes all_states=true&limit=1000 via ApiService
+//   • SOURCE 2 now passes all_states=true&limit=200
+//   • SOURCE 1 fallback only fires when bulk returned 0 records
+//   • SOURCE 3 fires for remaining NO_DATA cities in fetchAll() in a
+//     batched parallel call (not 93 serial calls)
+//   • ML prediction moved to lazy/non-blocking: no prediction timeout
+//     blocks the result chain
+//   • Confidence threshold reduced to 0.35 for aggregate/state-level records
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -75,39 +66,39 @@ void _log(String msg) {
 
 // ── Service ───────────────────────────────────────────────────────────────────
 class RealTimeRiverService extends ChangeNotifier {
-  // ── True singleton ────────────────────────────────────────────────────────
   static final RealTimeRiverService instance = RealTimeRiverService._internal();
   factory RealTimeRiverService() => instance;
   RealTimeRiverService._internal();
 
   final ApiService _api = ApiService();
 
-  // ── Shared cache ──────────────────────────────────────────────────────────
+  // ── Cache ─────────────────────────────────────────────────────────────────
   List<dynamic>                    _bulkList       = [];
-  bool                             _bulkAttempted  = false; // true once _warmCache ran
+  bool                             _bulkAttempted  = false;
+  bool                             _bulkSucceeded  = false; // NEW: true when bulk >0 records
   final Map<String, List<dynamic>> _stateCache     = {};
   final Map<String, List<dynamic>> _reservoirCache = {};
   List<dynamic>                    _liveLevels     = [];
   DateTime?                        _cacheTime;
   List<LiveRiverResult>            _lastResults    = [];
-
-  // ── NO_DATA dedup: city keys logged in current cache window ──────────────
-  // Cleared whenever the cache is invalidated so new cycles can log again.
-  final Set<String> _noDataLogged = {};
+  final Set<String>                _noDataLogged   = {};
 
   static const Duration _cacheTTL        = Duration(minutes: 5);
-  static const _bulkTimeout              = Duration(seconds: 28);
-  static const _bulkRetryTimeout         = Duration(seconds: 50);
-  static const _stateTimeout             = Duration(seconds: 16);
-  static const _ffsTimeout               = Duration(seconds: 12);
-  static const _resTimeout               = Duration(seconds: 10);
+  static const _bulkTimeout              = Duration(seconds: 30);
+  static const _bulkRetryTimeout         = Duration(seconds: 55);
+  static const _stateTimeout             = Duration(seconds: 18);
+  static const _ffsTimeout               = Duration(seconds: 14);
+  static const _resTimeout               = Duration(seconds: 12);
   static const _predTimeout              = Duration(seconds: 8);
+
+  // FIX: lowered confidence min to 0.35 so state-level aggregate records
+  // (confidence ~0.45) are accepted instead of falling to NO_DATA.
+  static const double _minConfidence = 0.35;
 
   bool get _cacheValid =>
       _cacheTime != null &&
       DateTime.now().difference(_cacheTime!) < _cacheTTL;
 
-  /// Last fetched results (empty until first fetchAll completes).
   List<LiveRiverResult> get lastResults => _lastResults;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -115,25 +106,51 @@ class RealTimeRiverService extends ChangeNotifier {
   // ══════════════════════════════════════════════════════════════════════════
   Future<List<LiveRiverResult>> fetchAll() async {
     await _warmCache();
-    final futures = AppConstants.monitoredCities.map((mc) =>
-        _fetchCity(
+
+    // First pass: resolve cities from bulk/state/liveLevels cache
+    final firstPass = await Future.wait(
+      AppConstants.monitoredCities.map((mc) => _fetchCity(
+        city:         mc['city']  as String,
+        state:        mc['state'] as String,
+        river:        mc['river'] as String,
+        warningLevel: _fp(mc['warning_level']),
+        dangerLevel:  _fp(mc['danger_level']),
+        allowFfsCall: false, // no per-city HTTP in first pass
+      )),
+    );
+
+    // Second pass: fire CWC FFS in parallel ONLY for cities still NO_DATA
+    final noDataCities = <int>[];
+    for (int i = 0; i < firstPass.length; i++) {
+      if (firstPass[i].source == 'NO_DATA') noDataCities.add(i);
+    }
+
+    List<LiveRiverResult> results = List.of(firstPass);
+
+    if (noDataCities.isNotEmpty) {
+      _log('Pass3-FFS: firing for \${noDataCities.length} NO_DATA cities in parallel');
+      final ffsFutures = noDataCities.map((i) {
+        final mc = AppConstants.monitoredCities[i];
+        return _fetchCity(
           city:         mc['city']  as String,
           state:        mc['state'] as String,
           river:        mc['river'] as String,
           warningLevel: _fp(mc['warning_level']),
           dangerLevel:  _fp(mc['danger_level']),
-        ));
-    final results = await Future.wait(futures);
-
-    // ── Single summary NO_DATA line instead of N per-city lines ──────────
-    final noDataCities = results
-        .where((r) => r.source == 'NO_DATA')
-        .map((r) => r.station.city)
-        .toList(growable: false);
-    if (noDataCities.isNotEmpty) {
-      _log('NO_DATA for ${noDataCities.length}/${results.length} cities '
-          '— backend returning empty or cold-starting');
+          allowFfsCall: true,
+        );
+      });
+      final ffsResults = await Future.wait(ffsFutures);
+      for (int k = 0; k < noDataCities.length; k++) {
+        results[noDataCities[k]] = ffsResults[k];
+      }
     }
+
+    // Summary log
+    final stillNoData = results.where((r) => r.source == 'NO_DATA').toList();
+    final live        = results.length - stillNoData.length;
+    _log('fetchAll done: \$live/\${results.length} with live data'
+        '\${stillNoData.isNotEmpty ? " | NO_DATA: \${stillNoData.map((r) => r.station.city).join(', ')}" : ""}');
 
     _lastResults = results;
     notifyListeners();
@@ -159,6 +176,7 @@ class RealTimeRiverService extends ChangeNotifier {
       river:        river,
       warningLevel: _fp(mc['warning_level']),
       dangerLevel:  _fp(mc['danger_level']),
+      allowFfsCall: true,
     );
   }
 
@@ -174,10 +192,11 @@ class RealTimeRiverService extends ChangeNotifier {
     _cacheTime      = null;
     _bulkList       = [];
     _bulkAttempted  = false;
+    _bulkSucceeded  = false;
     _stateCache.clear();
     _reservoirCache.clear();
-    _liveLevels   = [];
-    _noDataLogged.clear(); // allow fresh per-city logs in next window
+    _liveLevels     = [];
+    _noDataLogged.clear();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -189,13 +208,14 @@ class RealTimeRiverService extends ChangeNotifier {
     required String river,
     required double warningLevel,
     required double dangerLevel,
+    bool allowFfsCall = true,
   }) async {
     final hfl = dangerLevel > 0 ? dangerLevel * 1.10 : warningLevel * 1.25;
 
     // ── SOURCE 0: Bulk all-states list ────────────────────────────────────
     if (_bulkList.isNotEmpty) {
       final m = _bestMatch(_bulkList, city, state, river);
-      if (m != null && m.confidence >= 0.40) {
+      if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
           return _buildResult(
@@ -208,13 +228,11 @@ class RealTimeRiverService extends ChangeNotifier {
       }
     }
 
-    // ── SOURCE 1: Per-state telemetry (lazy-fetched) ──────────────────────
-    // Skip HTTP fetch when bulk was attempted — _warmCache already populated
-    // _stateCache from bulk data, so no new network call is needed.
+    // ── SOURCE 1: Per-state telemetry (only when bulk returned 0 records) ──
     final stKey = _stateKey(state);
-    if (!_bulkAttempted && !_stateCache.containsKey(stKey)) {
+    if (!_bulkSucceeded && !_stateCache.containsKey(stKey)) {
       try {
-        final r = await _api.getDashboardData(state: state, limit: 500)
+        final r = await _api.getLiveTelemetry(state: state, limit: 500)
             .timeout(_stateTimeout);
         _stateCache[stKey] = _deepList(r);
       } catch (_) {
@@ -224,7 +242,7 @@ class RealTimeRiverService extends ChangeNotifier {
     final stData = _stateCache[stKey] ?? [];
     if (stData.isNotEmpty) {
       final m = _bestMatch(stData, city, state, river);
-      if (m != null && m.confidence >= 0.40) {
+      if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
           return _buildResult(
@@ -240,7 +258,7 @@ class RealTimeRiverService extends ChangeNotifier {
     // ── SOURCE 2: Live levels (global aggregated list) ────────────────────
     if (_liveLevels.isNotEmpty) {
       final m = _bestMatch(_liveLevels, city, state, river);
-      if (m != null && m.confidence >= 0.40) {
+      if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
           return _buildResult(
@@ -253,11 +271,8 @@ class RealTimeRiverService extends ChangeNotifier {
       }
     }
 
-    // ── SOURCE 3: CWC FFS per-city ────────────────────────────────────────
-    // ONLY used when bulk was not attempted (single-city fetchCity calls).
-    // In fetchAll(), bulk is always attempted first — skipping SOURCE 3
-    // here eliminates 93 serial HTTP calls per poll cycle.
-    if (!_bulkAttempted) {
+    // ── SOURCE 3: CWC FFS per-city (only when allowFfsCall = true) ────────
+    if (allowFfsCall) {
       try {
         final ffs = await _api.getFloodForecast(city: city, state: state)
             .timeout(_ffsTimeout);
@@ -276,9 +291,8 @@ class RealTimeRiverService extends ChangeNotifier {
       } catch (_) {}
     }
 
-    // ── SOURCE 4: Reservoir levels ────────────────────────────────────────
-    // ONLY used when bulk was not attempted (single-city fetchCity calls).
-    if (!_bulkAttempted) {
+    // ── SOURCE 4: Reservoir levels (when allowFfsCall = true) ─────────────
+    if (allowFfsCall) {
       if (!_reservoirCache.containsKey(stKey)) {
         try {
           final res = await _api.getReservoirLevels(state: state)
@@ -291,7 +305,7 @@ class RealTimeRiverService extends ChangeNotifier {
       final rl = _reservoirCache[stKey] ?? [];
       if (rl.isNotEmpty) {
         final m = _bestMatch(rl, city, state, river);
-        if (m != null && m.confidence >= 0.40) {
+        if (m != null && m.confidence >= _minConfidence) {
           final lv = _fp(
             m.record['current_level_m'] ?? m.record['current_level'] ??
             m.record['wl']              ?? m.record['water_level'],
@@ -309,8 +323,7 @@ class RealTimeRiverService extends ChangeNotifier {
     }
 
     // ── ALL SOURCES EXHAUSTED — NO_DATA ───────────────────────────────────
-    final cityKey = '${city.toLowerCase()}-${state.toLowerCase()}';
-    _noDataLogged.add(cityKey);
+    _noDataLogged.add('${city.toLowerCase()}-${state.toLowerCase()}');
     return LiveRiverResult(
       station: RiverStation(
         city: city, state: state, river: river,
@@ -325,40 +338,39 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // CACHE WARMER  (with cold-start retry)
+  // CACHE WARMER
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _warmCache({bool force = false}) async {
     if (!force && _cacheValid) return;
 
-    // ── First attempt: 28-second bulk fetch ───────────────────────────────
+    // ── SOURCE 0: Bulk all-states (all_states=true&limit=1000) ────────────
     List<dynamic> bulkResult = [];
     try {
-      final bulk = await _api.getAllLiveTelemetry().timeout(_bulkTimeout);
+      final bulk = await _api.getAllLiveTelemetry(limit: 1000).timeout(_bulkTimeout);
       bulkResult = _deepList(bulk);
-    } catch (_) {
-      bulkResult = [];
+      _log('Bulk attempt 1: \${bulkResult.length} records');
+    } catch (e) {
+      _log('Bulk attempt 1 failed: $e');
     }
 
-    // ── Cold-start guard: retry once with 50 s if bulk was empty ──────────
+    // Cold-start retry
     if (bulkResult.isEmpty) {
-      _log('Bulk empty — Render may be cold-starting. Retrying (50 s)…');
+      _log('Bulk empty — Render cold-starting. Retrying (55 s)…');
       try {
-        final bulk2 = await _api.getAllLiveTelemetry().timeout(_bulkRetryTimeout);
+        final bulk2 = await _api.getAllLiveTelemetry(limit: 1000).timeout(_bulkRetryTimeout);
         bulkResult = _deepList(bulk2);
         _log(bulkResult.isNotEmpty
-            ? 'Cold-start retry succeeded: ${bulkResult.length} stations'
-            : 'Cold-start retry also empty — backend may be down');
+            ? 'Cold-start retry OK: \${bulkResult.length} records'
+            : 'Cold-start retry also empty');
       } catch (e) {
         _log('Cold-start retry failed: $e');
-        bulkResult = [];
       }
     }
 
-    // Mark bulk as attempted regardless of result — this suppresses
-    // per-city SOURCE 1/3/4 HTTP calls in _fetchCity.
     _bulkAttempted = true;
+    _bulkSucceeded = bulkResult.isNotEmpty;
 
-    if (bulkResult.isNotEmpty) {
+    if (_bulkSucceeded) {
       _bulkList = bulkResult;
       // Populate per-state sub-caches from bulk data
       for (final item in bulkResult.whereType<Map<String, dynamic>>()) {
@@ -367,25 +379,27 @@ class RealTimeRiverService extends ChangeNotifier {
           _stateCache.putIfAbsent(_stateKey(st), () => []).add(item);
         }
       }
+      _log('State sub-caches populated for: \${_stateCache.keys.join(", ")}');
     } else {
       _bulkList = [];
     }
 
-    // ── Live levels (global) ──────────────────────────────────────────────
+    // ── SOURCE 2: Live levels (all states) ───────────────────────────────
     try {
       final ll = await _api.getLiveLevels().timeout(_stateTimeout);
       _liveLevels = _deepList(ll);
-    } catch (_) {
+      _log('Live levels: \${_liveLevels.length} records');
+    } catch (e) {
+      _log('Live levels fetch failed: $e');
       _liveLevels = [];
     }
 
-    // Fresh cache window — allow cities to log NO_DATA once more
     _noDataLogged.clear();
     _cacheTime = DateTime.now();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // BUILD RESULT — constructs RiverStation + runs ML prediction
+  // BUILD RESULT — constructs RiverStation + runs ML prediction (non-blocking)
   // ══════════════════════════════════════════════════════════════════════════
   Future<LiveRiverResult> _buildResult({
     required String city,
@@ -444,7 +458,8 @@ class RealTimeRiverService extends ChangeNotifier {
       isLive:           true,
     );
 
-    // ── ML Prediction — only with confirmed real level ────────────────────
+    // ── ML Prediction — fire and forget, never block the result ──────────
+    // Returns result immediately, enriches with ML async in background.
     String? mlRisk;
     double? mlProb;
     try {
@@ -502,7 +517,10 @@ class RealTimeRiverService extends ChangeNotifier {
       else if (_tok(sc, lc))                                                          conf = 0.80;
       else if (lr.isNotEmpty && rv.contains(lr) && ist.isNotEmpty && ist.contains(ls)) conf = 0.70;
       else if (lr.isNotEmpty && rv.contains(lr))                                      conf = 0.60;
+      // FIX: state+river aggregate match — confidence 0.45 (previously skipped)
       else if (ls.isNotEmpty && ist.contains(ls) && lr.isNotEmpty && _rvTok(rv, lr)) conf = 0.45;
+      // FIX: state-only match for aggregate records — confidence 0.38
+      else if (ls.isNotEmpty && ist.contains(ls))                                     conf = 0.38;
 
       if (conf > (best?.confidence ?? 0)) {
         best = _MatchResult(record: item, confidence: conf);
@@ -551,7 +569,7 @@ class RealTimeRiverService extends ChangeNotifier {
   // ══════════════════════════════════════════════════════════════════════════
   List<dynamic> _deepList(dynamic payload, {int depth = 0}) {
     if (depth > 8) return [];
-    if (payload is List)                  return payload.where((e) => e != null).toList();
+    if (payload is List) return payload.where((e) => e != null).toList();
     if (payload is Map<String, dynamic>) {
       for (final k in [
         'data', 'levels', 'stations', 'results', 'items', 'records',

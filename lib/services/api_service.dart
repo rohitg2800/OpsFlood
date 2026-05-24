@@ -103,14 +103,12 @@ class ApiService {
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
-  // FIX: getLiveTelemetry was defaulting to state=Maharashtra and a limit of 10,
-  // returning data for one state only. getAllLiveTelemetry now fetches without a
-  // state filter so all monitored states are covered in a single call.
-  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 100}) =>
-      _get('\${AppConstants.liveTelemetryEndpoint}?limit=\$limit');
+  // FIX: added all_states=true so the backend returns every monitored state,
+  // not just the default state. Without this flag only one state was returned
+  // and all other cities fell through to NO_DATA.
+  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 1000}) =>
+      _get('\${AppConstants.liveTelemetryEndpoint}?all_states=true&limit=\$limit');
 
-  // FIX: added optional 'station' param — cwc_direct_service._fromTelemetry
-  // passes station: city to narrow the telemetry result to a single gauge.
   Future<Map<String, dynamic>> getLiveTelemetry({
     String? state,
     String? station,
@@ -124,51 +122,45 @@ class ApiService {
     return _get(qs.toString());
   }
 
-  // FIX: getDashboardData was called by real_time_river_service SOURCE 1 path
-  // but never defined. Aliased to getLiveTelemetry — same endpoint, same data.
   Future<Map<String, dynamic>> getDashboardData({
     String? state,
     int limit = 10,
   }) =>
       getLiveTelemetry(state: state, limit: limit);
 
-  // FIX: getLiveLevels was defaulting to state=Maharashtra and a limit of 20.
-  // getAllLiveLevels fetches without a state filter so all states are covered.
-  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 100}) =>
-      _get('\${AppConstants.liveLevelsEndpoint}?limit=\$limit');
+  // FIX: getAllLiveLevels now passes all_states=true so the backend returns
+  // levels for every monitored state in one call.
+  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200}) =>
+      _get('\${AppConstants.liveLevelsEndpoint}?all_states=true&limit=\$limit');
 
-  Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 20}) =>
-      _get('\${AppConstants.liveLevelsEndpoint}?state=\${state ?? "Maharashtra"}&limit=\$limit');
+  // FIX: getLiveLevels (used in RealTimeService) also fetches all states so
+  // the fusing Pass-2 matrix has data for every state.
+  Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 200}) {
+    if (state != null && state.isNotEmpty) {
+      return _get(
+          '\${AppConstants.liveLevelsEndpoint}?state=\${Uri.encodeComponent(state)}&limit=\$limit');
+    }
+    return _get('\${AppConstants.liveLevelsEndpoint}?all_states=true&limit=\$limit');
+  }
 
-  // FIX: getLiveLevelsByCity was called by cwc_direct_service SOURCE C but
-  // never defined. Routes to /api/live-levels?city=X.
   Future<Map<String, dynamic>> getLiveLevelsByCity(String city) =>
       _get('\${AppConstants.liveLevelsEndpoint}?city=\${Uri.encodeComponent(city)}');
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
 
-  // FIX: predict() was called by real_time_river_service _buildResult but
-  // never defined — predictFlood() was the existing method. Added predict()
-  // as a direct alias so callers compile without renaming every call site.
   Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
       predictFlood(input);
 
   Future<Map<String, dynamic>> predictFlood(Map<String, dynamic> input) =>
       _post('/predict/v2', input);
 
-  // FIX: getFloodForecast was called by both real_time_river_service SOURCE 3
-  // and cwc_direct_service SOURCE A but never defined. Routes to the CWC FFS
-  // per-station endpoint /api/cwc-ffs/station?city=X&state=Y.
   Future<Map<String, dynamic>> getFloodForecast({
     required String city,
     required String state,
   }) =>
       _get('/api/cwc-ffs/station?city=\${Uri.encodeComponent(city)}&state=\${Uri.encodeComponent(state)}');
 
-  // FIX: getReservoirLevels was called by real_time_river_service SOURCE 4
-  // and cwc_direct_service SOURCE D but never defined. Routes to the CWC
-  // reservoir endpoint /api/cwc-reservoir/state?state=X.
   Future<Map<String, dynamic>> getReservoirLevels({required String state}) =>
       _get('/api/cwc-reservoir/state?state=\${Uri.encodeComponent(state)}');
 
@@ -203,7 +195,7 @@ class ApiService {
   Future<Map<String, dynamic>> triggerIngestion() =>
       _post('/ingestion/run', {});
 
-  // ── CWC stations (used by predict.dart _fetchLiveLevel) ─────────────────
+  // ── CWC stations ─────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getAllCwcStations() =>
       _get('/api/cwc-stations');
 
