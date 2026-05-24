@@ -1,128 +1,163 @@
 // lib/data/direct_sources.dart
 //
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  OpsFlood — LAYER 3: Direct (No-Backend) API URL Builders             ║
-// ║                                                                          ║
-// ║  Sources that are CORS-safe from Flutter (mobile client):              ║
-// ║    A) Open-Meteo  — weather + GloFAS river discharge (free, no key)    ║
-// ║    C) data.gov.in — reservoir levels (public JSON)                     ║
-// ║    D) IMD RSS     — weather alerts (public XML feed)                   ║
-// ║                                                                          ║
-// ║  Sources that need OpsFlood proxy (CORS-blocked from mobile):          ║
-// ║    B) CWC FFS     — routed via AppConfig.epCwcFfs on OpsFlood backend  ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// OpsFlood — Direct (No-Backend) API URL Builders (v2)
+//
+// CORS-safe sources (usable directly from Flutter web + mobile):
+//   A) Open-Meteo  — weather forecast (free, no key, 10k req/day)
+//   B) GloFAS      — river discharge via flood-api.open-meteo.com
+//   C) data.gov.in — reservoir levels (public JSON)
+//   D) IMD / SACHET— weather & disaster alerts (public RSS/XML)
+//
+// CORS-blocked sources (need OpsFlood proxy):
+//   E) CWC FFS     — routed via AppConfig.epCwcFfs on OpsFlood backend
 library;
 
 import '../config/app_config.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// A) Open-Meteo — Weather (current + hourly forecast)
+// A) Open-Meteo — Weather forecast
 // Docs: https://open-meteo.com/en/docs
-// No API key. Free tier: 10,000 requests/day.
+// Free: 10,000 req/day, no API key required.
 // ═════════════════════════════════════════════════════════════════════════════
 class OpenMeteoUrls {
   OpenMeteoUrls._();
 
   static const _base = 'https://api.open-meteo.com/v1';
 
-  /// Current conditions + 24h hourly precipitation & soil moisture.
+  /// Current conditions + 48h hourly precipitation, soil moisture & wind.
   static String weather(double lat, double lon) =>
       '$_base/forecast'
       '?latitude=$lat&longitude=$lon'
       '&current=temperature_2m,relative_humidity_2m,precipitation,rain,'
-      'windspeed_10m,winddirection_10m,weathercode'
-      '&hourly=precipitation,precipitation_probability,soil_moisture_0_1cm'
-      '&forecast_days=2'
+      'windspeed_10m,winddirection_10m,weathercode,surface_pressure'
+      '&hourly=precipitation,precipitation_probability,'
+      'soil_moisture_0_1cm,soil_moisture_1_3cm,'
+      'windspeed_10m,winddirection_10m'
+      '&daily=precipitation_sum,rain_sum,precipitation_hours,'
+      'windspeed_10m_max'
+      '&forecast_days=3'
+      '&past_days=2'
       '&timezone=Asia%2FKolkata';
 
-  /// GloFAS river-discharge forecast (m³/s) — 30-day look-ahead.
-  /// Docs: https://open-meteo.com/en/docs/flood-api
-  static String riverDischarge(double lat, double lon) =>
-      'https://flood-api.open-meteo.com/v1/flood'
+  /// 7-day hourly precipitation sum (for 7-day rainfall accumulation chart).
+  static String precipitation7d(double lat, double lon) =>
+      '$_base/forecast'
       '?latitude=$lat&longitude=$lon'
-      '&daily=river_discharge'
-      '&forecast_days=16'
-      '&past_days=7';
-
-  /// Ensemble discharge for uncertainty ribbon (optional, heavier).
-  static String riverDischargeEnsemble(double lat, double lon) =>
-      'https://flood-api.open-meteo.com/v1/flood'
-      '?latitude=$lat&longitude=$lon'
-      '&daily=river_discharge_mean,river_discharge_max,river_discharge_min'
-      '&forecast_days=16';
+      '&daily=precipitation_sum,rain_sum'
+      '&forecast_days=7'
+      '&past_days=7'
+      '&timezone=Asia%2FKolkata';
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// B) CWC FFS — via OpsFlood proxy (CORS not allowed from mobile)
-// The proxy endpoint is defined in AppConfig; only URL helper here.
+// B) GloFAS — River discharge forecast
+// Docs: https://open-meteo.com/en/docs/flood-api
+// Same free quota as Open-Meteo. No key required.
+// river_discharge: median ensemble (m³/s)
+// ═════════════════════════════════════════════════════════════════════════════
+class GloFasUrls {
+  GloFasUrls._();
+
+  static const _base = 'https://flood-api.open-meteo.com/v1/flood';
+
+  /// Standard 16-day discharge forecast + 14 days of history.
+  /// Use this as the primary river level source.
+  static String discharge(double lat, double lon) =>
+      '$_base'
+      '?latitude=$lat&longitude=$lon'
+      '&daily=river_discharge'
+      '&forecast_days=16'
+      '&past_days=14';
+
+  /// Ensemble spread (min / mean / max) for uncertainty ribbon.
+  /// Only call when user opens detailed city view — heavier payload.
+  static String dischargeEnsemble(double lat, double lon) =>
+      '$_base'
+      '?latitude=$lat&longitude=$lon'
+      '&daily=river_discharge_mean,river_discharge_max,river_discharge_min'
+      '&forecast_days=16'
+      '&past_days=14';
+
+  /// Quick 7-day look-ahead for dashboard card sparklines.
+  static String discharge7d(double lat, double lon) =>
+      '$_base'
+      '?latitude=$lat&longitude=$lon'
+      '&daily=river_discharge'
+      '&forecast_days=7'
+      '&past_days=3';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// C) data.gov.in — Reservoir level dataset (CWC published)
+// Dataset: https://data.gov.in/resource/reservoir-levels-central-water-commission
+// Public, no auth. Limit=100 returns latest batch.
+// ═════════════════════════════════════════════════════════════════════════════
+class DataGovUrls {
+  DataGovUrls._();
+
+  static const _reservoirResourceId = '3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
+
+  /// Latest reservoir levels (all India, most-recent 100 records).
+  static String get reservoirLevels =>
+      'https://api.data.gov.in/resource/$_reservoirResourceId'
+      '?api-version=2.0&format=json&limit=100&offset=0';
+
+  /// Filter reservoir levels by state.
+  static String reservoirByState(String state) =>
+      'https://api.data.gov.in/resource/$_reservoirResourceId'
+      '?api-version=2.0&format=json&limit=50'
+      '&filters[state]=${Uri.encodeComponent(state)}';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// D) IMD / SACHET — Weather & disaster alerts (public feeds)
+// No key required. IMD updates every 3–6 h; SACHET is near-real-time.
+// ═════════════════════════════════════════════════════════════════════════════
+class ImdRssUrls {
+  ImdRssUrls._();
+
+  /// SACHET — CAP-format national disaster alerts (near-real-time).
+  static const String sachetAlerts =
+      'https://sachet.ndma.gov.in/cap_public_website/FeedPage';
+
+  /// IMD — all-India weather bulletins RSS.
+  static const String bulletins =
+      'https://mausam.imd.gov.in/backend/rss_en.php';
+
+  /// IMD — cyclone track feed (active only during cyclone season).
+  static const String cyclone =
+      'https://mausam.imd.gov.in/backend/cyclone_rss_en.php';
+
+  /// IMD — heavy rainfall warning RSS.
+  static const String heavyRainfall =
+      'https://mausam.imd.gov.in/backend/warning_rss_en.php';
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// E) CWC FFS — via OpsFlood proxy (CORS-blocked from browser)
 // ═════════════════════════════════════════════════════════════════════════════
 class CwcProxyUrls {
   CwcProxyUrls._();
 
-  /// Full URL to fetch a CWC FFS station via the OpsFlood proxy.
-  /// e.g.  CwcProxyUrls.station('GUW')
-  static String station(String stationCode) =>
-      '${AppConfig.baseUrl}${AppConfig.epCwcFfs}/$stationCode';
+  /// CWC FFS station data via OpsFlood proxy.
+  /// e.g. CwcProxyUrls.station('GUW')
+  static String station(String code) =>
+      '${AppConfig.baseUrl}${AppConfig.epCwcFfs}/$code';
 
-  /// All CWC stations registry.
+  /// All registered CWC stations.
   static String get stationsRegistry =>
       '${AppConfig.baseUrl}${AppConfig.epCwcStations}';
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// C) data.gov.in — Reservoir Level Dataset
-// API: https://data.gov.in/resource/reservoir-levels-central-water-commission
-// No auth needed for public datasets. Limit=100 returns latest batch.
-// ═════════════════════════════════════════════════════════════════════════════
-class DataGovUrls {
-  DataGovUrls._();
-
-  // Public dataset resource IDs on data.gov.in
-  static const _reservoirResourceId = '3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
-
-  static String get reservoirLevels =>
-      'https://api.data.gov.in/resource/$_reservoirResourceId'
-      '?api-version=2.0&format=json&limit=100&offset=0';
-
-  /// Filter by state (uses OData-style filter; not all datasets support it).
-  static String reservoirByState(String state) =>
-      'https://api.data.gov.in/resource/$_reservoirResourceId'
-      '?api-version=2.0&format=json&limit=50&filters[state]=${Uri.encodeComponent(state)}';
-
-  // Flood relief camps dataset
-  static const _reliefCampsResourceId = 'f6a5a9d2-3b3e-4b4b-8e8e-1a1a1a1a1a1a';
-  static String get reliefCamps =>
-      'https://api.data.gov.in/resource/$_reliefCampsResourceId'
-      '?api-version=2.0&format=json&limit=100';
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// D) IMD RSS — Weather Alerts (public XML)
-// No key required. Updated every 3–6 hours by IMD.
-// ═════════════════════════════════════════════════════════════════════════════
-class ImdRssUrls {
-  ImdRssUrls._();
-
-  /// National weather warning RSS (heavy rain, cyclone, thunderstorm).
-  static const String nationalAlerts =
-      'https://sachet.ndma.gov.in/cap_public_website/FeedPage';
-
-  /// IMD public RSS — all India weather bulletins.
-  static const String bulletins =
-      'https://mausam.imd.gov.in/backend/rss_en.php';
-
-  /// Cyclone track feed (active only during season).
-  static const String cyclone =
-      'https://mausam.imd.gov.in/backend/cyclone_rss_en.php';
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// E) OpsFlood ML Inference — POST to /predict
-// Defined here for reference; actual call is in MlInferenceService.
+// F) OpsFlood ML inference endpoints (reference only — calls in MlInferenceService)
 // ═════════════════════════════════════════════════════════════════════════════
 class OpsFloodUrls {
   OpsFloodUrls._();
 
   static String get predict => '${AppConfig.baseUrl}${AppConfig.epPredict}';
   static String get health  => '${AppConfig.baseUrl}${AppConfig.epHealth}';
+  static String get liveTelemetry => '${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}';
+  static String get liveLevels    => '${AppConfig.baseUrl}${AppConfig.epLiveLevels}';
+  static String get criticalAlerts=> '${AppConfig.baseUrl}${AppConfig.epCriticalAlerts}';
 }
