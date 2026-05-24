@@ -1,25 +1,40 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v13 — sequential fetch + backend-first)
+// OpsFlood — LiveFetchEngine (v14 — correct backend field extraction)
 //
-// Data sources by platform:
+// DATA PIPELINE ANALYSIS (from OpsFlood backend/routers/live_levels.py):
 //
-//   ALL PLATFORMS:
-//     Source 1: Open-Meteo Weather API         (CORS-safe, free)
-//     Source 2: Open-Meteo GloFAS River API    (CORS-safe, free)
-//     Source 3: CwcDirectService router        (CORS-safe: FFEM/WRD/BEAMS)
+//   GET /api/live-levels?state=Bihar
+//   └─ Response envelope:
+//       { "status": "success", "data_source": "GLOFAS+MATRIX",
+//         "total": N, "data": [ ...stations... ] }
 //
-//   MOBILE / DESKTOP only (no CORS restriction):
-//     Source 4: OpsFlood backend /api/live-levels  (Render, PRIMARY)
-//     Source 5: SACHET NDMA IMD alerts
+//   Each station in data[]:
+//       city, state, river_name, station
+//       current_level (m),  safe_level (m), warning_level (m), danger_level (m)
+//       river_discharge (m³/s) — raw GloFAS value
+//       capacity_percent (0-100)
+//       risk_level ("LOW"|"MODERATE"|"HIGH"|"CRITICAL")
+//       status ("RISING"|"STABLE"), alert (emoji)
+//       flow_rate (m³/s, same as river_discharge)
+//       lat, lon, data_source, timestamp
 //
-// KEY CHANGES IN v13:
-//   1. Cities are fetched ONE AT A TIME (sequential) instead of all in parallel.
-//      This avoids Render rate-limits and gives incremental UI updates.
-//   2. OpsFlood backend is now the PRIMARY river-level source on mobile.
-//      CwcDirectService supplements it; GloFAS + Weather provide precip/discharge.
-//   3. onStateChanged() fires after every city so the map/list fills in live.
-//   4. _wakeBackend() must complete BEFORE the first city fetch begins.
+//   NOTE: The backend does NOT filter by city — only by state.
+//         Client must match city from the returned data[] array.
+//
+//   PRIORITY:
+//     1. GloFAS in-memory cache (real river discharge → current_level in metres)
+//     2. STATE_SEVERITY_MATRIX (fallback for uncovered states)
+//
+// KEY FIXES IN v14 vs v13:
+//   1. URL uses ?state= only (backend ignores ?city=).
+//   2. _matchCity() scans data[] for the closest city name match.
+//   3. Extracts ALL rich fields: current_level, danger_level, warning_level,
+//      safe_level, risk_level, flow_rate (river_discharge), capacity_percent.
+//   4. Backend risk_level is passed up and used directly in _snapToFloodData
+//      (overrides the locally-inferred risk when backend has GloFAS data).
+//   5. Backend flow_rate is passed to FloodData.flowRate so the map shows
+//      actual river discharge instead of 0.
 library;
 
 import 'dart:async';
@@ -62,9 +77,7 @@ class LiveFetchEngine {
   DateTime? lastFetchTime;
   String?   error;
   int       queuedOfflineCycles = 0;
-
-  // Current city being fetched (shown in UI loading indicator)
-  String?   fetchingCity;
+  String?   fetchingCity;        // shown in loading UI
 
   // ── Data ─────────────────────────────────────────────────────────────────────
   List<FloodData>    liveLevels           = [];
@@ -132,15 +145,15 @@ class LiveFetchEngine {
   }
 
   // ── Backend wake ──────────────────────────────────────────────────────────────
-  // In v13 this MUST complete before per-city fetches begin so backend requests
-  // don't race against the cold-start window.
+
   Future<bool> _wakeBackend() async {
     if (_runningOnWeb || _backendAwake) return _backendAwake;
     try {
-      if (kDebugMode) debugPrint('[LiveFetch] waking backend…');
       debugWakeAttempts++;
-      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epHealth}');
-      final res = await _client.get(uri).timeout(AppConfig.coldStartTimeout);
+      if (kDebugMode) debugPrint('[LiveFetch] waking backend…');
+      final res = await _client
+          .get(Uri.parse('${AppConfig.baseUrl}${AppConfig.epHealth}'))
+          .timeout(AppConfig.coldStartTimeout);
       _backendAwake = res.statusCode < 500;
       if (kDebugMode) debugPrint('[LiveFetch] backend awake (${res.statusCode})');
     } catch (e) {
@@ -150,7 +163,7 @@ class LiveFetchEngine {
     return _backendAwake;
   }
 
-  // ── Main refresh (v13: sequential per-city) ───────────────────────────────────
+  // ── Main refresh (v13+: sequential per-city) ─────────────────────────────────
 
   Future<void> refreshData() async {
     if (_lock) return;
@@ -160,7 +173,6 @@ class LiveFetchEngine {
     Future.delayed(Duration.zero, () => onStateChanged?.call());
 
     try {
-      // Step 1: wake backend first (v13 — blocks until server is ready).
       await _wakeBackend();
       isWakingUp = false;
 
@@ -171,7 +183,6 @@ class LiveFetchEngine {
       final newCwc       = <Map<String, dynamic>>[];
       int   healthy      = 0;
 
-      // Step 2: fetch cities ONE AT A TIME — update UI after each.
       for (final city in cities) {
         fetchingCity = city.name;
         Future.delayed(Duration.zero, () => onStateChanged?.call());
@@ -213,7 +224,7 @@ class LiveFetchEngine {
         final imdList = snap['imdAlerts'];
         if (imdList is List && imdList.isNotEmpty) imdAlerts = imdList;
 
-        // ── Publish partial results after each city ────────────────────────────
+        // Publish partial results so UI fills in live after each city.
         liveLevels           = List.of(newLevels);
         criticalAlerts       = List.of(newAlerts);
         activeCriticalAlerts = newAlerts.where((a) => a['severity'] == 'CRITICAL').toList();
@@ -232,7 +243,8 @@ class LiveFetchEngine {
 
         if (kDebugMode) {
           debugPrint('[LiveFetch] ✓ ${city.name} | src=${snap['healthySources']} '
-              '| risk=${snap['riskLabel']} | cwc=${snap['cwcLevel']}');
+              '| risk=${snap['riskLabel']} | level=${snap['cwcLevel']} '
+              '| flow=${snap['flowRate']} m³/s | bkSrc=${snap['backendSource']}');
         }
       }
 
@@ -267,18 +279,10 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Per-city fetch (v13: backend is primary on mobile) ────────────────────────
-  //
-  // Fetch order:
-  //   [parallel] Weather + GloFAS + CwcDirect  — always run, CORS-safe
-  //   [parallel] Backend + IMD                 — mobile/desktop only
-  //
-  // The three parallel groups still run concurrently within the city,
-  // but cities themselves are serialised by refreshData().
+  // ── Per-city fetch ─────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> _fetchCity(IndiaCity city) async {
     try {
-      // Fire all 5 sources concurrently within this one city.
       final weatherFut   = _fetchWeather(city);
       final glofasFut    = _fetchGloFas(city);
       final cwcDirectFut = _cwcDirect.fetch(city);
@@ -302,45 +306,64 @@ class LiveFetchEngine {
         cwcDirect != null, backend != null, imd != null,
       ].where((v) => v).length;
 
-      final precipMm     = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
-      final dischargeM3s = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
-      final discharge7d  = (glofas?['discharge7d'] as List?)?.cast<double>() ?? <double>[];
+      final precipMm    = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
+      final discharge7d = (glofas?['discharge7d'] as List?)?.cast<double>() ?? <double>[];
 
-      // v13: backend is PRIMARY for river gauge levels on mobile.
-      // CwcDirectService overrides if it has a fresher reading.
-      double? cwcLevel    = _safeLevel(backend?['level']);
-      double? dangerLevel = _safeLevel(backend?['danger']);
-      double? warnLevel   = _safeLevel(backend?['warning']);
-      String? cwcSource   = backend != null ? 'BACKEND' : null;
+      // v14: prefer backend discharge (GloFAS-sourced, state-matched) over
+      // direct GloFAS coordinate fetch when available.
+      final backendFlow  = (backend?['flow_rate'] as num?)?.toDouble() ?? 0.0;
+      final glofasFlow   = (glofas?['discharge']  as num?)?.toDouble() ?? 0.0;
+      final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
 
-      // CwcDirect overrides if available (typically fresher/more precise).
+      // v14: backend is PRIMARY river-level source on mobile.
+      //   current_level, danger_level, warning_level, safe_level are all in metres.
+      //   risk_level is already computed by backend (CRITICAL/HIGH/MODERATE/LOW).
+      //   CwcDirect overrides level/thresholds if it has a fresher reading.
+      double? cwcLevel    = _safeLevel(backend?['current_level']);
+      double? dangerLevel = _safeLevel(backend?['danger_level']);
+      double? warnLevel   = _safeLevel(backend?['warning_level']);
+      double? safeLevel   = _safeLevel(backend?['safe_level']);
+      String? backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
+      String? backendSrc  = backend?['data_source'] as String?; // OPEN_METEO_GLOFAS or STATE_SEVERITY_MATRIX
+      String? cwcSource   = backend != null ? (backendSrc ?? 'BACKEND') : null;
+
       if (cwcDirect != null) {
         cwcLevel    = cwcDirect.level    ?? cwcLevel;
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
+        backendRisk = null; // CwcDirect is fresher — re-infer risk below
       }
 
-      // Final threshold fallback: static values from india_cities.dart.
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
       warnLevel   ??= city.warningLevel > 0 ? city.warningLevel : null;
 
-      final riskLabel = _inferRisk(
-        precipMm:     precipMm,
-        dischargeM3s: dischargeM3s,
-        discharge7d:  discharge7d,
-        currentLevel: cwcLevel,
-        dangerLevel:  dangerLevel,
-      );
+      // Use backend risk directly when it came from GloFAS (most accurate).
+      // Re-infer only when CwcDirect overrode the levels, or backend used matrix.
+      final String riskLabel;
+      if (backendRisk != null && backendSrc == 'OPEN_METEO_GLOFAS') {
+        riskLabel = backendRisk;
+      } else {
+        riskLabel = _inferRisk(
+          precipMm:     precipMm,
+          dischargeM3s: dischargeM3s,
+          discharge7d:  discharge7d,
+          currentLevel: cwcLevel,
+          dangerLevel:  dangerLevel,
+        );
+      }
 
       return {
         'precip_mm':      precipMm,
         'discharge':      dischargeM3s,
         'discharge7d':    discharge7d,
+        'flowRate':       dischargeM3s,  // m³/s — passed to FloodData.flowRate
         'cwcLevel':       cwcLevel,
         'dangerLevel':    dangerLevel,
         'warningLevel':   warnLevel,
+        'safeLevel':      safeLevel,
         'cwcSource':      cwcSource,
+        'backendSource':  backendSrc,
         'riskLabel':      riskLabel,
         'healthySources': healthySources,
         'imdAlerts':      imd ?? <dynamic>[],
@@ -398,35 +421,84 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 4 (PRIMARY on mobile): OpsFlood backend /api/live-levels ──────────
-  // Server is guaranteed awake before this is called (v13 _wakeBackend blocks).
-  // Uses AppConfig.requestTimeout (65s) — generous since server is already hot.
+  // ── Source 4 (PRIMARY on mobile): OpsFlood /api/live-levels ─────────────────
+  //
+  // v14 analysis of backend/routers/live_levels.py:
+  //
+  //   • Route: GET /api/live-levels?state=<state>
+  //   • Filter: ?city= is IGNORED by the backend — only ?state= is supported.
+  //   • Response: { status, data_source, total, data: [ ...stations... ] }
+  //   • Each station: city, state, river_name, current_level, safe_level,
+  //       warning_level, danger_level, river_discharge, capacity_percent,
+  //       risk_level, status, alert, flow_rate, lat, lon, data_source, timestamp
+  //
+  //   • _matchCity() scans data[] for the entry whose 'city' fuzzy-matches
+  //     the requested city name (exact → prefix → first result fallback).
 
   Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
     try {
       final uri = Uri.parse(
         '${AppConfig.baseUrl}${AppConfig.epLiveLevels}'
-        '?city=${Uri.encodeComponent(city.name)}'
-        '&state=${Uri.encodeComponent(city.state)}',
+        '?state=${Uri.encodeComponent(city.state)}',
       );
       final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
       if (res.statusCode != 200) {
         if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTTP ${res.statusCode}');
         return null;
       }
-      final j = jsonDecode(res.body) as Map<String, dynamic>;
-      final d = _firstItem(j);
-      if (d == null) return null;
-      if (kDebugMode) debugPrint('[LiveFetch] backend ✓ ${city.name}: $d');
+
+      final j    = jsonDecode(res.body) as Map<String, dynamic>;
+      final raw  = j['data'];
+      if (raw is! List || raw.isEmpty) return null;
+
+      // Find the station matching this city from the list.
+      final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
+      if (station == null) return null;
+
+      if (kDebugMode) {
+        debugPrint('[LiveFetch] backend ✓ ${city.name}: '
+            'level=${station['current_level']} danger=${station['danger_level']} '
+            'risk=${station['risk_level']} src=${station['data_source']}');
+      }
+
       return {
-        'level':   _num(d['current_level'] ?? d['level']),
-        'danger':  _num(d['danger_level']  ?? d['danger']),
-        'warning': _num(d['warning_level'] ?? d['warning']),
+        'current_level':    _num(station['current_level']),
+        'safe_level':       _num(station['safe_level']),
+        'warning_level':    _num(station['warning_level']),
+        'danger_level':     _num(station['danger_level']),
+        'flow_rate':        _num(station['flow_rate'] ?? station['river_discharge']),
+        'risk_level':       station['risk_level'] as String?,
+        'capacity_percent': _num(station['capacity_percent']),
+        'data_source':      station['data_source'] as String?,
       };
     } catch (e) {
       if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: $e');
       return null;
     }
+  }
+
+  // Match a city name from the backend data[] list.
+  // Priority: exact match → starts-with → contains → first item in list.
+  Map<String, dynamic>? _matchCity(
+    List<Map<String, dynamic>> stations, String cityName,
+  ) {
+    if (stations.isEmpty) return null;
+    final needle = cityName.trim().toLowerCase();
+
+    // 1. Exact match
+    for (final s in stations) {
+      if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
+    }
+    // 2. Starts-with
+    for (final s in stations) {
+      if ((s['city'] as String? ?? '').toLowerCase().startsWith(needle)) return s;
+    }
+    // 3. Contains
+    for (final s in stations) {
+      if ((s['city'] as String? ?? '').toLowerCase().contains(needle)) return s;
+    }
+    // 4. Fallback: highest capacity station for this state
+    return stations.first;
   }
 
   // ── Source 5: SACHET NDMA IMD (mobile/desktop only) ──────────────────────────
@@ -479,7 +551,7 @@ class LiveFetchEngine {
     }).toList();
   }
 
-  // ── Risk inference ────────────────────────────────────────────────────────────
+  // ── Risk inference (used when backend data is matrix-only or CwcDirect overrides) ───
 
   String _inferRisk({
     required double precipMm,
@@ -519,8 +591,11 @@ class LiveFetchEngine {
   FloodData _snapToFloodData(IndiaCity city, Map<String, dynamic> snap) {
     final danger  = (snap['dangerLevel']  as num?)?.toDouble() ?? city.dangerLevel;
     final warning = (snap['warningLevel'] as num?)?.toDouble() ?? city.warningLevel;
-    final safe    = (warning - 2.0).clamp(0.0, double.infinity);
-    final current = (snap['cwcLevel'] as double?) ?? 0.0;
+    // v14: prefer safe_level from backend; fall back to warning-2m.
+    final safe    = (snap['safeLevel']    as num?)?.toDouble()
+                 ?? (warning - 2.0).clamp(0.0, double.infinity);
+    final current = (snap['cwcLevel']     as double?) ?? 0.0;
+    final flow    = (snap['flowRate']     as num?)?.toDouble();
 
     final risk   = snap['riskLabel'] as String? ?? 'LOW';
     final precip = (snap['precip_mm'] as num?)?.toDouble() ?? 0.0;
@@ -542,7 +617,7 @@ class LiveFetchEngine {
       riskLevel:     risk,
       lastUpdated:   DateTime.now(),
       riverName:     city.river,
-      flowRate:      (snap['discharge'] as num?)?.toDouble(),
+      flowRate:      flow,         // v14: real river discharge in m³/s from backend
       rainfall24h:   precip,
       status:        (snap['healthySources'] as int? ?? 0) >= 2 ? 'Live' : 'Partial',
       imdRainfallMm: precip,
@@ -589,14 +664,4 @@ class LiveFetchEngine {
   }
 
   double? _num(dynamic v) => v == null ? null : (v as num).toDouble();
-
-  Map<String, dynamic>? _firstItem(Map<String, dynamic> j) {
-    for (final k in ['data', 'items', 'results', 'levels', 'records']) {
-      final v = j[k];
-      if (v is List && v.isNotEmpty) return v.first as Map<String, dynamic>?;
-      if (v is Map<String, dynamic>) return v;
-    }
-    if (j.containsKey('current_level') || j.containsKey('level')) return j;
-    return null;
-  }
 }
