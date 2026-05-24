@@ -620,6 +620,7 @@ class _CwcStationStrip extends StatelessWidget {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(name.isNotEmpty ? name : 'Station ${i + 1}',
                     maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -633,7 +634,7 @@ class _CwcStationStrip extends StatelessWidget {
                       style: TextStyle(
                           color: rc.textSecondary.withValues(alpha: 0.6),
                           fontSize: 9)),
-                const Spacer(),
+                const SizedBox(height: 4),
                 Row(
                   children: [
                     Text(
