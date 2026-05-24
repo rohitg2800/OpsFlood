@@ -1,16 +1,34 @@
 // lib/services/threshold_alert_service.dart
 //
-// OpsFlood — ThresholdAlertService
+// OpsFlood — ThresholdAlertService  (Option B — pure discharge comparison)
 //
-// Polls GloFAS discharge + CWC/WRD gauge levels on a timer and emits
-// ThresholdAlert events for every monitored station that crosses a threshold.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WHY OPTION B?
+//   The GloFAS flood API returns river_discharge in m³/s.
+//   CWC/WRD thresholds are gauge heights in metres MSL.
+//   Comparing m³/s against metres is a unit mismatch that produced nonsense
+//   alert levels and fill-bar values.
 //
-// Architecture:
-//   - Runs on a periodic timer (default: every 15 minutes).
-//   - Uses AlertEvaluator for stateless threshold logic.
-//   - Fires local notifications via FcmService.showAlertNotification().
-//   - Exposes a Stream<List<ThresholdAlert>> that AlertsProvider listens to.
-//   - Persists last-seen alert levels to SharedPreferences to suppress duplicates.
+//   Option B fixes this by fetching GloFAS statistical return-period
+//   discharge thresholds for every monitored city:
+//
+//     river_discharge_return_period_2  (m³/s) → watch boundary
+//     river_discharge_return_period_5  (m³/s) → warning level
+//     river_discharge_return_period_20 (m³/s) → danger level
+//
+//   These come from the SAME flood-api.open-meteo.com endpoint, so units
+//   always match live discharge perfectly.
+//
+// ARCHITECTURE:
+//   • _ReturnPeriodThresholds fetched once per city per session (or on
+//     forceRefresh).  Cached in _rpCache.  Serialised to SharedPreferences
+//     so they survive app restarts without an extra API call.
+//   • _poll() → _evaluateCity() / _evaluateBiharGauge() both:
+//       1. Ensure thresholds are loaded (_ensureThresholds).
+//       2. Fetch latest discharge.
+//       3. Call AlertEvaluator.fromDischarge() — all values in m³/s.
+//   • AlertEvaluator is unchanged; fromDischarge() was already correct.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 library;
 
 import 'dart:async';
@@ -27,18 +45,36 @@ import '../models/threshold_alert.dart';
 import 'alert_evaluator.dart';
 import 'fcm_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 const _kPollInterval    = Duration(minutes: 15);
 const _kPrefKeyPrefix   = 'threshold_alert_last_';
 const _kPrefAlertsJson  = 'threshold_alerts_cache';
+const _kPrefRpJson      = 'threshold_rp_cache';      // return-period cache
 const _kMaxCachedAlerts = 200;
 const _kHttpTimeout     = Duration(seconds: 20);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ThresholdAlertService
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Return-period thresholds (all m³/s) ─────────────────────────────────────
+class _Rp {
+  final double watch;    // 2-yr return period
+  final double warning;  // 5-yr return period
+  final double danger;   // 20-yr return period
+
+  const _Rp({required this.watch, required this.warning, required this.danger});
+
+  /// HFL proxy: 1.5× the 20-yr level (GloFAS doesn't publish 100-yr directly).
+  double get hfl => danger * 1.5;
+
+  Map<String, dynamic> toJson() =>
+      {'watch': watch, 'warning': warning, 'danger': danger};
+
+  factory _Rp.fromJson(Map<String, dynamic> j) => _Rp(
+        watch:   (j['watch']   as num).toDouble(),
+        warning: (j['warning'] as num).toDouble(),
+        danger:  (j['danger']  as num).toDouble(),
+      );
+}
+
+// ─── ThresholdAlertService ────────────────────────────────────────────────────
 class ThresholdAlertService {
   ThresholdAlertService._();
   static final ThresholdAlertService instance = ThresholdAlertService._();
@@ -49,10 +85,11 @@ class ThresholdAlertService {
   Timer? _timer;
   bool   _running = false;
 
-  final List<ThresholdAlert> _alerts = [];
+  final List<ThresholdAlert>  _alerts   = [];
   List<ThresholdAlert> get currentAlerts => List.unmodifiable(_alerts);
 
   final Map<String, double> _prevValues = {};
+  final Map<String, _Rp>   _rpCache    = {};   // key = city/gauge id
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -60,16 +97,16 @@ class ThresholdAlertService {
     if (_running) return;
     _running = true;
     await _loadCachedAlerts();
+    await _loadRpCache();
     await _poll();
     _timer = Timer.periodic(_kPollInterval, (_) => _poll());
-    debugPrint('[ThresholdAlertService] started, polling every $_kPollInterval');
+    debugPrint('[ThresholdAlertService] started (Option B — discharge vs return-period)');
   }
 
   void stop() {
     _timer?.cancel();
     _timer   = null;
     _running = false;
-    debugPrint('[ThresholdAlertService] stopped');
   }
 
   void dispose() {
@@ -83,7 +120,6 @@ class ThresholdAlertService {
     debugPrint('[ThresholdAlertService] poll @ ${DateTime.now()}');
     final newAlerts = <ThresholdAlert>[];
 
-    // 1. IndiaCity entries via GloFAS discharge
     for (final city in monitoredCities) {
       try {
         final alert = await _evaluateCity(city);
@@ -93,7 +129,6 @@ class ThresholdAlertService {
       }
     }
 
-    // 2. Bihar gauges
     for (final gauge in kBiharGauges) {
       try {
         final alert = await _evaluateBiharGauge(gauge);
@@ -115,13 +150,23 @@ class ThresholdAlertService {
     }
 
     await _saveAlertsCache();
+    await _saveRpCache();
     _controller.add(currentAlerts);
     debugPrint('[ThresholdAlertService] poll done — ${newAlerts.length} new alerts');
   }
 
-  // ── Per-city GloFAS evaluation ─────────────────────────────────────────────
+  // ── Per-city evaluation (IndiaCity) ───────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateCity(IndiaCity city) async {
+    // 1. Ensure return-period thresholds are loaded for this city.
+    final rp = await _ensureThresholds(
+      id:  city.id,
+      lat: city.lat,
+      lon: city.lon,
+    );
+    if (rp == null) return null;
+
+    // 2. Fetch latest live discharge.
     final discharge = await _fetchLatestDischarge(
         GloFasUrls.discharge(city.lat, city.lon));
     if (discharge == null) return null;
@@ -129,33 +174,110 @@ class ThresholdAlertService {
     final prev = _prevValues[city.id];
     _prevValues[city.id] = discharge;
 
-    return AlertEvaluator.fromCity(
-      city:          city,
-      currentValue:  discharge,
-      previousValue: prev,
-      isDischarge:   true,
+    // 3. Evaluate — all values in m³/s.
+    return AlertEvaluator.fromDischarge(
+      cityId:           city.id,
+      cityName:         city.name,
+      state:            city.state,
+      river:            city.river,
+      dischargeM3s:     discharge,
+      warningDischarge: rp.warning,
+      dangerDischarge:  rp.danger,
+      hflDischarge:     rp.hfl,
+      previousDischarge: prev,
     );
   }
 
-  // ── Bihar gauge evaluation ─────────────────────────────────────────────────
+  // ── Per-gauge evaluation (BiharGauge) ─────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateBiharGauge(BiharGauge gauge) async {
+    final id = '${gauge.river.toLowerCase().replaceAll(' ', '_')}_'
+               '${gauge.station.toLowerCase().replaceAll(' ', '_')}';
+
+    final rp = await _ensureThresholds(
+      id:  id,
+      lat: gauge.lat,
+      lon: gauge.lon,
+    );
+    if (rp == null) return null;
+
     final discharge = await _fetchLatestDischarge(
         GloFasUrls.discharge(gauge.lat, gauge.lon));
     if (discharge == null) return null;
 
-    final key  = '${gauge.river}_${gauge.station}';
-    final prev = _prevValues[key];
-    _prevValues[key] = discharge;
+    final prev = _prevValues[id];
+    _prevValues[id] = discharge;
 
-    return AlertEvaluator.fromBiharGauge(
-      gauge:         gauge,
-      currentValue:  discharge,
-      previousValue: prev,
+    return AlertEvaluator.fromDischarge(
+      cityId:           id,
+      cityName:         gauge.station,
+      state:            'Bihar',
+      river:            gauge.river,
+      dischargeM3s:     discharge,
+      warningDischarge: rp.warning,
+      dangerDischarge:  rp.danger,
+      hflDischarge:     rp.hfl,
+      previousDischarge: prev,
     );
   }
 
-  // ── HTTP helper ────────────────────────────────────────────────────────────
+  // ── Return-period loader ───────────────────────────────────────────────────
+
+  /// Returns cached thresholds or fetches them from GloFAS.
+  /// Returns null if both cache and network are unavailable.
+  Future<_Rp?> _ensureThresholds({
+    required String id,
+    required double lat,
+    required double lon,
+  }) async {
+    if (_rpCache.containsKey(id)) return _rpCache[id];
+    return _fetchReturnPeriods(id: id, lat: lat, lon: lon);
+  }
+
+  Future<_Rp?> _fetchReturnPeriods({
+    required String id,
+    required double lat,
+    required double lon,
+  }) async {
+    try {
+      final res = await http
+          .get(Uri.parse(GloFasUrls.returnPeriods(lat, lon)))
+          .timeout(_kHttpTimeout);
+      if (res.statusCode != 200) return null;
+
+      final body  = jsonDecode(res.body) as Map<String, dynamic>;
+      final daily = body['daily'] as Map<String, dynamic>?;
+      if (daily == null) return null;
+
+      // Each return-period field is a 1-element list for forecast_days=1.
+      double _first(String key) {
+        final list = daily[key] as List?;
+        if (list == null || list.isEmpty || list.first == null) return 0.0;
+        return (list.first as num).toDouble();
+      }
+
+      final rp2  = _first('river_discharge_return_period_2');
+      final rp5  = _first('river_discharge_return_period_5');
+      final rp20 = _first('river_discharge_return_period_20');
+
+      // Validate — all three must be positive and increasing.
+      if (rp2 <= 0 || rp5 <= 0 || rp20 <= 0) return null;
+      if (!(rp2 <= rp5 && rp5 <= rp20)) return null;
+
+      final rp = _Rp(watch: rp2, warning: rp5, danger: rp20);
+      _rpCache[id] = rp;
+      debugPrint('[ThresholdAlertService] RP $id — '
+          'watch=${rp2.toStringAsFixed(0)} '
+          'warn=${rp5.toStringAsFixed(0)} '
+          'danger=${rp20.toStringAsFixed(0)} m³/s');
+      return rp;
+    } catch (e) {
+      debugPrint('[ThresholdAlertService] RP fetch failed for $id: $e');
+      return null;
+    }
+  }
+
+  // ── Discharge fetcher ──────────────────────────────────────────────────────
 
   Future<double?> _fetchLatestDischarge(String url) async {
     try {
@@ -168,6 +290,7 @@ class ThresholdAlertService {
       if (daily == null) return null;
       final values = daily['river_discharge'] as List?;
       if (values == null || values.isEmpty) return null;
+      // Return the most recent non-null value (latest day first from the end).
       for (int i = values.length - 1; i >= 0; i--) {
         if (values[i] != null) return (values[i] as num).toDouble();
       }
@@ -193,14 +316,13 @@ class ThresholdAlertService {
     }
   }
 
-  // ── Notification via FcmService public API ─────────────────────────────────
+  // ── Notification ───────────────────────────────────────────────────────────
 
   Future<void> _notify(ThresholdAlert alert) async {
     final prefs    = await SharedPreferences.getInstance();
     final key      = '$_kPrefKeyPrefix${alert.cityId}';
     final lastSeen = prefs.getString(key);
 
-    // Suppress if same or higher level was already notified
     if (lastSeen != null) {
       final lastLevel = AlertLevel.values.firstWhere(
         (l) => l.name == lastSeen,
@@ -218,8 +340,10 @@ class ThresholdAlertService {
     };
 
     final body =
-        '${alert.river} at ${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}. '
-        'Danger level: ${alert.dangerLevel.toStringAsFixed(1)} ${alert.unitLabel}. '
+        '${alert.river} discharge at '
+        '${alert.currentValue.toStringAsFixed(0)} m³/s. '
+        'Danger threshold: '
+        '${alert.dangerLevel.toStringAsFixed(0)} m³/s. '
         'Trend: ${alert.trend.name}.';
 
     await FcmService.instance.showAlertNotification(
@@ -233,7 +357,7 @@ class ThresholdAlertService {
     );
   }
 
-  // ── Persistence ────────────────────────────────────────────────────────────
+  // ── Persistence — alerts ───────────────────────────────────────────────────
 
   Future<void> _saveAlertsCache() async {
     try {
@@ -251,7 +375,7 @@ class ThresholdAlertService {
         'breachMargin': a.breachMargin,
         'fillPercent':  a.fillPercent,
         'timestamp':    a.timestamp.toIso8601String(),
-        'isDischarge':  a.isDischarge,
+        'isDischarge':  true,          // always true in Option B
         'trend':        a.trend.name,
       }).toList();
       await prefs.setString(_kPrefAlertsJson, jsonEncode(simple));
@@ -283,7 +407,7 @@ class ThresholdAlertService {
           breachMargin: (map['breachMargin'] as num).toDouble(),
           fillPercent:  (map['fillPercent']  as num).toDouble(),
           timestamp:    DateTime.parse(map['timestamp'] as String),
-          isDischarge:  map['isDischarge'] as bool,
+          isDischarge:  true,
           isNew:        false,
           trend:        TrendDirection.values.firstWhere(
                           (t) => t.name == map['trend'],
@@ -292,7 +416,32 @@ class ThresholdAlertService {
       }
       debugPrint('[ThresholdAlertService] loaded ${_alerts.length} cached alerts');
     } catch (e) {
-      debugPrint('[ThresholdAlertService] cache load failed: $e');
+      debugPrint('[ThresholdAlertService] alert cache load failed: $e');
+    }
+  }
+
+  // ── Persistence — return-period cache ─────────────────────────────────────
+
+  Future<void> _saveRpCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final map   = _rpCache.map((k, v) => MapEntry(k, v.toJson()));
+      await prefs.setString(_kPrefRpJson, jsonEncode(map));
+    } catch (_) {}
+  }
+
+  Future<void> _loadRpCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw   = prefs.getString(_kPrefRpJson);
+      if (raw == null) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in map.entries) {
+        _rpCache[entry.key] = _Rp.fromJson(entry.value as Map<String, dynamic>);
+      }
+      debugPrint('[ThresholdAlertService] loaded ${_rpCache.length} cached return-period entries');
+    } catch (e) {
+      debugPrint('[ThresholdAlertService] RP cache load failed: $e');
     }
   }
 
@@ -306,7 +455,11 @@ class ThresholdAlertService {
     await _saveAlertsCache();
   }
 
-  Future<void> refresh() => _poll();
+  /// Force a full refresh — clears RP cache so thresholds are re-fetched.
+  Future<void> refresh() async {
+    _rpCache.clear();
+    await _poll();
+  }
 
   int get unreadCount =>
       _alerts.where((a) => a.isNew && a.level.requiresPush).length;

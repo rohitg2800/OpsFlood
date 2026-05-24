@@ -53,7 +53,13 @@ class OpenMeteoUrls {
 // B) GloFAS — River discharge forecast
 // Docs: https://open-meteo.com/en/docs/flood-api
 // Same free quota as Open-Meteo. No key required.
-// river_discharge: median ensemble (m³/s)
+// river_discharge         : median ensemble (m³/s) — current live value
+// river_discharge_return_period_2/5/20 : statistical thresholds in m³/s
+//   2-yr  ≈ "watch" / pre-warning boundary
+//   5-yr  ≈ "warning" level
+//   20-yr ≈ "danger" level
+// These return-period values replace CWC gauge-height thresholds for
+// discharge-based alert evaluation, ensuring apples-to-apples comparison.
 // ═════════════════════════════════════════════════════════════════════════════
 class GloFasUrls {
   GloFasUrls._();
@@ -68,6 +74,17 @@ class GloFasUrls {
       '&daily=river_discharge'
       '&forecast_days=16'
       '&past_days=14';
+
+  /// Return-period discharge thresholds for a location.
+  /// Returns river_discharge_return_period_2, _5, _20 (all in m³/s).
+  /// Call ONCE per city on first poll; cache for the session.
+  static String returnPeriods(double lat, double lon) =>
+      '$_base'
+      '?latitude=$lat&longitude=$lon'
+      '&daily=river_discharge_return_period_2,'
+      'river_discharge_return_period_5,'
+      'river_discharge_return_period_20'
+      '&forecast_days=1';
 
   /// Ensemble spread (min / mean / max) for uncertainty ribbon.
   /// Only call when user opens detailed city view — heavier payload.
@@ -140,7 +157,6 @@ class CwcProxyUrls {
   CwcProxyUrls._();
 
   /// CWC FFS station data via OpsFlood proxy.
-  /// e.g. CwcProxyUrls.station('GUW')
   static String station(String code) =>
       '${AppConfig.baseUrl}${AppConfig.epCwcFfs}/$code';
 
@@ -150,14 +166,14 @@ class CwcProxyUrls {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// F) OpsFlood ML inference endpoints (reference only — calls in MlInferenceService)
+// F) OpsFlood ML inference endpoints
 // ═════════════════════════════════════════════════════════════════════════════
 class OpsFloodUrls {
   OpsFloodUrls._();
 
-  static String get predict => '${AppConfig.baseUrl}${AppConfig.epPredict}';
-  static String get health  => '${AppConfig.baseUrl}${AppConfig.epHealth}';
-  static String get liveTelemetry => '${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}';
-  static String get liveLevels    => '${AppConfig.baseUrl}${AppConfig.epLiveLevels}';
-  static String get criticalAlerts=> '${AppConfig.baseUrl}${AppConfig.epCriticalAlerts}';
+  static String get predict        => '${AppConfig.baseUrl}${AppConfig.epPredict}';
+  static String get health         => '${AppConfig.baseUrl}${AppConfig.epHealth}';
+  static String get liveTelemetry  => '${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}';
+  static String get liveLevels     => '${AppConfig.baseUrl}${AppConfig.epLiveLevels}';
+  static String get criticalAlerts => '${AppConfig.baseUrl}${AppConfig.epCriticalAlerts}';
 }
