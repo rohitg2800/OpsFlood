@@ -16,6 +16,11 @@
 /// (/api/cwc-ffs, /api/cwc-reservoir) — the device NEVER calls
 /// ffs.india-water.gov.in or data.gov.in directly (they block CORS/mobile).
 /// The backend scrapes, normalises, and caches the feeds every 15 minutes.
+///
+/// GAUGE SANITY RULE:
+/// Indian river gauge heights are always 0.01 – 200 m (MSL or above datum).
+/// Any value outside this is a discharge (m³/s), error code, or wrong-column
+/// artifact and is zeroed out → NO_DATA fallback.
 library;
 
 import 'dart:async';
@@ -24,6 +29,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../constants.dart';
+
+// ─── Gauge sanity bounds ─────────────────────────────────────────────────────
+const double _kGaugeMin = 0.01;
+const double _kGaugeMax = 200.0;
+
+double _sanityClamp(double v) => (v < _kGaugeMin || v > _kGaugeMax) ? 0.0 : v;
 
 // ─── Data models ────────────────────────────────────────────────────────────────
 
@@ -67,7 +78,8 @@ class CwcFfsStation {
     stationName:   _s(j['station_name']  ?? j['station'] ?? j['name'] ?? ''),
     river:         _s(j['river']         ?? j['river_name']   ?? ''),
     state:         _s(j['state']         ?? ''),
-    currentLevelM: _d(j['current_level'] ?? j['level_m'] ?? j['obs_level']),
+    // Sanity-clamp the gauge reading — rejects discharge / error values.
+    currentLevelM: _sanityClamp(_d(j['current_level'] ?? j['level_m'] ?? j['obs_level'])),
     dangerLevelM:  _d(j['danger_level']  ?? j['hdl'] ?? j['danger']),
     warningLevelM: _d(j['warning_level'] ?? j['wl']  ?? j['warning']),
     alertColour:   _s(j['alert_colour']  ?? j['alert_color'] ?? j['colour'] ?? 'green'),
@@ -92,7 +104,7 @@ class CwcReservoirLevel {
   final String state;
   final String basin;
   final double fullReservoirLevelM;   // FRL in metres
-  final double currentLevelM;         // today’s level in metres
+  final double currentLevelM;         // today's level in metres
   final double liveStorageMcm;        // live storage in MCM
   final double liveStoragePct;        // % of total capacity
   final String dataDate;              // YYYY-MM-DD
@@ -118,7 +130,8 @@ class CwcReservoirLevel {
 
   factory CwcReservoirLevel.fromJson(Map<String, dynamic> j) {
     final frl  = _d(j['full_reservoir_level_m'] ?? j['frl'] ?? j['FRL']);
-    final curr = _d(j['current_level_m']  ?? j['current_level'] ?? j['wl'] ?? j['water_level']);
+    // Sanity-clamp reservoir current level — rejects MCM/discharge values.
+    final curr = _sanityClamp(_d(j['current_level_m'] ?? j['current_level'] ?? j['wl'] ?? j['water_level']));
     final cap  = _d(j['total_capacity_mcm'] ?? j['total_capacity'] ?? j['gross_capacity']);
     final live = _d(j['live_storage_mcm']   ?? j['live_storage']);
     final pct  = cap > 0 ? (live / cap * 100).clamp(0.0, 100.0) : 0.0;

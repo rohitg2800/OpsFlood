@@ -16,6 +16,11 @@
 // ║  SOURCE D — /api/cwc-reservoir     (reservoir levels via data.gov.in)  ║
 // ║                                                                          ║
 // ║  TIMEOUTS: 55 / 55 / 45 / 35 s — sized to survive Render cold-start.  ║
+// ║                                                                          ║
+// ║  GAUGE SANITY RULE:                                                      ║
+// ║  Indian river gauge heights are always 0.01 – 200 m.                   ║
+// ║  Values outside this range are discharge / error codes and are          ║
+// ║  treated as 0 (→ NO_DATA fallback).                                     ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 library;
@@ -112,19 +117,20 @@ class CwcDirectService {
 
   final _api = ApiService();
 
-  // Timeouts sized to survive Render free-tier cold-start (~50 s)
-  static const _tA = Duration(seconds: 55); // cwc-ffs/station
-  static const _tB = Duration(seconds: 55); // live-telemetry
-  static const _tC = Duration(seconds: 45); // live-levels
-  static const _tD = Duration(seconds: 35); // cwc-reservoir
+  static const _tA = Duration(seconds: 55);
+  static const _tB = Duration(seconds: 55);
+  static const _tC = Duration(seconds: 45);
+  static const _tD = Duration(seconds: 35);
+
+  // Gauge sanity bounds — Indian river stations are always 0.01–200 m.
+  static const double _gaugeMin = 0.01;
+  static const double _gaugeMax = 200.0;
 
   // 5-minute client-side cache
   final Map<String, CwcLiveReading> _cache   = {};
   final Map<String, DateTime>       _cacheTs = {};
   static const _cacheTTL = Duration(minutes: 5);
 
-  // FIX: SOURCE C bulk cache — one getLiveLevels(state) call shared across
-  // all cities in the same state, so we never fire per-city requests.
   final Map<String, List<dynamic>> _levelsStateCache   = {};
   final Map<String, DateTime>      _levelsStateCacheTs = {};
 
@@ -242,16 +248,12 @@ class CwcDirectService {
 
   // ══════════════════════════════════════════════════════════════════════════
   // SOURCE C — /api/live-levels
-  // FIX: was calling getLiveLevelsByCity(city) which no longer exists and
-  // was firing one HTTP request per city. Now calls getLiveLevels(state)
-  // once per state, caches the full list, and filters client-side by city.
   // ══════════════════════════════════════════════════════════════════════════
   Future<CwcLiveReading?> _fromLiveLevels(String city, String state,
       String river, double wl, double dl) async {
     try {
       final stKey = state.toLowerCase().replaceAll(' ', '_');
 
-      // Warm the per-state levels cache (one HTTP call per state, shared).
       if (!_isLevelsCacheValid(stKey)) {
         final res = await _api.getLiveLevels(state: state).timeout(_tC);
         if (res['status'] != 'error') {
@@ -266,7 +268,6 @@ class CwcDirectService {
       final items = _levelsStateCache[stKey] ?? [];
       if (items.isEmpty) return null;
 
-      // Filter client-side by city name.
       final m = _best(items, city, state, river);
       if (m == null || m.conf < 0.5) return null;
       final lv = _level(m.r);
@@ -288,7 +289,8 @@ class CwcDirectService {
       if (items.isEmpty) return null;
       final m = _best(items, city, state, river);
       if (m == null || m.conf < 0.5) return null;
-      final lv = _fp(m.r['current_level_m'] ?? m.r['current_level'] ?? m.r['wl']);
+      final rawLv = _fp(m.r['current_level_m'] ?? m.r['current_level'] ?? m.r['wl']);
+      final lv = _sanityClamp(rawLv);
       if (lv <= 0) return null;
       final frl = _fp(m.r['full_reservoir_level_m'] ?? m.r['frl'] ?? m.r['FRL']);
       final eDl = frl > 0 ? frl : dl;
@@ -378,6 +380,14 @@ class CwcDirectService {
   // ══════════════════════════════════════════════════════════════════════════
   // HELPERS
   // ══════════════════════════════════════════════════════════════════════════
+
+  /// Rejects values outside [0.01, 200] m — anything else is a discharge
+  /// figure, error code, or wrong-column parse artifact.
+  double _sanityClamp(double v) {
+    if (v < _gaugeMin || v > _gaugeMax) return 0.0;
+    return v;
+  }
+
   List<dynamic> _list(dynamic p, {int d = 0}) {
     if (d > 5) return [];
     if (p is List) return p.where((e) => e != null).toList();
@@ -397,14 +407,15 @@ class CwcDirectService {
     return [];
   }
 
-  double _level(Map<String, dynamic> d) => _fp(
+  /// Extract gauge height from a record and apply sanity clamp.
+  double _level(Map<String, dynamic> d) => _sanityClamp(_fp(
     d['river_level']     ?? d['riverLevel']      ?? d['current_level']  ??
     d['water_level']     ?? d['gauge_reading']   ?? d['currentLevel']   ??
     d['level']           ?? d['gauge_level']     ?? d['obs_level']      ??
     d['stage']           ?? d['rl']              ?? d['wl']             ??
     d['live_level']      ?? d['liveLevel']        ?? d['gauge_value']   ??
     d['obsLevel']        ?? d['observedLevel']   ?? d['water_elevation'],
-  );
+  ));
 
   String _colour(double lv, double wl, double dl) {
     if (dl > 0 && lv >= dl)        return 'RED';
