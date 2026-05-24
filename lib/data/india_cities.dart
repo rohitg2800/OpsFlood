@@ -1,6 +1,6 @@
 // lib/data/india_cities.dart
 //
-// OpsFlood — Indian Flood-Prone Cities Registry (v3)
+// OpsFlood — Indian Flood-Prone Cities Registry (v4)
 // 93 cities across all major flood-prone states.
 //
 // Fields:
@@ -8,24 +8,26 @@
 //   river            — primary flood river (corrected to CWC-published names)
 //   state            — for CWC FFS proxy & IMD RSS filtering
 //   cwcStation       — CWC FFS station code (null if not monitored)
-//   warningLevel     — CWC published warning gauge level (m)
-//   dangerLevel      — CWC published danger gauge level (m)
-//   hfl              — Highest Flood Level on record (m); 0.0 = unknown
+//   warningLevel     — CWC/WRD published warning gauge (m MSL)
+//   dangerLevel      — CWC/WRD published danger gauge (m MSL)
+//   hfl              — Highest Flood Level on record (m MSL); 0.0 = unknown
 //
-// Sources: CWC FFS Bulletin 2024-25, CWPRS gauge tables, state WRDs.
+// Bihar sources: WRD Bihar Central Flood Control Cell + CWC FFS 2024-25.
+//   Board: https://irrigation.befiqr.in/state/table/rivers
+//   CWC:   https://beams.fmiscwrdbihar.gov.in
 library;
 
 class IndiaCity {
-  final String  id;           // snake_case, used as map key
-  final String  name;         // display name
+  final String  id;
+  final String  name;
   final String  state;
-  final String  river;        // primary flood river
+  final String  river;
   final double  lat;
   final double  lon;
-  final String? cwcStation;   // CWC FFS station code
-  final double  warningLevel; // CWC warning gauge (m); 0.0 = not set
-  final double  dangerLevel;  // CWC danger  gauge (m); 0.0 = not set
-  final double  hfl;          // highest flood level (m); 0.0 = unknown
+  final String? cwcStation;
+  final double  warningLevel;
+  final double  dangerLevel;
+  final double  hfl;
 
   const IndiaCity({
     required this.id,
@@ -43,7 +45,7 @@ class IndiaCity {
 
 const List<IndiaCity> kIndiaCities = [
 
-  // ── ASSAM ───────────────────────────────────────────────────────────
+  // ── ASSAM ──────────────────────────────────────────────────────────
   IndiaCity(id:'guwahati',   name:'Guwahati',   state:'Assam', river:'Brahmaputra',
       lat:26.1445, lon:91.7362, cwcStation:'GUW',
       warningLevel:49.68,  dangerLevel:51.68,  hfl:53.92),
@@ -101,28 +103,59 @@ const List<IndiaCity> kIndiaCities = [
       lat:23.8315, lon:91.2868,
       warningLevel:6.10, dangerLevel:7.60, hfl:8.50),
 
-  // ── BIHAR ────────────────────────────────────────────────────────────
+  // ── BIHAR — updated from WRD Bihar Central Flood Control Cell (2024-25) ────────
+  // Patna — Gandhighat gauge; WL 47.50, DL 48.60, HFL 50.52 (1994)
   IndiaCity(id:'patna',      name:'Patna',      state:'Bihar', river:'Ganga',
       lat:25.5941, lon:85.1376, cwcStation:'PAT',
-      warningLevel:48.50, dangerLevel:50.27, hfl:52.50),
+      warningLevel:47.50, dangerLevel:48.60, hfl:50.52),
+  // Bhagalpur — CWC gauge; WL 32.50, DL 33.68, HFL 34.86 (1987)
   IndiaCity(id:'bhagalpur',  name:'Bhagalpur',  state:'Bihar', river:'Ganga',
       lat:25.2425, lon:86.9842, cwcStation:'BHP',
-      warningLevel:34.00, dangerLevel:35.50, hfl:37.20),
+      warningLevel:32.50, dangerLevel:33.68, hfl:34.86),
+  // Darbhanga — Bagmati at Hayaghat; WL 44.50, DL 45.72, HFL 48.96 (2007)
   IndiaCity(id:'darbhanga',  name:'Darbhanga',  state:'Bihar', river:'Bagmati',
       lat:26.1542, lon:85.8918,
-      warningLevel:51.40, dangerLevel:53.40, hfl:55.20),
-  IndiaCity(id:'muzaffarpur',name:'Muzaffarpur',state:'Bihar', river:'Gandak',
+      warningLevel:44.50, dangerLevel:45.72, hfl:48.96),
+  // Muzaffarpur — Burhi Gandak at Sikandarpur; WL 51.40, DL 52.53, HFL 54.29 (1987)
+  IndiaCity(id:'muzaffarpur',name:'Muzaffarpur',state:'Bihar', river:'Burhi Gandak',
       lat:26.1209, lon:85.3647,
-      warningLevel:50.70, dangerLevel:52.40, hfl:54.00),
-  IndiaCity(id:'samastipur', name:'Samastipur', state:'Bihar', river:'Ganga',
+      warningLevel:51.40, dangerLevel:52.53, hfl:54.29),
+  // Samastipur — Burhi Gandak; WL 44.80, DL 46.00, HFL 49.40 (1987)
+  IndiaCity(id:'samastipur', name:'Samastipur', state:'Bihar', river:'Burhi Gandak',
       lat:25.8620, lon:85.7812,
-      warningLevel:43.00, dangerLevel:44.50, hfl:46.00),
-  IndiaCity(id:'katihar',    name:'Katihar',    state:'Bihar', river:'Ganga',
+      warningLevel:44.80, dangerLevel:46.00, hfl:49.40),
+  // Katihar — Kosi at Kursela; WL 28.80, DL 30.00, HFL 32.10 (2008)
+  IndiaCity(id:'katihar',    name:'Katihar',    state:'Bihar', river:'Kosi',
       lat:25.5391, lon:87.5717, cwcStation:'KAT',
-      warningLevel:28.00, dangerLevel:29.50, hfl:31.00),
+      warningLevel:28.80, dangerLevel:30.00, hfl:32.10),
+  // Supaul — Kosi at Basua; WL 46.50, DL 47.75, HFL 49.24 (2008)
   IndiaCity(id:'supaul',     name:'Supaul',     state:'Bihar', river:'Kosi',
       lat:26.1234, lon:86.6020, cwcStation:'SUP',
-      warningLevel:59.82, dangerLevel:60.82, hfl:62.00),
+      warningLevel:46.50, dangerLevel:47.75, hfl:49.24),
+  // Sitamarhi — Bagmati at Dheng Bridge; WL 70.00, DL 71.00, HFL 73.47 (2024)
+  IndiaCity(id:'sitamarhi',  name:'Sitamarhi',  state:'Bihar', river:'Bagmati',
+      lat:26.5800, lon:85.4900,
+      warningLevel:70.00, dangerLevel:71.00, hfl:73.47),
+  // Gopalganj — Gandak at Dumariaghat; WL 61.10, DL 62.22, HFL 63.70 (1971)
+  IndiaCity(id:'gopalganj',  name:'Gopalganj',  state:'Bihar', river:'Gandak',
+      lat:26.4833, lon:84.4667,
+      warningLevel:61.10, dangerLevel:62.22, hfl:63.70),
+  // Purnia — Mahananda at Dhengraghat; WL 34.65, DL 35.65, HFL 38.20 (1987)
+  IndiaCity(id:'purnia',     name:'Purnia',     state:'Bihar', river:'Mahananda',
+      lat:25.7800, lon:87.4800,
+      warningLevel:34.65, dangerLevel:35.65, hfl:38.20),
+  // Siwan — Ghaghra at Darauli; WL 59.80, DL 60.82, HFL 61.82 (1998)
+  IndiaCity(id:'siwan',      name:'Siwan',      state:'Bihar', river:'Ghaghra',
+      lat:26.2200, lon:84.3600,
+      warningLevel:59.80, dangerLevel:60.82, hfl:61.82),
+  // Madhubani — Kamla at Jainagar; WL 66.00, DL 67.75, HFL 71.35 (2007)
+  IndiaCity(id:'madhubani',  name:'Madhubani',  state:'Bihar', river:'Kamla',
+      lat:26.3500, lon:86.0700,
+      warningLevel:66.00, dangerLevel:67.75, hfl:71.35),
+  // Khagaria — Burhi Gandak; WL 35.40, DL 36.58, HFL 39.22 (1987)
+  IndiaCity(id:'khagaria',   name:'Khagaria',   state:'Bihar', river:'Burhi Gandak',
+      lat:25.5000, lon:86.4700,
+      warningLevel:35.40, dangerLevel:36.58, hfl:39.22),
 
   // ── WEST BENGAL ─────────────────────────────────────────────────────
   IndiaCity(id:'kolkata',    name:'Kolkata',    state:'West Bengal', river:'Hooghly',
@@ -408,14 +441,11 @@ const List<IndiaCity> kIndiaCities = [
       warningLevel:1.80, dangerLevel:2.50, hfl:3.20),
 ];
 
-/// Look up a city by its snake_case id.
 IndiaCity? cityById(String id) =>
     kIndiaCities.where((c) => c.id == id).firstOrNull;
 
-/// All cities for a given state.
 List<IndiaCity> citiesByState(String state) =>
     kIndiaCities.where((c) => c.state == state).toList();
 
-/// Cities that have a valid danger level set.
 List<IndiaCity> get monitoredCities =>
     kIndiaCities.where((c) => c.dangerLevel > 0).toList();
