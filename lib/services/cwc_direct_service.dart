@@ -123,8 +123,18 @@ class CwcDirectService {
   final Map<String, DateTime>       _cacheTs = {};
   static const _cacheTTL = Duration(minutes: 5);
 
+  // FIX: SOURCE C bulk cache — one getLiveLevels(state) call shared across
+  // all cities in the same state, so we never fire per-city requests.
+  final Map<String, List<dynamic>> _levelsStateCache   = {};
+  final Map<String, DateTime>      _levelsStateCacheTs = {};
+
   bool _isCacheValid(String key) {
     final ts = _cacheTs[key];
+    return ts != null && DateTime.now().difference(ts) < _cacheTTL;
+  }
+
+  bool _isLevelsCacheValid(String stateKey) {
+    final ts = _levelsStateCacheTs[stateKey];
     return ts != null && DateTime.now().difference(ts) < _cacheTTL;
   }
 
@@ -185,6 +195,8 @@ class CwcDirectService {
   Future<List<CwcLiveReading>> forceRefresh() {
     _cache.clear();
     _cacheTs.clear();
+    _levelsStateCache.clear();
+    _levelsStateCacheTs.clear();
     return getAllLiveReadings();
   }
 
@@ -230,14 +242,31 @@ class CwcDirectService {
 
   // ══════════════════════════════════════════════════════════════════════════
   // SOURCE C — /api/live-levels
+  // FIX: was calling getLiveLevelsByCity(city) which no longer exists and
+  // was firing one HTTP request per city. Now calls getLiveLevels(state)
+  // once per state, caches the full list, and filters client-side by city.
   // ══════════════════════════════════════════════════════════════════════════
   Future<CwcLiveReading?> _fromLiveLevels(String city, String state,
       String river, double wl, double dl) async {
     try {
-      final res = await _api.getLiveLevelsByCity(city).timeout(_tC);
-      if (res['status'] == 'error') return null;
-      final items = _list(res);
+      final stKey = state.toLowerCase().replaceAll(' ', '_');
+
+      // Warm the per-state levels cache (one HTTP call per state, shared).
+      if (!_isLevelsCacheValid(stKey)) {
+        final res = await _api.getLiveLevels(state: state).timeout(_tC);
+        if (res['status'] != 'error') {
+          _levelsStateCache[stKey]   = _list(res);
+          _levelsStateCacheTs[stKey] = DateTime.now();
+        } else {
+          _levelsStateCache[stKey]   = [];
+          _levelsStateCacheTs[stKey] = DateTime.now();
+        }
+      }
+
+      final items = _levelsStateCache[stKey] ?? [];
       if (items.isEmpty) return null;
+
+      // Filter client-side by city name.
       final m = _best(items, city, state, river);
       if (m == null || m.conf < 0.5) return null;
       final lv = _level(m.r);
