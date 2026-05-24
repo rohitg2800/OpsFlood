@@ -110,7 +110,8 @@ class RiverLevelVisualizer extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Row 1: city name + arc percentage
+
+                  // Row 1: city name + arc percentage badge
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -118,54 +119,85 @@ class RiverLevelVisualizer extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(city,
-                                style: TextStyle(
-                                  color: rc.textPrimary, fontWeight: FontWeight.w800,
-                                  fontSize: 16, letterSpacing: -0.3,
-                                )),
+                            Text(
+                              city,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: rc.textPrimary, fontWeight: FontWeight.w800,
+                                fontSize: 16, letterSpacing: -0.3,
+                              ),
+                            ),
                             const SizedBox(height: 2),
-                            Text(river,
-                                style: TextStyle(color: rc.textSecondary, fontSize: 12)),
+                            Text(
+                              river,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: rc.textSecondary, fontSize: 12),
+                            ),
                           ],
                         ),
                       ),
-                      // Arc % badge
+                      const SizedBox(width: 8),
+                      // Arc % badge — fixed 68×68, never expands
                       _ArcBadge(pct: pct, color: color, riskLabel: _riskLabel),
                     ],
                   ),
 
                   const SizedBox(height: 14),
 
-                  // Row 2: level value + live chip + source
+                  // Row 2: level value + live chip
+                  // FIX: wrap children in Flexible so the Row never overflows
+                  // on narrow cards (~217px in a 2-column grid).
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       if (_hasRealLevel) ...[
-                        Text(
-                          '${currentLevel.toStringAsFixed(2)} m',
-                          style: TextStyle(
-                            color: color, fontWeight: FontWeight.w900,
-                            fontSize: 26, letterSpacing: -1,
+                        // The big level number can shrink/ellipsis if needed
+                        Flexible(
+                          child: Text(
+                            '${currentLevel.toStringAsFixed(2)} m',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: color, fontWeight: FontWeight.w900,
+                              fontSize: 26, letterSpacing: -1,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        _LiveChip(source: cwcSource ?? trend),
+                        // Chip is intrinsic-width but won't push beyond remaining space
+                        Flexible(
+                          flex: 0,
+                          child: _LiveChip(source: cwcSource ?? trend),
+                        ),
                       ] else if (flowRateM3s != null && flowRateM3s! > 0) ...[
-                        Text(
-                          '${flowRateM3s!.toStringAsFixed(0)} m³/s',
-                          style: TextStyle(
-                            color: color.withValues(alpha: 0.85),
-                            fontWeight: FontWeight.w800, fontSize: 22,
+                        Flexible(
+                          child: Text(
+                            '${flowRateM3s!.toStringAsFixed(0)} m³/s',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: color.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w800, fontSize: 22,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        _Chip(label: 'Discharge', color: Colors.blueAccent),
+                        const Flexible(
+                          flex: 0,
+                          child: _Chip(label: 'Discharge', color: Colors.blueAccent),
+                        ),
                       ] else ...[
-                        Text(
-                          'No Gauge Data',
-                          style: TextStyle(
-                            color: rc.textSecondary, fontWeight: FontWeight.w600,
-                            fontSize: 16,
+                        Flexible(
+                          child: Text(
+                            'No Gauge Data',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: rc.textSecondary, fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
                           ),
                         ),
                       ],
@@ -181,25 +213,30 @@ class RiverLevelVisualizer extends StatelessWidget {
 
                   const SizedBox(height: 8),
 
-                  // Row 3: DL + WL labels
+                  // Row 3: DL + WL threshold chips
+                  // Use Expanded so each chip shares space equally and never overflows
                   Row(
                     children: [
-                      _ThresholdChip(
-                        icon: Icons.warning_amber_rounded,
-                        label: 'Danger',
-                        value: dangerLevel > 0
-                            ? '${dangerLevel.toStringAsFixed(1)} m'
-                            : '—',
-                        color: const Color(0xFFEF4444),
+                      Expanded(
+                        child: _ThresholdChip(
+                          icon: Icons.warning_amber_rounded,
+                          label: 'DL',
+                          value: dangerLevel > 0
+                              ? '${dangerLevel.toStringAsFixed(1)} m'
+                              : '—',
+                          color: const Color(0xFFEF4444),
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      _ThresholdChip(
-                        icon: Icons.show_chart_rounded,
-                        label: 'Warning',
-                        value: warningLevel > 0
-                            ? '${warningLevel.toStringAsFixed(1)} m'
-                            : '—',
-                        color: const Color(0xFFF59E0B),
+                      Expanded(
+                        child: _ThresholdChip(
+                          icon: Icons.show_chart_rounded,
+                          label: 'WL',
+                          value: warningLevel > 0
+                              ? '${warningLevel.toStringAsFixed(1)} m'
+                              : '—',
+                          color: const Color(0xFFF59E0B),
+                        ),
                       ),
                     ],
                   ),
@@ -213,7 +250,7 @@ class RiverLevelVisualizer extends StatelessWidget {
   }
 }
 
-// ── Gauge bar ─────────────────────────────────────────────────────────────────
+// ── Gauge bar ────────────────────────────────────────────────────────────────────────────────
 class _GaugeBar extends StatelessWidget {
   final double pct;
   final double warnFrac;
@@ -243,13 +280,13 @@ class _GaugeBar extends StatelessWidget {
               width: w * pct,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                gradient: LinearGradient(
+                gradient: const LinearGradient(
                   colors: [
-                    const Color(0xFF34C759),
-                    const Color(0xFFF59E0B),
-                    color,
+                    Color(0xFF34C759),
+                    Color(0xFFF59E0B),
+                    Color(0xFFEF4444),
                   ],
-                  stops: const [0.0, 0.6, 1.0],
+                  stops: [0.0, 0.6, 1.0],
                 ),
               ),
             ),
@@ -283,7 +320,7 @@ class _GaugeBar extends StatelessWidget {
   }
 }
 
-// ── Arc percentage badge ──────────────────────────────────────────────────────
+// ── Arc percentage badge ─────────────────────────────────────────────────────────────────
 class _ArcBadge extends StatelessWidget {
   final double pct;
   final Color  color;
@@ -355,15 +392,15 @@ class _ArcPainter extends CustomPainter {
   bool shouldRepaint(_ArcPainter old) => old.pct != pct || old.color != color;
 }
 
-// ── Live chip ─────────────────────────────────────────────────────────────────
+// ── Live chip ─────────────────────────────────────────────────────────────────────────────
 class _LiveChip extends StatelessWidget {
   final String source;
   const _LiveChip({required this.source});
 
   String get _label {
-    if (source.contains('FFEM'))  return 'CWC FFEM';
-    if (source.contains('BEAMS')) return 'CWC BEAMS';
-    if (source.contains('WRD'))   return 'WRD';
+    if (source.contains('FFEM'))    return 'CWC';
+    if (source.contains('BEAMS'))   return 'CWC';
+    if (source.contains('WRD'))     return 'WRD';
     if (source.contains('BACKEND')) return 'LIVE';
     return 'LIVE';
   }
@@ -385,7 +422,7 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
@@ -396,23 +433,25 @@ class _Chip extends StatelessWidget {
         children: [
           if (dot) ...[
             Container(
-              width: 6, height: 6,
+              width: 5, height: 5,
               decoration: BoxDecoration(
                 color: color, shape: BoxShape.circle,
                 boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 4)],
               ),
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: 4),
           ],
-          Text(label,
-              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+          Text(
+            label,
+            style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );
   }
 }
 
-// ── Threshold chip ────────────────────────────────────────────────────────────
+// ── Threshold chip ────────────────────────────────────────────────────────────────────────────
 class _ThresholdChip extends StatelessWidget {
   final IconData icon;
   final String   label;
@@ -426,7 +465,7 @@ class _ThresholdChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
@@ -435,13 +474,19 @@ class _ThresholdChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 13),
-          const SizedBox(width: 5),
-          Text('$label: $value',
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              '$label: $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color.withValues(alpha: 0.85),
-                fontSize: 11, fontWeight: FontWeight.w600,
-              )),
+                fontSize: 10, fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
