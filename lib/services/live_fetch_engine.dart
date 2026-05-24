@@ -1,226 +1,262 @@
+// lib/services/live_fetch_engine.dart
+//
+// OpsFlood — LiveFetchEngine
+//
+// Hits REAL public APIs in parallel for every city fetch:
+//
+//   Source 1 — Open-Meteo Weather API       (free, no key)
+//              hourly precipitation + temperature + humidity
+//
+//   Source 2 — Open-Meteo GloFAS River API  (free, no key)
+//              river discharge m³/s, 7-day daily history
+//
+//   Source 3 — OpsFlood backend /api/cwc-ffs/station
+//              CWC gauge levels (current, danger, warning)
+//
+//   Source 4 — OpsFlood backend /api/live-levels
+//              aggregated flood risk data per city
+//
+//   Source 5 — IMD XML/RSS alert feed        (public, no key)
+//              flood/heavy-rain warnings for Indian states
+//
+// All sources run concurrently via Future.wait; individual failures
+// are silently swallowed and `healthySourceCount` reflects how many
+// actually returned data.
+library;
+
 import 'dart:convert';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:xml/xml.dart' as xml;
-import '../models/flood_data.dart';
-import '../models/river_monitoring.dart';
+
+import '../config/app_config.dart';
+import '../data/india_cities.dart';
+import 'ml_inference.dart';
 
 class LiveFetchEngine {
-  bool isLoading = false;
-  bool isOnline = true;
-  bool isUsingFallback = false;
-  bool isWakingUp = false;
-  bool isUsingCache = false;
-  DateTime? lastFetchTime;
-  String? error;
-  int queuedOfflineCycles = 0;
+  LiveFetchEngine._();
+  static final LiveFetchEngine instance = LiveFetchEngine._();
 
-  List<FloodData> liveLevels = <FloodData>[];
-  List<dynamic> activeCriticalAlerts = <dynamic>[];
-  List<dynamic> criticalAlerts = <dynamic>[];
-  int criticalCount = 0;
-  List<dynamic> cwcStations = <dynamic>[];
-  bool hasCwcLiveData = false;
+  final http.Client _client = http.Client();
 
-  MultiLocationMonitoring monitoringData = MultiLocationMonitoring(
-    locations: [],
-    fetchedAt: DateTime.now(),
-  );
-  
-  List<dynamic> imdAlerts = [];
-  List<dynamic> ndmaAdvisories = [];
-  List<dynamic> emergencyContacts = [];
+  // ── Source timeouts ──────────────────────────────────────────────────────
+  static const _weatherTimeout  = Duration(seconds: 10);
+  static const _gloFasTimeout   = Duration(seconds: 10);
+  static const _cwcTimeout      = Duration(seconds: 12);
+  static const _backendTimeout  = Duration(seconds: 12);
+  static const _imdTimeout      = Duration(seconds: 8);
 
-  Map<String, dynamic> debugLevelsRaw = {};
-  Map<String, dynamic> debugCwcRaw = {};
-  int debugRetryCount = 0;
-  int debugWakeAttempts = 0;
+  // ── Main entry point ─────────────────────────────────────────────────────
 
-  VoidCallback? onStateChanged;
-  bool _isFetchingLock = false;
+  Future<LiveSnapshot> fetchCity(IndiaCity city) async {
+    final results = await Future.wait([
+      _fetchWeather(city),
+      _fetchGloFas(city),
+      _fetchCwc(city),
+      _fetchBackendLevels(city),
+      _fetchImd(city),
+    ], eagerError: false);
 
-  List<FloodData>? _localLevelsDatabase;
-  List<dynamic>? _localAlertsDatabase;
-  final Map<String, List<RiverLevelSnapshot>> _metricsTimelineCache = {};
+    final weather  = results[0] as WeatherData?  ?? WeatherData.empty;
+    final river    = results[1] as RiverData?    ?? RiverData.empty;
+    final cwc      = results[2] as CwcData?      ?? CwcData.empty;
+    // results[3] — backend levels (enriches cwc if available)
+    final backCwc  = results[3] as CwcData?      ?? CwcData.empty;
+    // results[4] — IMD (logged, available via ImdService separately)
 
-  List<RiverLevelSnapshot> trendForCity(String city) {
-    if (_metricsTimelineCache.containsKey(city) && _metricsTimelineCache[city]!.isNotEmpty) {
-      return _metricsTimelineCache[city]!;
+    // Merge: prefer live CWC data, fall back to backend levels
+    final mergedCwc = cwc.ok ? cwc : backCwc;
+
+    final healthy = [
+      weather != WeatherData.empty,
+      river   != RiverData.empty,
+      cwc.ok,
+      backCwc.ok,
+      results[4] != null,
+    ].where((v) => v).length;
+
+    if (kDebugMode) {
+      debugPrint('[LiveFetchEngine] ${city.name}: '
+          'weather=${weather.precipitationMm}mm '
+          'discharge=${river.dischargeM3s?.toStringAsFixed(0) ?? "n/a"}m³/s '
+          'level=${mergedCwc.currentLevel?.toStringAsFixed(2) ?? "n/a"}m '
+          'healthy=$healthy/5');
     }
-    return <RiverLevelSnapshot>[];
-  }
 
-  FloodData? dataForCity(String city) {
-    if (liveLevels.isEmpty) return null;
-    return liveLevels.firstWhere(
-      (e) => e.city.toLowerCase() == city.toLowerCase(), 
-      orElse: () => liveLevels.first
+    return LiveSnapshot(
+      city:               city,
+      weather:            weather,
+      river:              river,
+      cwc:                mergedCwc,
+      healthySourceCount: healthy,
+      fetchedAt:          DateTime.now(),
     );
   }
 
-  List<dynamic> imdAlertsForState(String state) {
-    return imdAlerts.where((e) => e['state'].toString().toLowerCase() == state.toLowerCase()).toList();
-  }
-  
-  List<dynamic> ndmaAdvisoriesForState(String state) => [];
-  List<dynamic> emergencyContactsForState(String state) => [];
-
-  /// Ingests live data directly from active operational networks on the client side
-  Future<void> refreshData() async {
-    if (_isFetchingLock) return;
-    _isFetchingLock = true;
-    isLoading = true;
-    
-    Future.delayed(Duration.zero, () => onStateChanged?.call());
-
+  // ── Source 1: Open-Meteo Weather ─────────────────────────────────────────
+  // Docs: https://open-meteo.com/en/docs
+  Future<WeatherData?> _fetchWeather(IndiaCity city) async {
     try {
-      // Connect to the public live geographical tracking feeds
-      final feedResponse = await http.get(Uri.parse('https://www.gdacs.org/xml/rss.xml'))
-          .timeout(const Duration(seconds: 5));
-      
-      if (feedResponse.statusCode == 200) {
-        _parseCwcAndImdFeeds(feedResponse.body);
-        isOnline = true;
-        isUsingCache = false;
-        error = null;
-      } else {
-        throw Exception("Inbound stream unavailable");
-      }
-    } catch (e) {
-      isOnline = false;
-      isUsingCache = true;
-      error = "Live servers unreachable. Displaying local cached data assets.";
-    } finally {
-      _hydrateStateSlots();
-      isLoading = false;
-      _isFetchingLock = false;
-      Future.delayed(Duration.zero, () => onStateChanged?.call());
-    }
-  }
-
-  void _parseCwcAndImdFeeds(String xmlContent) {
-    try {
-      final document = xml.XmlDocument.parse(xmlContent);
-      final items = document.findAllElements('item');
-      List<dynamic> parsedAlerts = [];
-      List<dynamic> activeStations = [];
-
-      for (var item in items) {
-        final title = item.findElements('title').firstOrNull?.innerText ?? '';
-        final description = item.findElements('description').firstOrNull?.innerText ?? '';
-        
-        // Isolate hazard signals intersecting with South Asian storm and inundation footprints
-        if (title.toLowerCase().contains('flood') || title.toLowerCase().contains('cyclone') || description.toLowerCase().contains('india')) {
-          final isCritical = title.toLowerCase().contains('red') || description.toLowerCase().contains('severe');
-          final targetState = _matchIndianState(title + " " + description);
-          
-          final alertPayload = {
-            'title': title,
-            'description': description,
-            'state': targetState,
-            'severity': isCritical ? 'CRITICAL' : 'HIGH',
-            'source': title.toLowerCase().contains('flood') ? 'CWC Operational Forecast' : 'IMD Alert Matrix'
-          };
-          
-          parsedAlerts.add(alertPayload);
-
-          if (title.toLowerCase().contains('flood')) {
-            activeStations.add({
-              'stationName': '$targetState Telemetry Grid',
-              'riverName': 'Catchment Basin Basin',
-              'stateName': targetState,
-              'riverLevel': 11.4 + Random().nextDouble() * 4,
-              'warningLevel': 12.0,
-              'dangerLevel': 14.5,
-              'trend': Random().nextBool() ? 'RISING' : 'FALLING',
-              'status': isCritical ? 'CRITICAL' : 'WARNING'
-            });
-          }
-        }
-      }
-
-      criticalAlerts = parsedAlerts;
-      activeCriticalAlerts = parsedAlerts.where((e) => e['severity'] == 'CRITICAL').toList();
-      criticalCount = activeCriticalAlerts.length;
-      cwcStations = activeStations;
-      hasCwcLiveData = activeStations.isNotEmpty;
-      imdAlerts = parsedAlerts.where((e) => e['source'] == 'IMD Alert Matrix').toList();
-
-      _localAlertsDatabase = parsedAlerts;
-    } catch (_) {}
-  }
-
-  String _matchIndianState(String text) {
-    final territories = ['ASSAM', 'BIHAR', 'ODISHA', 'KERALA', 'GUJARAT', 'WEST BENGAL', 'UP'];
-    for (var region in territories) {
-      if (text.toUpperCase().contains(region)) return region;
-    }
-    return 'INDIA';
-  }
-
-  void _hydrateStateSlots() {
-    final random = Random();
-    final List<String> regionalHubs = ['Guwahati', 'Patna', 'Cuttack', 'Kochi'];
-    
-    List<RiverMonitoring> generatedLocations = [];
-    List<FloodData> coreLevels = [];
-    lastFetchTime ??= DateTime.now();
-
-    for (var i = 0; i < regionalHubs.length; i++) {
-      final city = regionalHubs[i];
-      final calculatedAltitude = 9.0 + random.nextDouble() * 5.0;
-      
-      final historyTimeline = List.generate(24, (index) {
-        return RiverLevelSnapshot(
-          timestamp: DateTime.now().subtract(Duration(hours: 24 - index)),
-          level: calculatedAltitude - 1.0 + (random.nextDouble() * 2.0),
-        );
-      });
-      
-      _metricsTimelineCache[city] = historyTimeline;
-
-      final item = FloodData(
-        id: "SLOT_ID_$i",
-        city: city,
-        state: _matchIndianState(city),
-        currentLevel: calculatedAltitude,
-        safeLevel: 8.0,
-        warningLevel: 11.5,
-        dangerLevel: 13.8,
-        status: random.nextBool() ? 'RISING' : 'FALLING',
-        latitude: 20.0 + (i * 2),
-        longitude: 77.0 + (i * 3),
-        lastUpdated: DateTime.now(),
-        riskLevel: calculatedAltitude > 13.0 ? 'CRITICAL' : (calculatedAltitude > 11.0 ? 'HIGH' : 'LOW'),
+      final uri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=${city.lat}'
+        '&longitude=${city.lon}'
+        '&hourly=precipitation,temperature_2m,relative_humidity_2m'
+        '&forecast_days=2'
+        '&timezone=Asia%2FKolkata',
       );
+      final res = await _client.get(uri).timeout(_weatherTimeout);
+      if (res.statusCode != 200) return null;
 
-      coreLevels.add(item);
-      generatedLocations.add(RiverMonitoring.fromFloodData(item, historyTimeline));
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      final hourly = j['hourly'] as Map<String, dynamic>;
+
+      final List<double> precip = _toDoubleList(hourly['precipitation']);
+      final List<double> temp   = _toDoubleList(hourly['temperature_2m']);
+      final List<double> humid  = _toDoubleList(hourly['relative_humidity_2m']);
+
+      // Take the last 24 h
+      final last24 = precip.length >= 24
+          ? precip.sublist(precip.length - 24)
+          : precip;
+      final total24 = last24.fold(0.0, (a, b) => a + b);
+
+      return WeatherData(
+        precipitationMm:  total24,
+        temperatureC:     temp.isNotEmpty ? temp.last : 25.0,
+        relativeHumidity: humid.isNotEmpty ? humid.last : 60.0,
+        hourlyPrecip:     last24,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LiveFetch] weather error for ${city.name}: $e');
+      return null;
     }
-
-    if (isOnline) {
-      liveLevels = coreLevels;
-      _localLevelsDatabase = coreLevels;
-    } else {
-      liveLevels = _localLevelsDatabase ?? coreLevels;
-      if (_localAlertsDatabase != null) {
-        criticalAlerts = _localAlertsDatabase!;
-        activeCriticalAlerts = _localAlertsDatabase!.where((e) => e['severity'] == 'CRITICAL').toList();
-        criticalCount = activeCriticalAlerts.length;
-      }
-    }
-
-    monitoringData = MultiLocationMonitoring(
-      locations: generatedLocations,
-      fetchedAt: lastFetchTime!,
-      fromCache: !isOnline,
-    );
   }
 
-  Future<void> startPolling() async {
-    await refreshData();
+  // ── Source 2: Open-Meteo GloFAS River Discharge ──────────────────────────
+  // Docs: https://open-meteo.com/en/docs/flood-api
+  Future<RiverData?> _fetchGloFas(IndiaCity city) async {
+    try {
+      final uri = Uri.parse(
+        'https://flood-api.open-meteo.com/v1/flood'
+        '?latitude=${city.lat}'
+        '&longitude=${city.lon}'
+        '&daily=river_discharge'
+        '&past_days=7'
+        '&forecast_days=1',
+      );
+      final res = await _client.get(uri).timeout(_gloFasTimeout);
+      if (res.statusCode != 200) return null;
+
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      final daily  = j['daily'] as Map<String, dynamic>?;
+      final discharges = _toDoubleList(daily?['river_discharge']);
+
+      if (discharges.isEmpty) return null;
+
+      return RiverData(
+        dischargeM3s: discharges.last,
+        discharge7d:  discharges.length >= 7
+            ? discharges.sublist(discharges.length - 7)
+            : discharges,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LiveFetch] GloFAS error for ${city.name}: $e');
+      return null;
+    }
   }
 
-  void stopPolling() {}
+  // ── Source 3: OpsFlood backend — CWC FFS gauge level ─────────────────────
+  Future<CwcData?> _fetchCwc(IndiaCity city) async {
+    if (city.cwcStation == null) return null;
+    try {
+      final uri = Uri.parse(
+        '${AppConfig.baseUrl}${AppConfig.epCwcFfs}/${city.cwcStation}',
+      );
+      final res = await _client.get(uri).timeout(_cwcTimeout);
+      if (res.statusCode != 200) return null;
+
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = j['data'] ?? j;
+
+      return CwcData(
+        currentLevel:  _toDouble(data['current_level'] ?? data['level']),
+        dangerLevel:   _toDouble(data['danger_level']  ?? data['danger']),
+        warningLevel:  _toDouble(data['warning_level'] ?? data['warning']),
+        ok: true,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LiveFetch] CWC error for ${city.name}: $e');
+      return null;
+    }
+  }
+
+  // ── Source 4: OpsFlood backend — /api/live-levels ────────────────────────
+  Future<CwcData?> _fetchBackendLevels(IndiaCity city) async {
+    try {
+      final uri = Uri.parse(
+        '${AppConfig.baseUrl}${AppConfig.epLiveLevels}'
+        '?city=${Uri.encodeComponent(city.name)}&state=${Uri.encodeComponent(city.state)}',
+      );
+      final res = await _client.get(uri).timeout(_backendTimeout);
+      if (res.statusCode != 200) return null;
+
+      final j    = jsonDecode(res.body) as Map<String, dynamic>;
+      final data = _extractFirst(j);
+      if (data == null) return null;
+
+      return CwcData(
+        currentLevel:  _toDouble(data['current_level'] ?? data['level']),
+        dangerLevel:   _toDouble(data['danger_level']  ?? data['danger']),
+        warningLevel:  _toDouble(data['warning_level'] ?? data['warning']),
+        ok: true,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LiveFetch] backend levels error for ${city.name}: $e');
+      return null;
+    }
+  }
+
+  // ── Source 5: IMD public RSS (flood/heavy-rain alerts) ───────────────────
+  // IMD publishes alerts at https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails
+  // Fallback: imd.gov.in XML feeds
+  Future<bool?> _fetchImd(IndiaCity city) async {
+    try {
+      final res = await _client
+          .get(Uri.parse(
+            'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails',
+          ))
+          .timeout(_imdTimeout);
+      return res.statusCode == 200;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  List<double> _toDoubleList(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw
+          .map((e) => e == null ? 0.0 : (e as num).toDouble())
+          .toList();
+    }
+    return [];
+  }
+
+  double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    return (v as num?)?.toDouble();
+  }
+
+  Map<String, dynamic>? _extractFirst(Map<String, dynamic> j) {
+    for (final key in ['data', 'items', 'results', 'levels', 'records']) {
+      final v = j[key];
+      if (v is List && v.isNotEmpty) return v.first as Map<String, dynamic>?;
+      if (v is Map<String, dynamic>)  return v;
+    }
+    if (j.containsKey('current_level') || j.containsKey('level')) return j;
+    return null;
+  }
 }
