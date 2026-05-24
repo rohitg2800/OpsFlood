@@ -1,17 +1,34 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v4.1  (merged India Map tab)
+// OpsFlood — River Monitor v5.0  (threshold alerts merged)
 //
 // TABS:
-//   0 — Stations   (CWC live telemetry list)
-//   1 — Add City   (search + add extra cities)
-//   2 — India Map  (IndiaRiverExplorerScreen embedded)
+//   0 — Stations   (CWC live telemetry + GloFAS threshold overlay)
+//   1 — Alerts     (inline ThresholdAlertService breach list)
+//   2 — Add City
+//   3 — India Map
+//
+// COMPOSITE RISK SCORE (0–100):
+//   score = 0.45 × cwcPct  +  0.35 × gloFasPct  +  0.20 × mlProb
+//   where:
+//     cwcPct    = (current - warning) / (hfl - warning) × 100  [clamped 0–100]
+//     gloFasPct = ThresholdAlert.fillPercent                    [0–150 → clamp 0–100]
+//     mlProb    = r.mlFloodProb × 100                           [0–100]
+//
+// The composite drives a unified RiskBand (Safe / Elevated / High / Critical)
+// shown prominently on every card.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+
 import '../constants.dart';
 import '../models/river_station.dart';
+import '../models/threshold_alert.dart';
+import '../providers/alerts_provider.dart';
 import '../services/real_time_river_service.dart';
+import '../services/threshold_alert_service.dart';
 import 'india_river_explorer_screen.dart';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -31,17 +48,98 @@ const _dcColors = {
   DangerClass.extreme:     Color(0xFFEF4444),
 };
 
-// ── Screen ────────────────────────────────────────────────────────────────────
-class RiverMonitorScreen extends StatefulWidget {
-  const RiverMonitorScreen({super.key});
-  @override
-  State<RiverMonitorScreen> createState() => _RiverMonitorScreenState();
+// ── Composite Risk Band ───────────────────────────────────────────────────────
+enum RiskBand { safe, elevated, high, critical }
+
+extension RiskBandX on RiskBand {
+  String get label => switch (this) {
+    RiskBand.safe     => 'SAFE',
+    RiskBand.elevated => 'ELEVATED',
+    RiskBand.high     => 'HIGH',
+    RiskBand.critical => 'CRITICAL',
+  };
+  Color get color => switch (this) {
+    RiskBand.safe     => const Color(0xFF22C55E),
+    RiskBand.elevated => const Color(0xFFD4A843),
+    RiskBand.high     => const Color(0xFFF97316),
+    RiskBand.critical => const Color(0xFFEF4444),
+  };
 }
 
-class _RiverMonitorScreenState extends State<RiverMonitorScreen>
+/// Composite risk score (0–100) and band.
+/// Weights: CWC gauge 45%, GloFAS discharge 35%, ML flood prob 20%.
+class RiskCompute {
+  final double score;      // 0–100
+  final RiskBand band;
+  final double cwcPct;     // CWC contribution raw %
+  final double gloFasPct;  // GloFAS contribution raw %
+  final double mlPct;      // ML prob raw %
+
+  const RiskCompute({
+    required this.score,
+    required this.band,
+    required this.cwcPct,
+    required this.gloFasPct,
+    required this.mlPct,
+  });
+
+  /// [cwcCurrent], [cwcWarning], [cwcHfl] in metres MSL (from CWC telemetry).
+  /// [alert] from ThresholdAlertService (may be null if no breach).
+  /// [mlFloodProb] 0–1 from ML model.
+  factory RiskCompute.compute({
+    required double cwcCurrent,
+    required double cwcWarning,
+    required double cwcHfl,
+    ThresholdAlert? alert,
+    double? mlFloodProb,
+  }) {
+    // ── CWC gauge pct: fraction of the gap between warning level and HFL ──
+    // If current < warning → 0.  If current > hfl → 100.
+    double cwcPct = 0;
+    if (cwcWarning > 0 && cwcHfl > cwcWarning) {
+      cwcPct = ((cwcCurrent - cwcWarning) / (cwcHfl - cwcWarning) * 100)
+          .clamp(0.0, 100.0);
+    } else if (cwcHfl > 0) {
+      // Fallback: plain % of HFL
+      cwcPct = (cwcCurrent / cwcHfl * 100).clamp(0.0, 100.0);
+    }
+
+    // ── GloFAS fill % (ThresholdAlert.fillPercent: 0–150+, clamp to 100) ──
+    final gloFasPct = alert != null
+        ? alert.fillPercent.clamp(0.0, 100.0)
+        : 0.0;
+
+    // ── ML flood probability → % ──────────────────────────────────────────
+    final mlPct = ((mlFloodProb ?? 0) * 100).clamp(0.0, 100.0);
+
+    // ── Weighted composite ────────────────────────────────────────────────
+    final score = (0.45 * cwcPct + 0.35 * gloFasPct + 0.20 * mlPct)
+        .clamp(0.0, 100.0);
+
+    // ── Band thresholds ───────────────────────────────────────────────────
+    final band = score >= 75 ? RiskBand.critical
+               : score >= 50 ? RiskBand.high
+               : score >= 25 ? RiskBand.elevated
+               : RiskBand.safe;
+
+    return RiskCompute(
+      score: score, band: band,
+      cwcPct: cwcPct, gloFasPct: gloFasPct, mlPct: mlPct,
+    );
+  }
+}
+
+// ── Screen ────────────────────────────────────────────────────────────────────
+class RiverMonitorScreen extends ConsumerStatefulWidget {
+  const RiverMonitorScreen({super.key});
+  @override
+  ConsumerState<RiverMonitorScreen> createState() => _RiverMonitorScreenState();
+}
+
+class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
     with TickerProviderStateMixin {
 
-  // 3 tabs: Stations | Add City | India Map
+  // 4 tabs: Stations | Alerts | Add City | India Map
   late final TabController      _tab;
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
@@ -61,13 +159,10 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   bool         _adding      = false;
   List<String> _suggestions = [];
 
-  final Set<String> _extraCities = {};
-
   @override
   void initState() {
     super.initState();
-    // length: 3 — Stations | Add City | India Map
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 4, vsync: this);
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
@@ -113,6 +208,19 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     }
   }
 
+  // ── Alert lookup by city name ─────────────────────────────────────────────
+  ThresholdAlert? _alertFor(LiveRiverResult r) {
+    final alerts = ThresholdAlertService.instance.currentAlerts;
+    final cityLower = r.station.city.toLowerCase();
+    try {
+      return alerts.firstWhere((a) =>
+          a.cityName.toLowerCase() == cityLower ||
+          a.cityId.toLowerCase().contains(cityLower));
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Filtered + sorted list ────────────────────────────────────────────────
   List<LiveRiverResult> get _list {
     var l = List<LiveRiverResult>.from(_results);
@@ -120,10 +228,23 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       l = l.where((r) => r.station.state == _filterState).toList();
     }
     if (_sortByRisk) {
+      // Sort by composite risk score (descending)
       l.sort((a, b) {
-        final rc = b.station.riskScore.compareTo(a.station.riskScore);
-        if (rc != 0) return rc;
-        return (b.mlFloodProb ?? 0).compareTo(a.mlFloodProb ?? 0);
+        final rA = RiskCompute.compute(
+          cwcCurrent: a.station.current,
+          cwcWarning: a.station.warning,
+          cwcHfl:     a.station.hfl,
+          alert:      _alertFor(a),
+          mlFloodProb: a.mlFloodProb,
+        ).score;
+        final rB = RiskCompute.compute(
+          cwcCurrent: b.station.current,
+          cwcWarning: b.station.warning,
+          cwcHfl:     b.station.hfl,
+          alert:      _alertFor(b),
+          mlFloodProb: b.mlFloodProb,
+        ).score;
+        return rB.compareTo(rA);
       });
     }
     return l;
@@ -208,6 +329,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   // ─── BUILD ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final alertsBadge = ref.watch(alertBadgeCountProvider);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
@@ -215,7 +337,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         body: SafeArea(
           child: Column(children: [
             _header(),
-            _tabBar(),
+            _tabBar(alertsBadge),
             if (_refreshing)
               LinearProgressIndicator(
                 backgroundColor: _kGold.withOpacity(0.08),
@@ -225,9 +347,9 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
             if (_error.isNotEmpty) _errorBanner(),
             Expanded(child: TabBarView(
               controller: _tab,
-              // India Map tab uses keepAlive via its own State
               children: [
                 _stationsTab(),
+                _alertsTab(),
                 _addCityTab(),
                 const IndiaRiverExplorerScreen(),
               ],
@@ -268,7 +390,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
               fontSize: 20, fontWeight: FontWeight.w900,
               color: Colors.white, letterSpacing: 0.5)),
         ),
-        const Text('CWC Live Telemetry · OpsFlood AI',
+        const Text('CWC + GloFAS · OpsFlood AI',
             style: TextStyle(fontSize: 10, color: Color(0xFF7B8A99), letterSpacing: 0.4)),
       ])),
       AnimatedBuilder(
@@ -307,17 +429,14 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
       ),
       if (_noData > 0) ...[
         const SizedBox(width: 6),
-        _GoldChip(
-          label: '$_noData',
-          sublabel: 'no data',
-          color: const Color(0xFF7B8A99),
-        ),
+        _GoldChip(label: '$_noData', sublabel: 'no data',
+            color: const Color(0xFF7B8A99)),
       ],
     ]),
   );
 
-  // ── Tab bar (3 tabs) ──────────────────────────────────────────────────────
-  Widget _tabBar() => Padding(
+  // ── Tab bar (4 tabs) ──────────────────────────────────────────────────────
+  Widget _tabBar(int alertsBadge) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
     child: Container(
       height: 44,
@@ -338,11 +457,32 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         ),
         labelColor: const Color(0xFF060B12),
         unselectedLabelColor: const Color(0xFF7B8A99),
-        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-        tabs: const [
-          Tab(text: ' Stations '),
-          Tab(text: ' Add City '),
-          Tab(text: ' India Map '),
+        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+        tabs: [
+          const Tab(text: 'Stations'),
+          Tab(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Text('Alerts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                if (alertsBadge > 0)
+                  Positioned(
+                    right: -10, top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                          color: Color(0xFFEF4444), shape: BoxShape.circle),
+                      child: Text('$alertsBadge',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 8,
+                              fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Tab(text: 'Add City'),
+          const Tab(text: 'Map'),
         ],
       ),
     ),
@@ -360,8 +500,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
     child: Row(children: [
       const Icon(Icons.wifi_off_rounded, size: 16, color: Color(0xFFEF4444)),
       const SizedBox(width: 8),
-      const Expanded(child: Text(
-          'API error — showing last cached data',
+      const Expanded(child: Text('API error — showing last cached data',
           style: TextStyle(color: Color(0xFFEF4444), fontSize: 11))),
       GestureDetector(
         onTap: _fetchAll,
@@ -383,13 +522,15 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         slivers: [
           SliverToBoxAdapter(child: _filterSortBar()),
           SliverToBoxAdapter(child: _legend()),
+          SliverToBoxAdapter(child: _riskMathNote()),
           SliverList(delegate: SliverChildBuilderDelegate(
             (ctx, i) {
               final r = _list[i];
               return _LiveCard(
-                key:      ValueKey('${r.station.city}_${r.station.state}'),
-                result:   r,
-                index:    i,
+                key:    ValueKey('${r.station.city}_${r.station.state}'),
+                result: r,
+                index:  i,
+                alert:  _alertFor(r),
                 onDelete: () => setState(() => _results.remove(r)),
               );
             },
@@ -398,6 +539,102 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
           const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
       ),
+    );
+  }
+
+  // ── Alerts tab (inline from ThresholdAlertService) ────────────────────────
+  Widget _alertsTab() {
+    final provider = ref.watch(alertsProvider);
+    final alerts   = provider.filtered;
+    final critical = provider.critical;
+    final loading  = provider.loading;
+
+    // Mark seen when tab is active
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_tab.index == 1) provider.markAllSeen();
+    });
+
+    return Column(
+      children: [
+        // critical banner
+        if (critical.isNotEmpty)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFF44336),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: Row(children: [
+              const Icon(Icons.crisis_alert, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                '${critical.length} station${critical.length > 1 ? "s" : ""} '
+                'at or above Danger level',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold,
+                    fontSize: 12),
+              ),
+            ]),
+          ),
+
+        // toolbar row
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: [
+              Text('${alerts.length} alert${alerts.length != 1 ? "s" : ""}',
+                  style: const TextStyle(
+                      color: Color(0xFF7B8A99), fontSize: 12)),
+              const Spacer(),
+              if (loading)
+                const SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(_kGold)))
+              else
+                GestureDetector(
+                  onTap: () => ref.read(alertsProvider).refresh(),
+                  child: const _FilterPill(
+                      icon: Icons.refresh_rounded,
+                      label: 'Refresh', active: false),
+                ),
+              const SizedBox(width: 8),
+              _AlertFilterMenu(provider: provider),
+            ],
+          ),
+        ),
+
+        // list
+        Expanded(
+          child: alerts.isEmpty
+              ? Center(
+                  child: loading
+                      ? const CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation(_kGold))
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle_outline,
+                                size: 56,
+                                color: const Color(0xFF22C55E).withOpacity(0.5)),
+                            const SizedBox(height: 12),
+                            const Text('All rivers within safe levels',
+                                style: TextStyle(
+                                    color: Color(0xFF7B8A99), fontSize: 14)),
+                          ],
+                        ),
+                )
+              : RefreshIndicator(
+                  color: _kGold,
+                  backgroundColor: _kSurface2,
+                  onRefresh: () => ref.read(alertsProvider).refresh(),
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
+                    itemCount: alerts.length,
+                    itemBuilder: (_, i) => _AlertRow(alert: alerts[i]),
+                  ),
+                ),
+        ),
+      ],
     );
   }
 
@@ -457,7 +694,7 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
         onTap: () => setState(() => _sortByRisk = !_sortByRisk),
         child: _FilterPill(
           icon: Icons.sort_rounded,
-          label: _sortByRisk ? 'By risk' : 'Sort',
+          label: _sortByRisk ? 'Risk ↓' : 'Sort',
           active: _sortByRisk,
         ),
       ),
@@ -465,13 +702,31 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   );
 
   Widget _legend() => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
     child: Wrap(spacing: 12, runSpacing: 4, children: [
       _LegendDot(color: _dcColors[DangerClass.normal]!,      label: 'Normal'),
       _LegendDot(color: _dcColors[DangerClass.aboveNormal]!, label: 'Above Normal'),
       _LegendDot(color: _dcColors[DangerClass.severe]!,      label: 'Severe'),
       _LegendDot(color: _dcColors[DangerClass.extreme]!,     label: 'Extreme'),
+      const _LegendDot(color: Color(0xFF818CF8), label: 'GloFAS breach'),
     ]),
+  );
+
+  Widget _riskMathNote() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: _kGold.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kGold.withOpacity(0.12)),
+      ),
+      child: const Text(
+        'Risk Score = 45% CWC gauge + 35% GloFAS discharge + 20% AI flood prob',
+        style: TextStyle(color: Color(0xFF7B8A99), fontSize: 9, letterSpacing: 0.2),
+        textAlign: TextAlign.center,
+      ),
+    ),
   );
 
   Widget _shimmer() => ListView.builder(
@@ -524,16 +779,22 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
             prefixIcon: const Icon(Icons.search_rounded, color: _kGold, size: 20),
             suffixIcon: _searchCtrl.text.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear_rounded, color: Color(0xFF7B8A99), size: 18),
-                    onPressed: () { _searchCtrl.clear(); setState(() { _addCityName = ''; _suggestions = []; }); })
+                    icon: const Icon(Icons.clear_rounded,
+                        color: Color(0xFF7B8A99), size: 18),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() { _addCityName = ''; _suggestions = []; });
+                    })
                 : null,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: const BorderSide(color: _kGold, width: 1.5)),
             filled: true, fillColor: Colors.transparent,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           ),
         ),
       ),
@@ -637,17 +898,17 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
           Row(children: [
             Text('🛰', style: TextStyle(fontSize: 14)),
             SizedBox(width: 8),
-            Text('3-Source Live Pipeline',
+            Text('4-Source Live Pipeline',
                 style: TextStyle(
                     color: _kGold, fontSize: 12, fontWeight: FontWeight.w700)),
           ]),
           SizedBox(height: 6),
           Text(
-            'SOURCE 1: CWC Telemetry (per-state bulk)  →  '
-            'SOURCE 2: OpsFlood Live Levels  →  '
-            'SOURCE 3: CWC Flood Forecasting Service.\n\n'
-            'If none of the three sources return a real gauge reading, '
-            'the card shows NO DATA — never a synthetic value.',
+            'SOURCE 1: CWC Telemetry (gauge height, m MSL)  →  '
+            'SOURCE 2: GloFAS Discharge (m³/s, threshold alerts)  →  '
+            'SOURCE 3: OpsFlood Live Levels  →  '
+            'SOURCE 4: CWC Flood Forecasting Service.\n\n'
+            'Risk Score blends all sources. Never shows synthetic values.',
             style: TextStyle(
                 color: Color(0xFF7B8A99), fontSize: 11, height: 1.5),
           ),
@@ -657,16 +918,18 @@ class _RiverMonitorScreenState extends State<RiverMonitorScreen>
   );
 }
 
-// ── Live Station Card ─────────────────────────────────────────────────────────
+// ── Live Station Card (with threshold alert overlay) ──────────────────────────
 class _LiveCard extends StatefulWidget {
   final LiveRiverResult result;
   final int             index;
   final VoidCallback    onDelete;
+  final ThresholdAlert? alert;     // may be null if GloFAS has no data for this city
   const _LiveCard({
     super.key,
     required this.result,
     required this.index,
     required this.onDelete,
+    this.alert,
   });
   @override State<_LiveCard> createState() => _LiveCardState();
 }
@@ -694,6 +957,16 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
     final r  = widget.result;
     final s  = r.station;
     final dc = s.dangerClass;
+    final a  = widget.alert;
+
+    // ── Composite risk ──────────────────────────────────────────────────────
+    final risk = RiskCompute.compute(
+      cwcCurrent:  s.current,
+      cwcWarning:  s.warning,
+      cwcHfl:      s.hfl,
+      alert:       a,
+      mlFloodProb: r.mlFloodProb,
+    );
 
     if (r.source == 'NO_DATA') {
       return FadeTransition(
@@ -716,17 +989,20 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     color: Color(0xFF7B8A99),
                     fontWeight: FontWeight.w700, fontSize: 14)),
                 Text('${s.river} · ${s.state}',
-                    style: const TextStyle(
-                        color: Color(0xFF3A4A58), fontSize: 10)),
+                    style: const TextStyle(color: Color(0xFF3A4A58), fontSize: 10)),
               ],
             )),
+            // Even NO_DATA cards show GloFAS alert if available
+            if (a != null) ...[
+              _AlertLevelBadge(level: a.level),
+              const SizedBox(width: 6),
+            ],
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: const Color(0xFF3A4A58).withOpacity(0.3),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF3A4A58)),
-              ),
+                border: Border.all(color: const Color(0xFF3A4A58))),
               child: const Text('NO DATA',
                   style: TextStyle(
                       color: Color(0xFF7B8A99),
@@ -742,8 +1018,8 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
       );
     }
 
-    final col = _dcColors[dc]!;
-    final pct = s.progressPct;
+    final cwcCol = _dcColors[dc]!;
+    final pct    = s.progressPct;
 
     return FadeTransition(
       opacity: _anim,
@@ -755,15 +1031,18 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
           decoration: BoxDecoration(
             color: _kSurface,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: col.withOpacity(0.22)),
+            // Border colour driven by composite risk band
+            border: Border.all(color: risk.band.color.withOpacity(0.28)),
             boxShadow: [
               BoxShadow(
-                  color: col.withOpacity(0.06), blurRadius: 16,
+                  color: risk.band.color.withOpacity(0.07), blurRadius: 16,
                   offset: const Offset(0, 4)),
               BoxShadow(color: _kGold.withOpacity(0.04), blurRadius: 24),
             ],
           ),
           child: Column(children: [
+
+            // ── Header row ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
               child: Row(children: [
@@ -771,11 +1050,11 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                   width: 44, height: 44,
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                        colors: [col.withOpacity(0.35), col.withOpacity(0.05)]),
+                        colors: [cwcCol.withOpacity(0.35), cwcCol.withOpacity(0.05)]),
                     shape: BoxShape.circle,
-                    border: Border.all(color: col.withOpacity(0.45), width: 1.5),
+                    border: Border.all(color: cwcCol.withOpacity(0.45), width: 1.5),
                   ),
-                  child: Icon(_dcIcon(dc), color: col, size: 22),
+                  child: Icon(_dcIcon(dc), color: cwcCol, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(child: Column(
@@ -801,17 +1080,21 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                   ],
                 )),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  // CWC danger class badge
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                     decoration: BoxDecoration(
-                      color: col.withOpacity(0.12),
+                      color: cwcCol.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: col.withOpacity(0.4))),
+                      border: Border.all(color: cwcCol.withOpacity(0.4))),
                     child: Text(dc.label,
                         style: TextStyle(
-                            color: col, fontSize: 10,
+                            color: cwcCol, fontSize: 10,
                             fontWeight: FontWeight.w800)),
                   ),
+                  const SizedBox(height: 4),
+                  // Composite risk band badge
+                  _RiskBandBadge(risk: risk),
                   const SizedBox(height: 4),
                   GestureDetector(
                     onTap: widget.onDelete,
@@ -820,6 +1103,8 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ]),
             ),
+
+            // ── CWC gauge bar ────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: AnimatedBuilder(
@@ -831,7 +1116,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                       Flexible(child: Text(
                           '${s.current.toStringAsFixed(2)} m',
                           style: TextStyle(
-                              color: col, fontSize: 18,
+                              color: cwcCol, fontSize: 18,
                               fontWeight: FontWeight.w900),
                           overflow: TextOverflow.ellipsis)),
                       Text('HFL ${s.hfl.toStringAsFixed(1)} m',
@@ -840,6 +1125,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     ],
                   ),
                   const SizedBox(height: 6),
+                  // CWC gauge height bar
                   Stack(children: [
                     Container(height: 7, decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.05),
@@ -858,12 +1144,12 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                         height: 7,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                              colors: [col.withOpacity(0.7), col],
+                              colors: [cwcCol.withOpacity(0.7), cwcCol],
                               begin: Alignment.centerLeft,
                               end: Alignment.centerRight),
                           borderRadius: BorderRadius.circular(4),
                           boxShadow: [BoxShadow(
-                              color: col.withOpacity(0.5), blurRadius: 6)],
+                              color: cwcCol.withOpacity(0.5), blurRadius: 6)],
                         ),
                       ),
                     ),
@@ -882,8 +1168,121 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ),
-            if (r.mlRiskLevel != null) ...[
+
+            // ── GloFAS threshold section (only if alert exists) ──────────────
+            if (a != null) ...[
               const SizedBox(height: 8),
+              Divider(height: 1,
+                  color: const Color(0xFF818CF8).withOpacity(0.2),
+                  indent: 14, endIndent: 14),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+                child: Column(children: [
+                  Row(children: [
+                    const Text('🛰 GloFAS',
+                        style: TextStyle(
+                            color: Color(0xFF818CF8), fontSize: 10,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(width: 8),
+                    _AlertLevelBadge(level: a.level),
+                    const SizedBox(width: 8),
+                    Icon(a.trend.icon, color: a.trend.color, size: 14),
+                    const SizedBox(width: 4),
+                    Text(a.trend.name,
+                        style: TextStyle(
+                            color: a.trend.color, fontSize: 9,
+                            fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    Text(
+                      '${a.currentValue.toStringAsFixed(1)} ${a.unitLabel}  '
+                      '(${a.breachMargin >= 0 ? '+' : ''}'  
+                      '${a.breachMargin.toStringAsFixed(1)} vs ${a.level.label})',
+                      style: const TextStyle(
+                          color: Color(0xFF7B8A99), fontSize: 9),
+                    ),
+                  ]),
+                  const SizedBox(height: 6),
+                  // GloFAS fill bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: (a.fillPercent / 100).clamp(0.0, 1.0),
+                      backgroundColor:
+                          const Color(0xFF818CF8).withOpacity(0.10),
+                      valueColor: AlwaysStoppedAnimation<Color>(a.level.color),
+                      minHeight: 6,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _mini('WL ${a.warningLevel.toStringAsFixed(0)}',
+                          const Color(0xFFD4A843)),
+                      _mini('DL ${a.dangerLevel.toStringAsFixed(0)}',
+                          const Color(0xFFF97316)),
+                      _mini('HFL ${a.hfl.toStringAsFixed(0)}',
+                          const Color(0xFF818CF8)),
+                      _mini('${a.fillPercent.toStringAsFixed(0)}% fill',
+                          const Color(0xFF7B8A99)),
+                    ],
+                  ),
+                ]),
+              ),
+            ],
+
+            // ── Composite risk score bar ─────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+              child: Column(children: [
+                Divider(height: 1,
+                    color: _kGold.withOpacity(0.08), indent: 0, endIndent: 0),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('⚡ Composite Risk',
+                        style: TextStyle(
+                            color: Color(0xFF7B8A99), fontSize: 10,
+                            fontWeight: FontWeight.w600)),
+                    Text('${risk.score.toStringAsFixed(1)} / 100',
+                        style: TextStyle(
+                            color: risk.band.color, fontSize: 10,
+                            fontWeight: FontWeight.w800)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: AnimatedBuilder(
+                    animation: _anim,
+                    builder: (_, __) => LinearProgressIndicator(
+                      value: (risk.score / 100 * _anim.value).clamp(0.0, 1.0),
+                      backgroundColor: risk.band.color.withOpacity(0.10),
+                      valueColor: AlwaysStoppedAnimation<Color>(risk.band.color),
+                      minHeight: 8,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _mini('CWC ${risk.cwcPct.toStringAsFixed(0)}%',
+                        cwcCol),
+                    if (a != null)
+                      _mini('GloFAS ${risk.gloFasPct.toStringAsFixed(0)}%',
+                          const Color(0xFF818CF8)),
+                    if (r.mlFloodProb != null)
+                      _mini('AI ${risk.mlPct.toStringAsFixed(0)}%',
+                          _kTeal),
+                  ],
+                ),
+              ]),
+            ),
+
+            // ── ML row ───────────────────────────────────────────────────────
+            if (r.mlRiskLevel != null) ...[
               Divider(height: 1,
                   color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
               Padding(
@@ -906,7 +1305,9 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ],
-            const SizedBox(height: 6),
+
+            // ── Pills ────────────────────────────────────────────────────────
+            const SizedBox(height: 4),
             Divider(height: 1,
                 color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
             const SizedBox(height: 8),
@@ -914,29 +1315,19 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
               child: Wrap(spacing: 6, runSpacing: 6, children: [
                 if (s.trend != null)
-                  _Pill(
-                      icon: _ti(s.trend!),
-                      label: s.trend!,
-                      color: _tc(s.trend!)),
+                  _Pill(icon: _ti(s.trend!), label: s.trend!, color: _tc(s.trend!)),
                 if (s.rainfallLastHour != null && s.rainfallLastHour! > 0)
-                  _Pill(
-                      icon: '🌧',
+                  _Pill(icon: '🌧',
                       label: '${s.rainfallLastHour!.toStringAsFixed(1)} mm/hr',
                       color: const Color(0xFF60A5FA)),
                 if (s.flowRate != null && s.flowRate! > 0)
-                  _Pill(
-                      icon: '💧',
+                  _Pill(icon: '💧',
                       label: '${s.flowRate!.toStringAsFixed(0)} m³/s',
                       color: _kTeal),
                 if (s.liveStatus != null)
-                  _Pill(
-                      icon: '📡',
-                      label: s.liveStatus!,
-                      color: _sc(s.liveStatus!)),
+                  _Pill(icon: '📡', label: s.liveStatus!, color: _sc(s.liveStatus!)),
                 if (s.lastUpdated != null)
-                  _Pill(
-                      icon: '🕐',
-                      label: _shortTime(s.lastUpdated!),
+                  _Pill(icon: '🕐', label: _shortTime(s.lastUpdated!),
                       color: r.isStale
                           ? const Color(0xFFEF4444)
                           : const Color(0xFF7B8A99)),
@@ -999,6 +1390,154 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
     } catch (_) {
       return ts.length > 16 ? ts.substring(11, 16) : ts;
     }
+  }
+}
+
+// ── Alert row (compact, for the Alerts tab) ───────────────────────────────────
+class _AlertRow extends StatelessWidget {
+  final ThresholdAlert alert;
+  const _AlertRow({required this.alert});
+
+  @override
+  Widget build(BuildContext context) {
+    final col = alert.level.color;
+    final ts  = DateFormat('dd MMM HH:mm').format(alert.timestamp.toLocal());
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: col.withOpacity(0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(alert.level.icon, color: col, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(alert.cityName,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800,
+                    fontSize: 14)),
+          ),
+          if (alert.isNew)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                  color: col, borderRadius: BorderRadius.circular(4)),
+              child: const Text('NEW',
+                  style: TextStyle(
+                      color: Colors.white, fontSize: 9,
+                      fontWeight: FontWeight.w800)),
+            ),
+        ]),
+        const SizedBox(height: 4),
+        Text('${alert.state} · ${alert.river}',
+            style: const TextStyle(color: Color(0xFF7B8A99), fontSize: 10)),
+        const SizedBox(height: 8),
+        // Fill bar
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: LinearProgressIndicator(
+            value: (alert.fillPercent / 100).clamp(0.0, 1.0),
+            backgroundColor: col.withOpacity(0.12),
+            valueColor: AlwaysStoppedAnimation<Color>(col),
+            minHeight: 6,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}',
+                style: TextStyle(
+                    color: col, fontSize: 12, fontWeight: FontWeight.w800)),
+            Text('DL ${alert.dangerLevel.toStringAsFixed(1)}',
+                style: const TextStyle(
+                    color: Color(0xFFF97316), fontSize: 10)),
+            Row(children: [
+              Icon(alert.trend.icon, size: 12, color: alert.trend.color),
+              const SizedBox(width: 3),
+              Text(alert.trend.name,
+                  style: TextStyle(
+                      color: alert.trend.color, fontSize: 9,
+                      fontWeight: FontWeight.w600)),
+            ]),
+            Text(ts,
+                style: const TextStyle(
+                    color: Color(0xFF3A4A58), fontSize: 9)),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
+// ── Alert level badge ─────────────────────────────────────────────────────────
+class _AlertLevelBadge extends StatelessWidget {
+  final AlertLevel level;
+  const _AlertLevelBadge({required this.level});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: level.color.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: level.color.withOpacity(0.4))),
+    child: Text(level.label,
+        style: TextStyle(
+            color: level.color, fontSize: 9, fontWeight: FontWeight.w800)),
+  );
+}
+
+// ── Composite risk band badge ─────────────────────────────────────────────────
+class _RiskBandBadge extends StatelessWidget {
+  final RiskCompute risk;
+  const _RiskBandBadge({required this.risk});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: risk.band.color.withOpacity(0.10),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: risk.band.color.withOpacity(0.35))),
+    child: Text('${risk.band.label} ${risk.score.toStringAsFixed(0)}',
+        style: TextStyle(
+            color: risk.band.color, fontSize: 8, fontWeight: FontWeight.w800)),
+  );
+}
+
+// ── Alert filter menu (for Alerts tab) ───────────────────────────────────────
+class _AlertFilterMenu extends StatelessWidget {
+  final AlertsProvider provider;
+  const _AlertFilterMenu({required this.provider});
+  @override
+  Widget build(BuildContext context) {
+    final hasFilter = provider.filterLevel != null || provider.filterState != null;
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.filter_list_rounded,
+          size: 18,
+          color: hasFilter ? _kGold : const Color(0xFF7B8A99)),
+      onSelected: (val) {
+        if (val == 'clear') { provider.clearFilters(); return; }
+        final level = AlertLevel.values.where((l) => l.name == val).firstOrNull;
+        if (level != null) provider.setFilterLevel(level);
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
+        const PopupMenuDivider(),
+        ...AlertLevel.values.reversed
+            .where((l) => l != AlertLevel.normal)
+            .map((l) => PopupMenuItem(
+                  value: l.name,
+                  child: Row(children: [
+                    Icon(l.icon, color: l.color, size: 16),
+                    const SizedBox(width: 8),
+                    Text(l.label),
+                  ]),
+                )),
+      ],
+    );
   }
 }
 
@@ -1083,8 +1622,7 @@ class _FilterPill extends StatelessWidget {
   final IconData icon;
   final String   label;
   final bool     active;
-  const _FilterPill({
-    required this.icon, required this.label, required this.active});
+  const _FilterPill({required this.icon, required this.label, required this.active});
   @override Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
@@ -1126,8 +1664,7 @@ class _Pill extends StatelessWidget {
 class _GoldChip extends StatelessWidget {
   final String label, sublabel;
   final Color? color;
-  const _GoldChip({
-      required this.label, required this.sublabel, this.color});
+  const _GoldChip({required this.label, required this.sublabel, this.color});
   @override Widget build(BuildContext context) {
     final c = color ?? _kGold;
     return Container(
@@ -1154,13 +1691,10 @@ class _LegendDot extends StatelessWidget {
           width: 8, height: 8,
           decoration: BoxDecoration(
             color: color, shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: color.withOpacity(0.5), blurRadius: 4)
-            ]),
+            boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 4)]),
         ),
         const SizedBox(width: 4),
         Text(label,
-            style: const TextStyle(
-                fontSize: 10, color: Color(0xFF7B8A99))),
+            style: const TextStyle(fontSize: 10, color: Color(0xFF7B8A99))),
       ]);
 }
