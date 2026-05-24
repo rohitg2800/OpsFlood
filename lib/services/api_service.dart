@@ -12,9 +12,9 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
-  static const Duration _timeout      = Duration(seconds: 60);
-  static const int      _maxRetries   = 2;
-  static const Duration _retryBackoff = Duration(seconds: 2);
+  // Sized to survive Render free-tier cold-start (~50 s).
+  static const Duration _timeout    = Duration(seconds: 60);
+  static const int      _maxRetries = 3;
 
   List<String> get _baseCandidates => [
     AppConstants.baseUrl,
@@ -53,25 +53,46 @@ class ApiService {
             res = await _client.get(uri).timeout(_timeout);
           }
 
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            lastError = 'HTTP ${res.statusCode}';
-            if (res.statusCode >= 400 && res.statusCode < 500) break;
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            return _normalizeSuccess(_safeDecode(res.body), base, path);
+          }
+
+          // 404 — endpoint does not exist, no point retrying this base.
+          if (res.statusCode == 404) {
+            lastError = 'Endpoint not found (404): $base$path';
+            break;
+          }
+
+          // 503 — server overloaded. Exponential backoff: 5s, 10s, 20s.
+          if (res.statusCode == 503) {
+            lastError = 'Server overloaded (503) — attempt $attempt';
             if (attempt < _maxRetries) {
-              await Future<void>.delayed(_retryBackoff * attempt);
+              await Future<void>.delayed(Duration(seconds: 5 * attempt));
             }
             continue;
           }
 
-          final parsedBody = _safeDecode(res.body);
-          return _normalizeSuccess(parsedBody, base, path);
+          // Other 4xx — fast-fail, no retry.
+          if (res.statusCode >= 400 && res.statusCode < 500) {
+            lastError = 'Client error (${res.statusCode}): $base$path';
+            break;
+          }
+
+          // 5xx (except 503) — standard 2s backoff.
+          lastError = 'Server error (${res.statusCode})';
+          if (attempt < _maxRetries) {
+            await Future<void>.delayed(const Duration(seconds: 2));
+          }
         } on TimeoutException {
-          lastError = 'Request timed out after ${_timeout.inSeconds}s';
-          if (attempt == _maxRetries) break;
-          await Future<void>.delayed(_retryBackoff);
+          lastError = 'Timed out after ${_timeout.inSeconds}s';
+          if (attempt < _maxRetries) {
+            await Future<void>.delayed(const Duration(seconds: 2));
+          }
         } catch (e) {
           lastError = e;
-          if (attempt == _maxRetries) break;
-          await Future<void>.delayed(_retryBackoff);
+          if (attempt < _maxRetries) {
+            await Future<void>.delayed(const Duration(seconds: 2));
+          }
         }
       }
     }
@@ -97,15 +118,26 @@ class ApiService {
     return {'status': 'success', 'data': parsed};
   }
 
-  // ── Named endpoint helpers ──────────────────────────────────────────────
-
+  // ── Health ────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> checkHealth() =>
       _get(AppConstants.healthEndpoint);
 
+  // ── BATCH endpoints — always fetch all states in ONE request ─────────────────
+  // Use these everywhere. Never loop getLiveLevelsByCity() per city.
+
+  /// Single bulk call for telemetry — all states, up to [limit] records.
   Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 1000}) {
     final ep = AppConstants.liveTelemetryEndpoint;
     return _get('$ep?all_states=true&limit=$limit');
   }
+
+  /// Single bulk call for levels — all states, up to [limit] records.
+  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200}) {
+    final ep = AppConstants.liveLevelsEndpoint;
+    return _get('$ep?all_states=true&limit=$limit');
+  }
+
+  // ── Scoped helpers (used only when a single state/city is needed) ──────────
 
   Future<Map<String, dynamic>> getLiveTelemetry({
     String? state,
@@ -121,17 +153,8 @@ class ApiService {
     return _get(qs.toString());
   }
 
-  Future<Map<String, dynamic>> getDashboardData({
-    String? state,
-    int limit = 10,
-  }) =>
-      getLiveTelemetry(state: state, limit: limit);
-
-  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200}) {
-    final ep = AppConstants.liveLevelsEndpoint;
-    return _get('$ep?all_states=true&limit=$limit');
-  }
-
+  /// Batch-first: if no [state] given, fetches all states in one call.
+  /// Pass a state only when you genuinely need a single state.
   Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 200}) {
     final ep = AppConstants.liveLevelsEndpoint;
     if (state != null && state.isNotEmpty) {
@@ -140,10 +163,15 @@ class ApiService {
     return _get('$ep?all_states=true&limit=$limit');
   }
 
-  Future<Map<String, dynamic>> getLiveLevelsByCity(String city) {
-    final ep = AppConstants.liveLevelsEndpoint;
-    return _get('$ep?city=${Uri.encodeComponent(city)}');
-  }
+  // NOTE: getLiveLevelsByCity is intentionally NOT exposed as a public method.
+  // Callers must use getAllLiveLevels() and filter client-side to avoid
+  // firing one HTTP request per city ("chatty API" pattern).
+
+  Future<Map<String, dynamic>> getDashboardData({
+    String? state,
+    int limit = 10,
+  }) =>
+      getLiveTelemetry(state: state, limit: limit);
 
   Future<Map<String, dynamic>> getCriticalAlerts() =>
       _get(AppConstants.criticalAlertsEndpoint);
@@ -158,7 +186,9 @@ class ApiService {
     required String city,
     required String state,
   }) =>
-      _get('/api/cwc-ffs/station?city=${Uri.encodeComponent(city)}&state=${Uri.encodeComponent(state)}');
+      _get('/api/cwc-ffs/station'
+          '?city=${Uri.encodeComponent(city)}'
+          '&state=${Uri.encodeComponent(state)}');
 
   Future<Map<String, dynamic>> getReservoirLevels({required String state}) =>
       _get('/api/cwc-reservoir/state?state=${Uri.encodeComponent(state)}');
@@ -174,7 +204,6 @@ class ApiService {
   }
 
   // ── Pipeline endpoints ──────────────────────────────────────────────────
-
   Future<Map<String, dynamic>> getPipelineFeatures({
     required String state,
     String? station,
