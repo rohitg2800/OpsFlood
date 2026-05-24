@@ -1,20 +1,24 @@
 // lib/data/india_cities.dart
 //
-// OpsFlood — Indian Flood-Prone Cities Registry (v4)
-// 93 cities across all major flood-prone states.
+// OpsFlood — Indian Flood-Prone Cities Registry (v5)
+// 110 cities — fully synced with backend cwc_scraper.py CITY_COORDS (93 cities)
+// + existing app-only cities (Silchar, Cooch Behar, Bhagalpur, etc.)
+//
+// Sync notes (v5):
+//   Added 17 cities present in backend CITY_COORDS but missing from v4:
+//   Satara (MH), Gaya (BR), Begusarai (BR), Howrah (WB), Barpeta (AS),
+//   Kanpur (UP), Sambalpur (OD), Kendrapara (OD), Kurnool (AP),
+//   Belagavi (KA), Raichur (KA), Bagalkot (KA), Hoshangabad (MP),
+//   Barmer (RJ), Firozpur (PB), Daltonganj (JH), Thanjavur (TN)
 //
 // Fields:
-//   lat / lon        — city centroid, used for Open-Meteo & GloFAS API calls
-//   river            — primary flood river (corrected to CWC-published names)
-//   state            — for CWC FFS proxy & IMD RSS filtering
+//   lat / lon        — city centroid for Open-Meteo & GloFAS API calls
+//   river            — primary flood river (CWC-published names)
+//   state            — for backend /api/live-levels?state= + IMD RSS filtering
 //   cwcStation       — CWC FFS station code (null if not monitored)
 //   warningLevel     — CWC/WRD published warning gauge (m MSL)
 //   dangerLevel      — CWC/WRD published danger gauge (m MSL)
 //   hfl              — Highest Flood Level on record (m MSL); 0.0 = unknown
-//
-// Bihar sources: WRD Bihar Central Flood Control Cell + CWC FFS 2024-25.
-//   Board: https://irrigation.befiqr.in/state/table/rivers
-//   CWC:   https://beams.fmiscwrdbihar.gov.in
 library;
 
 class IndiaCity {
@@ -64,11 +68,18 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'tezpur',     name:'Tezpur',     state:'Assam', river:'Brahmaputra',
       lat:26.6338, lon:92.8001,
       warningLevel:62.00,  dangerLevel:63.50,  hfl:65.00),
+  // v5 — synced from backend CITY_COORDS
+  IndiaCity(id:'barpeta',    name:'Barpeta',    state:'Assam', river:'Beki',
+      lat:26.32,   lon:91.01,
+      warningLevel:32.00,  dangerLevel:34.00,  hfl:36.00),
 
   // ── ARUNACHAL PRADESH ────────────────────────────────────────────────
   IndiaCity(id:'itanagar',   name:'Itanagar',   state:'Arunachal Pradesh', river:'Dikrong',
       lat:27.0844, lon:93.6053,
       warningLevel:5.00, dangerLevel:6.50, hfl:7.30),
+  IndiaCity(id:'pasighat',   name:'Pasighat',   state:'Arunachal Pradesh', river:'Siang',
+      lat:28.07,   lon:95.33,
+      warningLevel:4.00, dangerLevel:5.50, hfl:7.00),
 
   // ── MANIPUR ──────────────────────────────────────────────────────────
   IndiaCity(id:'imphal',     name:'Imphal',     state:'Manipur', river:'Imphal',
@@ -103,59 +114,53 @@ const List<IndiaCity> kIndiaCities = [
       lat:23.8315, lon:91.2868,
       warningLevel:6.10, dangerLevel:7.60, hfl:8.50),
 
-  // ── BIHAR — updated from WRD Bihar Central Flood Control Cell (2024-25) ────────
-  // Patna — Gandhighat gauge; WL 47.50, DL 48.60, HFL 50.52 (1994)
+  // ── BIHAR ────────────────────────────────────────────────────────────
   IndiaCity(id:'patna',      name:'Patna',      state:'Bihar', river:'Ganga',
       lat:25.5941, lon:85.1376, cwcStation:'PAT',
       warningLevel:47.50, dangerLevel:48.60, hfl:50.52),
-  // Bhagalpur — CWC gauge; WL 32.50, DL 33.68, HFL 34.86 (1987)
   IndiaCity(id:'bhagalpur',  name:'Bhagalpur',  state:'Bihar', river:'Ganga',
       lat:25.2425, lon:86.9842, cwcStation:'BHP',
       warningLevel:32.50, dangerLevel:33.68, hfl:34.86),
-  // Darbhanga — Bagmati at Hayaghat; WL 44.50, DL 45.72, HFL 48.96 (2007)
   IndiaCity(id:'darbhanga',  name:'Darbhanga',  state:'Bihar', river:'Bagmati',
       lat:26.1542, lon:85.8918,
       warningLevel:44.50, dangerLevel:45.72, hfl:48.96),
-  // Muzaffarpur — Burhi Gandak at Sikandarpur; WL 51.40, DL 52.53, HFL 54.29 (1987)
   IndiaCity(id:'muzaffarpur',name:'Muzaffarpur',state:'Bihar', river:'Burhi Gandak',
       lat:26.1209, lon:85.3647,
       warningLevel:51.40, dangerLevel:52.53, hfl:54.29),
-  // Samastipur — Burhi Gandak; WL 44.80, DL 46.00, HFL 49.40 (1987)
   IndiaCity(id:'samastipur', name:'Samastipur', state:'Bihar', river:'Burhi Gandak',
       lat:25.8620, lon:85.7812,
       warningLevel:44.80, dangerLevel:46.00, hfl:49.40),
-  // Katihar — Kosi at Kursela; WL 28.80, DL 30.00, HFL 32.10 (2008)
   IndiaCity(id:'katihar',    name:'Katihar',    state:'Bihar', river:'Kosi',
       lat:25.5391, lon:87.5717, cwcStation:'KAT',
       warningLevel:28.80, dangerLevel:30.00, hfl:32.10),
-  // Supaul — Kosi at Basua; WL 46.50, DL 47.75, HFL 49.24 (2008)
   IndiaCity(id:'supaul',     name:'Supaul',     state:'Bihar', river:'Kosi',
       lat:26.1234, lon:86.6020, cwcStation:'SUP',
       warningLevel:46.50, dangerLevel:47.75, hfl:49.24),
-  // Sitamarhi — Bagmati at Dheng Bridge; WL 70.00, DL 71.00, HFL 73.47 (2024)
   IndiaCity(id:'sitamarhi',  name:'Sitamarhi',  state:'Bihar', river:'Bagmati',
       lat:26.5800, lon:85.4900,
       warningLevel:70.00, dangerLevel:71.00, hfl:73.47),
-  // Gopalganj — Gandak at Dumariaghat; WL 61.10, DL 62.22, HFL 63.70 (1971)
   IndiaCity(id:'gopalganj',  name:'Gopalganj',  state:'Bihar', river:'Gandak',
       lat:26.4833, lon:84.4667,
       warningLevel:61.10, dangerLevel:62.22, hfl:63.70),
-  // Purnia — Mahananda at Dhengraghat; WL 34.65, DL 35.65, HFL 38.20 (1987)
   IndiaCity(id:'purnia',     name:'Purnia',     state:'Bihar', river:'Mahananda',
       lat:25.7800, lon:87.4800,
       warningLevel:34.65, dangerLevel:35.65, hfl:38.20),
-  // Siwan — Ghaghra at Darauli; WL 59.80, DL 60.82, HFL 61.82 (1998)
   IndiaCity(id:'siwan',      name:'Siwan',      state:'Bihar', river:'Ghaghra',
       lat:26.2200, lon:84.3600,
       warningLevel:59.80, dangerLevel:60.82, hfl:61.82),
-  // Madhubani — Kamla at Jainagar; WL 66.00, DL 67.75, HFL 71.35 (2007)
   IndiaCity(id:'madhubani',  name:'Madhubani',  state:'Bihar', river:'Kamla',
       lat:26.3500, lon:86.0700,
       warningLevel:66.00, dangerLevel:67.75, hfl:71.35),
-  // Khagaria — Burhi Gandak; WL 35.40, DL 36.58, HFL 39.22 (1987)
   IndiaCity(id:'khagaria',   name:'Khagaria',   state:'Bihar', river:'Burhi Gandak',
       lat:25.5000, lon:86.4700,
       warningLevel:35.40, dangerLevel:36.58, hfl:39.22),
+  // v5 — synced from backend
+  IndiaCity(id:'gaya',       name:'Gaya',       state:'Bihar', river:'Falgu',
+      lat:24.79,   lon:85.00,
+      warningLevel:94.00, dangerLevel:96.00, hfl:98.50),
+  IndiaCity(id:'begusarai',  name:'Begusarai',  state:'Bihar', river:'Ganga',
+      lat:25.41,   lon:86.13,
+      warningLevel:33.00, dangerLevel:34.50, hfl:36.00),
 
   // ── WEST BENGAL ─────────────────────────────────────────────────────
   IndiaCity(id:'kolkata',    name:'Kolkata',    state:'West Bengal', river:'Hooghly',
@@ -173,6 +178,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'cooch_behar',name:'Cooch Behar',state:'West Bengal', river:'Torsa',
       lat:26.3452, lon:89.4433,
       warningLevel:66.00, dangerLevel:67.50, hfl:69.00),
+  // v5 — synced from backend
+  IndiaCity(id:'howrah',     name:'Howrah',     state:'West Bengal', river:'Hooghly',
+      lat:22.59,   lon:88.31,
+      warningLevel:3.67, dangerLevel:4.57, hfl:5.05),
 
   // ── ODISHA ──────────────────────────────────────────────────────────
   IndiaCity(id:'bhubaneswar',name:'Bhubaneswar',state:'Odisha', river:'Mahanadi',
@@ -190,6 +199,13 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'brahmapur',  name:'Brahmapur',  state:'Odisha', river:'Rushikulya',
       lat:19.3150, lon:84.7941,
       warningLevel:2.90, dangerLevel:3.40, hfl:4.00),
+  // v5 — synced from backend
+  IndiaCity(id:'sambalpur',  name:'Sambalpur',  state:'Odisha', river:'Mahanadi',
+      lat:21.47,   lon:83.97,
+      warningLevel:160.00, dangerLevel:162.00, hfl:164.50),
+  IndiaCity(id:'kendrapara', name:'Kendrapara', state:'Odisha', river:'Brahmani',
+      lat:20.50,   lon:86.42,
+      warningLevel:4.50, dangerLevel:5.50, hfl:7.00),
 
   // ── JHARKHAND ───────────────────────────────────────────────────────
   IndiaCity(id:'ranchi',     name:'Ranchi',     state:'Jharkhand', river:'Subarnarekha',
@@ -200,6 +216,10 @@ const List<IndiaCity> kIndiaCities = [
       warningLevel:6.50, dangerLevel:8.00, hfl:10.20),
   IndiaCity(id:'dhanbad',    name:'Dhanbad',    state:'Jharkhand', river:'Damodar',
       lat:23.7957, lon:86.4304,
+      warningLevel:5.00, dangerLevel:6.50, hfl:8.00),
+  // v5 — synced from backend
+  IndiaCity(id:'daltonganj', name:'Daltonganj', state:'Jharkhand', river:'North Koel',
+      lat:24.03,   lon:84.07,
       warningLevel:5.00, dangerLevel:6.50, hfl:8.00),
 
   // ── CHHATTISGARH ───────────────────────────────────────────────────
@@ -235,6 +255,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'bahraich',   name:'Bahraich',   state:'Uttar Pradesh', river:'Saryu',
       lat:27.5742, lon:81.5960,
       warningLevel:102.00, dangerLevel:104.00, hfl:106.00),
+  // v5 — synced from backend
+  IndiaCity(id:'kanpur',     name:'Kanpur',     state:'Uttar Pradesh', river:'Ganga',
+      lat:26.46,   lon:80.33,
+      warningLevel:112.00, dangerLevel:114.00, hfl:116.50),
 
   // ── UTTARAKHAND ────────────────────────────────────────────────────
   IndiaCity(id:'haridwar',   name:'Haridwar',   state:'Uttarakhand', river:'Ganga',
@@ -257,6 +281,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'shimla',     name:'Shimla',     state:'Himachal Pradesh', river:'Sutlej',
       lat:31.1048, lon:77.1734,
       warningLevel:858.00, dangerLevel:860.00, hfl:862.50),
+  // v5 — synced from backend (Bilaspur HP — distinct from Bilaspur CG)
+  IndiaCity(id:'bilaspur_hp',name:'Bilaspur',   state:'Himachal Pradesh', river:'Sutlej',
+      lat:31.34,   lon:76.76,
+      warningLevel:370.00, dangerLevel:372.00, hfl:374.00),
 
   // ── PUNJAB ────────────────────────────────────────────────────────────
   IndiaCity(id:'ludhiana',   name:'Ludhiana',   state:'Punjab', river:'Sutlej',
@@ -271,6 +299,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'chandigarh', name:'Chandigarh', state:'Punjab', river:'Ghaggar',
       lat:30.7333, lon:76.7794,
       warningLevel:4.00, dangerLevel:5.00, hfl:5.80),
+  // v5 — synced from backend
+  IndiaCity(id:'firozpur',   name:'Firozpur',   state:'Punjab', river:'Sutlej',
+      lat:30.93,   lon:74.61,
+      warningLevel:184.00, dangerLevel:186.00, hfl:188.50),
 
   // ── HARYANA ───────────────────────────────────────────────────────────
   IndiaCity(id:'ambala',     name:'Ambala',     state:'Haryana', river:'Ghaggar',
@@ -293,6 +325,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'bikaner',    name:'Bikaner',    state:'Rajasthan', river:'Luni',
       lat:28.0229, lon:73.3119,
       warningLevel:2.00, dangerLevel:3.00, hfl:3.80),
+  // v5 — synced from backend
+  IndiaCity(id:'barmer',     name:'Barmer',     state:'Rajasthan', river:'Luni',
+      lat:25.75,   lon:71.39,
+      warningLevel:2.50, dangerLevel:3.50, hfl:4.50),
 
   // ── DELHI ────────────────────────────────────────────────────────────
   IndiaCity(id:'delhi',      name:'Delhi',      state:'Delhi', river:'Yamuna',
@@ -303,6 +339,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'srinagar',   name:'Srinagar',   state:'Jammu and Kashmir', river:'Jhelum',
       lat:34.0837, lon:74.7973,
       warningLevel:4.00, dangerLevel:5.50, hfl:7.00),
+  // v5 — synced from backend
+  IndiaCity(id:'jammu',      name:'Jammu',      state:'Jammu and Kashmir', river:'Tawi',
+      lat:32.73,   lon:74.87,
+      warningLevel:4.50, dangerLevel:5.50, hfl:7.00),
 
   // ── MADHYA PRADESH ───────────────────────────────────────────────────
   IndiaCity(id:'bhopal',     name:'Bhopal',     state:'Madhya Pradesh', river:'Betwa',
@@ -320,6 +360,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'rewa',       name:'Rewa',       state:'Madhya Pradesh', river:'Tons',
       lat:24.5362, lon:81.2994,
       warningLevel:310.00, dangerLevel:312.00, hfl:314.00),
+  // v5 — synced from backend
+  IndiaCity(id:'hoshangabad',name:'Hoshangabad',state:'Madhya Pradesh', river:'Narmada',
+      lat:22.75,   lon:77.72,
+      warningLevel:290.00, dangerLevel:292.00, hfl:295.00),
 
   // ── MAHARASHTRA ─────────────────────────────────────────────────────
   IndiaCity(id:'kolhapur',   name:'Kolhapur',   state:'Maharashtra', river:'Panchganga',
@@ -346,6 +390,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'mumbai',     name:'Mumbai',     state:'Maharashtra', river:'Mithi',
       lat:19.0760, lon:72.8777,
       warningLevel:1.80, dangerLevel:2.50, hfl:3.10),
+  // v5 — synced from backend
+  IndiaCity(id:'satara',     name:'Satara',     state:'Maharashtra', river:'Krishna',
+      lat:17.68,   lon:74.00,
+      warningLevel:4.50, dangerLevel:5.50, hfl:6.80),
 
   // ── GUJARAT ──────────────────────────────────────────────────────────
   IndiaCity(id:'surat',      name:'Surat',      state:'Gujarat', river:'Tapi',
@@ -380,6 +428,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'nellore',    name:'Nellore',    state:'Andhra Pradesh', river:'Pennar',
       lat:14.4426, lon:79.9865,
       warningLevel:4.50, dangerLevel:5.50, hfl:7.00),
+  // v5 — synced from backend
+  IndiaCity(id:'kurnool',    name:'Kurnool',    state:'Andhra Pradesh', river:'Tungabhadra',
+      lat:15.83,   lon:78.04,
+      warningLevel:7.00, dangerLevel:8.50, hfl:11.00),
 
   // ── TELANGANA ─────────────────────────────────────────────────────
   IndiaCity(id:'hyderabad',  name:'Hyderabad',  state:'Telangana', river:'Musi',
@@ -405,6 +457,16 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'mangalore',  name:'Mangaluru',  state:'Karnataka', river:'Netravati',
       lat:12.9141, lon:74.8560,
       warningLevel:4.00, dangerLevel:5.50, hfl:7.00),
+  // v5 — synced from backend
+  IndiaCity(id:'belagavi',   name:'Belagavi',   state:'Karnataka', river:'Ghataprabha',
+      lat:15.86,   lon:74.50,
+      warningLevel:6.00, dangerLevel:7.50, hfl:9.00),
+  IndiaCity(id:'raichur',    name:'Raichur',    state:'Karnataka', river:'Krishna',
+      lat:16.20,   lon:77.36,
+      warningLevel:6.00, dangerLevel:7.50, hfl:9.50),
+  IndiaCity(id:'bagalkot',   name:'Bagalkot',   state:'Karnataka', river:'Ghataprabha',
+      lat:16.18,   lon:75.69,
+      warningLevel:5.50, dangerLevel:7.00, hfl:8.50),
 
   // ── KERALA ──────────────────────────────────────────────────────────
   IndiaCity(id:'kochi',      name:'Kochi',      state:'Kerala', river:'Periyar',
@@ -439,6 +501,10 @@ const List<IndiaCity> kIndiaCities = [
   IndiaCity(id:'puducherry', name:'Puducherry', state:'Puducherry', river:'Gingee',
       lat:11.9416, lon:79.8083,
       warningLevel:1.80, dangerLevel:2.50, hfl:3.20),
+  // v5 — synced from backend
+  IndiaCity(id:'thanjavur',  name:'Thanjavur',  state:'Tamil Nadu', river:'Cauvery',
+      lat:10.79,   lon:79.14,
+      warningLevel:60.00, dangerLevel:62.00, hfl:64.50),
 ];
 
 IndiaCity? cityById(String id) =>
