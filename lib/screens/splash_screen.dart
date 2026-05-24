@@ -9,6 +9,15 @@ import '../services/api_service.dart';
 import '../theme/river_theme.dart';
 import '../providers/flood_providers.dart';
 
+// ── Color aliases for the splash theme ─────────────────────────────────────
+// Maps old "Equinox" palette names → existing AppPalette values.
+extension _SplashColors on AppPalette {
+  static const carbon0   = AppPalette.navy0;        // #020810 deepest bg
+  static const ferrari   = AppPalette.critical;     // #FF1744 hot red  (was Ferrari red)
+  static const gold      = AppPalette.amber;         // #FFB800 amber gold
+  static const goldLight = AppPalette.amberLight;   // #FFD54F lighter amber
+}
+
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
@@ -178,21 +187,27 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   String get _dots => '.' * (_dotFrame % 4);
 
+  // ── Local palette shorthands ──────────────────────────────────────────────
+  static const _bg      = AppPalette.navy0;       // carbon0
+  static const _accent  = AppPalette.critical;    // ferrari (red glow)
+  static const _gold    = AppPalette.amber;        // gold
+  static const _goldLt  = AppPalette.amberLight;  // goldLight
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     return Scaffold(
-      backgroundColor: AppPalette.carbon0,
+      backgroundColor: _bg,
       body: Stack(
         children: [
           // Background radial gradient
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: RadialGradient(
-                center: Alignment(0, -0.2),
+                center: const Alignment(0, -0.2),
                 radius: 0.9,
-                colors: [Color(0xFF300000), AppPalette.carbon0],
-                stops: [0.0, 1.0],
+                colors: [const Color(0xFF1A0A0A), _bg],
+                stops: const [0.0, 1.0],
               ),
             ),
           ),
@@ -211,9 +226,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        AppPalette.ferrari.withOpacity(0),
-                        AppPalette.ferrari.withOpacity(0.7),
-                        AppPalette.ferrari.withOpacity(0),
+                        _accent.withValues(alpha: 0.0),
+                        _accent.withValues(alpha: 0.7),
+                        _accent.withValues(alpha: 0.0),
                       ],
                     ),
                   ),
@@ -226,7 +241,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo with pulse
+                // Logo with pulse ring
                 AnimatedBuilder(
                   animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
                   builder: (_, __) {
@@ -239,6 +254,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
+                              // Pulse ring
                               Transform.scale(
                                 scale: _pulseScale.value,
                                 child: Container(
@@ -246,30 +262,32 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: AppPalette.ferrari
-                                          .withOpacity(_pulseOpacity.value),
+                                      color: _accent.withValues(
+                                          alpha: _pulseOpacity.value),
                                       width: 2,
                                     ),
                                   ),
                                 ),
                               ),
+                              // Logo circle
                               Container(
                                 width: 100, height: 100,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  gradient: const RadialGradient(
-                                    colors: [Color(0xFF5A0000), AppPalette.ferrari],
-                                    stops: [0.0, 1.0],
+                                  gradient: RadialGradient(
+                                    colors: [const Color(0xFF3A0010), _accent],
+                                    stops: const [0.0, 1.0],
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: AppPalette.ferrari.withOpacity(0.6),
+                                      color: _accent.withValues(alpha: 0.6),
                                       blurRadius: 32, spreadRadius: 4,
                                     ),
                                   ],
                                 ),
                                 child: const Icon(
-                                  Icons.water_drop, size: 52, color: Colors.white,
+                                  Icons.water_drop,
+                                  size: 52, color: Colors.white,
                                 ),
                               ),
                             ],
@@ -288,16 +306,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     child: Column(
                       children: [
                         ShaderMask(
-                          shaderCallback: (bounds) => const LinearGradient(
+                          shaderCallback: (bounds) => LinearGradient(
                             colors: [
-                              AppPalette.ferrari,
-                              AppPalette.goldLight,
+                              _accent,
+                              _goldLt,
                               Colors.white,
                             ],
-                            stops: [0.0, 0.5, 1.0],
+                            stops: const [0.0, 0.5, 1.0],
                           ).createShader(bounds),
                           child: const Text(
-                            'Equinox',
+                            'OpsFlood',
                             style: TextStyle(
                               fontSize: 44, fontWeight: FontWeight.w900,
                               color: Colors.white, letterSpacing: -1.0,
@@ -305,11 +323,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                           ),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
+                        Text(
                           'AI-POWERED FLOOD INTELLIGENCE',
                           style: TextStyle(
                             fontSize: 11, fontWeight: FontWeight.w700,
-                            color: AppPalette.gold, letterSpacing: 3.0,
+                            color: _gold, letterSpacing: 3.0,
                           ),
                         ),
                       ],
@@ -322,7 +340,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   opacity: _statusOpacity,
                   child: Column(
                     children: [
-                      // Animated progress indicator
                       if (!_backendOnline)
                         SizedBox(
                           width: 200, height: 2,
@@ -330,15 +347,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             borderRadius: BorderRadius.circular(2),
                             child: LinearProgressIndicator(
                               backgroundColor:
-                                  AppPalette.ferrari.withOpacity(0.15),
+                                  _accent.withValues(alpha: 0.15),
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                AppPalette.ferrari.withOpacity(0.8),
+                                _accent.withValues(alpha: 0.8),
                               ),
                             ),
                           ),
                         )
                       else
-                        SizedBox(
+                        const SizedBox(
                           width: 20, height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
@@ -368,9 +385,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             bottom: 32, left: 0, right: 0,
             child: Center(
               child: Text(
-                'v2.1  \u2022  EQUINOX BUILD',
+                'v2.1  \u2022  MIDNIGHT OPS BUILD',
                 style: TextStyle(
-                  color: AppPalette.ferrari.withOpacity(0.5),
+                  color: _accent.withValues(alpha: 0.5),
                   fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 2.0,
                 ),
               ),
