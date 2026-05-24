@@ -2,14 +2,19 @@
 //
 // OpsFlood — LiveFetchEngine
 //
-// Exposes the EXACT same public API that real_time_service.dart delegates to,
-// while internally hitting real public APIs:
+// Data sources by platform:
 //
-//   Source 1 — Open-Meteo Weather API       (free, no key)
-//   Source 2 — Open-Meteo GloFAS River API  (free, no key)
-//   Source 3 — OpsFlood backend /api/cwc-ffs/station
-//   Source 4 — OpsFlood backend /api/live-levels
-//   Source 5 — SACHET NDMA IMD alert feed   (free, no key)
+//   ALL PLATFORMS:
+//     Source 1: Open-Meteo Weather API         (CORS-safe, free)
+//     Source 2: Open-Meteo GloFAS River API    (CORS-safe, free)
+//
+//   MOBILE / DESKTOP only (no CORS restriction):
+//     Source 3: OpsFlood backend /api/cwc-ffs  (Render, needs CORS headers)
+//     Source 4: OpsFlood backend /api/live-levels
+//     Source 5: SACHET NDMA IMD alerts
+//
+// On Chrome web, Sources 3-5 are skipped (browser blocks them).
+// The app still shows real river discharge + weather data on web.
 library;
 
 import 'dart:async';
@@ -22,18 +27,13 @@ import '../data/india_cities.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 
-// ──────────────────────────────────────────────────────────────────────────
-// MlInferenceEngine — thin alias so real_time_service.dart compiles
-// ──────────────────────────────────────────────────────────────────────────
+// ── MlInferenceEngine stub (imported by real_time_service.dart) ────────────
 class MlInferenceEngine {
-  // No-op: real inference is done inside LiveFetchEngine._runInference()
+  // All inference is inside LiveFetchEngine._inferRisk()
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// LiveFetchEngine
-// ──────────────────────────────────────────────────────────────────────────
+// ── LiveFetchEngine ─────────────────────────────────────────────────────
 class LiveFetchEngine {
-  // Singleton — factory constructor so `LiveFetchEngine()` always returns same instance
   static final LiveFetchEngine _instance = LiveFetchEngine._internal();
   factory LiveFetchEngine() => _instance;
   LiveFetchEngine._internal();
@@ -42,10 +42,14 @@ class LiveFetchEngine {
   Timer? _timer;
   bool _lock = false;
 
-  // ── Callback wired by RealTimeService ───────────────────────────────────────
+  // True when running on Chrome/web — evaluated once, not const
+  static final bool _isWeb = identical(0, 0.0); // always false on VM/mobile
+  // Correct cross-platform web detection:
+  static bool get _runningOnWeb => kIsWeb;
+
   VoidCallback? onStateChanged;
 
-  // ── Status flags ────────────────────────────────────────────────────────────
+  // ── Status flags ────────────────────────────────────────────────────────
   bool      isLoading          = false;
   bool      isOnline           = false;
   bool      isUsingFallback    = false;
@@ -55,7 +59,7 @@ class LiveFetchEngine {
   String?   error;
   int       queuedOfflineCycles = 0;
 
-  // ── Data ─────────────────────────────────────────────────────────────────────
+  // ── Data ────────────────────────────────────────────────────────────────────
   List<FloodData>    liveLevels          = [];
   List<dynamic>      activeCriticalAlerts = [];
   List<dynamic>      criticalAlerts       = [];
@@ -71,8 +75,8 @@ class LiveFetchEngine {
   );
 
   // ── Debug ────────────────────────────────────────────────────────────────────
-  Map<String, dynamic> debugLevelsRaw  = {};
-  Map<String, dynamic> debugCwcRaw     = {};
+  Map<String, dynamic> debugLevelsRaw   = {};
+  Map<String, dynamic> debugCwcRaw      = {};
   int                  debugRetryCount  = 0;
   int                  debugWakeAttempts = 0;
 
@@ -109,7 +113,7 @@ class LiveFetchEngine {
         return s.toLowerCase() == state.toLowerCase() || s == 'All India';
       }).toList();
 
-  // ── Polling ────────────────────────────────────────────────────────────────────
+  // ── Polling ─────────────────────────────────────────────────────────────────
 
   Future<void> startPolling() async {
     _timer?.cancel();
@@ -122,17 +126,16 @@ class LiveFetchEngine {
     _timer = null;
   }
 
-  // ── Main refresh ──────────────────────────────────────────────────────────────
+  // ── Main refresh ─────────────────────────────────────────────────────────────
 
   Future<void> refreshData() async {
     if (_lock) return;
-    _lock    = true;
+    _lock     = true;
     isLoading = true;
     if (!isOnline) { isWakingUp = true; debugWakeAttempts++; }
     Future.delayed(Duration.zero, () => onStateChanged?.call());
 
     try {
-      // Fetch all cities in the top-priority list concurrently
       final cities = _priorityCities();
       final snapshots = await Future.wait(
         cities.map((c) => _fetchCity(c)),
@@ -164,8 +167,8 @@ class LiveFetchEngine {
             'city':     city.name,
             'state':    city.state,
             'severity': snap['riskLabel'],
-            'title':    '${snap['riskLabel']} Flood Risk — ${city.name}',
-            'source':   snap['healthySources'] > 2 ? 'Live' : 'Partial',
+            'title':    '${snap["riskLabel"]} Flood Risk — ${city.name}',
+            'source':   (snap['healthySources'] as int? ?? 0) > 2 ? 'Live' : 'Partial',
           });
         }
 
@@ -181,9 +184,9 @@ class LiveFetchEngine {
           });
         }
 
-        // IMD alerts from snap
-        if (snap['imdAlerts'] is List) {
-          imdAlerts = (snap['imdAlerts'] as List).cast<dynamic>();
+        final imdList = snap['imdAlerts'];
+        if (imdList is List && imdList.isNotEmpty) {
+          imdAlerts = imdList;
         }
       }
 
@@ -212,14 +215,14 @@ class LiveFetchEngine {
       if (kDebugMode) {
         debugPrint('[LiveFetch] ✓ ${newLevels.length} cities | '
             '$healthy/${cities.length} healthy | '
-            '${criticalCount} critical');
+            '${criticalCount} critical | web=$_runningOnWeb');
       }
-    } catch (e) {
+    } catch (e, st) {
       isOnline    = false;
       isWakingUp  = false;
       error       = e.toString();
       debugRetryCount++;
-      if (kDebugMode) debugPrint('[LiveFetch] error: $e');
+      if (kDebugMode) debugPrint('[LiveFetch] error: $e\n$st');
     } finally {
       isLoading = false;
       _lock     = false;
@@ -231,35 +234,41 @@ class LiveFetchEngine {
 
   Future<Map<String, dynamic>?> _fetchCity(IndiaCity city) async {
     try {
+      // Sources 1 & 2 work everywhere (Open-Meteo has CORS headers)
+      final weatherFut = _fetchWeather(city);
+      final glofasFut  = _fetchGloFas(city);
+
+      // Sources 3, 4, 5 only on mobile/desktop — skipped on web due to CORS
+      final cwcFut     = _runningOnWeb ? Future.value(null) : _fetchCwc(city);
+      final backendFut = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
+      final imdFut     = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
+
       final results = await Future.wait([
-        _fetchWeather(city),
-        _fetchGloFas(city),
-        _fetchCwc(city),
-        _fetchBackendLevels(city),
-        _fetchImdAlerts(city),
+        weatherFut, glofasFut, cwcFut, backendFut, imdFut,
       ], eagerError: false);
 
-      final weather  = results[0] as Map<String, dynamic>?;
-      final glofas   = results[1] as Map<String, dynamic>?;
-      final cwc      = results[2] as Map<String, dynamic>?;
-      final backend  = results[3] as Map<String, dynamic>?;
-      final imd      = results[4] as List<dynamic>?;
+      final weather = results[0] as Map<String, dynamic>?;
+      final glofas  = results[1] as Map<String, dynamic>?;
+      final cwc     = results[2] as Map<String, dynamic>?;
+      final backend = results[3] as Map<String, dynamic>?;
+      final imd     = results[4] as List<dynamic>?;
+
+      // A city is healthy if Open-Meteo weather OR GloFAS responded
+      if (weather == null && glofas == null) return null;
 
       final healthySources = [
         weather != null, glofas != null,
         cwc != null, backend != null, imd != null,
       ].where((v) => v).length;
 
-      final precipMm   = (weather?['precip_mm']   as num?)?.toDouble() ?? 0.0;
-      final dischargeM3s = (glofas?['discharge']  as num?)?.toDouble() ?? 0.0;
-      final discharge7d  = (glofas?['discharge7d'] as List?)?.cast<double>() ?? <double>[];
+      final precipMm     = (weather?['precip_mm']    as num?)?.toDouble() ?? 0.0;
+      final dischargeM3s = (glofas?['discharge']     as num?)?.toDouble() ?? 0.0;
+      final discharge7d  = (glofas?['discharge7d']   as List?)?.cast<double>() ?? <double>[];
 
-      // Level: prefer live CWC, fall back to backend
-      final cwcLevel    = (cwc?['level']   ?? backend?['level'])    as double?;
-      final dangerLevel = (cwc?['danger']  ?? backend?['danger'])   as double?;
-      final warnLevel   = (cwc?['warning'] ?? backend?['warning'])  as double?;
+      final cwcLevel    = (cwc?['level']   ?? backend?['level'])   as double?;
+      final dangerLevel = (cwc?['danger']  ?? backend?['danger'])  as double?;
+      final warnLevel   = (cwc?['warning'] ?? backend?['warning']) as double?;
 
-      // ML risk label
       final riskLabel = _inferRisk(
         precipMm:     precipMm,
         dischargeM3s: dischargeM3s,
@@ -277,14 +286,14 @@ class LiveFetchEngine {
         'warningLevel':   warnLevel   ?? 8.0,
         'riskLabel':      riskLabel,
         'healthySources': healthySources,
-        'imdAlerts':      imd ?? [],
+        'imdAlerts':      imd ?? <dynamic>[],
       };
     } catch (_) {
       return null;
     }
   }
 
-  // ── Source 1: Open-Meteo Weather ───────────────────────────────────────
+  // ── Source 1: Open-Meteo Weather (CORS-safe) ─────────────────────────────
 
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     try {
@@ -294,7 +303,7 @@ class LiveFetchEngine {
         '&hourly=precipitation,temperature_2m,relative_humidity_2m'
         '&forecast_days=2&timezone=Asia%2FKolkata',
       );
-      final res = await _client.get(uri).timeout(const Duration(seconds: 10));
+      final res = await _client.get(uri).timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return null;
       final j      = jsonDecode(res.body) as Map<String, dynamic>;
       final hourly = j['hourly'] as Map<String, dynamic>;
@@ -304,7 +313,6 @@ class LiveFetchEngine {
         'precip_mm': last24.fold(0.0, (a, b) => a + b),
         'temp_c':    _doubles(hourly['temperature_2m']).lastOrNull ?? 25.0,
         'humidity':  _doubles(hourly['relative_humidity_2m']).lastOrNull ?? 60.0,
-        'hourly24':  last24,
       };
     } catch (e) {
       if (kDebugMode) debugPrint('[LiveFetch] weather ${city.name}: $e');
@@ -312,7 +320,7 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 2: Open-Meteo GloFAS River Discharge ────────────────────────
+  // ── Source 2: Open-Meteo GloFAS (CORS-safe) ─────────────────────────────
 
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     try {
@@ -321,7 +329,7 @@ class LiveFetchEngine {
         '?latitude=${city.lat}&longitude=${city.lon}'
         '&daily=river_discharge&past_days=7&forecast_days=1',
       );
-      final res = await _client.get(uri).timeout(const Duration(seconds: 10));
+      final res = await _client.get(uri).timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return null;
       final j    = jsonDecode(res.body) as Map<String, dynamic>;
       final vals = _doubles((j['daily'] as Map?)?['river_discharge']);
@@ -333,16 +341,16 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 3: OpsFlood backend — CWC FFS gauge ───────────────────────
+  // ── Source 3: OpsFlood CWC (mobile/desktop only) ────────────────────────
 
   Future<Map<String, dynamic>?> _fetchCwc(IndiaCity city) async {
     if (city.cwcStation == null) return null;
     try {
       final res = await _client
           .get(Uri.parse('${AppConfig.baseUrl}${AppConfig.epCwcFfs}/${city.cwcStation}'))
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(seconds: 14));
       if (res.statusCode != 200) return null;
-      final j = (jsonDecode(res.body) as Map<String, dynamic>);
+      final j = jsonDecode(res.body) as Map<String, dynamic>;
       final d = j['data'] ?? j;
       return {
         'level':   _num(d['current_level'] ?? d['level']),
@@ -355,7 +363,7 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 4: OpsFlood backend — /api/live-levels ──────────────────────
+  // ── Source 4: OpsFlood /api/live-levels (mobile/desktop only) ────────────
 
   Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
     try {
@@ -363,7 +371,7 @@ class LiveFetchEngine {
         '${AppConfig.baseUrl}${AppConfig.epLiveLevels}'
         '?city=${Uri.encodeComponent(city.name)}&state=${Uri.encodeComponent(city.state)}',
       );
-      final res = await _client.get(uri).timeout(const Duration(seconds: 12));
+      final res = await _client.get(uri).timeout(const Duration(seconds: 14));
       if (res.statusCode != 200) return null;
       final j = jsonDecode(res.body) as Map<String, dynamic>;
       final d = _firstItem(j);
@@ -379,8 +387,8 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 5: SACHET NDMA IMD alerts ─────────────────────────────────
-  // Cached globally — only one request per 10-min window
+  // ── Source 5: SACHET NDMA IMD (mobile/desktop only) ─────────────────────
+
   List<dynamic> _imdCache        = [];
   DateTime?     _imdCacheTime;
 
@@ -396,7 +404,7 @@ class LiveFetchEngine {
           .get(Uri.parse(
             'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails',
           ))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return null;
       final raw = jsonDecode(res.body);
       List<dynamic> items = [];
@@ -429,7 +437,7 @@ class LiveFetchEngine {
     }).toList();
   }
 
-  // ── Risk inference ───────────────────────────────────────────────────────────
+  // ── Rule-based risk inference ────────────────────────────────────────────────
 
   String _inferRisk({
     required double precipMm,
@@ -473,7 +481,7 @@ class LiveFetchEngine {
     final current = (snap['cwcLevel'] as double?) ??
         _dischargeToLevel((snap['discharge'] as num?)?.toDouble() ?? 0);
 
-    final risk  = snap['riskLabel'] as String? ?? 'LOW';
+    final risk   = snap['riskLabel'] as String? ?? 'LOW';
     final precip = (snap['precip_mm'] as num?)?.toDouble() ?? 0.0;
     final imdSev = precip >= 115 ? 'RED'
         : precip >= 64  ? 'ORANGE'
@@ -495,7 +503,7 @@ class LiveFetchEngine {
       riverName:     city.river,
       flowRate:      (snap['discharge'] as num?)?.toDouble(),
       rainfall24h:   precip,
-      status:        (snap['healthySources'] as int? ?? 0) >= 3 ? 'Live' : 'Partial',
+      status:        (snap['healthySources'] as int? ?? 0) >= 2 ? 'Live' : 'Partial',
       imdRainfallMm: precip,
       imdSeverity:   imdSev,
     );
@@ -515,17 +523,14 @@ class LiveFetchEngine {
     ));
   }
 
-  // ── Priority cities (top flood-risk, fetched every cycle) ────────────────
+  // ── Priority city list ─────────────────────────────────────────────────────────
 
   List<IndiaCity> _priorityCities() {
     const ids = [
       'guwahati', 'patna', 'cuttack', 'kolkata', 'varanasi',
       'gorakhpur', 'dhubri', 'supaul', 'jalpaiguri', 'haridwar',
     ];
-    return ids
-        .map((id) => cityById(id))
-        .whereType<IndiaCity>()
-        .toList();
+    return ids.map(cityById).whereType<IndiaCity>().toList();
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -543,7 +548,7 @@ class LiveFetchEngine {
     for (final k in ['data', 'items', 'results', 'levels', 'records']) {
       final v = j[k];
       if (v is List && v.isNotEmpty) return v.first as Map<String, dynamic>?;
-      if (v is Map<String, dynamic>)  return v;
+      if (v is Map<String, dynamic>) return v;
     }
     if (j.containsKey('current_level') || j.containsKey('level')) return j;
     return null;
