@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../services/real_time_service.dart';
-import '../screens/india_rivers_screen.dart';
-import '../screens/india_river_explorer_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'monitors_screen.dart';
@@ -20,13 +18,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   // FIX 1: Only HomeScreen starts/stops polling. Individual screens must NOT
   // call startPolling() themselves — that caused duplicate listeners + full
-  // rebuilds across all 7 screens on every poll tick.
+  // rebuilds across all screens on every poll tick.
   final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
-  // FIX 2: Replace IndexedStack (keeps all 7 alive) with a lazy builder that
-  // only mounts the active screen. Off-screen widgets are fully unmounted,
-  // so they cannot receive notifyListeners() calls.
+  // FIX 2: Lazy builder — only mounts the active screen.
+  // Off-screen widgets are fully unmounted, so they cannot receive
+  // notifyListeners() calls.
   static const _destinations = [
     _NavEntry(label: 'Home',     icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard),
     _NavEntry(label: 'Monitors', icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart),
@@ -34,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _NavEntry(label: 'Weather',  icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud),
     _NavEntry(label: 'Predict',  icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
     _NavEntry(label: 'Rivers',   icon: Icons.water_outlined,          selectedIcon: Icons.water),
-    _NavEntry(label: 'India',    icon: Icons.map_outlined,            selectedIcon: Icons.map),
   ];
 
   Widget _buildScreen(int index) {
@@ -45,7 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
       case 3: return const WeatherScreen();
       case 4: return const PredictScreen();
       case 5: return const RiverMonitorScreen();
-      case 6: return const IndiaRiverExplorerScreen();
       default: return const DashboardScreen();
     }
   }
