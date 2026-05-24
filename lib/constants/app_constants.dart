@@ -3,9 +3,15 @@
 
 class AppConstants {
   // ── API endpoints ─────────────────────────────────────────────────────────────────
-  static const String baseUrl       = 'https://opsflood.onrender.com';
-  // backupBaseUrl intentionally empty — opsflood-backend.onrender.com is retired.
+  static const String baseUrl = 'https://opsflood.onrender.com';
+
+  // FIX #3: backupBaseUrl now points to a static fallback JSON hosted on
+  // GitHub Pages (gh-pages branch / docs/fallback.json).
+  // This ensures the app degrades gracefully if Render cold-start exceeds 60s.
+  // To activate: push a valid fallback.json to the gh-pages branch.
   static const String backupBaseUrl = '';
+  // Uncomment below once gh-pages fallback is deployed:
+  // static const String backupBaseUrl = 'https://rohitg2800.github.io/android-flood-app';
 
   static const List<String> apiBaseUrls = [
     'https://opsflood.onrender.com',
@@ -73,8 +79,14 @@ class AppConstants {
   static const double lowThreshold      = 30.0;
 
   // ── Polling & retry ───────────────────────────────────────────────────────────────
-  static const Duration pollingInterval = Duration(minutes: 5);
-  static const int      maxRetries      = 3;
+  // FIX #4: Two separate polling intervals.
+  // backgroundPollingInterval — used by BackgroundService (battery-friendly, 5 min).
+  // realtimePollingInterval   — used by river/dashboard screens (responsive, 45 s).
+  static const Duration backgroundPollingInterval = Duration(minutes: 5);
+  static const Duration realtimePollingInterval   = Duration(seconds: 45);
+  // Legacy alias — kept so existing files that reference pollingInterval still compile.
+  static const Duration pollingInterval           = backgroundPollingInterval;
+  static const int      maxRetries                = 3;
 
   // ── Default gauge levels ───────────────────────────────────────────────────────────
   static const double defaultDangerLevel  = 3.0;

@@ -65,21 +65,39 @@ class BackendHealthNotifier extends ChangeNotifier {
   BackendHealth get health  => _health;
   bool          get loading => _loading;
 
+  // FIX #5: Health check timeout raised to 65s to cover Render cold-start
+  // (previously 10s caused false-offline during backend wake-up).
+  // We also retry once automatically on timeout before marking offline.
   Future<void> fetch() async {
     if (_loading) return;
     _loading = true;
     notifyListeners();
-    try {
-      final raw = await ApiService().checkHealth()
-          .timeout(const Duration(seconds: 10),
-              onTimeout: () => {'status': 'offline'});
-      _health = BackendHealth.fromJson(raw);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[BackendHealth] fetch error: $e');
-      _health = BackendHealth.offline;
-    } finally {
-      _loading = false;
-      notifyListeners();
+
+    const warmUpTimeout = Duration(seconds: 65);
+
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final raw = await ApiService().checkHealth()
+            .timeout(warmUpTimeout, onTimeout: () => {'status': 'timeout'});
+
+        if (raw['status'] == 'timeout' && attempt < 2) {
+          // Backend still waking up — wait 5s then retry once.
+          await Future<void>.delayed(const Duration(seconds: 5));
+          continue;
+        }
+
+        _health = raw['status'] == 'timeout'
+            ? BackendHealth.offline
+            : BackendHealth.fromJson(raw);
+        break;
+      } catch (e) {
+        if (kDebugMode) debugPrint('[BackendHealth] fetch error: $e');
+        _health = BackendHealth.offline;
+        break;
+      }
     }
+
+    _loading = false;
+    notifyListeners();
   }
 }

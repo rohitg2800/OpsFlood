@@ -179,8 +179,9 @@ class ApiService {
   Future<Map<String, dynamic>> predict(Map<String, dynamic> input) =>
       predictFlood(input);
 
+  // FIX #1: Changed /predict/v2 → /predict (backend only exposes /predict)
   Future<Map<String, dynamic>> predictFlood(Map<String, dynamic> input) =>
-      _post('/predict/v2', input);
+      _post('/predict', input);
 
   Future<Map<String, dynamic>> getFloodForecast({
     required String city,
@@ -228,8 +229,22 @@ class ApiService {
       _post('/ingestion/run', {});
 
   // ── CWC stations ─────────────────────────────────────────────────────────
+  // FIX #2: CWC data is now proxied via the backend /api/cwc-stations
+  // instead of calling CWC directly from the app (avoids CORS on Flutter Web).
   Future<Map<String, dynamic>> getAllCwcStations() =>
       _get('/api/cwc-stations');
+
+  // FIX #2b: Proxied live telemetry for a single state+station
+  // — replaces any direct ffs.india-water.gov.in calls in cwc_direct_service.
+  Future<Map<String, dynamic>> getCwcProxiedTelemetry({
+    required String state,
+    required String station,
+    int limit = 6,
+  }) =>
+      _get('/api/live-telemetry'
+          '?state=${Uri.encodeComponent(state)}'
+          '&station=${Uri.encodeComponent(station)}'
+          '&limit=$limit');
 
   // ── Model quality ────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getModelMetrics() =>
