@@ -8,7 +8,7 @@
 // Architecture:
 //   - Runs on a periodic timer (default: every 15 minutes).
 //   - Uses AlertEvaluator for stateless threshold logic.
-//   - Fires FCM local notifications via FcmService for ≥ warning alerts.
+//   - Fires local notifications via FcmService.showAlertNotification().
 //   - Exposes a Stream<List<ThresholdAlert>> that AlertsProvider listens to.
 //   - Persists last-seen alert levels to SharedPreferences to suppress duplicates.
 library;
@@ -30,11 +30,11 @@ import 'fcm_service.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────────────────────
-const _kPollInterval     = Duration(minutes: 15);
-const _kPrefKeyPrefix    = 'threshold_alert_last_';
-const _kPrefAlertsJson   = 'threshold_alerts_cache';
-const _kMaxCachedAlerts  = 200;
-const _kHttpTimeout      = Duration(seconds: 20);
+const _kPollInterval    = Duration(minutes: 15);
+const _kPrefKeyPrefix   = 'threshold_alert_last_';
+const _kPrefAlertsJson  = 'threshold_alerts_cache';
+const _kMaxCachedAlerts = 200;
+const _kHttpTimeout     = Duration(seconds: 20);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ThresholdAlertService
@@ -43,27 +43,24 @@ class ThresholdAlertService {
   ThresholdAlertService._();
   static final ThresholdAlertService instance = ThresholdAlertService._();
 
-  // Stream controller — broadcast so multiple widgets can listen
   final _controller = StreamController<List<ThresholdAlert>>.broadcast();
   Stream<List<ThresholdAlert>> get stream => _controller.stream;
 
   Timer? _timer;
   bool   _running = false;
 
-  // In-memory cache of the most recent alerts (newest first)
   final List<ThresholdAlert> _alerts = [];
   List<ThresholdAlert> get currentAlerts => List.unmodifiable(_alerts);
 
-  // Previous discharge values keyed by cityId for trend detection
   final Map<String, double> _prevValues = {};
 
-  // ─── Lifecycle ────────────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   Future<void> start() async {
     if (_running) return;
     _running = true;
     await _loadCachedAlerts();
-    await _poll(); // immediate first run
+    await _poll();
     _timer = Timer.periodic(_kPollInterval, (_) => _poll());
     debugPrint('[ThresholdAlertService] started, polling every $_kPollInterval');
   }
@@ -80,13 +77,13 @@ class ThresholdAlertService {
     _controller.close();
   }
 
-  // ─── Main poll cycle ──────────────────────────────────────────────────────
+  // ── Main poll cycle ────────────────────────────────────────────────────────
 
   Future<void> _poll() async {
-    debugPrint('[ThresholdAlertService] poll started at ${DateTime.now()}');
+    debugPrint('[ThresholdAlertService] poll @ ${DateTime.now()}');
     final newAlerts = <ThresholdAlert>[];
 
-    // 1. Evaluate all monitored IndiaCity entries via GloFAS discharge
+    // 1. IndiaCity entries via GloFAS discharge
     for (final city in monitoredCities) {
       try {
         final alert = await _evaluateCity(city);
@@ -96,7 +93,7 @@ class ThresholdAlertService {
       }
     }
 
-    // 2. Evaluate Bihar gauges
+    // 2. Bihar gauges
     for (final gauge in kBiharGauges) {
       try {
         final alert = await _evaluateBiharGauge(gauge);
@@ -107,40 +104,31 @@ class ThresholdAlertService {
     }
 
     if (newAlerts.isEmpty) {
-      debugPrint('[ThresholdAlertService] poll complete — no actionable alerts');
+      debugPrint('[ThresholdAlertService] poll done — no actionable alerts');
       return;
     }
 
-    // 3. Merge with existing alerts, deduplicate by cityId (keep latest)
     _mergeAlerts(newAlerts);
 
-    // 4. Fire push notifications for new ≥ warning alerts
     for (final alert in newAlerts) {
-      if (alert.level.requiresPush) {
-        await _notify(alert);
-      }
+      if (alert.level.requiresPush) await _notify(alert);
     }
 
-    // 5. Persist to prefs
     await _saveAlertsCache();
-
-    // 6. Broadcast
     _controller.add(currentAlerts);
-    debugPrint('[ThresholdAlertService] poll complete — ${newAlerts.length} new alerts');
+    debugPrint('[ThresholdAlertService] poll done — ${newAlerts.length} new alerts');
   }
 
-  // ─── Per-city GloFAS evaluation ───────────────────────────────────────────
+  // ── Per-city GloFAS evaluation ─────────────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateCity(IndiaCity city) async {
-    final url = GloFasUrls.discharge(city.lat, city.lon);
-    final discharge = await _fetchLatestDischarge(url);
+    final discharge = await _fetchLatestDischarge(
+        GloFasUrls.discharge(city.lat, city.lon));
     if (discharge == null) return null;
 
     final prev = _prevValues[city.id];
     _prevValues[city.id] = discharge;
 
-    // Use GloFAS discharge — convert WRD gauge levels to equivalent discharge
-    // if city has dangerLevel > 0; use discharge directly
     return AlertEvaluator.fromCity(
       city:          city,
       currentValue:  discharge,
@@ -149,21 +137,17 @@ class ThresholdAlertService {
     );
   }
 
-  // ─── Bihar gauge evaluation ───────────────────────────────────────────────
+  // ── Bihar gauge evaluation ─────────────────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateBiharGauge(BiharGauge gauge) async {
-    // Bihar gauges: use GloFAS discharge at gauge lat/lon as proxy
-    final url = GloFasUrls.discharge(gauge.lat, gauge.lon);
-    final discharge = await _fetchLatestDischarge(url);
+    final discharge = await _fetchLatestDischarge(
+        GloFasUrls.discharge(gauge.lat, gauge.lon));
     if (discharge == null) return null;
 
     final key  = '${gauge.river}_${gauge.station}';
     final prev = _prevValues[key];
     _prevValues[key] = discharge;
 
-    // Scale: compare discharge against gauge danger level proportionally
-    // (gauge.dangerLevel is in m MSL; we treat discharge as the primary signal
-    //  but still classify against the WRD thresholds after normalisation)
     return AlertEvaluator.fromBiharGauge(
       gauge:         gauge,
       currentValue:  discharge,
@@ -171,7 +155,7 @@ class ThresholdAlertService {
     );
   }
 
-  // ─── HTTP helper — fetch today's river_discharge from GloFAS ─────────────
+  // ── HTTP helper ────────────────────────────────────────────────────────────
 
   Future<double?> _fetchLatestDischarge(String url) async {
     try {
@@ -179,29 +163,27 @@ class ThresholdAlertService {
           .get(Uri.parse(url))
           .timeout(_kHttpTimeout);
       if (response.statusCode != 200) return null;
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final json  = jsonDecode(response.body) as Map<String, dynamic>;
       final daily = json['daily'] as Map<String, dynamic>?;
       if (daily == null) return null;
-      final values = (daily['river_discharge'] as List?);
+      final values = daily['river_discharge'] as List?;
       if (values == null || values.isEmpty) return null;
-      // Return the most recent non-null value (last element = today/forecast)
       for (int i = values.length - 1; i >= 0; i--) {
         if (values[i] != null) return (values[i] as num).toDouble();
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
-  // ─── Merge helpers ────────────────────────────────────────────────────────
+  // ── Merge ──────────────────────────────────────────────────────────────────
 
   void _mergeAlerts(List<ThresholdAlert> incoming) {
     for (final alert in incoming) {
       _alerts.removeWhere((a) => a.cityId == alert.cityId);
       _alerts.insert(0, alert);
     }
-    // Sort: extreme > danger > warning > watch; then newest first within level
     _alerts.sort((a, b) {
       final cmp = b.level.index.compareTo(a.level.index);
       return cmp != 0 ? cmp : b.timestamp.compareTo(a.timestamp);
@@ -211,14 +193,14 @@ class ThresholdAlertService {
     }
   }
 
-  // ─── Notification ─────────────────────────────────────────────────────────
+  // ── Notification via FcmService public API ─────────────────────────────────
 
   Future<void> _notify(ThresholdAlert alert) async {
     final prefs    = await SharedPreferences.getInstance();
     final key      = '$_kPrefKeyPrefix${alert.cityId}';
     final lastSeen = prefs.getString(key);
 
-    // Suppress if same or higher level already notified
+    // Suppress if same or higher level was already notified
     if (lastSeen != null) {
       final lastLevel = AlertLevel.values.firstWhere(
         (l) => l.name == lastSeen,
@@ -229,21 +211,29 @@ class ThresholdAlertService {
 
     await prefs.setString(key, alert.level.name);
 
-    final title = '${alert.level.label.toUpperCase()} — ${alert.cityName}';
-    final body  =
+    final severity = switch (alert.level) {
+      AlertLevel.extreme => 'EXTREME',
+      AlertLevel.danger  => 'DANGER',
+      _                  => 'WARNING',
+    };
+
+    final body =
         '${alert.river} at ${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}. '
-        'Danger level: ${alert.dangerLevel} ${alert.unitLabel}. '
+        'Danger level: ${alert.dangerLevel.toStringAsFixed(1)} ${alert.unitLabel}. '
         'Trend: ${alert.trend.name}.';
 
-    await FcmService.instance.showLocalNotification(
-      id:    alert.cityId.hashCode.abs(),
-      title: title,
-      body:  body,
-      payload: alert.cityId,
+    await FcmService.instance.showAlertNotification(
+      cityName:     alert.cityName,
+      state:        alert.state,
+      river:        alert.river,
+      severity:     severity,
+      currentLevel: alert.currentValue,
+      dangerLevel:  alert.dangerLevel,
+      message:      body,
     );
   }
 
-  // ─── Persistence ──────────────────────────────────────────────────────────
+  // ── Persistence ────────────────────────────────────────────────────────────
 
   Future<void> _saveAlertsCache() async {
     try {
@@ -276,13 +266,13 @@ class ThresholdAlertService {
       final list  = jsonDecode(raw) as List;
       _alerts.clear();
       for (final m in list) {
-        final map  = m as Map<String, dynamic>;
+        final map = m as Map<String, dynamic>;
         _alerts.add(ThresholdAlert(
           id:           '${map["cityId"]}_cached',
-          cityId:       map['cityId'] as String,
+          cityId:       map['cityId']   as String,
           cityName:     map['cityName'] as String,
-          state:        map['state'] as String,
-          river:        map['river'] as String,
+          state:        map['state']    as String,
+          river:        map['river']    as String,
           level:        AlertLevel.values.firstWhere(
                           (l) => l.name == map['level'],
                           orElse: () => AlertLevel.normal),
@@ -306,7 +296,8 @@ class ThresholdAlertService {
     }
   }
 
-  /// Mark all alerts as seen (call when user opens alerts screen)
+  // ── Public helpers ─────────────────────────────────────────────────────────
+
   Future<void> markAllSeen() async {
     for (int i = 0; i < _alerts.length; i++) {
       _alerts[i] = _alerts[i].copyWith(isNew: false);
@@ -315,9 +306,8 @@ class ThresholdAlertService {
     await _saveAlertsCache();
   }
 
-  /// Force an immediate poll outside the timer cycle.
   Future<void> refresh() => _poll();
 
-  /// Count of unread alerts ≥ warning
-  int get unreadCount => _alerts.where((a) => a.isNew && a.level.requiresPush).length;
+  int get unreadCount =>
+      _alerts.where((a) => a.isNew && a.level.requiresPush).length;
 }

@@ -53,7 +53,6 @@ class FcmFloodAlert {
 // Background handler runs in a separate isolate — must be top-level.
 @pragma('vm:entry-point')
 Future<void> _fcmBackgroundHandler(RemoteMessage message) async {
-  // Guard against duplicate-app error when isolate already has Firebase.
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
@@ -80,8 +79,6 @@ class FcmService {
     _initialized = true;
 
     try {
-      // Guard against duplicate-app — Firebase may already be initialized
-      // by firebase_messaging background handler or by main.dart.
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
@@ -114,17 +111,6 @@ class FcmService {
       final initial = await messaging.getInitialMessage();
       if (initial != null) _handleMessageTap(initial);
 
-      // FIX: FirebaseMessaging.onBackgroundMessage() must be called ONCE in
-      // the app's lifetime, ideally before runApp() in main.dart, NOT here.
-      // Calling it in init() means it is re-registered every time the user
-      // grants notification permission or the FCM token rotates (because
-      // callers sometimes re-call init() defensively).  Re-registering the
-      // background handler after it has already been set is a no-op on some
-      // versions of firebase_messaging but throws on others.
-      // The call has been moved to main.dart (see _registerFcmBackground()).
-      // We keep it here only as a safety net for the very first cold-start
-      // on devices where main.dart runs before the isolate is ready — and we
-      // guard it with the _initialized flag so it runs at most once.
       FirebaseMessaging.onBackgroundMessage(_fcmBackgroundHandler);
 
       if (kDebugMode) debugPrint('[FCM] ✅ Live mode active. Token: $_token');
@@ -132,6 +118,34 @@ class FcmService {
       if (kDebugMode) debugPrint('[FCM] ⚠️  init failed: $e');
     }
   }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  /// Show a local notification from any service (e.g. ThresholdAlertService).
+  /// Builds a [FcmFloodAlert] from raw fields and delegates to [_showLocalNotification].
+  Future<void> showAlertNotification({
+    required String cityName,
+    required String state,
+    required String river,
+    required String severity,   // 'WARNING' | 'DANGER' | 'EXTREME'
+    required double currentLevel,
+    required double dangerLevel,
+    required String message,
+  }) async {
+    final alert = FcmFloodAlert(
+      city:         cityName,
+      state:        state,
+      severity:     severity,
+      river:        river,
+      currentLevel: currentLevel,
+      dangerLevel:  dangerLevel,
+      message:      message,
+      receivedAt:   DateTime.now(),
+    );
+    await _showLocalNotification(alert);
+  }
+
+  // ── Internal ──────────────────────────────────────────────────────────────
 
   Future<void> _registerTokenWithBackend(String token) async {
     try {
@@ -186,7 +200,7 @@ class FcmService {
 
   Future<void> _showLocalNotification(FcmFloodAlert alert) async {
     final plugin     = FlutterLocalNotificationsPlugin();
-    final isCritical = alert.severity == 'CRITICAL';
+    final isCritical = alert.severity == 'CRITICAL' || alert.severity == 'EXTREME';
     final body = alert.message.isNotEmpty
         ? alert.message
         : '${alert.river} is at ${alert.currentLevel.toStringAsFixed(1)}m '
