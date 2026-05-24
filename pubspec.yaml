@@ -1,4 +1,4 @@
-name: floodops_app
+name: equinox_flood
 description: OpsFlood - AI-powered flood prediction app
 publish_to: 'none'
 version: 1.0.0+1
