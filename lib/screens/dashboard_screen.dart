@@ -1,20 +1,10 @@
 // lib/screens/dashboard_screen.dart
 //
 // OpsFlood — DashboardScreen (v12 — full UI overhaul)
-//
-// CHANGES vs previous version:
-//   - Removed duplicate import of river_monitoring.dart
-//   - Removed _ModelMetricsCard (backend endpoint unavailable, shows empty)
-//   - Removed dead `ApiService().getModelMetrics()` call
-//   - Removed unused `_showDebug` FAB wiring (kept panel itself, debug-only)
-//   - Banner logic cleaned up — exactly one banner shown at a time
-//   - Trend chart now uses flowRate (m³/s) when gauge level is 0
-//   - Dashboard header is now a proper glassy app bar
-//   - CWC station strip shows cwcSource tag
-//   - River cards pass flowRateM3s + cwcSource through to RiverLevelVisualizer
 library;
 
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -77,8 +67,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _onRefresh() => _service.refreshData();
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final rc = RiverColors.of(context);
@@ -105,8 +93,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         : levels.firstWhere((e) => e.city == _selectedCity,
             orElse: () => primary!);
 
-    final cwcStations = _service.cwcStations;
-    final hasCwcLive  = _service.hasCwcLiveData;
+    final cwcStations  = _service.cwcStations;
+    final hasCwcLive   = _service.hasCwcLiveData;
     final isConnecting = _service.isWakingUp;
     final isOnline     = _service.isOnline;
     final isBackendLive = _service.lastFetchTime != null &&
@@ -160,7 +148,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     children: [
                       Row(
                         children: [
-                          // Logo icon
                           Container(
                             width: 38, height: 38,
                             decoration: BoxDecoration(
@@ -218,37 +205,36 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
 
-              // ── Body padding ───────────────────────────────────────────────
+              // ── Body ───────────────────────────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
 
-                    // ── Debug panel
                     if (kDebugMode && _showDebug)
                       _DebugPanel(service: _service),
 
-                    // ── Single status banner (mutually exclusive)
+                    // Single status banner (mutually exclusive)
                     if (hasCwcLive)
                       _Banner(
-                        icon:    Icons.sensors_rounded,
-                        title:   'CWC Live Telemetry Active',
-                        body:    '${cwcStations.length} stations reporting above warning level',
-                        color:   const Color(0xFF34C759),
+                        icon:  Icons.sensors_rounded,
+                        title: 'CWC Live Telemetry Active',
+                        body:  '${cwcStations.length} stations reporting above warning level',
+                        color: const Color(0xFF34C759),
                       )
                     else if (isConnecting)
                       _Banner(
-                        icon:    Icons.hourglass_top_rounded,
-                        title:   'Connecting to Live Feed',
-                        body:    'CWC FFEM / WRD Bihar endpoints being queried…',
-                        color:   const Color(0xFFF59E0B),
+                        icon:  Icons.hourglass_top_rounded,
+                        title: 'Connecting to Live Feed',
+                        body:  'CWC FFEM / WRD Bihar endpoints being queried…',
+                        color: const Color(0xFFF59E0B),
                       )
                     else if (!isOnline)
                       _Banner(
-                        icon:    Icons.wifi_off_rounded,
-                        title:   'No Internet Connection',
-                        body:    'Cached data shown. Pull to retry.',
-                        color:   Colors.redAccent,
+                        icon:  Icons.wifi_off_rounded,
+                        title: 'No Internet Connection',
+                        body:  'Cached data shown. Pull to retry.',
+                        color: Colors.redAccent,
                       ),
 
                     if (_service.error != null) ...[
@@ -263,7 +249,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
                     const SizedBox(height: 12),
 
-                    // ── Alert badge
                     AnimatedAlertBadge(
                       count: _service.activeCriticalAlerts.length,
                       isCritical: _service.activeCriticalAlerts.isNotEmpty,
@@ -273,7 +258,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 14),
 
-                    // ── Flood gauge (highest risk city)
                     if (primary != null)
                       Center(
                         child: FloodGauge(
@@ -290,7 +274,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                               child: CircularProgressIndicator(strokeWidth: 2))),
                     const SizedBox(height: 14),
 
-                    // ── Stat cards row
                     SizedBox(
                       height: 110,
                       child: Row(
@@ -299,8 +282,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.warning_amber_rounded,
                               title: 'Critical',
-                              value:
-                                  '${_service.monitoringData.criticalCount}',
+                              value: '${_service.monitoringData.criticalCount}',
                               subtitle: 'threshold breaches',
                               accent: const Color(0xFFEF4444),
                             ),
@@ -310,8 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             child: PremiumStatCard(
                               icon: Icons.ssid_chart_rounded,
                               title: 'High Risk',
-                              value:
-                                  '${_service.monitoringData.highRiskCount}',
+                              value: '${_service.monitoringData.highRiskCount}',
                               subtitle: 'active locations',
                               accent: const Color(0xFFF59E0B),
                             ),
@@ -349,7 +330,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 16),
 
-                    // ── CWC station strip
                     if (cwcStations.isNotEmpty) ...[
                       _SectionHeader('⚠ CWC Stations Above Warning'),
                       const SizedBox(height: 8),
@@ -357,18 +337,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                       const SizedBox(height: 16),
                     ],
 
-                    // ── River monitoring section
                     if (levels.isNotEmpty) ...[
                       _SectionHeader('River Monitoring'),
                       const SizedBox(height: 10),
-                      // City selector
                       SizedBox(
                         height: 38,
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: levels.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 8),
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
                           itemBuilder: (_, i) {
                             final city = levels[i].city;
                             final sel  = city == _selectedCity;
@@ -386,7 +363,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     : Colors.white12,
                               ),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20)),
+                                  borderRadius: BorderRadius.circular(20)),
                               label: Text(city,
                                   style: TextStyle(
                                     color: sel
@@ -404,7 +381,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                       const SizedBox(height: 12),
                     ],
 
-                    // ── Trend chart
                     if (selected != null)
                       RepaintBoundary(
                         child: _TrendCard(
@@ -454,8 +430,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
                 sliver: SliverToBoxAdapter(
-                  child: RiskHeatmap(
-                      stateRisks: _stateRiskMap(levels)),
+                  child: RiskHeatmap(stateRisks: _stateRiskMap(levels)),
                 ),
               ),
             ],
@@ -531,8 +506,7 @@ class _Banner extends StatelessWidget {
                     )),
                 const SizedBox(height: 2),
                 Text(body,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 11)),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11)),
               ],
             ),
           ),
@@ -559,7 +533,7 @@ class _StatusPill extends StatelessWidget {
         : isConnecting ? Colors.orange
         : isOffline    ? Colors.redAccent
         : Colors.grey;
-    final String label = isCwcLive ? 'CWC LIVE'
+    final String label = isCwcLive    ? 'CWC LIVE'
         : isLive       ? 'LIVE'
         : isConnecting ? 'CONNECTING'
         : isOffline    ? 'OFFLINE'
@@ -585,16 +559,14 @@ class _StatusPill extends StatelessWidget {
                     alpha: pulsing ? pulseAnim.value : 1.0),
                 shape: BoxShape.circle,
                 boxShadow: [
-                  BoxShadow(
-                      color: color.withValues(alpha: 0.6), blurRadius: 5)
+                  BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 5)
                 ],
               ),
             ),
             const SizedBox(width: 6),
             Text(label,
                 style: TextStyle(
-                    color: color, fontSize: 10,
-                    fontWeight: FontWeight.w800)),
+                    color: color, fontSize: 10, fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -618,15 +590,12 @@ class _CwcStationStrip extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
           final s = stations[i];
-          final isCritical = (s is Map ? s['source'] : null)
-                  ?.toString()
-                  .contains('CRITICAL') ==
-              true;
-          final Color col = isCritical
+          final isCrit = (s is Map ? s['source'] : null)
+                  ?.toString().contains('CRITICAL') == true;
+          final Color col = isCrit
               ? const Color(0xFFEF4444)
               : const Color(0xFFF59E0B);
 
-          // Support both RiverStation objects and raw Maps
           final String name    = _str(s, ['stationName', 'city', 'name']);
           final String state   = _str(s, ['stateName', 'state']);
           final String river   = _str(s, ['riverName', 'river']);
@@ -658,8 +627,7 @@ class _CwcStationStrip extends StatelessWidget {
                         color: rc.textPrimary,
                         fontWeight: FontWeight.w700, fontSize: 12)),
                 Text(state.isNotEmpty ? state : 'India',
-                    style: TextStyle(
-                        color: rc.textSecondary, fontSize: 10)),
+                    style: TextStyle(color: rc.textSecondary, fontSize: 10)),
                 if (river.isNotEmpty)
                   Text(river, maxLines: 1,
                       style: TextStyle(
@@ -669,12 +637,9 @@ class _CwcStationStrip extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      level > 0
-                          ? '${level.toStringAsFixed(2)} m'
-                          : '—',
+                      level > 0 ? '${level.toStringAsFixed(2)} m' : '—',
                       style: TextStyle(
-                          color: col,
-                          fontWeight: FontWeight.w900, fontSize: 15),
+                          color: col, fontWeight: FontWeight.w900, fontSize: 15),
                     ),
                     const SizedBox(width: 4),
                     Icon(
@@ -695,8 +660,7 @@ class _CwcStationStrip extends StatelessWidget {
                           : warning > 0
                               ? 'WL ${warning.toStringAsFixed(1)} m'
                               : '',
-                      style: TextStyle(
-                          color: rc.textSecondary, fontSize: 9),
+                      style: TextStyle(color: rc.textSecondary, fontSize: 9),
                     ),
                     const Spacer(),
                     if (src.isNotEmpty)
@@ -771,8 +735,7 @@ class _DebugPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black87,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: Colors.deepPurpleAccent.withValues(alpha: 0.6)),
+        border: Border.all(color: Colors.deepPurpleAccent.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -795,13 +758,11 @@ class _DebugPanel extends StatelessWidget {
                   SizedBox(
                     width: 120,
                     child: Text(e.key,
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 11)),
+                        style: const TextStyle(color: Colors.white38, fontSize: 11)),
                   ),
                   Expanded(
                     child: Text(e.value,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 11),
+                        style: const TextStyle(color: Colors.white70, fontSize: 11),
                         overflow: TextOverflow.ellipsis),
                   ),
                 ],
@@ -848,7 +809,6 @@ class _TrendCard extends StatelessWidget {
         ? sorted.sublist(sorted.length - 24)
         : sorted;
 
-    // Use flowRate (m³/s) since gauge levels are 0 until CWC connects
     final useFlow = pts.isNotEmpty && pts.every((p) => p.level == 0);
     final spots = List.generate(
       pts.length,
@@ -868,8 +828,7 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: rc.cardBg,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-            color: rc.riverNormal.withValues(alpha: 0.18)),
+        border: Border.all(color: rc.riverNormal.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -882,8 +841,7 @@ class _TrendCard extends StatelessWidget {
                       fontWeight: FontWeight.w700, fontSize: 13)),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: (isLiveData
                           ? const Color(0xFF34C759)
@@ -942,16 +900,13 @@ class _TrendCard extends StatelessWidget {
                                 ? '${(v / 1000).toStringAsFixed(1)}k'
                                 : v.toStringAsFixed(1),
                             style: TextStyle(
-                                color: rc.textSecondary,
-                                fontSize: 9),
+                                color: rc.textSecondary, fontSize: 9),
                           ),
                         )),
                         rightTitles: const AxisTitles(
-                            sideTitles:
-                                SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false)),
                         topTitles: const AxisTitles(
-                            sideTitles:
-                                SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false)),
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
@@ -959,21 +914,15 @@ class _TrendCard extends StatelessWidget {
                               if (v == 0)
                                 return Text('7d ago',
                                     style: TextStyle(
-                                        color: rc.textSecondary,
-                                        fontSize: 9));
-                              if (v ==
-                                  ((spots.length - 1) / 2)
-                                      .roundToDouble())
+                                        color: rc.textSecondary, fontSize: 9));
+                              if (v == ((spots.length - 1) / 2).roundToDouble())
                                 return Text('3d ago',
                                     style: TextStyle(
-                                        color: rc.textSecondary,
-                                        fontSize: 9));
-                              if (v ==
-                                  (spots.length - 1).toDouble())
+                                        color: rc.textSecondary, fontSize: 9));
+                              if (v == (spots.length - 1).toDouble())
                                 return Text('Now',
                                     style: TextStyle(
-                                        color: rc.textSecondary,
-                                        fontSize: 9));
+                                        color: rc.textSecondary, fontSize: 9));
                               return const SizedBox.shrink();
                             },
                           ),
@@ -982,8 +931,7 @@ class _TrendCard extends StatelessWidget {
                       borderData: FlBorderData(
                         show: true,
                         border: Border.all(
-                            color: rc.riverNormal
-                                .withValues(alpha: 0.12)),
+                            color: rc.riverNormal.withValues(alpha: 0.12)),
                       ),
                       lineBarsData: [
                         LineChartBarData(
@@ -998,16 +946,13 @@ class _TrendCard extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                rc.sparklineColor
-                                    .withValues(alpha: 0.30),
-                                rc.sparklineColor
-                                    .withValues(alpha: 0.02),
+                                rc.sparklineColor.withValues(alpha: 0.30),
+                                rc.sparklineColor.withValues(alpha: 0.02),
                               ],
                             ),
                           ),
                         ),
                       ],
-                      // Only draw reference lines when using real gauge levels
                       extraLinesData: ExtraLinesData(
                         horizontalLines: useFlow
                             ? []
@@ -1034,6 +979,3 @@ class _TrendCard extends StatelessWidget {
     );
   }
 }
-
-// ignore: unused_import
-import 'dart:math' as math;
