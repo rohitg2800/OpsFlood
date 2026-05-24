@@ -3,7 +3,7 @@
 // OpsFlood — AlertsScreen
 // Two tabs:
 //   Tab 1 — Live CWC Gauge Alerts  (ThresholdAlertService, gauge breach events)
-//   Tab 2 — IMD Weather Alerts     (SACHET NDMA, imdAlertsProvider)
+//   Tab 2 — IMD Weather Alerts     (SACHET NDMA, fully parsed via ImdAlert model)
 library;
 
 import 'package:flutter/material.dart';
@@ -11,8 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../models/threshold_alert.dart';
+import '../models/imd_alert.dart';
 import '../providers/alerts_provider.dart';
-import '../providers/flood_providers.dart';
 
 class AlertsScreen extends ConsumerStatefulWidget {
   const AlertsScreen({super.key});
@@ -43,9 +43,9 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final ap       = ref.watch(alertsProvider);
-    final loading  = ap.loading;
-    final imdList  = ref.watch(imdAlertsProvider);
+    final ap      = ref.watch(alertsProvider);
+    final loading = ap.loading;
+    final imdList = ap.imdAlerts;
 
     return Scaffold(
       appBar: AppBar(
@@ -79,7 +79,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                   const Text('CWC Gauge'),
                   if (ap.critical.isNotEmpty) ...[
                     const SizedBox(width: 6),
-                    _Badge(count: ap.critical.length, color: const Color(0xFFF44336)),
+                    _Badge(count: ap.critical.length,
+                           color: const Color(0xFFF44336)),
                   ],
                 ],
               ),
@@ -93,7 +94,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                   const Text('IMD Weather'),
                   if (imdList.isNotEmpty) ...[
                     const SizedBox(width: 6),
-                    _Badge(count: imdList.length, color: const Color(0xFFF97316)),
+                    _Badge(count: imdList.length,
+                           color: const Color(0xFFF97316)),
                   ],
                 ],
               ),
@@ -105,16 +107,14 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
         controller: _tab,
         children: [
           _CwcTab(provider: ap),
-          _ImdTab(alerts: imdList),
+          _ImdTab(alerts: imdList, loading: loading),
         ],
       ),
     );
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Tab 1 — CWC Gauge Alerts
-// ───────────────────────────────────────────────────────────────────────
+// ─── Tab 1: CWC Gauge Alerts ──────────────────────────────────────────────────
 
 class _CwcTab extends StatelessWidget {
   final AlertsProvider provider;
@@ -151,19 +151,18 @@ class _CwcTab extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Tab 2 — IMD Weather Alerts
-// ───────────────────────────────────────────────────────────────────────
+// ─── Tab 2: IMD Weather Alerts ────────────────────────────────────────────────
 
 class _ImdTab extends StatelessWidget {
-  final List<dynamic> alerts;
-  const _ImdTab({required this.alerts});
+  final List<ImdAlert> alerts;
+  final bool loading;
+  const _ImdTab({required this.alerts, required this.loading});
 
   @override
   Widget build(BuildContext context) {
     if (alerts.isEmpty) {
       return _EmptyState(
-        loading: false,
+        loading: loading,
         icon: Icons.wb_sunny_outlined,
         message: 'No active IMD weather alerts',
       );
@@ -171,65 +170,19 @@ class _ImdTab extends StatelessWidget {
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: alerts.length,
-      itemBuilder: (ctx, i) => _ImdCard(raw: alerts[i]),
+      itemBuilder: (ctx, i) => _ImdCard(alert: alerts[i]),
     );
   }
 }
 
 class _ImdCard extends StatelessWidget {
-  final dynamic raw;
-  const _ImdCard({required this.raw});
-
-  // Safely pull a string from nested maps
-  String _s(List<String> keys) {
-    dynamic cur = raw;
-    for (final k in keys) {
-      if (cur is! Map) return '';
-      cur = cur[k];
-    }
-    return cur?.toString() ?? '';
-  }
-
-  Color _severityColor(String sev) {
-    final s = sev.toUpperCase();
-    if (s.contains('RED'))    return const Color(0xFFF44336);
-    if (s.contains('ORANGE')) return const Color(0xFFF97316);
-    if (s.contains('YELLOW')) return const Color(0xFFEAB308);
-    return const Color(0xFF34C759);
-  }
+  final ImdAlert alert;
+  const _ImdCard({required this.alert});
 
   @override
   Widget build(BuildContext context) {
-    final theme    = Theme.of(context);
-
-    // Try common CAP / SACHET field paths
-    final headline = _s(['info', 'headline']).isNotEmpty
-        ? _s(['info', 'headline'])
-        : _s(['headline']);
-    final area     = _s(['info', 'area', 'areaDesc']).isNotEmpty
-        ? _s(['info', 'area', 'areaDesc'])
-        : _s(['areaDesc']);
-    final severity = _s(['info', 'severity']).isNotEmpty
-        ? _s(['info', 'severity'])
-        : _s(['severity']);
-    final event    = _s(['info', 'event']).isNotEmpty
-        ? _s(['info', 'event'])
-        : _s(['event']);
-    final desc     = _s(['info', 'description']).isNotEmpty
-        ? _s(['info', 'description'])
-        : _s(['description']);
-    final effective = _s(['info', 'effective']).isNotEmpty
-        ? _s(['info', 'effective'])
-        : _s(['effective']);
-    final expires   = _s(['info', 'expires']).isNotEmpty
-        ? _s(['info', 'expires'])
-        : _s(['expires']);
-
-    final color    = _severityColor(severity);
-    final label    = severity.isNotEmpty ? severity : 'ADVISORY';
-    final title    = headline.isNotEmpty ? headline
-        : event.isNotEmpty ? event
-        : 'IMD Weather Alert';
+    final theme = Theme.of(context);
+    final color = alert.severity.color;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -242,38 +195,57 @@ class _ImdCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // ── Header row ──────────────────────────────────────────────────
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.thunderstorm_outlined, color: color, size: 22),
+                Icon(alert.severity.icon, color: color, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    title,
+                    alert.displayTitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                const SizedBox(width: 8),
+                // Severity pill
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: color.withValues(alpha: 0.5)),
+                    border: Border.all(color: color.withValues(alpha: 0.6)),
                   ),
                   child: Text(
-                    label.toUpperCase(),
+                    alert.severity.label.toUpperCase(),
                     style: TextStyle(
                       color: color, fontSize: 9, fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
+                if (alert.isNew) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('NEW',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ],
             ),
 
-            if (area.isNotEmpty) ...[
+            // ── Area ────────────────────────────────────────────────────────
+            if (alert.area.isNotEmpty) ...[
               const SizedBox(height: 6),
               Row(
                 children: [
@@ -282,43 +254,73 @@ class _ImdCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
-                      area,
+                      alert.area,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.65)),
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.65)),
                     ),
                   ),
                 ],
               ),
             ],
 
-            if (desc.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                desc,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.75)),
+            // ── Event type chip ─────────────────────────────────────────────
+            if (alert.event.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  alert.event,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ],
 
-            if (effective.isNotEmpty || expires.isNotEmpty) ...[
+            // ── Description ─────────────────────────────────────────────────
+            if (alert.description.isNotEmpty) ...[
               const SizedBox(height: 8),
-              DefaultTextStyle(
-                style: theme.textTheme.labelSmall!.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.5)),
-                child: Row(
-                  children: [
-                    if (effective.isNotEmpty)
-                      Text('From: ${_fmtTime(effective)}'),
-                    if (effective.isNotEmpty && expires.isNotEmpty)
-                      const Text('  —  '),
-                    if (expires.isNotEmpty)
-                      Text('Until: ${_fmtTime(expires)}'),
-                  ],
-                ),
+              Text(
+                alert.description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface
+                        .withValues(alpha: 0.75)),
+              ),
+            ],
+
+            // ── Validity row ────────────────────────────────────────────────
+            if (alert.effective != null || alert.expires != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.schedule_outlined, size: 12,
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.45)),
+                  const SizedBox(width: 4),
+                  DefaultTextStyle(
+                    style: theme.textTheme.labelSmall!.copyWith(
+                        color: theme.colorScheme.onSurface
+                            .withValues(alpha: 0.5)),
+                    child: Row(
+                      children: [
+                        if (alert.effective != null)
+                          Text('From: ${_fmt(alert.effective!)}'),
+                        if (alert.effective != null && alert.expires != null)
+                          const Text('  —  '),
+                        if (alert.expires != null)
+                          Text('Until: ${_fmt(alert.expires!)}'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ],
@@ -327,17 +329,11 @@ class _ImdCard extends StatelessWidget {
     );
   }
 
-  String _fmtTime(String raw) {
-    try {
-      final dt = DateTime.parse(raw).toLocal();
-      return DateFormat('dd MMM, HH:mm').format(dt);
-    } catch (_) {
-      return raw.length > 16 ? raw.substring(0, 16) : raw;
-    }
-  }
+  String _fmt(DateTime dt) =>
+      DateFormat('dd MMM, HH:mm').format(dt.toLocal());
 }
 
-// ── Shared widgets ────────────────────────────────────────────────────────────────────────────
+// ─── Shared widgets ───────────────────────────────────────────────────────────
 
 class _Badge extends StatelessWidget {
   final int count;
@@ -349,15 +345,12 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        '$count',
-        style: const TextStyle(
-          color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold,
-        ),
-      ),
+          color: color, borderRadius: BorderRadius.circular(10)),
+      child: Text('$count',
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.bold)),
     );
   }
 }
@@ -395,7 +388,7 @@ class _AlertCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme      = Theme.of(context);
     final levelColor = alert.level.color;
-    final ts         = DateFormat('dd MMM, HH:mm').format(alert.timestamp.toLocal());
+    final ts = DateFormat('dd MMM, HH:mm').format(alert.timestamp.toLocal());
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -413,19 +406,17 @@ class _AlertCard extends StatelessWidget {
                 Icon(alert.level.icon, color: levelColor, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    alert.cityName,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
+                  child: Text(alert.cityName,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold)),
                 ),
                 if (alert.isNew)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: levelColor,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+                        color: levelColor,
+                        borderRadius: BorderRadius.circular(4)),
                     child: const Text('NEW',
                         style: TextStyle(
                             color: Colors.white,
@@ -435,20 +426,17 @@ class _AlertCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              '${alert.state} · ${alert.river}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
-            ),
+            Text('${alert.state} · ${alert.river}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface
+                        .withValues(alpha: 0.6))),
             const SizedBox(height: 10),
             _GaugeBar(
-              current: alert.currentValue,
               warning: alert.warningLevel,
               danger:  alert.dangerLevel,
               hfl:     alert.hfl,
               fill:    alert.fillPercent,
               color:   levelColor,
-              unit:    alert.unitLabel,
             ),
             const SizedBox(height: 10),
             Row(
@@ -475,11 +463,10 @@ class _AlertCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              ts,
-              style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5)),
-            ),
+            Text(ts,
+                style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurface
+                        .withValues(alpha: 0.5))),
           ],
         ),
       ),
@@ -488,25 +475,23 @@ class _AlertCard extends StatelessWidget {
 }
 
 class _GaugeBar extends StatelessWidget {
-  final double current, warning, danger, hfl, fill;
+  final double warning, danger, hfl, fill;
   final Color color;
-  final String unit;
   const _GaugeBar({
-    required this.current, required this.warning, required this.danger,
+    required this.warning, required this.danger,
     required this.hfl, required this.fill, required this.color,
-    required this.unit,
   });
 
   @override
   Widget build(BuildContext context) {
-    final clampedFill = (fill / 100).clamp(0.0, 1.0);
+    final clamped = (fill / 100).clamp(0.0, 1.0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
-            value: clampedFill,
+            value: clamped,
             backgroundColor: color.withValues(alpha: 0.15),
             valueColor: AlwaysStoppedAnimation<Color>(color),
             minHeight: 10,
@@ -533,7 +518,8 @@ class _GaugeBar extends StatelessWidget {
 class _MetricChip extends StatelessWidget {
   final String label, value;
   final Color color;
-  const _MetricChip({required this.label, required this.value, required this.color});
+  const _MetricChip(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -557,10 +543,10 @@ class _FilterMenu extends StatelessWidget {
     final hasFilter =
         provider.filterLevel != null || provider.filterState != null;
     return PopupMenuButton<String>(
-      icon: Icon(
-        Icons.filter_list,
-        color: hasFilter ? Theme.of(context).colorScheme.primary : null,
-      ),
+      icon: Icon(Icons.filter_list,
+          color: hasFilter
+              ? Theme.of(context).colorScheme.primary
+              : null),
       onSelected: (val) {
         if (val == 'clear') { provider.clearFilters(); return; }
         final level = AlertLevel.values
