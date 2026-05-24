@@ -44,7 +44,7 @@ Future<void> main() async {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor:                    Colors.transparent,
       statusBarIconBrightness:           Brightness.light,
-      systemNavigationBarColor:          AppPalette.carbon0,
+      systemNavigationBarColor:          AppPalette.navy0,  // was: AppPalette.carbon0
       systemNavigationBarIconBrightness: Brightness.light,
     ));
 
@@ -69,7 +69,7 @@ Future<void> main() async {
 
   await ThemeProvider().init();
 
-  // ── Background services (native only — not supported on web) ────────────────────
+  // ── Background services (native only — not supported on web) ─────────────────────────
   if (!kIsWeb) {
     // 1. State severity matrix — fetched once, cached 1 hour.
     unawaited(
@@ -103,18 +103,18 @@ Future<void> main() async {
 
   WidgetsBinding.instance.allowFirstFrame();
 
-  runApp(const ProviderScope(child: EquinoxApp()));
+  runApp(const ProviderScope(child: OpsFloodApp()));
 }
 
-class EquinoxApp extends ConsumerWidget {
-  const EquinoxApp({super.key});
+class OpsFloodApp extends ConsumerWidget {
+  const OpsFloodApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp(
-      title:                      'Equinox',
+      title:                      'OpsFlood',
       debugShowCheckedModeBanner: false,
       themeMode:                  themeMode,
       theme:                      RiverColors.lightTheme(),
