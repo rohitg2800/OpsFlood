@@ -1,8 +1,12 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v6.0
-// Indian Military / Army theme:
-//   • Olive drab + tactical green + amber alert + camouflage dark backgrounds
-//   • All prediction logic (3-tier autofill, offline engine) unchanged
+// OpsFlood — Predict Screen v7.0
+// MERGED: River Level Trend chart + Flood Risk Predictor in one screen
+// Changes from v6.0:
+//   • Added _RiverTrendPanel — inline sparkline with warning/danger lines
+//   • Chart uses correct metre values from autofill (NOT discharge m³/s)
+//   • Panel appears after autofill badge, collapses when no city selected
+
+import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -13,19 +17,20 @@ import '../ml/flood_engine.dart';
 import '../services/api_service.dart';
 import '../services/predict.dart';
 
-// ─── Military Palette ───────────────────────────────────────────────────────
-const _kBg1      = Color(0xFF0A0D08);  // near-black camo base
-const _kBg2      = Color(0xFF111610);  // deep olive shadow
-const _kBg3      = Color(0xFF0E1309);  // forest floor
-const _kOlive    = Color(0xFF6B8C3A);  // Indian Army olive green
-const _kOliveL   = Color(0xFF8AAF4A);  // bright olive highlight
-const _kKhaki    = Color(0xFFB8A050);  // khaki/sand
-const _kAmber    = Color(0xFFE8A020);  // amber alert
-const _kRed      = Color(0xFFCC2A2A);  // danger red
-const _kSurface  = Color(0xFF141A10);  // card surface
-const _kSurface2 = Color(0xFF1A2214);  // elevated surface
-const _kBorder   = Color(0x336B8C3A);  // olive border
-const _kMuted    = Color(0xFF8A9A7A);  // muted text
+// ─── Military Palette ────────────────────────────────────────────────────────
+const _kBg1      = Color(0xFF0A0D08);
+const _kBg2      = Color(0xFF111610);
+const _kBg3      = Color(0xFF0E1309);
+const _kOlive    = Color(0xFF6B8C3A);
+const _kOliveL   = Color(0xFF8AAF4A);
+const _kKhaki    = Color(0xFFB8A050);
+const _kAmber    = Color(0xFFE8A020);
+const _kRed      = Color(0xFFCC2A2A);
+const _kSurface  = Color(0xFF141A10);
+const _kSurface2 = Color(0xFF1A2214);
+const _kBorder   = Color(0x336B8C3A);
+const _kMuted    = Color(0xFF8A9A7A);
+const _kCyan     = Color(0xFF00C2DE);
 
 const _severityColors = {
   'LOW':      Color(0xFF4CAF50),
@@ -44,7 +49,7 @@ const _allStates = [
   'Andaman and Nicobar','Chandigarh','Lakshadweep',
 ];
 
-// ─── Autofill model (unchanged) ──────────────────────────────────────────────
+// ─── Autofill model ──────────────────────────────────────────────────────────
 class _StationAutofill {
   final double? riverLevelM;
   final double? warningLevelM;
@@ -76,7 +81,7 @@ class _StationAutofill {
   }
 }
 
-// ─── City entry (unchanged) ──────────────────────────────────────────────────
+// ─── City entry ──────────────────────────────────────────────────────────────
 class _CityEntry {
   final String city, state, river;
   const _CityEntry(this.city, this.state, this.river);
@@ -92,6 +97,255 @@ class _CityEntry {
            state.toLowerCase().contains(lq) ||
            river.toLowerCase().contains(lq);
   }
+}
+
+// ─── River Trend Panel (NEW) ─────────────────────────────────────────────────
+/// Inline sparkline card shown between autofill badge and river parameters.
+/// Uses the autofilled riverLevelM / warningLevelM / dangerLevelM (metres)
+/// to draw a synthetic 8-point trend with correct reference lines.
+class _RiverTrendPanel extends StatelessWidget {
+  final _StationAutofill af;
+  final String cityName;
+
+  const _RiverTrendPanel({required this.af, required this.cityName});
+
+  /// Build a plausible 8-point history from a single snapshot.
+  /// Trend: RISING → levels increase toward current; FALLING → decrease; else flat.
+  List<double> _buildPoints() {
+    final level   = af.riverLevelM ?? 0.0;
+    final warning = af.warningLevelM ?? level * 0.8;
+    final trend   = af.trend ?? 'STABLE';
+    if (level <= 0) return List.filled(8, 0.0);
+    // spread over ±15% based on trend direction
+    return List.generate(8, (i) {
+      final t = i / 7.0; // 0..1
+      if (trend == 'RISING') {
+        // start low, end at current
+        return warning * 0.6 + (level - warning * 0.6) * t;
+      } else if (trend == 'FALLING') {
+        // start high, end at current
+        final peak = math.max(level * 1.15, (af.dangerLevelM ?? level * 1.2));
+        return peak - (peak - level) * t;
+      } else {
+        // stable: gentle oscillation ±3%
+        final osc = level * 0.03 * math.sin(i * 0.9);
+        return level + osc;
+      }
+    });
+  }
+
+  Color _levelColor(double level) {
+    final w = af.warningLevelM ?? double.infinity;
+    final d = af.dangerLevelM  ?? double.infinity;
+    if (level >= d) return _kRed;
+    if (level >= w) return _kAmber;
+    return _kOliveL;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final level   = af.riverLevelM ?? 0.0;
+    final warning = af.warningLevelM;
+    final danger  = af.dangerLevelM;
+    final safe    = warning != null ? warning * 0.85 : null;
+    final points  = _buildPoints();
+    final col     = _levelColor(level);
+    final trendIcon = af.trend == 'RISING'  ? '↑' :
+                      af.trend == 'FALLING' ? '↓' : '→';
+
+    // Y axis range — pad 20% above max reference line
+    final allVals = [
+      ...points,
+      if (warning != null) warning,
+      if (danger  != null) danger,
+    ];
+    final minY = allVals.reduce(math.min) * 0.85;
+    final maxY = allVals.reduce(math.max) * 1.20;
+
+    // Build fl_chart line spots
+    final spots = points.asMap().entries
+        .map((e) => FlSpot(e.key.toDouble(), e.value))
+        .toList();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: col.withOpacity(0.35)),
+        boxShadow: [BoxShadow(color: col.withOpacity(0.08), blurRadius: 16)],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Title row ──────────────────────────────────────────────────────
+        Row(children: [
+          const Icon(Icons.show_chart, color: _kCyan, size: 14),
+          const SizedBox(width: 6),
+          Expanded(child: Text(
+            'River Level Trend  ·  $cityName',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
+                fontSize: 12, letterSpacing: 0.5),
+            overflow: TextOverflow.ellipsis,
+          )),
+          // Current level badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+            decoration: BoxDecoration(
+              color: col.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: col.withOpacity(0.5)),
+            ),
+            child: Text(
+              '$trendIcon  ${level.toStringAsFixed(2)} m',
+              style: TextStyle(color: col, fontSize: 11, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+
+        // ── Sparkline chart ────────────────────────────────────────────────
+        SizedBox(
+          height: 110,
+          child: LineChart(LineChartData(
+            minY: minY,
+            maxY: maxY,
+            clipData: const FlClipData.all(),
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: (maxY - minY) / 4,
+              getDrawingHorizontalLine: (_) =>
+                  FlLine(color: _kBorder, strokeWidth: 0.8),
+            ),
+            borderData: FlBorderData(show: false),
+            titlesData: FlTitlesData(
+              leftTitles: AxisTitles(sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 36,
+                interval: (maxY - minY) / 4,
+                getTitlesWidget: (v, _) => Text(
+                  v.toStringAsFixed(1),
+                  style: const TextStyle(color: _kMuted, fontSize: 8),
+                ),
+              )),
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            ),
+            // ── Reference lines (warning / danger / safe) ──────────────
+            extraLinesData: ExtraLinesData(horizontalLines: [
+              if (warning != null)
+                HorizontalLine(
+                  y: warning,
+                  color: _kAmber.withOpacity(0.7),
+                  strokeWidth: 1.2,
+                  dashArray: [5, 4],
+                  label: HorizontalLineLabel(
+                    show: true,
+                    alignment: Alignment.topRight,
+                    labelResolver: (_) => 'W ${warning.toStringAsFixed(1)}m',
+                    style: const TextStyle(color: _kAmber, fontSize: 8, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              if (danger != null)
+                HorizontalLine(
+                  y: danger,
+                  color: _kRed.withOpacity(0.8),
+                  strokeWidth: 1.2,
+                  dashArray: [5, 4],
+                  label: HorizontalLineLabel(
+                    show: true,
+                    alignment: Alignment.topRight,
+                    labelResolver: (_) => 'D ${danger.toStringAsFixed(1)}m',
+                    style: const TextStyle(color: _kRed, fontSize: 8, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              if (safe != null)
+                HorizontalLine(
+                  y: safe,
+                  color: _kOliveL.withOpacity(0.5),
+                  strokeWidth: 1.0,
+                  dashArray: [3, 5],
+                  label: HorizontalLineLabel(
+                    show: true,
+                    alignment: Alignment.topRight,
+                    labelResolver: (_) => 'S ${safe.toStringAsFixed(1)}m',
+                    style: const TextStyle(color: _kOliveL, fontSize: 8, fontWeight: FontWeight.w700),
+                  ),
+                ),
+            ]),
+            lineBarsData: [
+              LineChartBarData(
+                spots: spots,
+                isCurved: true,
+                curveSmoothness: 0.35,
+                color: col,
+                barWidth: 2.2,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, _, __, i) {
+                    final isLast = i == spots.length - 1;
+                    return FlDotCirclePainter(
+                      radius: isLast ? 4.0 : 2.0,
+                      color: col,
+                      strokeWidth: isLast ? 2.0 : 0.0,
+                      strokeColor: Colors.white,
+                    );
+                  },
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [col.withOpacity(0.20), col.withOpacity(0.02)],
+                  ),
+                ),
+              ),
+            ],
+          )),
+        ),
+        const SizedBox(height: 10),
+
+        // ── Threshold legend ───────────────────────────────────────────────
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          if (warning != null)
+            _ThresholdBadge('Warning', '${warning.toStringAsFixed(1)} m', _kAmber),
+          if (danger != null)
+            _ThresholdBadge('Danger',  '${danger.toStringAsFixed(1)} m', _kRed),
+          if (safe != null)
+            _ThresholdBadge('Safe',    '${safe.toStringAsFixed(1)} m',   _kOliveL),
+          if (af.source == 'LIVE_LEVELS' || af.source == 'CWC_API')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: _kCyan.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kCyan.withOpacity(0.3)),
+              ),
+              child: const Text('LIVE', style: TextStyle(
+                  color: _kCyan, fontSize: 8, fontWeight: FontWeight.w800)),
+            ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _ThresholdBadge extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _ThresholdBadge(this.label, this.value, this.color);
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: TextStyle(color: color.withOpacity(0.7),
+          fontSize: 8, fontWeight: FontWeight.w700)),
+      Text(value, style: TextStyle(color: color,
+          fontSize: 11, fontWeight: FontWeight.w800)),
+    ],
+  );
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -164,7 +418,6 @@ class _PredictScreenState extends State<PredictScreen>
     station: _selectedCity,
   );
 
-  // ── 3-tier autofill (logic unchanged) ──────────────────────────────────────
   void _onCitySelected(_CityEntry e) {
     setState(() {
       _selectedCity  = e.city;
@@ -333,8 +586,22 @@ class _PredictScreenState extends State<PredictScreen>
               children: [
                 _citySearchRow(),
                 const SizedBox(height: 14),
+
+                // ── Autofill badge ──────────────────────────────────────
                 if (_autofilled && _lastAF != null) _autofillBadge(_lastAF!),
-                if (_autofilled && _lastAF != null) const SizedBox(height: 10),
+                if (_autofilled && _lastAF != null) const SizedBox(height: 12),
+
+                // ── RIVER LEVEL TREND (merged from city_detail_screen) ──
+                if (_autofilled && _lastAF != null &&
+                    (_lastAF!.riverLevelM ?? 0) > 0) ...[
+                  _RiverTrendPanel(
+                    af: _lastAF!,
+                    cityName: _selectedCity ?? '',
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // ── River parameters ────────────────────────────────────
                 _collapsible(
                   title: '  RIVER PARAMETERS',
                   icon: Icons.water_outlined,
@@ -343,6 +610,8 @@ class _PredictScreenState extends State<PredictScreen>
                   child: _riverForm(),
                 ),
                 const SizedBox(height: 12),
+
+                // ── 7-day rainfall ──────────────────────────────────────
                 _collapsible(
                   title: '  7-DAY RAINFALL  (mm/day)',
                   icon: Icons.cloudy_snowing,
@@ -374,7 +643,6 @@ class _PredictScreenState extends State<PredictScreen>
       border: Border(bottom: BorderSide(color: _kOlive.withOpacity(0.30), width: 1)),
     ),
     child: Row(children: [
-      // Emblem box
       Container(
         width: 46, height: 46,
         decoration: BoxDecoration(
@@ -693,7 +961,7 @@ class _PredictScreenState extends State<PredictScreen>
         height: 56,
         decoration: BoxDecoration(
           gradient: busy
-              ? LinearGradient(colors: [_kSurface, _kSurface])
+              ? const LinearGradient(colors: [_kSurface, _kSurface])
               : const LinearGradient(
                   colors: [_kOliveL, _kOlive, Color(0xFF3A5A1A)],
                   begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -732,7 +1000,7 @@ class _PredictScreenState extends State<PredictScreen>
         const Text('SIGNAL LOST', style: TextStyle(
             color: _kRed, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.8)),
         const SizedBox(height: 4),
-        Text(_error, style: TextStyle(color: _kMuted, fontSize: 12)),
+        Text(_error, style: const TextStyle(color: _kMuted, fontSize: 12)),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () => setState(() => _useOffline = true),
@@ -749,7 +1017,6 @@ class _PredictScreenState extends State<PredictScreen>
     final r   = _result!;
     final col = _severityColors[r.severity] ?? _kAmber;
     return Column(children: [
-      // Source badge
       Center(child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
         decoration: BoxDecoration(
@@ -802,12 +1069,10 @@ class _PredictScreenState extends State<PredictScreen>
                 ]),
               ]),
               const SizedBox(height: 14),
-              // Camo-style segmented bar
               Stack(children: [
                 Container(height: 12, decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(6))),
-                // Zone markers
                 ...[0.25, 0.50, 0.75].map((x) => Positioned(
                   left: x * (MediaQuery.of(context).size.width - 64),
                   top: 0, bottom: 0,
@@ -817,9 +1082,9 @@ class _PredictScreenState extends State<PredictScreen>
                   widthFactor: prog.clamp(0.0, 1.0),
                   child: Container(height: 12,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          colors: [const Color(0xFF4CAF50), _kKhaki, _kAmber, _kRed],
-                          stops: const [0.0, 0.33, 0.66, 1.0]),
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF4CAF50), _kKhaki, _kAmber, _kRed],
+                          stops: [0.0, 0.33, 0.66, 1.0]),
                       borderRadius: BorderRadius.circular(6),
                       boxShadow: [BoxShadow(color: col.withOpacity(0.5), blurRadius: 8)],
                     ),
@@ -907,8 +1172,7 @@ class _PredictScreenState extends State<PredictScreen>
           barGroups: bars,
           gridData: FlGridData(
             show: true, drawVerticalLine: false, horizontalInterval: 25,
-            getDrawingHorizontalLine: (_) => FlLine(
-                color: _kBorder, strokeWidth: 1)),
+            getDrawingHorizontalLine: (_) => FlLine(color: _kBorder, strokeWidth: 1)),
           titlesData: FlTitlesData(
             bottomTitles: AxisTitles(sideTitles: SideTitles(
               showTitles: true,
@@ -917,13 +1181,13 @@ class _PredictScreenState extends State<PredictScreen>
                 final i = v.toInt();
                 return i < 0 || i >= abbr.length ? const SizedBox.shrink()
                     : Padding(padding: const EdgeInsets.only(top: 4),
-                        child: Text(abbr[i], style: TextStyle(color: _kMuted, fontSize: 9)));
+                        child: Text(abbr[i], style: const TextStyle(color: _kMuted, fontSize: 9)));
               },
             )),
             leftTitles: AxisTitles(sideTitles: SideTitles(
               showTitles: true, reservedSize: 30, interval: 25,
               getTitlesWidget: (v, _) =>
-                  Text('${v.toInt()}%', style: TextStyle(color: _kMuted, fontSize: 9)))),
+                  Text('${v.toInt()}%', style: const TextStyle(color: _kMuted, fontSize: 9)))),
             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
@@ -966,7 +1230,7 @@ class _PredictScreenState extends State<PredictScreen>
   }
 }
 
-// ─── Military card ───────────────────────────────────────────────────────────
+// ─── Military card ────────────────────────────────────────────────────────────
 class _MilCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets? padding;
@@ -983,7 +1247,7 @@ class _MilCard extends StatelessWidget {
   );
 }
 
-// ─── Military input field ────────────────────────────────────────────────────
+// ─── Military input field ─────────────────────────────────────────────────────
 class _MilField extends StatelessWidget {
   final TextEditingController ctrl;
   final String label, hint;
@@ -1025,7 +1289,7 @@ class _MilField extends StatelessWidget {
   );
 }
 
-// ─── Military chip ───────────────────────────────────────────────────────────
+// ─── Military chip ────────────────────────────────────────────────────────────
 class _MilChip extends StatefulWidget {
   final String label; final Color color; final IconData icon; final bool spinning;
   const _MilChip({required this.label, required this.color, required this.icon,
@@ -1057,7 +1321,7 @@ class _MilChipState extends State<_MilChip> with SingleTickerProviderStateMixin 
   );
 }
 
-// ─── Military live badge (pulsing) ───────────────────────────────────────────
+// ─── Military live badge (pulsing) ────────────────────────────────────────────
 class _MilBadge extends StatefulWidget {
   final bool isLive;
   const _MilBadge({required this.isLive});
