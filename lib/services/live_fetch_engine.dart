@@ -1,14 +1,17 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v16 — trust backend risk label for all sources)
+// OpsFlood — LiveFetchEngine (v17 — all 110 cities, CWC-first)
 //
-// FIX v16:
-//   1. backendRisk is now trusted for ANY non-null backendSrc, not only
-//      OPEN_METEO_GLOFAS. This means STATE_SEVERITY_MATRIX, CWC_DIRECT etc.
-//      from the backend no longer get downgraded to LOW by _inferRisk().
-//   2. CWC direct HTML error guard: response body starting with '<' is
-//      treated as a maintenance page → skipped cleanly, no FormatException.
-//   3. All v15 cache, 429-backoff, 300ms inter-city delay unchanged.
+// FIX v17:
+//   _priorityCities() was hardcoded to 10 IDs → app showed only 10 cities
+//   on dashboard and "All Systems Monitoring: 0".
+//   Now returns ALL cities from kIndiaCities, sorted CWC-monitored first
+//   (highest confidence) then remaining cities.
+//
+// v16 fixes retained:
+//   1. backendRisk trusted for ANY non-null backendSrc.
+//   2. CWC HTML maintenance page guard (body.startsWith('<')).
+//   3. 429-backoff + 300 ms inter-city delay unchanged.
 library;
 
 import 'dart:async';
@@ -317,7 +320,6 @@ class LiveFetchEngine {
       double? dangerLevel = _safeLevel(backend?['danger_level']);
       double? warnLevel   = _safeLevel(backend?['warning_level']);
       double? safeLevel   = _safeLevel(backend?['safe_level']);
-      // v16: trust backendRisk for ANY non-null source, not only GLOFAS
       String? backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
       String? backendSrc  = backend?['data_source'] as String?;
       String? cwcSource   = backend != null ? (backendSrc ?? 'BACKEND') : null;
@@ -327,17 +329,14 @@ class LiveFetchEngine {
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null; // CWC direct overrides backend risk — recalculate below
+        backendRisk = null;
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
       warnLevel   ??= city.warningLevel > 0 ? city.warningLevel : null;
 
-      // v16: use backendRisk whenever we have a backend source AND CWC direct
-      // did NOT override it. _inferRisk() is only fallback when backend is absent.
       final String riskLabel;
       if (backendRisk != null && backendRisk.isNotEmpty) {
-        // Still check if CWC level data warrants upgrading to CRITICAL
         riskLabel = _upgradeRiskFromLevel(
           backendRisk, cwcLevel, dangerLevel, warnLevel,
         );
@@ -371,7 +370,6 @@ class LiveFetchEngine {
     }
   }
 
-  // v16: upgrade risk label if CWC level says it's actually worse
   String _upgradeRiskFromLevel(
     String base, double? current, double? danger, double? warning,
   ) {
@@ -469,7 +467,6 @@ class LiveFetchEngine {
         if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTTP ${res.statusCode}');
         return null;
       }
-      // v16: guard against HTML maintenance pages returned as 200
       final body = res.body.trim();
       if (body.startsWith('<')) {
         if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTML response (maintenance?)');
@@ -651,12 +648,18 @@ class LiveFetchEngine {
     ));
   }
 
+  // ── v17: ALL 110 cities, CWC-monitored stations first ──────────────────────
+  //
+  // Previously: hardcoded 10-city list → only 10 cities on dashboard.
+  // Now: return every city in kIndiaCities.
+  //   • Cities with a known CWC station code load first → highest confidence
+  //     gauge data populates the UI immediately while remaining cities load.
+  //   • Within each group, original registry order is preserved (roughly
+  //     flood-risk priority as curated in india_cities.dart).
   List<IndiaCity> _priorityCities() {
-    const ids = [
-      'guwahati', 'patna', 'cuttack', 'kolkata', 'varanasi',
-      'gorakhpur', 'dhubri', 'supaul', 'jalpaiguri', 'haridwar',
-    ];
-    return ids.map(cityById).whereType<IndiaCity>().toList();
+    final cwcFirst   = kIndiaCities.where((c) => c.cwcStation != null).toList();
+    final remaining  = kIndiaCities.where((c) => c.cwcStation == null).toList();
+    return [...cwcFirst, ...remaining];
   }
 
   double? _safeLevel(dynamic v) {
