@@ -1,32 +1,26 @@
-import 'dart:math' as math;
-import 'dart:async';
+// lib/screens/splash_screen.dart
+// OpsFlood — SplashScreen v5  (Abyss Ops — cyan accent, minimal grid)
+library;
 
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'home_screen.dart';
+import '../providers/flood_providers.dart';
 import '../services/api_service.dart';
 import '../theme/river_theme.dart';
-import '../providers/flood_providers.dart';
-
-// ── Color aliases for the splash theme ─────────────────────────────────────
-// Maps old "Equinox" palette names → existing AppPalette values.
-extension _SplashColors on AppPalette {
-  static const carbon0   = AppPalette.navy0;        // #020810 deepest bg
-  static const ferrari   = AppPalette.critical;     // #FF1744 hot red  (was Ferrari red)
-  static const gold      = AppPalette.amber;         // #FFB800 amber gold
-  static const goldLight = AppPalette.amberLight;   // #FFD54F lighter amber
-}
+import 'home_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
-
   @override
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
+  // ── Controllers ──────────────────────────────────────────────────────────
   late AnimationController _entranceCtrl;
   late Animation<double>   _logoScale;
   late Animation<double>   _logoOpacity;
@@ -43,7 +37,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late AnimationController _statusCtrl;
   late Animation<double>   _statusOpacity;
 
-  // Status cycling
   late AnimationController _dotCtrl;
   int _dotFrame = 0;
 
@@ -53,55 +46,49 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   static const _statusMessages = [
     'Connecting to backend',
     'Loading flood data',
-    'Calibrating sensors',
-    'Almost there',
+    'Syncing river sensors',
+    'Almost ready',
   ];
-  int _msgIndex = 0;
+  int    _msgIndex = 0;
   Timer? _msgTimer;
 
   @override
   void initState() {
     super.initState();
 
-    // ── Entrance animation ────────────────────────────────────────────
     _entranceCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400));
     _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
         CurvedAnimation(parent: _entranceCtrl, curve: Curves.elasticOut));
     _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _entranceCtrl, curve: const Interval(0.0, 0.4)));
+        CurvedAnimation(parent: _entranceCtrl,
+            curve: const Interval(0.0, 0.4)));
     _titleOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _entranceCtrl, curve: const Interval(0.4, 0.8)));
+        CurvedAnimation(parent: _entranceCtrl,
+            curve: const Interval(0.4, 0.8)));
     _titleSlide = Tween<Offset>(
             begin: const Offset(0, 0.4), end: Offset.zero)
-        .animate(CurvedAnimation(
-            parent: _entranceCtrl,
+        .animate(CurvedAnimation(parent: _entranceCtrl,
             curve: const Interval(0.4, 0.9, curve: Curves.easeOutCubic)));
 
-    // ── Pulse ring ────────────────────────────────────────────────────
     _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1600))
+        vsync: this, duration: const Duration(milliseconds: 1800))
       ..repeat(reverse: true);
-    _pulseScale   = Tween<double>(begin: 1.0, end: 1.6).animate(
+    _pulseScale   = Tween<double>(begin: 1.0, end: 1.55).animate(
         CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _pulseOpacity = Tween<double>(begin: 0.35, end: 0.0).animate(
+    _pulseOpacity = Tween<double>(begin: 0.4, end: 0.0).animate(
         CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeIn));
 
-    // ── Sweep line ────────────────────────────────────────────────────
     _sweepCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900));
+        vsync: this, duration: const Duration(milliseconds: 1100));
     _sweepPos = Tween<double>(begin: -1.0, end: 1.0).animate(
         CurvedAnimation(parent: _sweepCtrl, curve: Curves.easeInOut));
 
-    // ── Status fade-in ────────────────────────────────────────────────
     _statusCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400));
-    _statusOpacity = CurvedAnimation(
-        parent: _statusCtrl, curve: Curves.easeIn);
+    _statusOpacity =
+        CurvedAnimation(parent: _statusCtrl, curve: Curves.easeIn);
 
-    // ── Animated dots ────────────────────────────────────────────────
     _dotCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500))
       ..addListener(() {
@@ -115,14 +102,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       _statusCtrl.forward();
     });
 
-    // Cycle status messages every 1.2 s so the screen feels active
     _msgTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
       if (!mounted) return;
       setState(() {
         _msgIndex = (_msgIndex + 1) % _statusMessages.length;
-        if (!_backendOnline) {
-          _statusText = _statusMessages[_msgIndex];
-        }
+        if (!_backendOnline) _statusText = _statusMessages[_msgIndex];
       });
     });
 
@@ -130,10 +114,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 
   Future<void> _bootServices() async {
-    // Fire-and-forget: start polling without awaiting it
     ref.read(realTimeProvider).startPolling();
-
-    // Check backend with a hard 3-second timeout — never block splash longer
     _checkBackend();
   }
 
@@ -145,17 +126,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       _backendOnline =
           health['status'] != 'offline' && health['status'] != 'error';
     } catch (_) {
-      _backendOnline = false; // timeout or network error — proceed anyway
+      _backendOnline = false;
     }
-
     if (!mounted) return;
     setState(() {
-      _statusText = _backendOnline
-          ? 'Systems online  \u2705'
-          : 'Loading data  \u23f3';
+      _statusText = _backendOnline ? 'Systems online  \u2705' : 'Loading cached data  \u23f3';
     });
-
-    // Show the final status for 800 ms then navigate — always
     await Future.delayed(const Duration(milliseconds: 800));
     _navigate();
   }
@@ -164,7 +140,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const HomeScreen(),
+        pageBuilder:        (_, __, ___) => const HomeScreen(),
         transitionsBuilder: (_, anim, __, child) => FadeTransition(
           opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
           child: child,
@@ -187,11 +163,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   String get _dots => '.' * (_dotFrame % 4);
 
-  // ── Local palette shorthands ──────────────────────────────────────────────
-  static const _bg      = AppPalette.navy0;       // carbon0
-  static const _accent  = AppPalette.critical;    // ferrari (red glow)
-  static const _gold    = AppPalette.amber;        // gold
-  static const _goldLt  = AppPalette.amberLight;  // goldLight
+  // ── Palette ───────────────────────────────────────────────────────────────
+  static const _bg     = AppPalette.abyss0;
+  static const _accent = AppPalette.cyan;
+  static const _gold   = AppPalette.amber;
 
   @override
   Widget build(BuildContext context) {
@@ -200,34 +175,36 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       backgroundColor: _bg,
       body: Stack(
         children: [
-          // Background radial gradient
+          // Deep radial glow — cyan instead of red
           Container(
             decoration: BoxDecoration(
               gradient: RadialGradient(
-                center: const Alignment(0, -0.2),
-                radius: 0.9,
-                colors: [const Color(0xFF1A0A0A), _bg],
-                stops: const [0.0, 1.0],
+                center: const Alignment(0, -0.25),
+                radius: 0.85,
+                colors: [
+                  _accent.withValues(alpha: 0.07),
+                  _bg,
+                ],
               ),
             ),
           ),
-          // Carbon grid
-          CustomPaint(size: size, painter: _CarbonGridPainter()),
-          // Sweep line
+          // Minimal dot-grid background
+          CustomPaint(size: size, painter: _DotGridPainter()),
+          // Diagonal sweep line
           AnimatedBuilder(
             animation: _sweepCtrl,
             builder: (_, __) {
               final x = _sweepPos.value * size.width;
               return Positioned(
-                left: x, top: 0, bottom: 0, width: 2,
+                left: x, top: 0, bottom: 0, width: 1.5,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
+                      end:   Alignment.bottomCenter,
                       colors: [
                         _accent.withValues(alpha: 0.0),
-                        _accent.withValues(alpha: 0.7),
+                        _accent.withValues(alpha: 0.5),
                         _accent.withValues(alpha: 0.0),
                       ],
                     ),
@@ -236,68 +213,74 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               );
             },
           ),
-          // Main content
+          // ── Main content ────────────────────────────────────────────
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo with pulse ring
+                // Logo
                 AnimatedBuilder(
                   animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
-                  builder: (_, __) {
-                    return Opacity(
-                      opacity: _logoOpacity.value,
-                      child: Transform.scale(
-                        scale: _logoScale.value,
-                        child: SizedBox(
-                          width: 120, height: 120,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              // Pulse ring
-                              Transform.scale(
-                                scale: _pulseScale.value,
-                                child: Container(
-                                  width: 110, height: 110,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: _accent.withValues(
-                                          alpha: _pulseOpacity.value),
-                                      width: 2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // Logo circle
-                              Container(
-                                width: 100, height: 100,
+                  builder: (_, __) => Opacity(
+                    opacity: _logoOpacity.value,
+                    child: Transform.scale(
+                      scale: _logoScale.value,
+                      child: SizedBox(
+                        width: 128, height: 128,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // outer pulse ring
+                            Transform.scale(
+                              scale: _pulseScale.value,
+                              child: Container(
+                                width: 112, height: 112,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  gradient: RadialGradient(
-                                    colors: [const Color(0xFF3A0010), _accent],
-                                    stops: const [0.0, 1.0],
+                                  border: Border.all(
+                                    color: _accent.withValues(
+                                        alpha: _pulseOpacity.value),
+                                    width: 2,
                                   ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: _accent.withValues(alpha: 0.6),
-                                      blurRadius: 32, spreadRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.water_drop,
-                                  size: 52, color: Colors.white,
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                            // logo circle
+                            Container(
+                              width: 96, height: 96,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF0A2A3A),
+                                    Color(0xFF003D55),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end:   Alignment.bottomRight,
+                                ),
+                                border: Border.all(
+                                    color: _accent.withValues(alpha: 0.55),
+                                    width: 1.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color:      _accent.withValues(alpha: 0.40),
+                                    blurRadius: 36,
+                                    spreadRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.water_drop_rounded,
+                                size: 48, color: AppPalette.cyan,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
                 // Title
                 SlideTransition(
                   position: _titleSlide,
@@ -306,19 +289,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     child: Column(
                       children: [
                         ShaderMask(
-                          shaderCallback: (bounds) => LinearGradient(
-                            colors: [
-                              _accent,
-                              _goldLt,
-                              Colors.white,
-                            ],
-                            stops: const [0.0, 0.5, 1.0],
-                          ).createShader(bounds),
+                          shaderCallback: (b) => const LinearGradient(
+                            colors: [AppPalette.cyan, AppPalette.textWhite],
+                            stops: [0.0, 0.6],
+                          ).createShader(b),
                           child: const Text(
                             'OpsFlood',
                             style: TextStyle(
-                              fontSize: 44, fontWeight: FontWeight.w900,
-                              color: Colors.white, letterSpacing: -1.0,
+                              fontSize:   46,
+                              fontWeight: FontWeight.w900,
+                              color:      Colors.white,
+                              letterSpacing: -1.5,
                             ),
                           ),
                         ),
@@ -326,31 +307,30 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                         Text(
                           'AI-POWERED FLOOD INTELLIGENCE',
                           style: TextStyle(
-                            fontSize: 11, fontWeight: FontWeight.w700,
-                            color: _gold, letterSpacing: 3.0,
+                            fontSize: 10, fontWeight: FontWeight.w700,
+                            color: _gold, letterSpacing: 3.2,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 64),
-                // Status area
+                const SizedBox(height: 72),
+                // Status
                 FadeTransition(
                   opacity: _statusOpacity,
                   child: Column(
                     children: [
                       if (!_backendOnline)
                         SizedBox(
-                          width: 200, height: 2,
+                          width: 180, height: 2,
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(2),
                             child: LinearProgressIndicator(
                               backgroundColor:
-                                  _accent.withValues(alpha: 0.15),
+                                  _accent.withValues(alpha: 0.12),
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                _accent.withValues(alpha: 0.8),
-                              ),
+                                  _accent.withValues(alpha: 0.75)),
                             ),
                           ),
                         )
@@ -360,18 +340,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              AppPalette.safe,
-                            ),
+                                AppPalette.safe),
                           ),
                         ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
                       Text(
                         _backendOnline
                             ? _statusText
                             : '$_statusText$_dots',
                         style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 13,
-                          fontWeight: FontWeight.w500, letterSpacing: 0.3,
+                          color: AppPalette.textGrey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.3,
                         ),
                       ),
                     ],
@@ -380,15 +361,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               ],
             ),
           ),
-          // Version badge
+          // Version stamp
           Positioned(
             bottom: 32, left: 0, right: 0,
             child: Center(
               child: Text(
-                'v2.1  \u2022  MIDNIGHT OPS BUILD',
+                'v2.2  \u2022  ABYSS OPS BUILD',
                 style: TextStyle(
-                  color: _accent.withValues(alpha: 0.5),
-                  fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 2.0,
+                  color: _accent.withValues(alpha: 0.38),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2.5,
                 ),
               ),
             ),
@@ -399,19 +382,20 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 }
 
-class _CarbonGridPainter extends CustomPainter {
+// ── Minimal dot grid painter ──────────────────────────────────────────────────
+class _DotGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0x08FFFFFF)
-      ..strokeWidth = 0.5;
-    const step = 28.0;
-    for (double i = -size.height; i < size.width + size.height; i += step) {
-      canvas.drawLine(Offset(i, 0), Offset(i + size.height, size.height), paint);
-      canvas.drawLine(Offset(i, 0), Offset(i - size.height, size.height), paint);
+      ..color = const Color(0x0C00C6FF)
+      ..style = PaintingStyle.fill;
+    const step = 32.0;
+    for (double x = 0; x < size.width; x += step) {
+      for (double y = 0; y < size.height; y += step) {
+        canvas.drawCircle(Offset(x, y), 1.2, paint);
+      }
     }
   }
-
   @override
-  bool shouldRepaint(_CarbonGridPainter old) => false;
+  bool shouldRepaint(_DotGridPainter old) => false;
 }

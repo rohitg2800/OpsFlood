@@ -1,7 +1,6 @@
 // lib/widgets/premium_stat_card.dart
-//
-// OpsFlood — PremiumStatCard (redesigned)
-// Glass card with glow border, large value, accent gradient line at bottom.
+// OpsFlood — PremiumStatCard v3  (Abyss Ops)
+// Minimal KPI chip: icon  |  large number  |  label  |  optional delta badge
 library;
 
 import 'package:flutter/material.dart';
@@ -9,82 +8,97 @@ import '../theme/river_theme.dart';
 
 class PremiumStatCard extends StatelessWidget {
   final IconData icon;
-  final String   title;
   final String   value;
-  final String   subtitle;
-  final Color    accent;
+  final String   label;
+  final Color    color;
+  final String?  delta;   // e.g. "+2" or "-1"
+  final bool     isAlert; // pulse border when true
 
   const PremiumStatCard({
     super.key,
     required this.icon,
-    required this.title,
     required this.value,
-    required this.subtitle,
-    required this.accent,
+    required this.label,
+    required this.color,
+    this.delta,
+    this.isAlert = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final rc = RiverColors.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: rc.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withValues(alpha: 0.25)),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.07),
-            blurRadius: 10, offset: const Offset(0, 4),
-          ),
-        ],
+        color:        AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isAlert
+              ? color.withValues(alpha: 0.60)
+              : AppPalette.abyssStroke,
+          width: isAlert ? 1.5 : 1,
+        ),
+        boxShadow: isAlert
+            ? AppPalette.glowShadow(color, blur: 18)
+            : const [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // icon + optional delta
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(7),
+                width: 32, height: 32,
                 decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
+                  color:        color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: accent, size: 16),
+                child: Icon(icon, color: color, size: 17),
               ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(title,
+              const Spacer(),
+              if (delta != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color:        color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: color.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    delta!,
                     style: TextStyle(
-                      color: rc.textSecondary,
-                      fontSize: 11, fontWeight: FontWeight.w600,
-                    )),
-              ),
+                      color:      color,
+                      fontSize:   10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(value,
-              style: TextStyle(
-                color: accent,
-                fontSize: 26, fontWeight: FontWeight.w900,
-                letterSpacing: -1,
-              )),
-          const SizedBox(height: 2),
-          Text(subtitle,
-              style: TextStyle(color: rc.textSecondary, fontSize: 10),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 10),
-          // Accent gradient line at bottom
-          Container(
-            height: 3,
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.only(
-                bottomLeft:  Radius.circular(16),
-                bottomRight: Radius.circular(16),
-              ),
-              gradient: LinearGradient(
-                colors: [accent.withValues(alpha: 0.7), accent.withValues(alpha: 0.1)],
-              ),
+          // large metric
+          Text(
+            value,
+            style: TextStyle(
+              color:      color,
+              fontSize:   26,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              height:     1.0,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color:      AppPalette.textGrey,
+              fontSize:   11,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.1,
             ),
           ),
         ],

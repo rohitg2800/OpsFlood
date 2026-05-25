@@ -1,106 +1,147 @@
-import 'dart:ui';
+// lib/widgets/risk_heatmap.dart
+// OpsFlood — RiskHeatmap v3  (Abyss Ops)
+// State × risk-level grid with animated cell glow.
+library;
 
 import 'package:flutter/material.dart';
+import '../theme/river_theme.dart';
 
-import '../constants.dart';
+class RiskHeatmapEntry {
+  final String state;
+  final String level; // 'SAFE' | 'WARNING' | 'DANGER' | 'CRITICAL'
+  final int    count;
+
+  const RiskHeatmapEntry({
+    required this.state,
+    required this.level,
+    required this.count,
+  });
+}
 
 class RiskHeatmap extends StatelessWidget {
-  final List<Map<String, String>> stateRisks;
+  final List<RiskHeatmapEntry> entries;
+  const RiskHeatmap({super.key, required this.entries});
 
-  const RiskHeatmap({
-    super.key,
-    required this.stateRisks,
-  });
-
-  Color _colorFor(String risk) {
-    return Color(AppConstants.riskColors[risk.toUpperCase()] ??
-        AppConstants.riskColors['MODERATE']!);
-  }
+  static Color _color(String level) => AppPalette.statusColor(level);
 
   @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withOpacity(0.16)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'State Risk Heatmap',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 12),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: stateRisks.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                  childAspectRatio: 2.5,
-                ),
-                itemBuilder: (context, index) {
-                  final item = stateRisks[index];
-                  final risk = item['risk'] ?? 'MODERATE';
-                  final color = _colorFor(risk);
-                  return Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.16),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: color.withOpacity(0.5)),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: color,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            item['state'] ?? '',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          risk,
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 10,
-                          ),
-                        )
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
+    if (entries.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color:        AppPalette.abyss2,
+          borderRadius: BorderRadius.circular(22),
+          border:       Border.all(color: AppPalette.abyssStroke),
+        ),
+        child: const Center(
+          child: Text(
+            'No risk data available',
+            style: TextStyle(color: AppPalette.textGrey, fontSize: 13),
           ),
         ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color:        AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(22),
+        border:       Border.all(color: AppPalette.abyssStroke),
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // header
+          Row(children: [
+            Container(
+              width: 3, height: 18,
+              decoration: BoxDecoration(
+                color:        AppPalette.cyan,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'State Risk Matrix',
+              style: TextStyle(
+                color:      AppPalette.textWhite,
+                fontSize:   14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          // grid
+          Wrap(
+            spacing:    8,
+            runSpacing: 8,
+            children: entries.map((e) {
+              final col = _color(e.level);
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color:        col.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: col.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      e.state.length > 12
+                          ? '${e.state.substring(0, 12)}…'
+                          : e.state,
+                      style: TextStyle(
+                        color:      col,
+                        fontSize:   11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${e.count} station${e.count != 1 ? 's' : ''}',
+                      style: const TextStyle(
+                        color:    AppPalette.textGrey,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          // legend
+          Row(
+            children: ['SAFE', 'WARNING', 'DANGER', 'CRITICAL']
+                .map((l) => Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8, height: 8,
+                            decoration: BoxDecoration(
+                              color:  _color(l),
+                              shape:  BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            l,
+                            style: const TextStyle(
+                              color:    AppPalette.textGrey,
+                              fontSize: 9,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ))
+                .toList(),
+          ),
+        ],
       ),
     );
   }
