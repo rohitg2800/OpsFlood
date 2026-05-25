@@ -789,9 +789,10 @@ class _LiveGaugeCard extends StatelessWidget {
               _stat('Level', '${data.currentLevel.toStringAsFixed(2)} m'),
               const SizedBox(width: 16),
               _stat('Danger', '${data.dangerLevel.toStringAsFixed(2)} m'),
-              if (data.flowRate != null) ...
-                [const SizedBox(width: 16),
-                 _stat('Flow', '${data.flowRate!.toStringAsFixed(0)} m³/s')],
+              if (data.flowRate != null) ...[
+                const SizedBox(width: 16),
+                _stat('Flow', '${data.flowRate!.toStringAsFixed(0)} m³/s'),
+              ],
             ],
           ),
         ],
@@ -822,13 +823,19 @@ class _CwcStationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s     = result.station;
-    final dc    = s.dangerClass;
-    final color = dc == DangerClass.extreme ? const Color(0xFFEF4444)
+    final s      = result.station;
+    final dc     = s.dangerClass;
+    final color  = dc == DangerClass.extreme ? const Color(0xFFEF4444)
         : dc == DangerClass.severe      ? const Color(0xFFF97316)
         : dc == DangerClass.aboveNormal ? const Color(0xFFD4A843)
         : const Color(0xFF22C55E);
     final noData = result.source == 'NO_DATA';
+
+    // FIX: result.currentLevel is double? — use null-aware access + fallback.
+    // FIX: RiverStation fields are .warning / .danger (not warningLevel / dangerLevel).
+    final levelStr   = result.currentLevel?.toStringAsFixed(2) ?? '—';
+    final warningStr = s.warning.toStringAsFixed(2);
+    final dangerStr  = s.danger.toStringAsFixed(2);
 
     return Opacity(
       opacity: noData ? 0.55 : 1.0,
@@ -882,32 +889,27 @@ class _CwcStationCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (!noData) ...
-              [
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _stat('Level',
-                        '${result.currentLevel.toStringAsFixed(2)} m'),
-                    const SizedBox(width: 14),
-                    _stat('Warning',
-                        '${s.warningLevel.toStringAsFixed(2)} m'),
-                    const SizedBox(width: 14),
-                    _stat('Danger',
-                        '${s.dangerLevel.toStringAsFixed(2)} m'),
-                  ],
+            if (!noData) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _stat('Level',   '$levelStr m'),
+                  const SizedBox(width: 14),
+                  _stat('Warning', '$warningStr m'),
+                  const SizedBox(width: 14),
+                  _stat('Danger',  '$dangerStr m'),
+                ],
+              ),
+              if (result.mlFloodProb != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'ML flood prob: ${(result.mlFloodProb! * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 11),
                 ),
-                if (result.mlFloodProb != null) ...
-                  [
-                    const SizedBox(height: 6),
-                    Text(
-                      'ML flood prob: ${(result.mlFloodProb! * 100).toStringAsFixed(1)}%',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          fontSize: 11),
-                    ),
-                  ],
               ],
+            ],
           ],
         ),
       ),
