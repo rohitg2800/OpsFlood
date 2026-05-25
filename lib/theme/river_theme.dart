@@ -1,101 +1,123 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  OpsFlood  –  Midnight Ops Design Language  (v3 — Premium Rebuild)
+//  OpsFlood  —  Abyss Ops Design Language  (v4 — Premium Rebuild 2026)
 //
 //  Philosophy:
-//    • Deep navy base  →  professional emergency ops feel
-//    • Neon cyan accent →  live data / active state
-//    • Amber gold       →  metrics / numbers
-//    • Red reserved     →  critical alerts ONLY
-//    • Green/orange     →  safe / warning status
-//    • Glass morphism   →  frosted overlays for depth
+//    • Abyss black-blue base  →  elite intelligence ops feel
+//    • Electric cyan accent   →  live data / heartbeat
+//    • Warm amber gold        →  metric numbers / KPIs
+//    • Red ONLY for critical  →  never decorative
+//    • Vivid emerald          →  safe / healthy
+//    • Frosted glass cards    →  depth without noise
+//    • Minimal data shown     →  only what matters, shown with precision
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppPalette {
-  // ── Navy backgrounds ──────────────────────────────────────────────────────
-  static const navy0      = Color(0xFF020810);
-  static const navy1      = Color(0xFF050C1A);
-  static const navy2      = Color(0xFF0D1B2E);
-  static const navy3      = Color(0xFF142438);
-  static const navy4      = Color(0xFF1C3050);
-  static const navyStroke = Color(0xFF1E3A5F);
-  static const navyGlass  = Color(0x880D1B2E); // frosted card
+  // ── Abyss backgrounds ──────────────────────────────────────────────────────
+  static const abyss0     = Color(0xFF030A14);  // deepest
+  static const abyss1     = Color(0xFF060F1C);  // scaffold
+  static const abyss2     = Color(0xFF0A1828);  // card
+  static const abyss3     = Color(0xFF0F2035);  // elevated card
+  static const abyss4     = Color(0xFF152840);  // chip / selection
+  static const abyssStroke = Color(0x1A00C6FF); // cyan-tinted border
+  static const abyssGlass  = Color(0xCC0A1828); // frosted card
 
-  // ── Neon cyan ────────────────────────────────────────────────────────────
-  static const cyan      = Color(0xFF00D4FF);
-  static const cyanDark  = Color(0xFF0099BB);
-  static const cyanGlow  = Color(0x3300D4FF);
-  static const cyanDim   = Color(0xFF007A99);
-  static const cyanGlow2 = Color(0x1A00D4FF); // subtle glow for backgrounds
+  // Keep old names as aliases so existing screens don't break
+  static const navy0      = abyss0;
+  static const navy1      = abyss1;
+  static const navy2      = abyss2;
+  static const navy3      = abyss3;
+  static const navy4      = abyss4;
+  static const navyStroke = abyssStroke;
+  static const navyGlass  = abyssGlass;
 
-  // ── Amber gold ───────────────────────────────────────────────────────────
-  static const amber      = Color(0xFFFFB800);
-  static const amberLight = Color(0xFFFFD54F);
-  static const amberDim   = Color(0xFF996D00);
+  // ── Electric cyan ────────────────────────────────────────────────────────
+  static const cyan      = Color(0xFF00C6FF);
+  static const cyanBright = Color(0xFF33D4FF);
+  static const cyanDark  = Color(0xFF0090BB);
+  static const cyanGlow  = Color(0x2600C6FF);
+  static const cyanGlow2 = Color(0x1200C6FF);
+  static const cyanDim   = Color(0xFF006A88);
 
-  // ── Status palette ────────────────────────────────────────────────────────
-  static const safe     = Color(0xFF00E676);
-  static const warning  = Color(0xFFFFB300);
-  static const danger   = Color(0xFFFF6D00);
-  static const critical = Color(0xFFFF1744);
-  static const safeGlow = Color(0x2200E676);
-  static const warnGlow = Color(0x22FFB300);
-  static const dangerGlow = Color(0x22FF6D00);
-  static const critGlow   = Color(0x22FF1744);
+  // ── Warm amber gold ───────────────────────────────────────────────────────
+  static const amber      = Color(0xFFE8A020);
+  static const amberLight = Color(0xFFFFCA50);
+  static const amberDim   = Color(0xFF8A5A00);
+
+  // ── Status palette — semantic only ────────────────────────────────────────
+  static const safe     = Color(0xFF10E88A);  // vivid emerald
+  static const warning  = Color(0xFFFFA520);  // warm orange
+  static const danger   = Color(0xFFFF5500);  // deep orange
+  static const critical = Color(0xFFFF1A44);  // saturated red
+  static const safeGlow    = Color(0x1810E88A);
+  static const warnGlow    = Color(0x18FFA520);
+  static const dangerGlow  = Color(0x18FF5500);
+  static const critGlow    = Color(0x18FF1A44);
 
   // ── Text ─────────────────────────────────────────────────────────────────
-  static const textWhite = Color(0xFFF0F4FF);
-  static const textGrey  = Color(0xFF7A8CA8);
-  static const textDim   = Color(0xFF3A4A60);
+  static const textWhite = Color(0xFFF0F6FF);
+  static const textGrey  = Color(0xFF6A7E96);
+  static const textDim   = Color(0xFF283848);
 
   // ── Gradient helpers ─────────────────────────────────────────────────────
-  static const LinearGradient navyGradient = LinearGradient(
+  static const LinearGradient abyssGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [navy1, navy3],
+    colors: [abyss1, abyss3],
   );
+
+  // Keep old alias
+  static const LinearGradient navyGradient = abyssGradient;
 
   static LinearGradient glowGradient(Color c) => LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [
-      c.withValues(alpha: 0.18),
-      c.withValues(alpha: 0.04),
+      c.withValues(alpha: 0.15),
+      c.withValues(alpha: 0.03),
     ],
   );
 
-  // ── Box shadow helpers ────────────────────────────────────────────────────
   static List<BoxShadow> glowShadow(Color c, {double blur = 20}) => [
     BoxShadow(
-      color: c.withValues(alpha: 0.18),
+      color: c.withValues(alpha: 0.20),
       blurRadius: blur,
       offset: const Offset(0, 6),
     ),
     BoxShadow(
-      color: c.withValues(alpha: 0.06),
-      blurRadius: blur * 2,
-      spreadRadius: 2,
+      color: c.withValues(alpha: 0.07),
+      blurRadius: blur * 2.2,
+      spreadRadius: 1,
     ),
   ];
 
   static BoxDecoration glassMorph({
-    Color borderColor = AppPalette.navyStroke,
+    Color borderColor = AppPalette.abyssStroke,
     double radius = 20,
     Color? bg,
   }) =>
       BoxDecoration(
-        color: bg ?? AppPalette.navyGlass,
+        color: bg ?? AppPalette.abyssGlass,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.30),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.40),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
           ),
         ],
       );
+
+  // ── Chart palette — 5 distinct data colours ───────────────────────────────
+  static const List<Color> chartPalette = [
+    Color(0xFF00C6FF), // cyan
+    Color(0xFF10E88A), // emerald
+    Color(0xFFE8A020), // amber
+    Color(0xFFFF5500), // orange
+    Color(0xFF818CF8), // indigo
+  ];
 }
 
 class RiverColors extends ThemeExtension<RiverColors> {
@@ -142,26 +164,26 @@ class RiverColors extends ThemeExtension<RiverColors> {
   final Color navInactive;
 
   static RiverColors of(BuildContext context) =>
-      Theme.of(context).extension<RiverColors>() ?? _midnight;
+      Theme.of(context).extension<RiverColors>() ?? _abyss;
 
-  static const RiverColors _midnight = RiverColors(
+  static const RiverColors _abyss = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
     riverDanger:    AppPalette.danger,
     riverCritical:  AppPalette.critical,
-    riverSurface:   AppPalette.navy2,
+    riverSurface:   AppPalette.abyss2,
     riverGlow:      AppPalette.cyanGlow,
-    cardBg:         AppPalette.navy2,
-    cardBgElevated: AppPalette.navy3,
-    chipBg:         AppPalette.navy4,
-    stroke:         AppPalette.navyStroke,
+    cardBg:         AppPalette.abyss2,
+    cardBgElevated: AppPalette.abyss3,
+    chipBg:         AppPalette.abyss4,
+    stroke:         AppPalette.abyssStroke,
     textPrimary:    AppPalette.textWhite,
     textSecondary:  AppPalette.textGrey,
     sparklineColor: AppPalette.cyan,
     accent:         AppPalette.cyan,
     accentGlow:     AppPalette.cyanGlow,
     metricColor:    AppPalette.amber,
-    navBg:          AppPalette.navy0,
+    navBg:          AppPalette.abyss0,
     navActive:      AppPalette.cyan,
     navInactive:    AppPalette.textDim,
   );
@@ -171,21 +193,21 @@ class RiverColors extends ThemeExtension<RiverColors> {
     riverWarning:   AppPalette.warning,
     riverDanger:    AppPalette.danger,
     riverCritical:  AppPalette.critical,
-    riverSurface:   Color(0xFFF0F4FF),
-    riverGlow:      Color(0x220099BB),
+    riverSurface:   Color(0xFFF0F6FF),
+    riverGlow:      Color(0x220090BB),
     cardBg:         Colors.white,
-    cardBgElevated: Color(0xFFF0F4FF),
-    chipBg:         Color(0xFFE0EAF8),
-    stroke:         Color(0xFFCCDDEE),
-    textPrimary:    Color(0xFF0A1628),
-    textSecondary:  Color(0xFF4A6080),
+    cardBgElevated: Color(0xFFF0F6FF),
+    chipBg:         Color(0xFFDCEBF8),
+    stroke:         Color(0xFFBBCFE8),
+    textPrimary:    Color(0xFF060F1C),
+    textSecondary:  Color(0xFF3A5570),
     sparklineColor: AppPalette.cyanDark,
     accent:         AppPalette.cyanDark,
-    accentGlow:     Color(0x220099BB),
+    accentGlow:     Color(0x220090BB),
     metricColor:    AppPalette.amberDim,
-    navBg:          Color(0xFF0A1628),
+    navBg:          Color(0xFF060F1C),
     navActive:      AppPalette.cyan,
-    navInactive:    Color(0xFF8A9AAA),
+    navInactive:    Color(0xFF7A8A9A),
   );
 
   @override
@@ -247,11 +269,11 @@ class RiverColors extends ThemeExtension<RiverColors> {
 
   static ThemeData lightTheme() => _buildTheme(
       brightness: Brightness.light, ext: _light,
-      scaffoldBg: const Color(0xFF0A1628));
+      scaffoldBg: const Color(0xFF060F1C));
 
   static ThemeData darkTheme() => _buildTheme(
-      brightness: Brightness.dark, ext: _midnight,
-      scaffoldBg: AppPalette.navy0);
+      brightness: Brightness.dark, ext: _abyss,
+      scaffoldBg: AppPalette.abyss0);
 
   static ThemeData _buildTheme({
     required Brightness brightness,
@@ -265,9 +287,9 @@ class RiverColors extends ThemeExtension<RiverColors> {
     ).copyWith(
       primary:     AppPalette.cyan,
       secondary:   AppPalette.amber,
-      surface:     isDark ? AppPalette.navy1 : Colors.white,
-      onPrimary:   AppPalette.navy0,
-      onSecondary: AppPalette.navy0,
+      surface:     isDark ? AppPalette.abyss1 : Colors.white,
+      onPrimary:   AppPalette.abyss0,
+      onSecondary: AppPalette.abyss0,
       error:       AppPalette.critical,
     );
 
@@ -276,130 +298,123 @@ class RiverColors extends ThemeExtension<RiverColors> {
       colorScheme:             cs,
       scaffoldBackgroundColor: scaffoldBg,
       extensions:              <ThemeExtension<dynamic>>[ext],
+      fontFamily: 'Roboto',
       textTheme: TextTheme(
         displayLarge: const TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w900,
-          letterSpacing: -1.5, color: AppPalette.textWhite,
+          fontWeight: FontWeight.w900, letterSpacing: -2.0,
+          color: AppPalette.textWhite,
         ),
         displaySmall: const TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w800,
-          letterSpacing: -1.0, color: AppPalette.textWhite,
+          fontWeight: FontWeight.w800, letterSpacing: -1.2,
+          color: AppPalette.textWhite,
         ),
         titleLarge: const TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w700,
-          letterSpacing: -0.5, color: AppPalette.textWhite,
+          fontWeight: FontWeight.w700, letterSpacing: -0.6,
+          color: AppPalette.textWhite,
         ),
         titleMedium: const TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w600,
-          letterSpacing: -0.2, color: AppPalette.textWhite,
+          fontWeight: FontWeight.w600, letterSpacing: -0.3,
+          color: AppPalette.textWhite,
         ),
         bodyMedium: TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w400,
+          fontWeight: FontWeight.w400,
           color: isDark ? AppPalette.textGrey : AppPalette.textWhite,
         ),
         labelSmall: const TextStyle(
-          fontFamily: 'Roboto', fontWeight: FontWeight.w600,
-          letterSpacing: 1.0, color: AppPalette.textGrey,
+          fontWeight: FontWeight.w600, letterSpacing: 1.2,
+          color: AppPalette.textGrey,
         ),
       ),
       cardTheme: CardThemeData(
-        color:     isDark ? AppPalette.navy2 : Colors.white,
+        color:     isDark ? AppPalette.abyss2 : Colors.white,
         elevation: 0,
         shape:     RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           side: BorderSide(
-            color: isDark ? AppPalette.navyStroke : const Color(0xFFCCDDEE),
+            color: isDark ? AppPalette.abyssStroke : const Color(0xFFBBCFE8),
             width: 1,
           ),
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: isDark ? AppPalette.navy0 : const Color(0xFF0A1628),
+        backgroundColor: isDark ? AppPalette.abyss0 : const Color(0xFF060F1C),
         foregroundColor: AppPalette.textWhite,
         elevation: 0,
         centerTitle: false,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: const TextStyle(
           color: AppPalette.textWhite, fontSize: 20,
-          fontWeight: FontWeight.w800, letterSpacing: -0.5,
-          fontFamily: 'Roboto',
+          fontWeight: FontWeight.w800, letterSpacing: -0.6,
         ),
         iconTheme: const IconThemeData(color: AppPalette.cyan),
       ),
-      bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor:     isDark ? AppPalette.navy0 : const Color(0xFF0A1628),
-        selectedItemColor:   AppPalette.cyan,
-        unselectedItemColor: AppPalette.textDim,
-        selectedLabelStyle:  const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-        unselectedLabelStyle:const TextStyle(fontSize: 11),
-        type:                BottomNavigationBarType.fixed,
-        elevation:           0,
-      ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor:  isDark ? AppPalette.navy0 : const Color(0xFF0A1628),
+        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF060F1C),
         indicatorColor:   AppPalette.cyanGlow,
+        height: 64,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: AppPalette.cyan, size: 24);
+            return const IconThemeData(color: AppPalette.cyan, size: 23);
           }
-          return const IconThemeData(color: AppPalette.textDim, size: 22);
+          return const IconThemeData(color: AppPalette.textDim, size: 21);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return const TextStyle(
-              color: AppPalette.cyan, fontSize: 11, fontWeight: FontWeight.w700);
+              color: AppPalette.cyan, fontSize: 10, fontWeight: FontWeight.w700,
+              letterSpacing: 0.2);
           }
-          return const TextStyle(color: AppPalette.textDim, fontSize: 11);
+          return const TextStyle(color: AppPalette.textDim, fontSize: 10);
         }),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppPalette.cyan,
-          foregroundColor: AppPalette.navy0,
+          foregroundColor: AppPalette.abyss0,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.4),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppPalette.cyan,
           side: const BorderSide(color: AppPalette.cyan, width: 1.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: isDark ? AppPalette.navy4 : const Color(0xFFE0EAF8),
+        backgroundColor: isDark ? AppPalette.abyss4 : const Color(0xFFDCEBF8),
         labelStyle: TextStyle(
-          fontSize: 12, fontWeight: FontWeight.w600,
-          color: isDark ? AppPalette.textWhite : AppPalette.navy2,
+          fontSize: 11, fontWeight: FontWeight.w700,
+          color: isDark ? AppPalette.textWhite : AppPalette.abyss2,
         ),
         side: BorderSide(
-          color: isDark ? AppPalette.navyStroke : const Color(0xFFCCDDEE),
+          color: isDark ? AppPalette.abyssStroke : const Color(0xFFBBCFE8),
           width: 1,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppPalette.cyan, linearTrackColor: AppPalette.navy3,
+        color: AppPalette.cyan, linearTrackColor: AppPalette.abyss3,
       ),
       dividerTheme: const DividerThemeData(
-        color: AppPalette.navyStroke, space: 1, thickness: 1,
+        color: AppPalette.abyssStroke, space: 1, thickness: 1,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled:    true,
-        fillColor: isDark ? AppPalette.navy2 : Colors.white,
+        fillColor: isDark ? AppPalette.abyss2 : Colors.white,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.navyStroke),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppPalette.abyssStroke),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.navyStroke),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppPalette.abyssStroke),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: AppPalette.cyan, width: 2),
         ),
         hintStyle: const TextStyle(color: AppPalette.textDim),
