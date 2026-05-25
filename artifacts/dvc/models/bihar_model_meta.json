@@ -1,0 +1,39 @@
+{
+  "trained_at": "2026-05-25T13:45:23.015201Z",
+  "accuracy": 1.0,
+  "n_samples": 1509,
+  "live_samples": 0,
+  "features": [
+    "Peak_Flood_Level_m",
+    "Event_Duration_days",
+    "Time_to_Peak_days",
+    "Recession_Time_day",
+    "T1d",
+    "T2d",
+    "T3d",
+    "T4d",
+    "T5d",
+    "T6d",
+    "T7d"
+  ],
+  "importance": {
+    "Peak_Flood_Level_m": 0.0003,
+    "Event_Duration_days": 0.4171,
+    "Time_to_Peak_days": 0.263,
+    "Recession_Time_day": 0.2183,
+    "T1d": 0.0119,
+    "T2d": 0.0161,
+    "T3d": 0.0026,
+    "T4d": 0.0056,
+    "T5d": 0.0171,
+    "T6d": 0.0186,
+    "T7d": 0.0294
+  },
+  "class_map": {
+    "0": "LOW",
+    "1": "MODERATE",
+    "2": "SEVERE"
+  },
+  "state": "Bihar",
+  "source": "WRD_Bihar_live + CWC_historical + synthetic"
+}
