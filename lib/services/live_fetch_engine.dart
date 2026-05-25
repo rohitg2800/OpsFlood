@@ -1,22 +1,14 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v15 — fix Open-Meteo 429 rate-limit)
+// OpsFlood — LiveFetchEngine (v16 — trust backend risk label for all sources)
 //
-// ROOT CAUSE OF HTTP 429 ERRORS:
-//   Open-Meteo free tier rate-limits at ~10-15 req/min per IP.
-//   With 10 cities sequential, each firing Weather + GloFAS = 20 requests
-//   in quick succession.  Later cities in the queue hit 429.
-//
-// FIX (v15):
-//   1. Shared in-memory cache for Weather and GloFAS keyed by
-//      rounded lat/lon (0.5° grid).  TTL = 20 min.
-//      Cities within ~55 km share the same Open-Meteo tile.
-//   2. _fetchWithRetry(): on HTTP 429 wait Retry-After header (default 60s)
-//      + jitter, then retry once before giving up.
-//   3. Inter-city delay: 300 ms between cities so burst is spread out.
-//   4. GloFAS past_days reduced from 7→4 (fewer data points = faster, same TTL).
-//
-// Rest of pipeline unchanged from v14.
+// FIX v16:
+//   1. backendRisk is now trusted for ANY non-null backendSrc, not only
+//      OPEN_METEO_GLOFAS. This means STATE_SEVERITY_MATRIX, CWC_DIRECT etc.
+//      from the backend no longer get downgraded to LOW by _inferRisk().
+//   2. CWC direct HTML error guard: response body starting with '<' is
+//      treated as a maintenance page → skipped cleanly, no FormatException.
+//   3. All v15 cache, 429-backoff, 300ms inter-city delay unchanged.
 library;
 
 import 'dart:async';
@@ -31,12 +23,7 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'cwc_direct_service.dart';
 
-// ── MlInferenceEngine stub ───────────────────────────────────────────────────
 class MlInferenceEngine {}
-
-// ── Open-Meteo tile cache ─────────────────────────────────────────────────
-// Keys are "lat2dp:lon2dp" rounded to 2 decimal places.
-// Shared across all city fetches in a single refresh cycle.
 
 const Duration _kCacheTtl = Duration(minutes: 20);
 
@@ -53,7 +40,6 @@ final _glofasCache  = <String, _CacheEntry<Map<String, dynamic>>>{};
 String _tileKey(double lat, double lon) =>
     '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
 
-// ── LiveFetchEngine ──────────────────────────────────────────────────────────
 class LiveFetchEngine {
   static final LiveFetchEngine _instance = LiveFetchEngine._internal();
   factory LiveFetchEngine() => _instance;
@@ -71,7 +57,6 @@ class LiveFetchEngine {
 
   VoidCallback? onStateChanged;
 
-  // ── Status flags ─────────────────────────────────────────────────────────────
   bool      isLoading           = false;
   bool      isOnline            = false;
   bool      isUsingFallback     = false;
@@ -82,7 +67,6 @@ class LiveFetchEngine {
   int       queuedOfflineCycles = 0;
   String?   fetchingCity;
 
-  // ── Data ─────────────────────────────────────────────────────────────────────
   List<FloodData>    liveLevels           = [];
   List<dynamic>      activeCriticalAlerts = [];
   List<dynamic>      criticalAlerts       = [];
@@ -104,8 +88,6 @@ class LiveFetchEngine {
 
   final Map<String, List<RiverLevelSnapshot>> _trendCache = {};
   final Map<String, FloodData>                _dataCache  = {};
-
-  // ── Public helpers ────────────────────────────────────────────────────────────
 
   List<RiverLevelSnapshot> trendForCity(String city) =>
       _trendCache[city.toLowerCase()] ?? [];
@@ -134,8 +116,6 @@ class LiveFetchEngine {
         return s.toLowerCase() == state.toLowerCase() || s == 'All India';
       }).toList();
 
-  // ── Polling ─────────────────────────────────────────────────────────────────
-
   Future<void> startPolling() async {
     _timer?.cancel();
     await refreshData();
@@ -146,8 +126,6 @@ class LiveFetchEngine {
     _timer?.cancel();
     _timer = null;
   }
-
-  // ── Backend wake ──────────────────────────────────────────────────────────────
 
   Future<bool> _wakeBackend() async {
     if (_runningOnWeb || _backendAwake) return _backendAwake;
@@ -165,12 +143,6 @@ class LiveFetchEngine {
     }
     return _backendAwake;
   }
-
-  // ── HTTP helper with 429 backoff ───────────────────────────────────────────
-  //
-  // On 429: reads Retry-After header (or defaults to 60s) + random jitter,
-  // waits, then retries exactly once.  If still 429, returns the response
-  // so callers can treat it as a cache miss (null).
 
   Future<http.Response> _fetchWithRetry(
     Uri uri, {
@@ -191,8 +163,6 @@ class LiveFetchEngine {
     }
     return res;
   }
-
-  // ── Main refresh (sequential per-city + 300 ms inter-city gap) ──────────────
 
   Future<void> refreshData() async {
     if (_lock) return;
@@ -275,8 +245,6 @@ class LiveFetchEngine {
               '| flow=${snap['flowRate']} m³/s | bkSrc=${snap['backendSource']}');
         }
 
-        // v15: 300 ms gap between cities to stay under Open-Meteo rate limit.
-        // Skipped for last city to avoid unnecessary delay.
         if (city != cities.last) {
           await Future.delayed(const Duration(milliseconds: 300));
         }
@@ -312,8 +280,6 @@ class LiveFetchEngine {
       Future.delayed(Duration.zero, () => onStateChanged?.call());
     }
   }
-
-  // ── Per-city fetch ─────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> _fetchCity(IndiaCity city) async {
     try {
@@ -351,6 +317,7 @@ class LiveFetchEngine {
       double? dangerLevel = _safeLevel(backend?['danger_level']);
       double? warnLevel   = _safeLevel(backend?['warning_level']);
       double? safeLevel   = _safeLevel(backend?['safe_level']);
+      // v16: trust backendRisk for ANY non-null source, not only GLOFAS
       String? backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
       String? backendSrc  = backend?['data_source'] as String?;
       String? cwcSource   = backend != null ? (backendSrc ?? 'BACKEND') : null;
@@ -360,15 +327,20 @@ class LiveFetchEngine {
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null;
+        backendRisk = null; // CWC direct overrides backend risk — recalculate below
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
       warnLevel   ??= city.warningLevel > 0 ? city.warningLevel : null;
 
+      // v16: use backendRisk whenever we have a backend source AND CWC direct
+      // did NOT override it. _inferRisk() is only fallback when backend is absent.
       final String riskLabel;
-      if (backendRisk != null && backendSrc == 'OPEN_METEO_GLOFAS') {
-        riskLabel = backendRisk;
+      if (backendRisk != null && backendRisk.isNotEmpty) {
+        // Still check if CWC level data warrants upgrading to CRITICAL
+        riskLabel = _upgradeRiskFromLevel(
+          backendRisk, cwcLevel, dangerLevel, warnLevel,
+        );
       } else {
         riskLabel = _inferRisk(
           precipMm:     precipMm,
@@ -399,10 +371,26 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 1: Open-Meteo Weather (cached by lat/lon tile, 429-aware) ─────────
-  //
-  // v15: Results cached for 20 min per 0.01° lat/lon tile.
-  // Cities sharing the same tile (e.g. Kolkata & Howrah) use one HTTP call.
+  // v16: upgrade risk label if CWC level says it's actually worse
+  String _upgradeRiskFromLevel(
+    String base, double? current, double? danger, double? warning,
+  ) {
+    const rank = {'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1, 'NORMAL': 1};
+    int score = rank[base] ?? 1;
+    if (current != null && danger != null && danger > 0) {
+      final r = current / danger;
+      if (r >= 1.0  && score < 4) score = 4;
+      else if (r >= 0.85 && score < 3) score = 3;
+      else if (r >= 0.70 && score < 2) score = 2;
+    } else if (current != null && warning != null && warning > 0) {
+      final r = current / warning;
+      if (r >= 1.0 && score < 3) score = 3;
+    }
+    return score >= 4 ? 'CRITICAL'
+         : score == 3 ? 'HIGH'
+         : score == 2 ? 'MODERATE'
+         : 'LOW';
+  }
 
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
@@ -420,9 +408,7 @@ class LiveFetchEngine {
       );
       final res = await _fetchWithRetry(uri);
       if (res.statusCode != 200) {
-        if (kDebugMode) {
-          debugPrint('[LiveFetch] weather ${city.name}: HTTP ${res.statusCode}');
-        }
+        if (kDebugMode) debugPrint('[LiveFetch] weather ${city.name}: HTTP ${res.statusCode}');
         return null;
       }
       final j      = jsonDecode(res.body) as Map<String, dynamic>;
@@ -442,10 +428,6 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 2: Open-Meteo GloFAS (cached by lat/lon tile, 429-aware) ────────
-  //
-  // v15: past_days reduced 7→4 (saves ~43% response size, same practical TTL).
-
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
     final cached = _glofasCache[key];
@@ -461,9 +443,7 @@ class LiveFetchEngine {
       );
       final res = await _fetchWithRetry(uri);
       if (res.statusCode != 200) {
-        if (kDebugMode) {
-          debugPrint('[LiveFetch] GloFAS ${city.name}: HTTP ${res.statusCode}');
-        }
+        if (kDebugMode) debugPrint('[LiveFetch] GloFAS ${city.name}: HTTP ${res.statusCode}');
         return null;
       }
       final j    = jsonDecode(res.body) as Map<String, dynamic>;
@@ -478,8 +458,6 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Source 4 (PRIMARY on mobile): OpsFlood /api/live-levels ─────────────────
-
   Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
     try {
       final uri = Uri.parse(
@@ -491,8 +469,14 @@ class LiveFetchEngine {
         if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTTP ${res.statusCode}');
         return null;
       }
+      // v16: guard against HTML maintenance pages returned as 200
+      final body = res.body.trim();
+      if (body.startsWith('<')) {
+        if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTML response (maintenance?)');
+        return null;
+      }
 
-      final j   = jsonDecode(res.body) as Map<String, dynamic>;
+      final j   = jsonDecode(body) as Map<String, dynamic>;
       final raw = j['data'];
       if (raw is! List || raw.isEmpty) return null;
 
@@ -537,8 +521,6 @@ class LiveFetchEngine {
     }
     return stations.first;
   }
-
-  // ── Source 5: SACHET NDMA IMD (mobile/desktop only) ──────────────────────────
 
   List<dynamic> _imdCache     = [];
   DateTime?     _imdCacheTime;
@@ -588,8 +570,6 @@ class LiveFetchEngine {
     }).toList();
   }
 
-  // ── Risk inference ────────────────────────────────────────────────────────────
-
   String _inferRisk({
     required double precipMm,
     required double dischargeM3s,
@@ -622,8 +602,6 @@ class LiveFetchEngine {
     if (score >= 0.30) return 'MODERATE';
     return 'LOW';
   }
-
-  // ── FloodData builder ────────────────────────────────────────────────────────
 
   FloodData _snapToFloodData(IndiaCity city, Map<String, dynamic> snap) {
     final danger  = (snap['dangerLevel']  as num?)?.toDouble() ?? city.dangerLevel;
@@ -661,8 +639,6 @@ class LiveFetchEngine {
     );
   }
 
-  // ── Trend builder ─────────────────────────────────────────────────────────────
-
   List<RiverLevelSnapshot> _buildTrend(dynamic discharge7d) {
     final vals = (discharge7d is List) ? discharge7d.cast<double>() : <double>[];
     if (vals.isEmpty) return [];
@@ -675,8 +651,6 @@ class LiveFetchEngine {
     ));
   }
 
-  // ── Priority city list ────────────────────────────────────────────────────────
-
   List<IndiaCity> _priorityCities() {
     const ids = [
       'guwahati', 'patna', 'cuttack', 'kolkata', 'varanasi',
@@ -684,8 +658,6 @@ class LiveFetchEngine {
     ];
     return ids.map(cityById).whereType<IndiaCity>().toList();
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────────
 
   double? _safeLevel(dynamic v) {
     if (v == null) return null;

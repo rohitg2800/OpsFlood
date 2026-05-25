@@ -15,13 +15,16 @@ import '../theme/river_theme.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
+
+  static const route = '/alerts';
+
   @override
   State<AlertsScreen> createState() => _AlertsScreenState();
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
   final AllIndiaAlertEngine _engine = AllIndiaAlertEngine();
-  String _filterRisk = 'ALL'; // ALL | CRITICAL | HIGH | MODERATE
+  String _filterRisk = 'ALL';
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
 
@@ -41,12 +44,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   void _rebuild() { if (mounted) setState(() {}); }
 
-  // ── Filtered state list ────────────────────────────────────────────────────
-
   List<String> _visibleStates() {
     final q = _searchQuery.toLowerCase();
     return _engine.stateGroups.keys.where((state) {
-      // filter by search
       if (q.isNotEmpty) {
         final match = state.toLowerCase().contains(q) ||
             (_engine.stateGroups[state] ?? []).any(
@@ -54,7 +54,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       (fd.riverName ?? '').toLowerCase().contains(q));
         if (!match) return false;
       }
-      // filter by risk
       if (_filterRisk != 'ALL') {
         final worst = _engine.stateRisk(state);
         if (_filterRisk == 'CRITICAL' && worst != 'CRITICAL') return false;
@@ -66,8 +65,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
       return true;
     }).toList();
   }
-
-  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -123,8 +120,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
       ),
       body: Column(
         children: [
-
-          // ── Summary chips ──────────────────────────────────────────────────
+          // Summary chips
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
             child: Row(
@@ -151,7 +147,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
           ),
 
-          // ── Search bar ────────────────────────────────────────────────────
+          // Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
             child: TextField(
@@ -186,7 +182,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
           ),
 
-          // ── State list ────────────────────────────────────────────────────
+          // State list
           Expanded(
             child: _engine.isLoading && _engine.allStations.isEmpty
                 ? const Center(
@@ -203,10 +199,14 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     ),
                   )
                 : states.isEmpty
-                    ? const Center(
-                        child: Text('No stations match your filter.',
-                            style: TextStyle(
-                                color: AppPalette.textGrey, fontSize: 13)),
+                    ? Center(
+                        child: Text(
+                          _engine.allStations.isEmpty
+                              ? 'No station data yet. Pull to refresh.'
+                              : 'No stations match your filter.',
+                          style: const TextStyle(
+                              color: AppPalette.textGrey, fontSize: 13),
+                        ),
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
@@ -225,12 +225,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 }
 
-// ── State Section (expandable) ─────────────────────────────────────────────
+// ── State Section ──────────────────────────────────────────────────────────────
 class _StateSection extends StatefulWidget {
-  final String         state;
+  final String          state;
   final List<FloodData> cities;
-  final String         risk;
-  final String         query;
+  final String          risk;
+  final String          query;
   const _StateSection({
     required this.state, required this.cities,
     required this.risk,  required this.query,
@@ -240,7 +240,7 @@ class _StateSection extends StatefulWidget {
 }
 
 class _StateSectionState extends State<_StateSection> {
-  bool _expanded = true; // expand CRITICAL/HIGH by default later
+  late bool _expanded;
 
   @override
   void initState() {
@@ -250,9 +250,9 @@ class _StateSectionState extends State<_StateSection> {
 
   @override
   Widget build(BuildContext context) {
-    final col = _riskColor(widget.risk);
-    final critCities = widget.cities.where((c) => c.riskLevel == 'CRITICAL').length;
-    final warnCities = widget.cities.where((c) =>
+    final col       = _riskColor(widget.risk);
+    final critCount = widget.cities.where((c) => c.riskLevel == 'CRITICAL').length;
+    final warnCount = widget.cities.where((c) =>
         c.riskLevel == 'HIGH' || c.riskLevel == 'MODERATE').length;
 
     return Container(
@@ -265,7 +265,6 @@ class _StateSectionState extends State<_StateSection> {
       ),
       child: Column(
         children: [
-          // Header
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: BorderRadius.circular(14),
@@ -287,11 +286,11 @@ class _StateSectionState extends State<_StateSection> {
                           fontSize: 14,
                         )),
                   ),
-                  if (critCities > 0)
-                    _MiniTag('$critCities CRIT', AppPalette.critical),
-                  if (warnCities > 0) ...[
+                  if (critCount > 0)
+                    _MiniTag('$critCount CRIT', AppPalette.critical),
+                  if (warnCount > 0) ...[
                     const SizedBox(width: 5),
-                    _MiniTag('$warnCities WARN', AppPalette.warning),
+                    _MiniTag('$warnCount WARN', AppPalette.warning),
                   ],
                   const SizedBox(width: 8),
                   Text('${widget.cities.length}',
@@ -308,12 +307,11 @@ class _StateSectionState extends State<_StateSection> {
               ),
             ),
           ),
-
-          // City rows
           if (_expanded) ...[
             const Divider(
                 height: 1, color: AppPalette.navyStroke, thickness: 1),
-            ...widget.cities.map((fd) => _CityRow(fd: fd, query: widget.query)),
+            ...widget.cities.map(
+              (fd) => _CityRow(fd: fd, query: widget.query)),
           ],
         ],
       ),
@@ -321,7 +319,7 @@ class _StateSectionState extends State<_StateSection> {
   }
 }
 
-// ── City Row ───────────────────────────────────────────────────────────────
+// ── City Row ──────────────────────────────────────────────────────────────────
 class _CityRow extends StatelessWidget {
   final FloodData fd;
   final String    query;
@@ -329,7 +327,7 @@ class _CityRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col     = _riskColor(fd.riskLevel);
+    final col      = _riskColor(fd.riskLevel);
     final hasLevel = fd.currentLevel > 0 && fd.dangerLevel > 0;
     final pct      = hasLevel
         ? (fd.currentLevel / fd.dangerLevel).clamp(0.0, 1.0)
@@ -343,17 +341,12 @@ class _CityRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Risk colour stripe
           Container(
             width: 3, height: 38,
             decoration: BoxDecoration(
-              color: col,
-              borderRadius: BorderRadius.circular(2),
-            ),
+              color: col, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(width: 10),
-
-          // City + river name
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -365,7 +358,9 @@ class _CityRow extends StatelessWidget {
                       fontSize: 13,
                     )),
                 Text(
-                  fd.riverName ?? fd.state,
+                  fd.riverName != null && fd.riverName!.isNotEmpty
+                      ? fd.riverName!
+                      : fd.state,
                   style: const TextStyle(
                       color: AppPalette.textGrey, fontSize: 10),
                 ),
@@ -377,7 +372,7 @@ class _CityRow extends StatelessWidget {
                       value:           pct,
                       minHeight:       4,
                       backgroundColor: AppPalette.navy4,
-                      valueColor:      AlwaysStoppedAnimation<Color>(col),
+                      valueColor: AlwaysStoppedAnimation<Color>(col),
                     ),
                   ),
                 ],
@@ -385,8 +380,6 @@ class _CityRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-
-          // Level + risk badge
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -434,12 +427,12 @@ class _CityRow extends StatelessWidget {
   }
 }
 
-// ── Summary Chip ───────────────────────────────────────────────────────────
+// ── Summary Chip ──────────────────────────────────────────────────────────────
 class _SummaryChip extends StatelessWidget {
-  final String   label;
-  final int      count;
-  final Color    color;
-  final bool     selected;
+  final String       label;
+  final int          count;
+  final Color        color;
+  final bool         selected;
   final VoidCallback onTap;
   const _SummaryChip(this.label, this.count, this.color,
       {required this.selected, required this.onTap});
@@ -484,9 +477,7 @@ class _SummaryChip extends StatelessWidget {
               child: Text(
                 '$count',
                 style: TextStyle(
-                    color: color,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900),
+                    color: color, fontSize: 10, fontWeight: FontWeight.w900),
               ),
             ),
           ],
@@ -496,7 +487,7 @@ class _SummaryChip extends StatelessWidget {
   }
 }
 
-// ── Mini Tag ───────────────────────────────────────────────────────────────
+// ── Mini Tag ──────────────────────────────────────────────────────────────────
 class _MiniTag extends StatelessWidget {
   final String label;
   final Color  color;

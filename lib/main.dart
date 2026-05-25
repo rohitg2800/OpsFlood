@@ -12,6 +12,7 @@ import 'providers/flood_providers.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/all_india_alert_engine.dart';
 import 'services/background_service.dart';
 import 'services/fcm_service.dart';
 import 'services/pipeline_service.dart';
@@ -21,20 +22,18 @@ import 'theme/river_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Defer first frame. IMPORTANT: allowFirstFrame() is called in a finally
-  // block below so it is ALWAYS reached — even if any init step throws/hangs.
+  // Defer first frame so splash renders before heavy init.
   WidgetsBinding.instance.deferFirstFrame();
 
   try {
-    // 1. Load .env — gracefully handles missing file in production.
+    // 1. Load .env
     try {
       await dotenv.load(fileName: '.env', mergeWith: {});
     } catch (e) {
       if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
     }
 
-    // 2. Firebase — skip on web; guard with 5-second timeout so a slow
-    //    Google-Play-Services response never freezes the splash screen.
+    // 2. Firebase
     if (!kIsWeb) {
       try {
         if (Firebase.apps.isEmpty) {
@@ -44,20 +43,16 @@ Future<void> main() async {
             const Duration(seconds: 5),
             onTimeout: () {
               if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out — continuing without Firebase');
-              // Return a dummy app instance or just swallow; the app works
-              // without Firebase on first cold start.
               throw TimeoutException('Firebase init timeout');
             },
           );
         }
       } catch (e) {
-        // Firebase failure is non-fatal — FCM / Firestore features degrade
-        // gracefully; GloFAS flood data still loads.
         if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase init failed (non-fatal): $e');
       }
     }
 
-    // 3. System chrome — nav bar matches Midnight Ops background.
+    // 3. System chrome
     if (!kIsWeb) {
       SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
         statusBarColor:                    Colors.transparent,
@@ -65,30 +60,28 @@ Future<void> main() async {
         systemNavigationBarColor:          AppPalette.navy0,
         systemNavigationBarIconBrightness: Brightness.light,
       ));
-
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
     }
 
-    // 4. Global error handlers.
+    // 4. Global error handlers
     FlutterError.onError = (FlutterErrorDetails details) {
       if (kDebugMode) {
         FlutterError.presentError(details);
         debugPrint('\u274c FlutterError: ${details.summary}');
       }
     };
-
     PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
       if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
       return true;
     };
 
-    // 5. Theme — load persisted light/dark preference from SharedPreferences.
+    // 5. Theme
     await ThemeProvider().init();
 
-    // 6. Background services — all fire-and-forget; never block the UI.
+    // 6. Background services — all fire-and-forget
     if (!kIsWeb) {
       unawaited(
         PipelineService.instance.init().catchError((e) {
@@ -110,9 +103,14 @@ Future<void> main() async {
           if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
         }),
       );
+      // Start all-India alert engine (5-min polling for all states/cities)
+      unawaited(
+        AllIndiaAlertEngine().start().catchError((e) {
+          if (kDebugMode) debugPrint('\u26a0\ufe0f  AllIndiaAlertEngine.start failed: $e');
+        }),
+      );
     }
   } finally {
-    // ALWAYS unblock the Flutter engine — even if something above threw.
     WidgetsBinding.instance.allowFirstFrame();
   }
 
@@ -136,7 +134,6 @@ class OpsFloodApp extends ConsumerWidget {
       routes: {
         AlertsScreen.route: (_) => const AlertsScreen(),
       },
-      // Clamp text scale — prevents overflow on accessibility large-text settings.
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         return MediaQuery(
