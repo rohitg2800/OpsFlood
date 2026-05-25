@@ -1,5 +1,5 @@
 // lib/services/real_time_river_service.dart
-// OpsFlood — Real-Time River Data Service (v9 — Web-bridge + 55-city fix)
+// OpsFlood — Real-Time River Data Service (v9.1 — trend fix)
 //
 // ARCHITECTURE — Platform-aware 5-source cascade:
 //
@@ -19,6 +19,23 @@
 //   a gauge reading — it is a discharge (m³/s), an error code, or a
 //   column-parsing artifact.  _extractLevel() enforces this clamp;
 //   values outside it are treated as 0 (→ NO_DATA fallback).
+//
+// TREND RULE (v9.1):
+//   _deriveTrend() is a LAST-RESORT fallback used only when the live feed
+//   provides no trend field.  It must NOT infer 'RISING' simply because
+//   current > warningLevel — that is true for almost every station in
+//   monsoon and causes the entire list to show warning badges.
+//
+//   New logic (uses absolute m-MSL values correctly):
+//     DANGER_BREACH  → current >= dangerLevel          → 'RISING'
+//     NEAR_DANGER    → current >= dangerLevel * 0.97   → 'RISING'
+//     ABOVE_WARNING  → current >= warningLevel          → 'STEADY'
+//     APPROACHING_WL → current >= warningLevel * 0.90  → 'STEADY'
+//     FALLING        → current < warningLevel * 0.80   → 'FALLING'
+//     else                                              → 'STEADY'
+//
+//   The web branch inline trends in _fetchAllWeb / _fetchCityGloFas
+//   have been updated to use the same helper instead of the old ratio.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -122,7 +139,9 @@ class RealTimeRiverService extends ChangeNotifier {
       // Try LFE cache first (fast, no HTTP)
       final fd = _lfe.dataForCity(city);
       if (fd != null) {
-        final lv = fd.currentLevel ?? 0.0;
+        final lv   = fd.currentLevel ?? 0.0;
+        final wlEf = fd.warningLevel > 0 ? fd.warningLevel : wl;
+        final dlEf = fd.dangerLevel  > 0 ? fd.dangerLevel  : dl;
         final risk = fd.riskLevel ?? 'LOW';
         results.add(LiveRiverResult(
           station: RiverStation(
@@ -131,16 +150,15 @@ class RealTimeRiverService extends ChangeNotifier {
             river:            river,
             station:          '$city GloFAS',
             current:          lv,
-            warning:          fd.warningLevel > 0 ? fd.warningLevel : wl,
-            danger:           fd.dangerLevel  > 0 ? fd.dangerLevel  : dl,
+            warning:          wlEf,
+            danger:           dlEf,
             hfl:              hfl,
             rainfallLastHour: fd.rainfall24h != null && fd.rainfall24h! > 0
                 ? fd.rainfall24h! / 24
                 : null,
             flowRate:         fd.flowRate,
-            trend:            lv > (fd.warningLevel > 0 ? fd.warningLevel : wl)
-                ? 'RISING'
-                : 'STEADY',
+            // FIX: use _deriveTrend so only danger-level breach → RISING
+            trend:            _deriveTrend(lv, wlEf, dlEf),
             liveStatus:       risk,
             lastUpdated:      fd.lastUpdated.toIso8601String(),
             dataSource:       'GLOFAS',
@@ -202,24 +220,27 @@ class RealTimeRiverService extends ChangeNotifier {
       await _lfe.refreshData();
       final fd2 = _lfe.dataForCity(city);
       if (fd2 != null) {
-        final lv = fd2.currentLevel ?? 0.0;
+        final lv   = fd2.currentLevel ?? 0.0;
+        final wlEf = fd2.warningLevel > 0 ? fd2.warningLevel : warningLevel;
+        final dlEf = fd2.dangerLevel  > 0 ? fd2.dangerLevel  : dangerLevel;
         final risk = fd2.riskLevel ?? 'LOW';
         return LiveRiverResult(
           station: RiverStation(
             city: city, state: state, river: river,
             station: '$city GloFAS',
             current: lv,
-            warning: fd2.warningLevel > 0 ? fd2.warningLevel : warningLevel,
-            danger:  fd2.dangerLevel  > 0 ? fd2.dangerLevel  : dangerLevel,
+            warning: wlEf,
+            danger:  dlEf,
             hfl:     hfl,
             rainfallLastHour: fd2.rainfall24h != null && fd2.rainfall24h! > 0
                 ? fd2.rainfall24h! / 24 : null,
-            flowRate:   fd2.flowRate,
-            trend:      lv > warningLevel ? 'RISING' : 'STEADY',
-            liveStatus: risk,
+            flowRate:    fd2.flowRate,
+            // FIX: use _deriveTrend instead of raw lv > warningLevel
+            trend:       _deriveTrend(lv, wlEf, dlEf),
+            liveStatus:  risk,
             lastUpdated: fd2.lastUpdated.toIso8601String(),
-            dataSource: 'GLOFAS',
-            isLive: true,
+            dataSource:  'GLOFAS',
+            isLive:      true,
           ),
           source: 'GLOFAS', confidence: 0.75,
           mlRiskLevel: risk, mlFloodProb: _riskToProb(risk),
@@ -540,6 +561,8 @@ class RealTimeRiverService extends ChangeNotifier {
     final ts  = _s(record['timestamp'] ?? record['updated_at'] ?? record['last_updated']
                    ?? record['lastUpdated']);
     final rawTrend = _s(record['trend'] ?? record['level_trend'] ?? record['water_trend']);
+    // FIX: only fall back to _deriveTrend when the feed provides no trend.
+    // _deriveTrend now requires a genuine danger-level breach to emit 'RISING'.
     final trend    = rawTrend.isNotEmpty ? rawTrend.toUpperCase() : _deriveTrend(lv, wlR, dlR);
 
     bool stale = false;
@@ -660,11 +683,22 @@ class RealTimeRiverService extends ChangeNotifier {
     return _sanityClamp(raw);
   }
 
+  // ── Trend derivation ──────────────────────────────────────────────────────
+  // LAST-RESORT fallback: called only when the live feed has no trend field.
+  //
+  // All inputs are absolute metres MSL (e.g. current=48.12, warning=47.50,
+  // danger=48.60).  A ratio like lv/wl is meaningless (48/47 ≈ 1.02 → every
+  // station looks "rising" even when 0.5 m below danger).
+  //
+  // Rules (all comparisons in absolute metres):
+  //   current >= dangerLevel × 0.97  → RISING   (within 3 % of danger or above)
+  //   current >= warningLevel         → STEADY   (above-normal but not near danger)
+  //   current < warningLevel × 0.80  → FALLING  (clearly below warning band)
+  //   else                            → STEADY
   String _deriveTrend(double lv, double wl, double dl) {
-    if (wl <= 0) return 'STEADY';
-    final ratio = lv / wl;
-    if (ratio >= 1.0) return 'RISING';
-    if (ratio < 0.75) return 'FALLING';
+    if (dl > 0 && lv >= dl * 0.97) return 'RISING';
+    if (wl > 0 && lv >= wl)        return 'STEADY';
+    if (wl > 0 && lv < wl * 0.80)  return 'FALLING';
     return 'STEADY';
   }
 
