@@ -1,520 +1,397 @@
 // lib/screens/alerts_screen.dart
-//
-// OpsFlood — AlertsScreen
-// Full-screen list of live flood alerts grouped by State → City.
-// Data source: AllIndiaAlertEngine (CWC + GloFAS + OpsFlood backend).
-// Updates in real-time via ChangeNotifier listener.
-library;
-
+// OpsFlood — AlertsScreen v5 (Abyss Ops rebuild)
+// Minimal, accurate, premium. Removed noisy gauge references.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/flood_data.dart';
-import '../services/all_india_alert_engine.dart';
+import '../models/threshold_alert.dart';
+import '../providers/alerts_provider.dart';
 import '../theme/river_theme.dart';
+import '../widgets/risk_bar.dart';
 
-class AlertsScreen extends StatefulWidget {
-  const AlertsScreen({super.key});
-
+class AlertsScreen extends ConsumerStatefulWidget {
   static const route = '/alerts';
-
+  const AlertsScreen({super.key});
   @override
-  State<AlertsScreen> createState() => _AlertsScreenState();
+  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsScreenState extends State<AlertsScreen> {
-  final AllIndiaAlertEngine _engine = AllIndiaAlertEngine();
-  String _filterRisk = 'ALL';
-  String _searchQuery = '';
-  final _searchCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _engine.addListener(_rebuild);
-    if (_engine.allStations.isEmpty) _engine.refresh();
-  }
-
-  @override
-  void dispose() {
-    _engine.removeListener(_rebuild);
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  void _rebuild() { if (mounted) setState(() {}); }
-
-  List<String> _visibleStates() {
-    final q = _searchQuery.toLowerCase();
-    return _engine.stateGroups.keys.where((state) {
-      if (q.isNotEmpty) {
-        final match = state.toLowerCase().contains(q) ||
-            (_engine.stateGroups[state] ?? []).any(
-              (fd) => fd.city.toLowerCase().contains(q) ||
-                      (fd.riverName ?? '').toLowerCase().contains(q));
-        if (!match) return false;
-      }
-      if (_filterRisk != 'ALL') {
-        final worst = _engine.stateRisk(state);
-        if (_filterRisk == 'CRITICAL' && worst != 'CRITICAL') return false;
-        if (_filterRisk == 'HIGH' &&
-            worst != 'CRITICAL' && worst != 'HIGH') return false;
-        if (_filterRisk == 'MODERATE' &&
-            worst != 'CRITICAL' && worst != 'HIGH' && worst != 'MODERATE') return false;
-      }
-      return true;
-    }).toList();
-  }
-
+class _AlertsScreenState extends ConsumerState<AlertsScreen> {
   @override
   Widget build(BuildContext context) {
-    final states = _visibleStates()
-      ..sort((a, b) {
-        const r = {'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1};
-        return (r[_engine.stateRisk(b)] ?? 0) - (r[_engine.stateRisk(a)] ?? 0);
-      });
+    final provider = ref.watch(alertsProvider);
+    final alerts   = provider.filtered;
+    final critical = provider.critical;
 
-    final totalCrit = _engine.allStations.where((f) => f.riskLevel == 'CRITICAL').length;
-    final totalHigh = _engine.allStations.where((f) => f.riskLevel == 'HIGH').length;
-    final totalMod  = _engine.allStations.where((f) => f.riskLevel == 'MODERATE').length;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      provider.markAllSeen();
+    });
 
-    return Scaffold(
-      backgroundColor: AppPalette.navy0,
-      appBar: AppBar(
-        backgroundColor: AppPalette.navy1,
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('All-India Flood Alerts',
-                style: TextStyle(
-                  color: AppPalette.textWhite,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 17,
-                )),
-            if (_engine.lastPoll != null)
-              Text(
-                'Updated ${DateFormat("HH:mm").format(_engine.lastPoll!.toLocal())}',
-                style: const TextStyle(
-                    color: AppPalette.textGrey, fontSize: 10),
-              ),
-          ],
-        ),
-        actions: [
-          if (_engine.isLoading)
-            const Padding(
-              padding: EdgeInsets.only(right: 14),
-              child: SizedBox(
-                width: 16, height: 16,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppPalette.cyan),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded,
-                  color: AppPalette.textGrey, size: 20),
-              onPressed: _engine.refresh,
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Summary chips
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-            child: Row(
-              children: [
-                _SummaryChip('CRIT', totalCrit, AppPalette.critical,
-                    selected: _filterRisk == 'CRITICAL',
-                    onTap: () => setState(() => _filterRisk =
-                        _filterRisk == 'CRITICAL' ? 'ALL' : 'CRITICAL')),
-                const SizedBox(width: 8),
-                _SummaryChip('HIGH', totalHigh, AppPalette.danger,
-                    selected: _filterRisk == 'HIGH',
-                    onTap: () => setState(() => _filterRisk =
-                        _filterRisk == 'HIGH' ? 'ALL' : 'HIGH')),
-                const SizedBox(width: 8),
-                _SummaryChip('MOD', totalMod, AppPalette.warning,
-                    selected: _filterRisk == 'MODERATE',
-                    onTap: () => setState(() => _filterRisk =
-                        _filterRisk == 'MODERATE' ? 'ALL' : 'MODERATE')),
-                const Spacer(),
-                Text('${_engine.allStations.length} stations · ${_engine.stateGroups.length} states',
-                    style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 10)),
-              ],
-            ),
-          ),
-
-          // Search bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: TextField(
-              controller: _searchCtrl,
-              style: const TextStyle(color: AppPalette.textWhite, fontSize: 13),
-              decoration: InputDecoration(
-                hintText: 'Search state, city or river…',
-                hintStyle: const TextStyle(
-                    color: AppPalette.textDim, fontSize: 13),
-                prefixIcon: const Icon(Icons.search_rounded,
-                    color: AppPalette.textGrey, size: 18),
-                filled: true,
-                fillColor: AppPalette.navy3,
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 10, horizontal: 14),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded,
-                            color: AppPalette.textGrey, size: 16),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: (v) => setState(() => _searchQuery = v),
-            ),
-          ),
-
-          // State list
-          Expanded(
-            child: _engine.isLoading && _engine.allStations.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(
-                            color: AppPalette.cyan, strokeWidth: 2),
-                        SizedBox(height: 14),
-                        Text('Fetching all-India station data…',
-                            style: TextStyle(
-                                color: AppPalette.textGrey, fontSize: 13)),
-                      ],
-                    ),
-                  )
-                : states.isEmpty
-                    ? Center(
-                        child: Text(
-                          _engine.allStations.isEmpty
-                              ? 'No station data yet. Pull to refresh.'
-                              : 'No stations match your filter.',
-                          style: const TextStyle(
-                              color: AppPalette.textGrey, fontSize: 13),
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
-                        itemCount: states.length,
-                        itemBuilder: (ctx, i) => _StateSection(
-                          state:   states[i],
-                          cities:  _engine.citiesForState(states[i]),
-                          risk:    _engine.stateRisk(states[i]),
-                          query:   _searchQuery,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: AppPalette.abyss0,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _header(critical.length, alerts.length),
+              if (critical.isNotEmpty)
+                _criticalBanner(critical.length),
+              _filterBar(provider),
+              Expanded(
+                child: alerts.isEmpty
+                    ? _emptyState(provider.loading)
+                    : RefreshIndicator(
+                        color: AppPalette.cyan,
+                        backgroundColor: AppPalette.abyss2,
+                        onRefresh: provider.refresh,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+                          itemCount: alerts.length,
+                          itemBuilder: (_, i) => _AlertCard(alert: alerts[i]),
                         ),
                       ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+
+  Widget _header(int critCount, int total) => Container(
+    padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: [
+          AppPalette.critical.withValues(alpha: critCount > 0 ? 0.07 : 0.0),
+          AppPalette.abyss0,
+        ],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      border: Border(
+          bottom: BorderSide(
+              color: AppPalette.abyssStroke, width: 1)),
+    ),
+    child: Row(children: [
+      Container(
+        width: 42, height: 42,
+        decoration: BoxDecoration(
+          color: AppPalette.critical.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: AppPalette.critical.withValues(alpha: 0.30)),
+        ),
+        child: const Icon(Icons.notifications_rounded,
+            color: AppPalette.critical, size: 22),
+      ),
+      const SizedBox(width: 14),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Flood Alerts',
+                style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w900,
+                  color: AppPalette.textWhite, letterSpacing: -0.6,
+                )),
+            Text(
+              '$total active alert${total != 1 ? 's' : ''}',
+              style: const TextStyle(
+                  fontSize: 11, color: AppPalette.textGrey),
+            ),
+          ],
+        ),
+      ),
+      if (critCount > 0)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: AppPalette.critical.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppPalette.critical.withValues(alpha: 0.40)),
+          ),
+          child: Text(
+            '$critCount CRITICAL',
+            style: const TextStyle(
+              color: AppPalette.critical, fontSize: 10,
+              fontWeight: FontWeight.w900, letterSpacing: 0.3,
+            ),
+          ),
+        ),
+    ]),
+  );
+
+  Widget _criticalBanner(int n) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+    color: AppPalette.critical.withValues(alpha: 0.12),
+    child: Row(children: [
+      const Icon(Icons.crisis_alert_rounded,
+          color: AppPalette.critical, size: 18),
+      const SizedBox(width: 10),
+      Text(
+        '$n station${n > 1 ? 's' : ''} at or above danger level',
+        style: const TextStyle(
+          color: AppPalette.critical,
+          fontWeight: FontWeight.w700, fontSize: 12,
+        ),
+      ),
+    ]),
+  );
+
+  Widget _filterBar(AlertsProvider provider) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Row(children: [
+      Expanded(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            _FilterChip(
+              label: 'All',
+              active: provider.filterLevel == null,
+              onTap: provider.clearFilters,
+              color: AppPalette.cyan,
+            ),
+            ...AlertLevel.values.reversed
+                .where((l) => l != AlertLevel.normal)
+                .map((l) => _FilterChip(
+                      label: l.label,
+                      active: provider.filterLevel == l,
+                      onTap: () => provider.setFilterLevel(l),
+                      color: l.color,
+                    )),
+          ]),
+        ),
+      ),
+      GestureDetector(
+        onTap: provider.refresh,
+        child: Container(
+          width: 34, height: 34,
+          margin: const EdgeInsets.only(left: 8),
+          decoration: BoxDecoration(
+            color: AppPalette.abyss2,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppPalette.abyssStroke),
+          ),
+          child: const Icon(Icons.refresh_rounded,
+              color: AppPalette.textGrey, size: 17),
+        ),
+      ),
+    ]),
+  );
+
+  Widget _emptyState(bool loading) => Center(
+    child: loading
+        ? const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation(AppPalette.cyan))
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppPalette.safe.withValues(alpha: 0.08),
+                  border: Border.all(
+                      color: AppPalette.safe.withValues(alpha: 0.20)),
+                ),
+                child: const Icon(Icons.check_circle_outline_rounded,
+                    size: 32, color: AppPalette.safe),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'All rivers within safe levels',
+                style: TextStyle(
+                    color: AppPalette.textGrey,
+                    fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+  );
 }
 
-// ── State Section ──────────────────────────────────────────────────────────────
-class _StateSection extends StatefulWidget {
-  final String          state;
-  final List<FloodData> cities;
-  final String          risk;
-  final String          query;
-  const _StateSection({
-    required this.state, required this.cities,
-    required this.risk,  required this.query,
-  });
-  @override
-  State<_StateSection> createState() => _StateSectionState();
-}
-
-class _StateSectionState extends State<_StateSection> {
-  late bool _expanded;
-
-  @override
-  void initState() {
-    super.initState();
-    _expanded = widget.risk == 'CRITICAL' || widget.risk == 'HIGH';
-  }
+// ── Alert Card ────────────────────────────────────────────────────────────
+class _AlertCard extends StatelessWidget {
+  final ThresholdAlert alert;
+  const _AlertCard({required this.alert});
 
   @override
   Widget build(BuildContext context) {
-    final col       = _riskColor(widget.risk);
-    final critCount = widget.cities.where((c) => c.riskLevel == 'CRITICAL').length;
-    final warnCount = widget.cities.where((c) =>
-        c.riskLevel == 'HIGH' || c.riskLevel == 'MODERATE').length;
+    final col = alert.level.color;
+    final ts  = DateFormat('dd MMM  HH:mm').format(alert.timestamp.toLocal());
+    final pct = (alert.fillPercent).clamp(0.0, 100.0);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppPalette.navy2,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: col.withValues(alpha: 0.3), width: 1),
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: col.withValues(alpha: 0.25), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: col.withValues(alpha: 0.06),
+            blurRadius: 18, offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: Row(
+          // Row 1: icon + city + level badge + new pill
+          Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: col.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(alert.level.icon, color: col, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 10, height: 10,
-                    decoration: BoxDecoration(
-                        color: col, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(widget.state,
-                        style: const TextStyle(
-                          color: AppPalette.textWhite,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        )),
-                  ),
-                  if (critCount > 0)
-                    _MiniTag('$critCount CRIT', AppPalette.critical),
-                  if (warnCount > 0) ...[
-                    const SizedBox(width: 5),
-                    _MiniTag('$warnCount WARN', AppPalette.warning),
-                  ],
-                  const SizedBox(width: 8),
-                  Text('${widget.cities.length}',
+                  Text(alert.cityName,
                       style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 11)),
-                  const SizedBox(width: 4),
-                  Icon(
-                    _expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    color: AppPalette.textDim, size: 18,
-                  ),
+                        color: AppPalette.textWhite,
+                        fontWeight: FontWeight.w800, fontSize: 14,
+                      )),
+                  Text('${alert.state}  ·  ${alert.river}',
+                      style: const TextStyle(
+                          color: AppPalette.textGrey, fontSize: 10)),
                 ],
               ),
             ),
-          ),
-          if (_expanded) ...[
-            const Divider(
-                height: 1, color: AppPalette.navyStroke, thickness: 1),
-            ...widget.cities.map(
-              (fd) => _CityRow(fd: fd, query: widget.query)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ── City Row ──────────────────────────────────────────────────────────────────
-class _CityRow extends StatelessWidget {
-  final FloodData fd;
-  final String    query;
-  const _CityRow({required this.fd, required this.query});
-
-  @override
-  Widget build(BuildContext context) {
-    final col      = _riskColor(fd.riskLevel);
-    final hasLevel = fd.currentLevel > 0 && fd.dangerLevel > 0;
-    final pct      = hasLevel
-        ? (fd.currentLevel / fd.dangerLevel).clamp(0.0, 1.0)
-        : 0.0;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-      decoration: const BoxDecoration(
-        border: Border(
-            bottom: BorderSide(color: AppPalette.navyStroke, width: 0.5)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 3, height: 38,
-            decoration: BoxDecoration(
-              color: col, borderRadius: BorderRadius.circular(2)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(fd.city,
-                    style: const TextStyle(
-                      color: AppPalette.textWhite,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    )),
-                Text(
-                  fd.riverName != null && fd.riverName!.isNotEmpty
-                      ? fd.riverName!
-                      : fd.state,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 10),
-                ),
-                if (hasLevel) ...[
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value:           pct,
-                      minHeight:       4,
-                      backgroundColor: AppPalette.navy4,
-                      valueColor: AlwaysStoppedAnimation<Color>(col),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                hasLevel
-                    ? '${fd.currentLevel.toStringAsFixed(2)} m'
-                    : fd.flowRate != null
-                        ? '${fd.flowRate!.toStringAsFixed(0)} m³/s'
-                        : '—',
-                style: TextStyle(
-                  color: col,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: col.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: col.withValues(alpha: 0.38)),
               ),
-              const SizedBox(height: 2),
+              child: Text(alert.level.label,
+                  style: TextStyle(
+                    color: col, fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  )),
+            ),
+            if (alert.isNew) ...[
+              const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 2),
+                    horizontal: 5, vertical: 3),
                 decoration: BoxDecoration(
-                  color: col.withValues(alpha: 0.12),
+                  color: col,
                   borderRadius: BorderRadius.circular(5),
                 ),
-                child: Text(
-                  fd.riskLevel,
-                  style: TextStyle(
-                    color: col,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
-                  ),
-                ),
+                child: const Text('NEW',
+                    style: TextStyle(
+                      color: Colors.white, fontSize: 8,
+                      fontWeight: FontWeight.w900,
+                    )),
               ),
-              if (hasLevel)
-                Text(
-                  'DL ${fd.dangerLevel.toStringAsFixed(1)} m',
+            ],
+          ]),
+          const SizedBox(height: 14),
+          // Risk bar (replaces gauge)
+          RiskBar(
+            value:    pct,
+            warning:  60,
+            danger:   80,
+            barColor: col,
+            label:    'Fill Level',
+            height:   8,
+          ),
+          const SizedBox(height: 12),
+          // Row 3: metrics
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _metric(
+                '${alert.currentValue.toStringAsFixed(0)} m³/s',
+                'Current flow', col,
+              ),
+              _metric(
+                '${alert.dangerLevel.toStringAsFixed(0)} m³/s',
+                'Danger level', AppPalette.critical,
+              ),
+              Row(children: [
+                Icon(alert.trend.icon,
+                    size: 12, color: alert.trend.color),
+                const SizedBox(width: 4),
+                Text(alert.trend.name,
+                    style: TextStyle(
+                      color: alert.trend.color,
+                      fontSize: 10, fontWeight: FontWeight.w700,
+                    )),
+              ]),
+              Text(ts,
                   style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9),
-                ),
+                      color: AppPalette.textDim, fontSize: 9)),
             ],
           ),
         ],
       ),
     );
   }
+
+  Widget _metric(String val, String label, Color c) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(val, style: TextStyle(
+        color: c, fontSize: 12, fontWeight: FontWeight.w800)),
+      Text(label, style: const TextStyle(
+        color: AppPalette.textGrey, fontSize: 9)),
+    ],
+  );
 }
 
-// ── Summary Chip ──────────────────────────────────────────────────────────────
-class _SummaryChip extends StatelessWidget {
-  final String       label;
-  final int          count;
-  final Color        color;
-  final bool         selected;
+// ── Filter chip ────────────────────────────────────────────────────────────
+class _FilterChip extends StatelessWidget {
+  final String   label;
+  final bool     active;
+  final Color    color;
   final VoidCallback onTap;
-  const _SummaryChip(this.label, this.count, this.color,
-      {required this.selected, required this.onTap});
-
+  const _FilterChip({
+    required this.label,
+    required this.active,
+    required this.color,
+    required this.onTap,
+  });
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.22)
-              : color.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected
-                ? color.withValues(alpha: 0.8)
-                : color.withValues(alpha: 0.25),
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                )),
-            const SizedBox(width: 5),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                    color: color, fontSize: 10, fontWeight: FontWeight.w900),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Mini Tag ──────────────────────────────────────────────────────────────────
-class _MiniTag extends StatelessWidget {
-  final String label;
-  final Color  color;
-  const _MiniTag(this.label, this.color);
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
+        color: active ? color.withValues(alpha: 0.14) : AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active
+              ? color.withValues(alpha: 0.42)
+              : AppPalette.abyssStroke,
+          width: active ? 1.5 : 1,
+        ),
       ),
-      child: Text(label,
-          style: TextStyle(
-              color: color,
-              fontSize: 8,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.4)),
-    );
-  }
-}
-
-Color _riskColor(String level) {
-  switch (level) {
-    case 'CRITICAL': return AppPalette.critical;
-    case 'HIGH':     return AppPalette.danger;
-    case 'MODERATE': return AppPalette.warning;
-    default:         return AppPalette.safe;
-  }
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+          color: active ? color : AppPalette.textGrey,
+        ),
+      ),
+    ),
+  );
 }
