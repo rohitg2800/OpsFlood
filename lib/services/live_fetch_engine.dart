@@ -1,15 +1,22 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.4 — WRIS disabled, GloFAS 7-day trend)
+// OpsFlood — LiveFetchEngine (v17.5 — seasonal risk floor)
 //
-// CHANGES in v17.4:
-//   • WRIS disabled: wrisFut always resolves to null instantly, no timeout.
-//   • GloFAS past_days raised 4 → 7 for a fuller discharge trend.
-//   • GloFAS forecast_days = 3: trend array now includes 3-day outlook
-//     so _inferRisk() rising-trend bonus uses a 10-day window.
-//   • Discharge priority simplified: backendFlow > glofasFlow (WRIS gone).
+// CHANGES in v17.5:
+//   • _inferRisk() gains a seasonal cap:
+//       Jan–May  (pre-monsoon)  → max LOW
+//       June     (onset month)  → max MODERATE
+//       Jul–Oct  (flood season) → no cap (full scoring)
+//       Nov–Dec  (recession)    → max LOW
+//     This prevents phantom MODERATE/HIGH scores in pre-monsoon when
+//     gauge levels are naturally close to the danger mark but rivers
+//     are not in flood (e.g. Patna Gandhighat 42.27m / danger 48.60m).
+//     The cap ONLY applies when risk is inferred from GloFAS+rainfall
+//     (no real CWC gauge reading). If cwcDirect or backend returns a
+//     verified per-city level, _upgradeRiskFromLevel() is used instead
+//     and has no seasonal cap.
 //
-// v17.3 / v17.2 / v17.1 fixes all retained.
+// v17.4 / v17.3 / v17.2 / v17.1 fixes all retained.
 library;
 
 import 'dart:async';
@@ -53,6 +60,29 @@ const _kSyntheticSources = {
 // GloFAS fetch window: 7 past days + 3 forecast days = 10-point trend
 const _kGloFasPastDays     = 7;
 const _kGloFasForecastDays = 3;
+
+// ── Seasonal risk caps ────────────────────────────────────────────────────────
+// India SW monsoon: June–October.  Outside that window, cap inferred risk
+// so pre-monsoon structural gauge proximity doesn't trigger false alerts.
+//
+//  month  1–5  (Jan–May)  : cap = 'LOW'      (pre-monsoon dry season)
+//  month  6    (June)     : cap = 'MODERATE'  (onset — allow early warning)
+//  month  7–10 (Jul–Oct)  : no cap            (peak flood season)
+//  month  11–12 (Nov–Dec) : cap = 'LOW'       (post-monsoon recession)
+String? _seasonalCap(int month) {
+  if (month >= 7 && month <= 10) return null;       // full scoring
+  if (month == 6)                return 'MODERATE'; // onset ramp
+  return 'LOW';                                      // Jan–May, Nov–Dec
+}
+
+const _kRiskRank = {'LOW': 1, 'MODERATE': 2, 'HIGH': 3, 'CRITICAL': 4};
+
+String _applySeasonalCap(String risk, String? cap) {
+  if (cap == null) return risk;
+  final rRank = _kRiskRank[risk] ?? 1;
+  final cRank = _kRiskRank[cap] ?? 1;
+  return rRank <= cRank ? risk : cap;
+}
 
 class LiveFetchEngine {
   static final LiveFetchEngine _instance = LiveFetchEngine._internal();
@@ -303,8 +333,7 @@ class LiveFetchEngine {
       final cwcDirectFut = _cwcDirect.fetch(city);
       final backendFut   = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
       final imdFut       = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
-      // WRIS is disabled (infinite redirect loop on indiawris.gov.in).
-      // _wris.fetch() returns null immediately — zero network cost.
+      // WRIS disabled — returns null instantly, no network I/O.
       final wrisFut      = _wris.fetch(city);
 
       final results = await Future.wait([
@@ -316,7 +345,6 @@ class LiveFetchEngine {
       final cwcDirect = results[2] as CwcReading?;
       final backend   = results[3] as Map<String, dynamic>?;
       final imd       = results[4] as List<dynamic>?;
-      // wris (results[5]) is always null — kept for future re-enable
 
       if (weather == null && glofas == null && backend == null) return null;
 
@@ -330,7 +358,6 @@ class LiveFetchEngine {
 
       final backendFlow  = (backend?['flow_rate']  as num?)?.toDouble() ?? 0.0;
       final glofasFlow   = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
-      // Prefer live backend discharge; fall back to GloFAS modelled value
       final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
 
       double? cwcLevel    = _safeLevel(backend?['current_level']);
@@ -372,10 +399,12 @@ class LiveFetchEngine {
 
       final String riskLabel;
       if (backendRisk != null && backendRisk.isNotEmpty) {
+        // Has verified per-city gauge data — no seasonal cap applied here
         riskLabel = _upgradeRiskFromLevel(
           backendRisk, cwcLevel, dangerLevel, warnLevel,
         );
       } else {
+        // Inferred from GloFAS + rainfall — apply seasonal cap
         riskLabel = _inferRisk(
           precipMm:     precipMm,
           dischargeM3s: dischargeM3s,
@@ -460,7 +489,6 @@ class LiveFetchEngine {
     final cached = _glofasCache[key];
     if (cached != null && cached.valid) return cached.data;
     try {
-      // v17.4: 7 past days + 3 forecast days = 10-point trend window
       final uri = Uri.parse(
         'https://flood-api.open-meteo.com/v1/flood'
         '?latitude=${city.lat}&longitude=${city.lon}'
@@ -473,11 +501,10 @@ class LiveFetchEngine {
       final j    = jsonDecode(res.body) as Map<String, dynamic>;
       final vals = _doubles((j['daily'] as Map?)?['river_discharge']);
       if (vals.isEmpty) return null;
-      // discharge = today's value (index at past_days, i.e. vals[7])
       final todayIdx = vals.length > _kGloFasPastDays ? _kGloFasPastDays : vals.length - 1;
       final result = {
         'discharge':   vals[todayIdx],
-        'discharge7d': vals,  // full 10-point array incl. 3-day forecast
+        'discharge7d': vals,
       };
       _glofasCache[key] = _CacheEntry(result);
       return result;
@@ -595,6 +622,10 @@ class LiveFetchEngine {
     }).toList();
   }
 
+  /// Infers flood risk from GloFAS discharge + rainfall + gauge ratio.
+  /// A seasonal cap is applied when there is no verified per-city CWC
+  /// gauge reading so that pre-monsoon structural proximity to the danger
+  /// mark does not generate false HIGH/MODERATE alerts.
   String _inferRisk({
     required double precipMm,
     required double dischargeM3s,
@@ -624,18 +655,27 @@ class LiveFetchEngine {
       else if (r >= 0.70) score += 0.10;
     }
 
-    // Rising trend bonus: today (index 7) vs 7 days ago (index 0)
-    // With 10-point array: if discharge has risen 30%+ over the past week
+    // Rising trend bonus: today vs 7 days ago (30%+ rise over the week)
     if (discharge7d.length >= 2) {
       final first = discharge7d.first;
       final last  = discharge7d[_kGloFasPastDays.clamp(0, discharge7d.length - 1)];
       if (first > 0 && last > first * 1.3) score += 0.05;
     }
 
-    if (score >= 0.75) return 'CRITICAL';
-    if (score >= 0.50) return 'HIGH';
-    if (score >= 0.30) return 'MODERATE';
-    return 'LOW';
+    final raw = score >= 0.75 ? 'CRITICAL'
+              : score >= 0.50 ? 'HIGH'
+              : score >= 0.30 ? 'MODERATE'
+              : 'LOW';
+
+    // Apply seasonal cap — prevents false alerts outside the flood season
+    final cap = _seasonalCap(DateTime.now().month);
+    final capped = _applySeasonalCap(raw, cap);
+
+    if (kDebugMode && capped != raw) {
+      debugPrint('[_inferRisk] seasonal cap applied: $raw → $capped '
+          '(month=${DateTime.now().month})');
+    }
+    return capped;
   }
 
   FloodData _snapToFloodData(IndiaCity city, Map<String, dynamic> snap) {
