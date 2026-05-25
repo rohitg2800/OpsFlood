@@ -322,21 +322,26 @@ class _DashboardScreenState extends State<DashboardScreen>
                               size: 196,
                             ),
                             const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                _GaugeLegendDot(
-                                    AppPalette.safe, 'Normal'),
-                                const SizedBox(width: 16),
-                                _GaugeLegendDot(
-                                    AppPalette.warning, 'Warning'),
-                                const SizedBox(width: 16),
-                                _GaugeLegendDot(
-                                    AppPalette.danger, 'Danger'),
-                                const SizedBox(width: 16),
-                                _GaugeLegendDot(
-                                    AppPalette.critical, 'Critical'),
-                              ],
+                            // FittedBox prevents the legend row from
+                            // overflowing on narrow grid cells
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _GaugeLegendDot(
+                                      AppPalette.safe, 'Normal'),
+                                  const SizedBox(width: 16),
+                                  _GaugeLegendDot(
+                                      AppPalette.warning, 'Warning'),
+                                  const SizedBox(width: 16),
+                                  _GaugeLegendDot(
+                                      AppPalette.danger, 'Danger'),
+                                  const SizedBox(width: 16),
+                                  _GaugeLegendDot(
+                                      AppPalette.critical, 'Critical'),
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -1149,16 +1154,18 @@ class _CwcStationStrip extends StatelessWidget {
                 ),
                 Row(
                   children: [
-                    Text(
-                      danger > 0
-                          ? 'DL ${danger.toStringAsFixed(1)} m'
-                          : warning > 0
-                              ? 'WL ${warning.toStringAsFixed(1)} m'
-                              : '',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 9),
+                    Expanded(
+                      child: Text(
+                        danger > 0
+                            ? 'DL ${danger.toStringAsFixed(1)} m'
+                            : warning > 0
+                                ? 'WL ${warning.toStringAsFixed(1)} m'
+                                : '',
+                        style: const TextStyle(
+                            color: AppPalette.textGrey, fontSize: 9),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    const Spacer(),
                     if (src.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(
