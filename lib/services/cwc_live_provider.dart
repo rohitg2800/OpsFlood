@@ -3,13 +3,6 @@
 // Central provider that wires CwcDirectService into the rest of the app.
 // Screens call CwcLiveProvider.instance.getReading(city, state, river, ...)
 // and get back real CWC data — no simulation, no hardcoded levels.
-//
-// Integration guide:
-//   1. In your DashboardScreen / HomeScreen, import this file.
-//   2. Call: final reading = await CwcLiveProvider.instance
-//              .getReading(city: mc['city'], state: mc['state'], ...);
-//   3. Show reading.level, reading.danger, and derive riskLabel from them.
-//   4. For ML prediction, pass reading.level to PredictionService.
 
 library;
 
@@ -17,11 +10,12 @@ import '../data/india_cities.dart';
 import 'cwc_direct_service.dart';
 import '../constants.dart';
 
+// Re-export so callers can reference CwcReading without extra imports.
+// NOTE: CwcDataSource removed — not exported by cwc_direct_service.dart.
+export 'cwc_direct_service.dart' show CwcReading;
+
 // ── Alias: expose CwcReading as CwcLiveReading for backwards compat ───────────
 typedef CwcLiveReading = CwcReading;
-
-// Re-export so callers can reference CwcDataSource without extra imports.
-export 'cwc_direct_service.dart' show CwcReading, CwcDataSource;
 
 class CwcLiveProvider {
   CwcLiveProvider._();
