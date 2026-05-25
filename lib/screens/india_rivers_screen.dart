@@ -20,6 +20,7 @@ import '../models/river_monitoring.dart';
 import '../models/river_station.dart';
 import '../providers/flood_providers.dart';
 import '../services/real_time_river_service.dart';
+import '../services/state_data_prefetcher.dart'; // Bihar WRD auto-prefetch
 import '../theme/river_theme.dart';
 import '../widgets/river_level_visualizer.dart';
 
@@ -88,6 +89,11 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     _fetchCwc();
     _cwcTimer = Timer.periodic(
         AppConstants.pollingInterval, (_) => _fetchCwc(silent: true));
+
+    // Warm Bihar WRD cache immediately on screen open.
+    // One HTTP call fetches all 103 stations so every Bihar city card
+    // loads instantly without individual network requests.
+    StateDataPrefetcher.prefetchState('Bihar');
   }
 
   @override
@@ -458,17 +464,23 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
             ),
           ),
           const SizedBox(height: 6),
-          // state chips
+          // state chips — tapping any state fires a prefetch for that state
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: states.map((s) {
                 final active = _selectedState == s;
                 return GestureDetector(
-                  onTap: () => setState(() {
-                    _selectedState = s;
-                    _selectedCity  = null;
-                  }),
+                  onTap: () {
+                    setState(() {
+                      _selectedState = s;
+                      _selectedCity  = null;
+                    });
+                    // Prefetch live gauge data for the selected state.
+                    // For Bihar this warms all 13 cities in one HTTP call;
+                    // for other states it is a no-op until their scraper is added.
+                    StateDataPrefetcher.prefetchState(s);
+                  },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     margin: const EdgeInsets.only(right: 8),
@@ -831,8 +843,6 @@ class _CwcStationCard extends StatelessWidget {
         : const Color(0xFF22C55E);
     final noData = result.source == 'NO_DATA';
 
-    // FIX: result.currentLevel is double? — use null-aware access + fallback.
-    // FIX: RiverStation fields are .warning / .danger (not warningLevel / dangerLevel).
     final levelStr   = result.currentLevel?.toStringAsFixed(2) ?? '—';
     final warningStr = s.warning.toStringAsFixed(2);
     final dangerStr  = s.danger.toStringAsFixed(2);
