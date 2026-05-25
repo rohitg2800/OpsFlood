@@ -1,21 +1,21 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.1 — _matchCity + STATE_SEVERITY_MATRIX fix)
+// OpsFlood — LiveFetchEngine (v17.2 — remove Duration.zero timer leaks)
 //
-// BUGS FIXED in v17.1:
+// BUGS FIXED in v17.2:
 //
-//   1. _matchCity() was returning stations.first when no city match was found.
-//      With the backend returning ALL stations for a state, this meant every
-//      city in Bihar got Patna’s reading (level=6.2) and every city in Assam
-//      got Guwahati’s reading (level=5.47), causing the “46 WARNING” badge.
-//      Fix: return null on no-match so the backend slot stays empty and
-//      _inferRisk() uses GloFAS + weather instead.
+//   All three Future.delayed(Duration.zero, () => onStateChanged?.call())
+//   calls inside refreshData() were replaced with direct synchronous calls.
+//   Each Future.delayed creates a one-shot Timer that FakeAsync tracks; when
+//   the widget test disposes the tree those timers are still pending, causing
+//   "A Timer is still pending even after the widget tree was disposed".
+//   Since RealTimeService.dispose() now guards onStateChanged with a
+//   _disposed flag (v17.1 companion fix), a direct synchronous call is both
+//   safe and leak-free.
 //
-//   2. backendRisk was being trusted when data_source == STATE_SEVERITY_MATRIX
-//      or FALLBACK.  These sources are synthetic averages, not live gauge data;
-//      trusting them caused every city to show MODERATE regardless of actual
-//      conditions.  Fix: if backendSrc is a synthetic source, clear backendRisk
-//      so _inferRisk() is used instead.
+// v17.1 fixes retained:
+//   • _matchCity() returns null on no-match.
+//   • Synthetic backend sources (STATE_SEVERITY_MATRIX, FALLBACK…) are ignored.
 //
 // v17 fixes retained:
 //   • _priorityCities() returns all 110 cities, CWC-monitored first.
@@ -193,7 +193,8 @@ class LiveFetchEngine {
     _lock     = true;
     isLoading = true;
     if (!isOnline) isWakingUp = true;
-    Future.delayed(Duration.zero, () => onStateChanged?.call());
+    // FIX v17.2: call synchronously — no timer created, safe after dispose.
+    onStateChanged?.call();
 
     try {
       await _wakeBackend();
@@ -208,7 +209,8 @@ class LiveFetchEngine {
 
       for (final city in cities) {
         fetchingCity = city.name;
-        Future.delayed(Duration.zero, () => onStateChanged?.call());
+        // FIX v17.2: call synchronously — no timer created, safe after dispose.
+        onStateChanged?.call();
 
         final snap = await _fetchCity(city);
         if (snap == null) continue;
@@ -261,7 +263,8 @@ class LiveFetchEngine {
           fetchedAt: lastFetchTime!,
           fromCache: false,
         );
-        Future.delayed(Duration.zero, () => onStateChanged?.call());
+        // FIX v17.2: call synchronously — no timer created, safe after dispose.
+        onStateChanged?.call();
 
         if (kDebugMode) {
           debugPrint('[LiveFetch] ✓ ${city.name} | src=${snap['healthySources']} '
@@ -301,7 +304,8 @@ class LiveFetchEngine {
       isLoading    = false;
       fetchingCity = null;
       _lock        = false;
-      Future.delayed(Duration.zero, () => onStateChanged?.call());
+      // FIX v17.2: call synchronously — no timer created, safe after dispose.
+      onStateChanged?.call();
     }
   }
 
@@ -344,20 +348,13 @@ class LiveFetchEngine {
       String? backendSrc  = backend?['data_source'] as String?;
 
       // FIX: Do NOT trust risk labels from synthetic/averaged sources.
-      // STATE_SEVERITY_MATRIX, FALLBACK, ESTIMATED etc. are computed averages
-      // for the whole state — they make every city in the state look MODERATE.
-      // For these sources also discard the level values (they are state averages,
-      // not per-city gauge readings) so _inferRisk uses GloFAS + rainfall.
       final isSyntheticBackend =
           backendSrc != null && _kSyntheticSources.contains(backendSrc.toUpperCase());
 
       String? backendRisk;
       if (!isSyntheticBackend) {
         backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
-        // cwcLevel/dangerLevel/warnLevel already set from backend above — keep them.
       } else {
-        // Synthetic source: discard all level data from backend, rely on
-        // CWC Direct + GloFAS + rainfall for risk inference.
         cwcLevel    = null;
         dangerLevel = null;
         warnLevel   = null;
@@ -375,7 +372,7 @@ class LiveFetchEngine {
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null; // CWC Direct is ground truth — always re-infer
+        backendRisk = null;
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
@@ -523,8 +520,6 @@ class LiveFetchEngine {
       final raw = j['data'];
       if (raw is! List || raw.isEmpty) return null;
 
-      // FIX: _matchCity now returns null on no-match (previously returned
-      // stations.first, giving every city in a state the same level reading).
       final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
       if (station == null) return null;
 
@@ -550,31 +545,24 @@ class LiveFetchEngine {
     }
   }
 
-  // FIX: Returns null when no station matches the city name.
-  // Previously returned stations.first as a fallback, which caused every
-  // city in a state to receive the first station’s gauge reading.
   Map<String, dynamic>? _matchCity(
     List<Map<String, dynamic>> stations, String cityName,
   ) {
     if (stations.isEmpty) return null;
     final needle = cityName.trim().toLowerCase();
 
-    // Exact match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
     }
-    // Prefix match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase().startsWith(needle)) return s;
     }
-    // Substring match (both directions, min 4 chars to avoid false positives)
     if (needle.length >= 4) {
       for (final s in stations) {
         final sc = (s['city'] as String? ?? '').toLowerCase();
         if (sc.contains(needle) || needle.contains(sc)) return s;
       }
     }
-    // No match — return null so GloFAS + weather inference is used instead.
     return null;
   }
 
