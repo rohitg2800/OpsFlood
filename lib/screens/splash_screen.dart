@@ -20,7 +20,7 @@ class SplashScreen extends ConsumerStatefulWidget {
 
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
-  // ── Controllers ──────────────────────────────────────────────────────────
+  // ── Controllers ──────────────────────────────────────────────────────
   late AnimationController _entranceCtrl;
   late Animation<double>   _logoScale;
   late Animation<double>   _logoOpacity;
@@ -110,7 +110,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       });
     });
 
-    _bootServices();
+    // FIX: defer _bootServices() until after the first frame so the
+    // ProviderScope is fully mounted before RealTimeService calls
+    // notifyListeners().  Calling startPolling() synchronously from
+    // initState violates Riverpod's _debugCanModifyProviders invariant.
+    // addPostFrameCallback does NOT create a FakeAsync-tracked Timer,
+    // so the widget test teardown stays clean.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _bootServices();
+    });
   }
 
   Future<void> _bootServices() async {
@@ -130,7 +138,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
     if (!mounted) return;
     setState(() {
-      _statusText = _backendOnline ? 'Systems online  \u2705' : 'Loading cached data  \u23f3';
+      _statusText = _backendOnline ? 'Systems online  ✅' : 'Loading cached data  ⏳';
     });
     await Future.delayed(const Duration(milliseconds: 800));
     _navigate();
@@ -163,7 +171,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   String get _dots => '.' * (_dotFrame % 4);
 
-  // ── Palette ───────────────────────────────────────────────────────────────
+  // ── Palette ───────────────────────────────────────────────────────────
   static const _bg     = AppPalette.abyss0;
   static const _accent = AppPalette.cyan;
   static const _gold   = AppPalette.amber;
@@ -213,7 +221,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               );
             },
           ),
-          // ── Main content ────────────────────────────────────────────
+          // ── Main content ──────────────────────────────────────────
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -366,7 +374,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             bottom: 32, left: 0, right: 0,
             child: Center(
               child: Text(
-                'v2.2  \u2022  ABYSS OPS BUILD',
+                'v2.2  •  ABYSS OPS BUILD',
                 style: TextStyle(
                   color: _accent.withValues(alpha: 0.38),
                   fontSize: 9,
