@@ -4,6 +4,8 @@ import '../services/real_time_service.dart';
 import '../services/ndma_service.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
+// Source policy provider — re-exported so screens import one file.
+export 'source_policy_provider.dart';
 
 final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
   final service = RealTimeService();

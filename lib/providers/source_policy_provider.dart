@@ -1,16 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../models/source_policy.dart';
 
 enum PolicyStatus { loading, live, locked, offline }
 
-/// Polls /health every [pollInterval] and exposes [policy] + [status].
-/// Option A gate: consumers check [allowLiveCwc] before fetching telemetry.
-class SourcePolicyProvider extends ChangeNotifier {
+class SourcePolicyNotifier extends ChangeNotifier {
   static const String _baseUrl = 'https://opsflood.onrender.com';
-  static const Duration pollInterval = Duration(seconds: 60);
+  static const Duration _pollInterval = Duration(seconds: 60);
 
   SourcePolicy _policy = SourcePolicy.fallback();
   PolicyStatus _status = PolicyStatus.loading;
@@ -21,13 +20,13 @@ class SourcePolicyProvider extends ChangeNotifier {
   PolicyStatus get status => _status;
   String? get error => _error;
 
-  /// Option A: true only when backend confirms allow_live_cwc_in_app = true.
+  /// Option A gate: true only when backend confirms allow_live_cwc_in_app = true.
   bool get allowLiveCwc =>
       _status == PolicyStatus.live && _policy.allowLiveCwcInApp;
 
-  SourcePolicyProvider() {
+  SourcePolicyNotifier() {
     _fetch();
-    _timer = Timer.periodic(pollInterval, (_) => _fetch());
+    _timer = Timer.periodic(_pollInterval, (_) => _fetch());
   }
 
   Future<void> refresh() => _fetch();
@@ -66,3 +65,20 @@ class SourcePolicyProvider extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Riverpod provider — drop-in alongside existing ChangeNotifierProviders.
+final sourcePolicyProvider =
+    ChangeNotifierProvider<SourcePolicyNotifier>((ref) {
+  final notifier = SourcePolicyNotifier();
+  ref.onDispose(notifier.dispose);
+  return notifier;
+});
+
+/// Convenience derived providers — use these in widgets.
+final allowLiveCwcProvider = Provider<bool>((ref) {
+  return ref.watch(sourcePolicyProvider).allowLiveCwc;
+});
+
+final policyStatusProvider = Provider<PolicyStatus>((ref) {
+  return ref.watch(sourcePolicyProvider).status;
+});
