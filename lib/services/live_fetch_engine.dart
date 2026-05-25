@@ -1,27 +1,25 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.2 — remove Duration.zero timer leaks)
+// OpsFlood — LiveFetchEngine (v17.3 — WrisService fallback)
 //
-// BUGS FIXED in v17.2:
+// CHANGES in v17.3:
+//   • Imports WrisService.
+//   • _fetchCity() now fires wrisFut in parallel with the other futures.
+//   • WRIS reading is used as gauge fallback when:
+//       (a) backend returned a synthetic source (STATE_SEVERITY_MATRIX etc.)
+//       (b) cwcDirect returned null AND cwcLevel is still null after backend.
+//     In both cases: fills cwcLevel / dangerLevel / warnLevel / cwcSource
+//     from WRIS so _inferRisk() / _upgradeRiskFromLevel() have real per-city
+//     gauge data instead of state-wide averages.
+//   • backendRisk is cleared after a WRIS fill so risk is always re-inferred
+//     from fresh gauge values, not a stale state-level label.
 //
-//   All three Future.delayed(Duration.zero, () => onStateChanged?.call())
-//   calls inside refreshData() were replaced with direct synchronous calls.
-//   Each Future.delayed creates a one-shot Timer that FakeAsync tracks; when
-//   the widget test disposes the tree those timers are still pending, causing
-//   "A Timer is still pending even after the widget tree was disposed".
-//   Since RealTimeService.dispose() now guards onStateChanged with a
-//   _disposed flag (v17.1 companion fix), a direct synchronous call is both
-//   safe and leak-free.
+// v17.2 fixes retained:
+//   • All onStateChanged?.call() calls are synchronous (no Duration.zero timers).
 //
 // v17.1 fixes retained:
 //   • _matchCity() returns null on no-match.
-//   • Synthetic backend sources (STATE_SEVERITY_MATRIX, FALLBACK…) are ignored.
-//
-// v17 fixes retained:
-//   • _priorityCities() returns all 110 cities, CWC-monitored first.
-//   • backendRisk trusted for any non-null non-synthetic backendSrc.
-//   • CWC HTML maintenance page guard.
-//   • 429-backoff + 300 ms inter-city delay.
+//   • Synthetic backend sources are discarded.
 library;
 
 import 'dart:async';
@@ -35,6 +33,7 @@ import '../data/india_cities.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'cwc_direct_service.dart';
+import 'wris_service.dart';
 
 class MlInferenceEngine {}
 
@@ -53,9 +52,6 @@ final _glofasCache  = <String, _CacheEntry<Map<String, dynamic>>>{};
 String _tileKey(double lat, double lon) =>
     '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
 
-// Sources that are synthetic/computed averages, NOT live gauge readings.
-// When data_source is one of these, backendRisk is NOT trusted — we fall
-// through to _inferRisk() which uses real GloFAS discharge + rainfall.
 const _kSyntheticSources = {
   'STATE_SEVERITY_MATRIX',
   'FALLBACK',
@@ -71,6 +67,7 @@ class LiveFetchEngine {
 
   final http.Client      _client    = http.Client();
   final CwcDirectService _cwcDirect = CwcDirectService.instance;
+  final WrisService      _wris      = WrisService.instance;
   final Random           _rng       = Random();
   Timer? _timer;
   bool   _lock = false;
@@ -193,7 +190,6 @@ class LiveFetchEngine {
     _lock     = true;
     isLoading = true;
     if (!isOnline) isWakingUp = true;
-    // FIX v17.2: call synchronously — no timer created, safe after dispose.
     onStateChanged?.call();
 
     try {
@@ -209,7 +205,6 @@ class LiveFetchEngine {
 
       for (final city in cities) {
         fetchingCity = city.name;
-        // FIX v17.2: call synchronously — no timer created, safe after dispose.
         onStateChanged?.call();
 
         final snap = await _fetchCity(city);
@@ -263,7 +258,6 @@ class LiveFetchEngine {
           fetchedAt: lastFetchTime!,
           fromCache: false,
         );
-        // FIX v17.2: call synchronously — no timer created, safe after dispose.
         onStateChanged?.call();
 
         if (kDebugMode) {
@@ -304,7 +298,6 @@ class LiveFetchEngine {
       isLoading    = false;
       fetchingCity = null;
       _lock        = false;
-      // FIX v17.2: call synchronously — no timer created, safe after dispose.
       onStateChanged?.call();
     }
   }
@@ -316,9 +309,11 @@ class LiveFetchEngine {
       final cwcDirectFut = _cwcDirect.fetch(city);
       final backendFut   = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
       final imdFut       = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
+      // v17.3: WRIS runs in parallel — never on web (CORS), never throws
+      final wrisFut      = _runningOnWeb ? Future.value(null) : _wris.fetch(city);
 
       final results = await Future.wait([
-        weatherFut, glofasFut, cwcDirectFut, backendFut, imdFut,
+        weatherFut, glofasFut, cwcDirectFut, backendFut, imdFut, wrisFut,
       ], eagerError: false);
 
       final weather   = results[0] as Map<String, dynamic>?;
@@ -326,12 +321,13 @@ class LiveFetchEngine {
       final cwcDirect = results[2] as CwcReading?;
       final backend   = results[3] as Map<String, dynamic>?;
       final imd       = results[4] as List<dynamic>?;
+      final wris      = results[5] as WrisReading?;
 
       if (weather == null && glofas == null && backend == null) return null;
 
       final healthySources = [
         weather != null, glofas != null,
-        cwcDirect != null, backend != null, imd != null,
+        cwcDirect != null, backend != null, imd != null, wris != null,
       ].where((v) => v).length;
 
       final precipMm    = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
@@ -339,7 +335,9 @@ class LiveFetchEngine {
 
       final backendFlow  = (backend?['flow_rate']  as num?)?.toDouble() ?? 0.0;
       final glofasFlow   = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
-      final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
+      // Prefer WRIS discharge if available, then backend, then GloFAS
+      final wrisFlow     = wris?.discharge;
+      final dischargeM3s = wrisFlow ?? (backendFlow > 0 ? backendFlow : glofasFlow);
 
       double? cwcLevel    = _safeLevel(backend?['current_level']);
       double? dangerLevel = _safeLevel(backend?['danger_level']);
@@ -347,7 +345,6 @@ class LiveFetchEngine {
       double? safeLevel   = _safeLevel(backend?['safe_level']);
       String? backendSrc  = backend?['data_source'] as String?;
 
-      // FIX: Do NOT trust risk labels from synthetic/averaged sources.
       final isSyntheticBackend =
           backendSrc != null && _kSyntheticSources.contains(backendSrc.toUpperCase());
 
@@ -367,12 +364,32 @@ class LiveFetchEngine {
           ? (backendSrc ?? 'BACKEND')
           : null;
 
+      // Priority 1: CWC Direct (live scrape — ground truth)
       if (cwcDirect != null) {
         cwcLevel    = cwcDirect.level    ?? cwcLevel;
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
         backendRisk = null;
+      }
+
+      // Priority 2: WRIS daily gauge reading
+      // Applied when: (a) backend was synthetic, OR (b) cwcDirect was null
+      // and we still have no level data.  WRIS fills the gap with official
+      // CWC gauge heights published on indiawris.gov.in.
+      if (wris != null && wris.hasLevel) {
+        final needsFill = isSyntheticBackend || cwcLevel == null;
+        if (needsFill) {
+          cwcLevel    = wris.level    ?? cwcLevel;
+          dangerLevel = wris.danger   ?? dangerLevel;
+          warnLevel   = wris.warning  ?? warnLevel;
+          cwcSource   = 'WRIS';
+          backendRisk = null; // always re-infer from fresh gauge data
+          if (kDebugMode) {
+            debugPrint('[LiveFetch] ${city.name}: filled from WRIS '
+                'level=${wris.level} danger=${wris.danger}');
+          }
+        }
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
