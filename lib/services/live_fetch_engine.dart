@@ -1,17 +1,27 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17 — all 110 cities, CWC-first)
+// OpsFlood — LiveFetchEngine (v17.1 — _matchCity + STATE_SEVERITY_MATRIX fix)
 //
-// FIX v17:
-//   _priorityCities() was hardcoded to 10 IDs → app showed only 10 cities
-//   on dashboard and "All Systems Monitoring: 0".
-//   Now returns ALL cities from kIndiaCities, sorted CWC-monitored first
-//   (highest confidence) then remaining cities.
+// BUGS FIXED in v17.1:
 //
-// v16 fixes retained:
-//   1. backendRisk trusted for ANY non-null backendSrc.
-//   2. CWC HTML maintenance page guard (body.startsWith('<')).
-//   3. 429-backoff + 300 ms inter-city delay unchanged.
+//   1. _matchCity() was returning stations.first when no city match was found.
+//      With the backend returning ALL stations for a state, this meant every
+//      city in Bihar got Patna’s reading (level=6.2) and every city in Assam
+//      got Guwahati’s reading (level=5.47), causing the “46 WARNING” badge.
+//      Fix: return null on no-match so the backend slot stays empty and
+//      _inferRisk() uses GloFAS + weather instead.
+//
+//   2. backendRisk was being trusted when data_source == STATE_SEVERITY_MATRIX
+//      or FALLBACK.  These sources are synthetic averages, not live gauge data;
+//      trusting them caused every city to show MODERATE regardless of actual
+//      conditions.  Fix: if backendSrc is a synthetic source, clear backendRisk
+//      so _inferRisk() is used instead.
+//
+// v17 fixes retained:
+//   • _priorityCities() returns all 110 cities, CWC-monitored first.
+//   • backendRisk trusted for any non-null non-synthetic backendSrc.
+//   • CWC HTML maintenance page guard.
+//   • 429-backoff + 300 ms inter-city delay.
 library;
 
 import 'dart:async';
@@ -42,6 +52,17 @@ final _glofasCache  = <String, _CacheEntry<Map<String, dynamic>>>{};
 
 String _tileKey(double lat, double lon) =>
     '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
+
+// Sources that are synthetic/computed averages, NOT live gauge readings.
+// When data_source is one of these, backendRisk is NOT trusted — we fall
+// through to _inferRisk() which uses real GloFAS discharge + rainfall.
+const _kSyntheticSources = {
+  'STATE_SEVERITY_MATRIX',
+  'FALLBACK',
+  'ESTIMATED',
+  'SYNTHETIC',
+  'DEFAULT',
+};
 
 class LiveFetchEngine {
   static final LiveFetchEngine _instance = LiveFetchEngine._internal();
@@ -320,16 +341,41 @@ class LiveFetchEngine {
       double? dangerLevel = _safeLevel(backend?['danger_level']);
       double? warnLevel   = _safeLevel(backend?['warning_level']);
       double? safeLevel   = _safeLevel(backend?['safe_level']);
-      String? backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
       String? backendSrc  = backend?['data_source'] as String?;
-      String? cwcSource   = backend != null ? (backendSrc ?? 'BACKEND') : null;
+
+      // FIX: Do NOT trust risk labels from synthetic/averaged sources.
+      // STATE_SEVERITY_MATRIX, FALLBACK, ESTIMATED etc. are computed averages
+      // for the whole state — they make every city in the state look MODERATE.
+      // For these sources also discard the level values (they are state averages,
+      // not per-city gauge readings) so _inferRisk uses GloFAS + rainfall.
+      final isSyntheticBackend =
+          backendSrc != null && _kSyntheticSources.contains(backendSrc.toUpperCase());
+
+      String? backendRisk;
+      if (!isSyntheticBackend) {
+        backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
+        // cwcLevel/dangerLevel/warnLevel already set from backend above — keep them.
+      } else {
+        // Synthetic source: discard all level data from backend, rely on
+        // CWC Direct + GloFAS + rainfall for risk inference.
+        cwcLevel    = null;
+        dangerLevel = null;
+        warnLevel   = null;
+        safeLevel   = null;
+        if (kDebugMode) {
+          debugPrint('[LiveFetch] ${city.name}: skipping synthetic bkSrc=$backendSrc');
+        }
+      }
+      String? cwcSource = (!isSyntheticBackend && backend != null)
+          ? (backendSrc ?? 'BACKEND')
+          : null;
 
       if (cwcDirect != null) {
         cwcLevel    = cwcDirect.level    ?? cwcLevel;
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null;
+        backendRisk = null; // CWC Direct is ground truth — always re-infer
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
@@ -477,6 +523,8 @@ class LiveFetchEngine {
       final raw = j['data'];
       if (raw is! List || raw.isEmpty) return null;
 
+      // FIX: _matchCity now returns null on no-match (previously returned
+      // stations.first, giving every city in a state the same level reading).
       final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
       if (station == null) return null;
 
@@ -502,21 +550,32 @@ class LiveFetchEngine {
     }
   }
 
+  // FIX: Returns null when no station matches the city name.
+  // Previously returned stations.first as a fallback, which caused every
+  // city in a state to receive the first station’s gauge reading.
   Map<String, dynamic>? _matchCity(
     List<Map<String, dynamic>> stations, String cityName,
   ) {
     if (stations.isEmpty) return null;
     final needle = cityName.trim().toLowerCase();
+
+    // Exact match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
     }
+    // Prefix match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase().startsWith(needle)) return s;
     }
-    for (final s in stations) {
-      if ((s['city'] as String? ?? '').toLowerCase().contains(needle)) return s;
+    // Substring match (both directions, min 4 chars to avoid false positives)
+    if (needle.length >= 4) {
+      for (final s in stations) {
+        final sc = (s['city'] as String? ?? '').toLowerCase();
+        if (sc.contains(needle) || needle.contains(sc)) return s;
+      }
     }
-    return stations.first;
+    // No match — return null so GloFAS + weather inference is used instead.
+    return null;
   }
 
   List<dynamic> _imdCache     = [];
@@ -648,14 +707,6 @@ class LiveFetchEngine {
     ));
   }
 
-  // ── v17: ALL 110 cities, CWC-monitored stations first ──────────────────────
-  //
-  // Previously: hardcoded 10-city list → only 10 cities on dashboard.
-  // Now: return every city in kIndiaCities.
-  //   • Cities with a known CWC station code load first → highest confidence
-  //     gauge data populates the UI immediately while remaining cities load.
-  //   • Within each group, original registry order is preserved (roughly
-  //     flood-risk priority as curated in india_cities.dart).
   List<IndiaCity> _priorityCities() {
     final cwcFirst   = kIndiaCities.where((c) => c.cwcStation != null).toList();
     final remaining  = kIndiaCities.where((c) => c.cwcStation == null).toList();
