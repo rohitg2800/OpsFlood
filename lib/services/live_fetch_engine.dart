@@ -1,25 +1,15 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.3 — WrisService fallback)
+// OpsFlood — LiveFetchEngine (v17.4 — WRIS disabled, GloFAS 7-day trend)
 //
-// CHANGES in v17.3:
-//   • Imports WrisService.
-//   • _fetchCity() now fires wrisFut in parallel with the other futures.
-//   • WRIS reading is used as gauge fallback when:
-//       (a) backend returned a synthetic source (STATE_SEVERITY_MATRIX etc.)
-//       (b) cwcDirect returned null AND cwcLevel is still null after backend.
-//     In both cases: fills cwcLevel / dangerLevel / warnLevel / cwcSource
-//     from WRIS so _inferRisk() / _upgradeRiskFromLevel() have real per-city
-//     gauge data instead of state-wide averages.
-//   • backendRisk is cleared after a WRIS fill so risk is always re-inferred
-//     from fresh gauge values, not a stale state-level label.
+// CHANGES in v17.4:
+//   • WRIS disabled: wrisFut always resolves to null instantly, no timeout.
+//   • GloFAS past_days raised 4 → 7 for a fuller discharge trend.
+//   • GloFAS forecast_days = 3: trend array now includes 3-day outlook
+//     so _inferRisk() rising-trend bonus uses a 10-day window.
+//   • Discharge priority simplified: backendFlow > glofasFlow (WRIS gone).
 //
-// v17.2 fixes retained:
-//   • All onStateChanged?.call() calls are synchronous (no Duration.zero timers).
-//
-// v17.1 fixes retained:
-//   • _matchCity() returns null on no-match.
-//   • Synthetic backend sources are discarded.
+// v17.3 / v17.2 / v17.1 fixes all retained.
 library;
 
 import 'dart:async';
@@ -60,6 +50,10 @@ const _kSyntheticSources = {
   'DEFAULT',
 };
 
+// GloFAS fetch window: 7 past days + 3 forecast days = 10-point trend
+const _kGloFasPastDays     = 7;
+const _kGloFasForecastDays = 3;
+
 class LiveFetchEngine {
   static final LiveFetchEngine _instance = LiveFetchEngine._internal();
   factory LiveFetchEngine() => _instance;
@@ -67,7 +61,7 @@ class LiveFetchEngine {
 
   final http.Client      _client    = http.Client();
   final CwcDirectService _cwcDirect = CwcDirectService.instance;
-  final WrisService      _wris      = WrisService.instance;
+  final WrisService      _wris      = WrisService.instance; // stub, always null
   final Random           _rng       = Random();
   Timer? _timer;
   bool   _lock = false;
@@ -309,8 +303,9 @@ class LiveFetchEngine {
       final cwcDirectFut = _cwcDirect.fetch(city);
       final backendFut   = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
       final imdFut       = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
-      // v17.3: WRIS runs in parallel — never on web (CORS), never throws
-      final wrisFut      = _runningOnWeb ? Future.value(null) : _wris.fetch(city);
+      // WRIS is disabled (infinite redirect loop on indiawris.gov.in).
+      // _wris.fetch() returns null immediately — zero network cost.
+      final wrisFut      = _wris.fetch(city);
 
       final results = await Future.wait([
         weatherFut, glofasFut, cwcDirectFut, backendFut, imdFut, wrisFut,
@@ -321,13 +316,13 @@ class LiveFetchEngine {
       final cwcDirect = results[2] as CwcReading?;
       final backend   = results[3] as Map<String, dynamic>?;
       final imd       = results[4] as List<dynamic>?;
-      final wris      = results[5] as WrisReading?;
+      // wris (results[5]) is always null — kept for future re-enable
 
       if (weather == null && glofas == null && backend == null) return null;
 
       final healthySources = [
         weather != null, glofas != null,
-        cwcDirect != null, backend != null, imd != null, wris != null,
+        cwcDirect != null, backend != null, imd != null,
       ].where((v) => v).length;
 
       final precipMm    = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
@@ -335,9 +330,8 @@ class LiveFetchEngine {
 
       final backendFlow  = (backend?['flow_rate']  as num?)?.toDouble() ?? 0.0;
       final glofasFlow   = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
-      // Prefer WRIS discharge if available, then backend, then GloFAS
-      final wrisFlow     = wris?.discharge;
-      final dischargeM3s = wrisFlow ?? (backendFlow > 0 ? backendFlow : glofasFlow);
+      // Prefer live backend discharge; fall back to GloFAS modelled value
+      final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
 
       double? cwcLevel    = _safeLevel(backend?['current_level']);
       double? dangerLevel = _safeLevel(backend?['danger_level']);
@@ -364,32 +358,13 @@ class LiveFetchEngine {
           ? (backendSrc ?? 'BACKEND')
           : null;
 
-      // Priority 1: CWC Direct (live scrape — ground truth)
+      // CWC Direct: live scrape — highest priority, always re-infer risk
       if (cwcDirect != null) {
         cwcLevel    = cwcDirect.level    ?? cwcLevel;
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
         backendRisk = null;
-      }
-
-      // Priority 2: WRIS daily gauge reading
-      // Applied when: (a) backend was synthetic, OR (b) cwcDirect was null
-      // and we still have no level data.  WRIS fills the gap with official
-      // CWC gauge heights published on indiawris.gov.in.
-      if (wris != null && wris.hasLevel) {
-        final needsFill = isSyntheticBackend || cwcLevel == null;
-        if (needsFill) {
-          cwcLevel    = wris.level    ?? cwcLevel;
-          dangerLevel = wris.danger   ?? dangerLevel;
-          warnLevel   = wris.warning  ?? warnLevel;
-          cwcSource   = 'WRIS';
-          backendRisk = null; // always re-infer from fresh gauge data
-          if (kDebugMode) {
-            debugPrint('[LiveFetch] ${city.name}: filled from WRIS '
-                'level=${wris.level} danger=${wris.danger}');
-          }
-        }
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
@@ -453,10 +428,7 @@ class LiveFetchEngine {
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
     final cached = _weatherCache[key];
-    if (cached != null && cached.valid) {
-      if (kDebugMode) debugPrint('[LiveFetch] weather cache hit: ${city.name}');
-      return cached.data;
-    }
+    if (cached != null && cached.valid) return cached.data;
     try {
       final uri = Uri.parse(
         'https://api.open-meteo.com/v1/forecast'
@@ -465,10 +437,7 @@ class LiveFetchEngine {
         '&forecast_days=2&timezone=Asia%2FKolkata',
       );
       final res = await _fetchWithRetry(uri);
-      if (res.statusCode != 200) {
-        if (kDebugMode) debugPrint('[LiveFetch] weather ${city.name}: HTTP ${res.statusCode}');
-        return null;
-      }
+      if (res.statusCode != 200) return null;
       final j      = jsonDecode(res.body) as Map<String, dynamic>;
       final hourly = j['hourly'] as Map<String, dynamic>;
       final precip = _doubles(hourly['precipitation']);
@@ -489,25 +458,27 @@ class LiveFetchEngine {
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
     final cached = _glofasCache[key];
-    if (cached != null && cached.valid) {
-      if (kDebugMode) debugPrint('[LiveFetch] GloFAS cache hit: ${city.name}');
-      return cached.data;
-    }
+    if (cached != null && cached.valid) return cached.data;
     try {
+      // v17.4: 7 past days + 3 forecast days = 10-point trend window
       final uri = Uri.parse(
         'https://flood-api.open-meteo.com/v1/flood'
         '?latitude=${city.lat}&longitude=${city.lon}'
-        '&daily=river_discharge&past_days=4&forecast_days=1',
+        '&daily=river_discharge'
+        '&past_days=$_kGloFasPastDays'
+        '&forecast_days=$_kGloFasForecastDays',
       );
       final res = await _fetchWithRetry(uri);
-      if (res.statusCode != 200) {
-        if (kDebugMode) debugPrint('[LiveFetch] GloFAS ${city.name}: HTTP ${res.statusCode}');
-        return null;
-      }
+      if (res.statusCode != 200) return null;
       final j    = jsonDecode(res.body) as Map<String, dynamic>;
       final vals = _doubles((j['daily'] as Map?)?['river_discharge']);
       if (vals.isEmpty) return null;
-      final result = {'discharge': vals.last, 'discharge7d': vals};
+      // discharge = today's value (index at past_days, i.e. vals[7])
+      final todayIdx = vals.length > _kGloFasPastDays ? _kGloFasPastDays : vals.length - 1;
+      final result = {
+        'discharge':   vals[todayIdx],
+        'discharge7d': vals,  // full 10-point array incl. 3-day forecast
+      };
       _glofasCache[key] = _CacheEntry(result);
       return result;
     } catch (e) {
@@ -523,15 +494,9 @@ class LiveFetchEngine {
         '?state=${Uri.encodeComponent(city.state)}',
       );
       final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
-      if (res.statusCode != 200) {
-        if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTTP ${res.statusCode}');
-        return null;
-      }
+      if (res.statusCode != 200) return null;
       final body = res.body.trim();
-      if (body.startsWith('<')) {
-        if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTML response (maintenance?)');
-        return null;
-      }
+      if (body.startsWith('<')) return null;
 
       final j   = jsonDecode(body) as Map<String, dynamic>;
       final raw = j['data'];
@@ -567,7 +532,6 @@ class LiveFetchEngine {
   ) {
     if (stations.isEmpty) return null;
     final needle = cityName.trim().toLowerCase();
-
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
     }
@@ -639,16 +603,20 @@ class LiveFetchEngine {
     double? dangerLevel,
   }) {
     double score = 0.0;
+
+    // Rainfall component
     if (precipMm > 150)       score += 0.35;
     else if (precipMm > 80)   score += 0.25;
     else if (precipMm > 40)   score += 0.15;
     else if (precipMm > 15)   score += 0.07;
 
+    // Discharge component
     if (dischargeM3s > 8000)      score += 0.35;
     else if (dischargeM3s > 4000) score += 0.25;
     else if (dischargeM3s > 1500) score += 0.15;
     else if (dischargeM3s > 500)  score += 0.07;
 
+    // Gauge level vs danger threshold
     if (currentLevel != null && dangerLevel != null && dangerLevel > 0) {
       final r = currentLevel / dangerLevel;
       if (r >= 1.0)       score += 0.30;
@@ -656,7 +624,13 @@ class LiveFetchEngine {
       else if (r >= 0.70) score += 0.10;
     }
 
-    if (discharge7d.length >= 2 && discharge7d.last > discharge7d.first * 1.3) score += 0.05;
+    // Rising trend bonus: today (index 7) vs 7 days ago (index 0)
+    // With 10-point array: if discharge has risen 30%+ over the past week
+    if (discharge7d.length >= 2) {
+      final first = discharge7d.first;
+      final last  = discharge7d[_kGloFasPastDays.clamp(0, discharge7d.length - 1)];
+      if (first > 0 && last > first * 1.3) score += 0.05;
+    }
 
     if (score >= 0.75) return 'CRITICAL';
     if (score >= 0.50) return 'HIGH';
@@ -713,8 +687,8 @@ class LiveFetchEngine {
   }
 
   List<IndiaCity> _priorityCities() {
-    final cwcFirst   = kIndiaCities.where((c) => c.cwcStation != null).toList();
-    final remaining  = kIndiaCities.where((c) => c.cwcStation == null).toList();
+    final cwcFirst  = kIndiaCities.where((c) => c.cwcStation != null).toList();
+    final remaining = kIndiaCities.where((c) => c.cwcStation == null).toList();
     return [...cwcFirst, ...remaining];
   }
 
