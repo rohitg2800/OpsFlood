@@ -23,7 +23,7 @@ import '../services/real_time_river_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/river_level_visualizer.dart';
 
-// ── palette (shared) ──────────────────────────────────────────────────────────
+// ── palette (shared) ──────────────────────────────────────────────────────────────
 const _kBg        = Color(0xFF060B12);
 const _kSurface   = Color(0xFF0C1520);
 const _kSurface2  = Color(0xFF111D2B);
@@ -40,7 +40,7 @@ const _dcColors = {
   DangerClass.extreme:     Color(0xFFEF4444),
 };
 
-// ── Screen ────────────────────────────────────────────────────────────────────
+// ── Screen ────────────────────────────────────────────────────────────────────────────
 class IndiaRiversScreen extends ConsumerStatefulWidget {
   const IndiaRiversScreen({super.key});
   @override
@@ -50,19 +50,19 @@ class IndiaRiversScreen extends ConsumerStatefulWidget {
 class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     with TickerProviderStateMixin {
 
-  // ── tab controller (2 tabs) ────────────────────────────────────────────────
+  // ── tab controller (2 tabs) ──────────────────────────────────────────
   late final TabController       _tab;
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
 
-  // ── Live Gauges filter state ───────────────────────────────────────────────
+  // ── Live Gauges filter state ─────────────────────────────────────────
   String  _selectedState = 'All India';
   String? _selectedCity;
   String  _searchQuery   = '';
   String  _riskFilter    = 'ALL';
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // ── CWC Stations state ─────────────────────────────────────────────────────
+  // ── CWC Stations state ───────────────────────────────────────────────
   final _cwcSvc         = RealTimeRiverService();
   final _cwcSearchCtrl  = TextEditingController();
   List<LiveRiverResult> _cwcResults    = [];
@@ -100,7 +100,7 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     super.dispose();
   }
 
-  // ── CWC fetch ──────────────────────────────────────────────────────────────
+  // ── CWC fetch ───────────────────────────────────────────────────────────
   Future<void> _fetchCwc({bool silent = false}) async {
     if (!mounted) return;
     setState(() {
@@ -126,7 +126,7 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     }
   }
 
-  // ── CWC helpers ────────────────────────────────────────────────────────────
+  // ── CWC helpers ─────────────────────────────────────────────────────────
   List<LiveRiverResult> get _cwcList {
     var l = List<LiveRiverResult>.from(_cwcResults);
     if (_cwcFilterState.isNotEmpty) {
@@ -215,7 +215,7 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     ));
   }
 
-  // ── Live Gauges helpers ────────────────────────────────────────────────────
+  // ── Live Gauges helpers ──────────────────────────────────────────────
   List<FloodData> _filteredLevels(List<FloodData> levels) {
     return levels.where((d) {
       final stateMatch =
@@ -249,10 +249,12 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ── Build ──────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final lvAsync = ref.watch(liveLevelsProvider);
+    // liveLevelsProvider is Provider<List<FloodData>> — NOT AsyncValue.
+    // Watch it directly; it is never null (starts as empty list).
+    final levels = ref.watch(liveLevelsProvider);
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -266,24 +268,19 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
                 controller: _tab,
                 children: [
                   // ── Tab 0: Live Gauges ─────────────────────────────────
-                  lvAsync.when(
-                    loading: () => const Center(
+                  levels.isEmpty
+                    ? const Center(
                         child: CircularProgressIndicator(
-                            color: Color(0xFF00B4C8))),
-                    error: (e, _) => Center(
-                        child: Text('Error: $e',
-                            style: const TextStyle(
-                                color: Color(0xFFEF4444)))),
-                    data: (levels) {
-                      final filtered = _filteredLevels(levels);
-                      return Column(
-                        children: [
-                          _buildLiveFilters(levels),
-                          Expanded(child: _buildLiveList(filtered)),
-                        ],
-                      );
-                    },
-                  ),
+                            color: Color(0xFF00B4C8)))
+                    : Builder(builder: (_) {
+                        final filtered = _filteredLevels(levels);
+                        return Column(
+                          children: [
+                            _buildLiveFilters(levels),
+                            Expanded(child: _buildLiveList(filtered)),
+                          ],
+                        );
+                      }),
                   // ── Tab 1: CWC Stations ────────────────────────────────
                   _buildCwcTab(),
                 ],
@@ -351,7 +348,7 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     );
   }
 
-  // ── Tab bar ────────────────────────────────────────────────────────────────
+  // ── Tab bar ───────────────────────────────────────────────────────────────
   Widget _buildTabBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
@@ -388,7 +385,7 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     );
   }
 
-  // ── Live Gauges: filter bar ────────────────────────────────────────────────
+  // ── Live Gauges: filter bar ──────────────────────────────────────────
   Widget _buildLiveFilters(List<FloodData> levels) {
     final states = _stateList(levels);
     return Padding(
@@ -504,87 +501,129 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     );
   }
 
-  // ── Live Gauges: list ──────────────────────────────────────────────────────
-  Widget _buildLiveList(List<FloodData> items) {
-    if (items.isEmpty) {
+  Widget _buildLiveList(List<FloodData> filtered) {
+    if (filtered.isEmpty) {
       return Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.water_drop_outlined,
-                color: _kTeal.withValues(alpha: 0.4), size: 40),
+            Icon(Icons.search_off_rounded,
+                color: Colors.white.withValues(alpha: 0.2), size: 48),
             const SizedBox(height: 12),
-            const Text('No matching stations',
-                style: TextStyle(color: Color(0xFF6A7E98), fontSize: 14)),
+            Text('No matching stations',
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    fontSize: 14)),
           ],
         ),
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      itemCount: items.length,
-      itemBuilder: (ctx, i) => _LiveCard(item: items[i]),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      itemCount: filtered.length,
+      itemBuilder: (_, i) => _LiveGaugeCard(data: filtered[i]),
     );
   }
 
-  // ── CWC tab ────────────────────────────────────────────────────────────────
   Widget _buildCwcTab() {
+    if (_cwcLoading) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00B4C8)));
+    }
+    if (_cwcError.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: Color(0xFFEF4444), size: 40),
+            const SizedBox(height: 12),
+            Text(_cwcError,
+                style: const TextStyle(
+                    color: Color(0xFFEF4444), fontSize: 13)),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: _fetchCwc,
+              child: const Text('Retry',
+                  style: TextStyle(color: Color(0xFF00B4C8))),
+            ),
+          ],
+        ),
+      );
+    }
+    final list = _cwcList;
     return Column(
       children: [
-        // stats row
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-          child: Row(
-            children: [
-              _CwcStat('${_cwcResults.length}', 'Total', _kTeal),
-              const SizedBox(width: 10),
-              _CwcStat('$_cwcLive', 'Live', const Color(0xFF22C55E)),
-              const SizedBox(width: 10),
-              _CwcStat('$_cwcAtRisk', 'At Risk', const Color(0xFFF97316)),
-              const Spacer(),
-              // sort toggle
-              GestureDetector(
-                onTap: () =>
-                    setState(() => _cwcSortByRisk = !_cwcSortByRisk),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _cwcSortByRisk
-                        ? _kGold.withValues(alpha: 0.15)
-                        : _kSurface,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: _cwcSortByRisk
-                            ? _kGold.withValues(alpha: 0.5)
-                            : Colors.white.withValues(alpha: 0.08)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.sort_rounded,
-                          color:
-                              _cwcSortByRisk ? _kGold : const Color(0xFF6A7E98),
-                          size: 14),
-                      const SizedBox(width: 4),
-                      Text('By Risk',
-                          style: TextStyle(
-                              color: _cwcSortByRisk
-                                  ? _kGold
-                                  : const Color(0xFF6A7E98),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+        _buildCwcHeader(list),
+        _buildCwcAddCity(),
+        Expanded(
+          child: ListView.builder(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            itemCount: list.length,
+            itemBuilder: (_, i) => _CwcStationCard(result: list[i]),
           ),
         ),
-        // add city bar
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
+      ],
+    );
+  }
+
+  Widget _buildCwcHeader(List<LiveRiverResult> list) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Row(
+        children: [
+          Text('${_cwcLive} live',
+              style: const TextStyle(
+                  color: Color(0xFF22C55E),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12)),
+          const SizedBox(width: 10),
+          if (_cwcAtRisk > 0)
+            Text('$_cwcAtRisk at risk',
+                style: const TextStyle(
+                    color: Color(0xFFEF4444),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12)),
+          const Spacer(),
+          if (_cwcRefreshing)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Color(0xFF00B4C8)),
+            ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded,
+                color: Color(0xFF6A7E98), size: 18),
+            onPressed: _fetchCwc,
+            tooltip: 'Refresh',
+          ),
+          IconButton(
+            icon: Icon(
+              _cwcSortByRisk
+                  ? Icons.sort_rounded
+                  : Icons.sort_by_alpha_rounded,
+              color: _cwcSortByRisk
+                  ? const Color(0xFF00B4C8)
+                  : const Color(0xFF6A7E98),
+              size: 18,
+            ),
+            onPressed: () => setState(() => _cwcSortByRisk = !_cwcSortByRisk),
+            tooltip: 'Sort by risk',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCwcAddCity() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               Expanded(
                 child: TextField(
@@ -592,11 +631,11 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
                   style:
                       const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Add city from CWC registry…',
+                    hintText: 'Add city…',
                     hintStyle: TextStyle(
                         color: Colors.white.withValues(alpha: 0.3),
                         fontSize: 13),
-                    prefixIcon: const Icon(Icons.add_location_alt_outlined,
+                    prefixIcon: const Icon(Icons.add_location_alt_rounded,
                         color: Color(0xFF6A7E98), size: 18),
                     filled: true,
                     fillColor: _kSurface,
@@ -607,277 +646,92 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
                         const EdgeInsets.symmetric(vertical: 10),
                   ),
                   onChanged: (v) {
-                    setState(() => _addCityName = v);
+                    _addCityName = v;
                     _cwcSearch(v);
                   },
                   onSubmitted: _addCity,
                 ),
               ),
               const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _fetchCwc();
-                },
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: _kSurface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08)),
-                  ),
-                  child: _cwcRefreshing
-                      ? const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF00B4C8)))
-                      : const Icon(Icons.refresh_rounded,
-                          color: Color(0xFF6A7E98), size: 18),
-                ),
-              ),
-            ],
-          ),
-        ),
-        // suggestions
-        if (_suggestions.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            decoration: BoxDecoration(
-              color: _kSurface2,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: Column(
-              children: _suggestions
-                  .map((s) => ListTile(
-                        dense: true,
-                        title: Text(s,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 13)),
-                        leading: const Icon(Icons.location_city,
-                            color: Color(0xFF00B4C8), size: 16),
-                        trailing: _adding
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Color(0xFF22C55E)))
-                            : null,
-                        onTap: () => _addCity(s),
-                      ))
-                  .toList(),
-            ),
-          ),
-        // state filter
-        if (_cwcStateList.isNotEmpty)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () =>
-                      setState(() => _cwcFilterState = ''),
-                  child: _StateChip(
-                      label: 'All', active: _cwcFilterState.isEmpty),
-                ),
-                ..._cwcStateList.map((s) => GestureDetector(
-                      onTap: () =>
-                          setState(() => _cwcFilterState = s),
-                      child: _StateChip(
-                          label: s,
-                          active: _cwcFilterState == s),
-                    )),
-              ],
-            ),
-          ),
-        // list
-        Expanded(
-          child: _cwcLoading
-              ? const Center(
-                  child: CircularProgressIndicator(
-                      color: Color(0xFF00B4C8)))
-              : _cwcError.isNotEmpty
-                  ? Center(
-                      child: Text('Error: $_cwcError',
-                          style: const TextStyle(
-                              color: Color(0xFFEF4444))))
-                  : _cwcList.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.sensors_off,
-                                  color:
-                                      _kGold.withValues(alpha: 0.4),
-                                  size: 36),
-                              const SizedBox(height: 10),
-                              const Text('No stations loaded',
-                                  style: TextStyle(
-                                      color: Color(0xFF6A7E98),
-                                      fontSize: 13)),
-                              const SizedBox(height: 6),
-                              const Text(
-                                  'Use the search bar above to add cities',
-                                  style: TextStyle(
-                                      color: Color(0xFF4A5A6A),
-                                      fontSize: 11)),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                          itemCount: _cwcList.length,
-                          itemBuilder: (ctx, i) =>
-                              _CwcCard(result: _cwcList[i]),
-                        ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Live gauge card ────────────────────────────────────────────────────────────
-class _LiveCard extends StatelessWidget {
-  final FloodData item;
-  const _LiveCard({required this.item});
-
-  Color get _riskColor {
-    switch (item.riskLevel) {
-      case 'CRITICAL': return const Color(0xFFEF4444);
-      case 'HIGH':     return const Color(0xFFF97316);
-      case 'MODERATE': return const Color(0xFFD4A843);
-      default:         return const Color(0xFF22C55E);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c   = _riskColor;
-    final pct = item.capacityPercent / 100;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C1520),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: c.withValues(alpha: 0.25)),
-        boxShadow: [
-          BoxShadow(
-            color: c.withValues(alpha: 0.06),
-            blurRadius: 16,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── header row ───────────────────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.city,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${item.state}${item.riverName != null ? ' · ${item.riverName}' : ''}',
-                      style: const TextStyle(
-                          color: Color(0xFF6A7E98), fontSize: 11),
+              _adding
+                  ? const SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Color(0xFF00B4C8)),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.add_rounded,
+                          color: Color(0xFF00B4C8), size: 22),
+                      onPressed: () => _addCity(_addCityName),
                     ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: c.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border:
-                      Border.all(color: c.withValues(alpha: 0.4)),
-                ),
-                child: Text(item.riskLevel,
-                    style: TextStyle(
-                        color: c,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 11)),
-              ),
             ],
           ),
-          const SizedBox(height: 12),
-          // ── RiverLevelVisualizer (new API) ───────────────────────────
-          RiverLevelVisualizer(
-            cityName: item.city,
-            current:  item.currentLevel,
-            warning:  item.warningLevel,
-            danger:   item.dangerLevel,
-            hfl:      item.dangerLevel,
-            history:  const [],
-          ),
-          const SizedBox(height: 12),
-          // ── capacity bar ─────────────────────────────────────────────
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Capacity ${item.capacityPercent.toStringAsFixed(0)}%',
-                  style: const TextStyle(
-                      color: Color(0xFF6A7E98), fontSize: 10)),
-              Text(
-                'W: ${item.warningLevel.toStringAsFixed(1)} m  '
-                'D: ${item.dangerLevel.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                    color: Color(0xFF6A7E98), fontSize: 10),
+          if (_suggestions.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              decoration: BoxDecoration(
+                color: _kSurface2,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.06)),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: pct.clamp(0.0, 1.0),
-              minHeight: 6,
-              backgroundColor:
-                  Colors.white.withValues(alpha: 0.06),
-              valueColor: AlwaysStoppedAnimation<Color>(c),
+              child: Column(
+                children: _suggestions.map((s) {
+                  return InkWell(
+                    onTap: () {
+                      _cwcSearchCtrl.text = s;
+                      _addCityName        = s;
+                      setState(() => _suggestions = []);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined,
+                              color: Color(0xFF6A7E98), size: 15),
+                          const SizedBox(width: 8),
+                          Text(s,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 }
 
-// ── CWC station card ──────────────────────────────────────────────────────────
-class _CwcCard extends StatelessWidget {
-  final LiveRiverResult result;
-  const _CwcCard({required this.result});
+// ── Live Gauge Card ────────────────────────────────────────────────────────────────────
+class _LiveGaugeCard extends StatelessWidget {
+  const _LiveGaugeCard({required this.data});
+  final FloodData data;
 
   @override
   Widget build(BuildContext context) {
-    final st  = result.station;
-    final dc  = st.dangerClass;
-    final col = _dcColors[dc] ?? const Color(0xFF22C55E);
-    final hasLevel = result.currentLevel != null;
+    final risk  = data.riskLevel ?? 'LOW';
+    final color = risk == 'CRITICAL' ? const Color(0xFFEF4444)
+        : risk == 'HIGH'     ? const Color(0xFFF97316)
+        : risk == 'MODERATE' ? const Color(0xFFD4A843)
+        : const Color(0xFF22C55E);
+    final pct   = data.dangerLevel > 0
+        ? (data.currentLevel / data.dangerLevel).clamp(0.0, 1.0)
+        : 0.0;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF0C1520),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: col.withValues(alpha: 0.22)),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -888,186 +742,190 @@ class _CwcCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(st.city,
+                    Text(data.city,
                         style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 14)),
                     const SizedBox(height: 2),
-                    Text('${st.state} · ${st.river}',
-                        style: const TextStyle(
-                            color: Color(0xFF6A7E98), fontSize: 11)),
+                    Text(
+                        '${data.state} • ${data.riverName ?? 'River'}',
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 11)),
                   ],
                 ),
               ),
-              // source badge
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                    horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: (result.source == 'NO_DATA'
-                          ? const Color(0xFF6A7E98)
-                          : col)
-                      .withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  color: color.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                      color: (result.source == 'NO_DATA'
-                              ? const Color(0xFF6A7E98)
-                              : col)
-                          .withValues(alpha: 0.35)),
+                      color: color.withValues(alpha: 0.35)),
                 ),
-                child: Text(
-                  result.source == 'NO_DATA' ? 'NO DATA' : result.source,
-                  style: TextStyle(
-                      color: result.source == 'NO_DATA'
-                          ? const Color(0xFF6A7E98)
-                          : col,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700),
-                ),
+                child: Text(risk,
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10)),
               ),
             ],
           ),
-          if (hasLevel) ...
-          [
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Text(
-                  '${result.currentLevel!.toStringAsFixed(2)} m',
-                  style: TextStyle(
-                      color: col,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  dc == DangerClass.normal
-                      ? 'Normal'
-                      : dc == DangerClass.aboveNormal
-                          ? 'Above Normal'
-                          : dc == DangerClass.severe
-                              ? 'Severe'
-                              : 'Extreme',
-                  style: TextStyle(
-                      color: col.withValues(alpha: 0.8),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600),
-                ),
-              ],
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 5,
+              backgroundColor: Colors.white.withValues(alpha: 0.06),
+              valueColor: AlwaysStoppedAnimation(color),
             ),
-          ],
-          if (result.mlFloodProb != null) ...
-          [
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.auto_graph_rounded,
-                    color: Color(0xFF8B5CF6), size: 13),
-                const SizedBox(width: 4),
-                Text(
-                  'ML Flood Risk: ${(result.mlFloodProb! * 100).toStringAsFixed(0)}%',
-                  style: const TextStyle(
-                      color: Color(0xFF8B5CF6),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          ],
-          if (result.trend != null) ...
-          [
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(
-                  result.trend == 'rising'
-                      ? Icons.trending_up
-                      : result.trend == 'falling'
-                          ? Icons.trending_down
-                          : Icons.trending_flat,
-                  color: result.trend == 'rising'
-                      ? const Color(0xFFEF4444)
-                      : result.trend == 'falling'
-                          ? const Color(0xFF22C55E)
-                          : const Color(0xFF6A7E98),
-                  size: 13,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  result.trend!,
-                  style: TextStyle(
-                      color: result.trend == 'rising'
-                          ? const Color(0xFFEF4444)
-                          : result.trend == 'falling'
-                              ? const Color(0xFF22C55E)
-                              : const Color(0xFF6A7E98),
-                      fontSize: 11),
-                ),
-              ],
-            ),
-          ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _stat('Level', '${data.currentLevel.toStringAsFixed(2)} m'),
+              const SizedBox(width: 16),
+              _stat('Danger', '${data.dangerLevel.toStringAsFixed(2)} m'),
+              if (data.flowRate != null) ...
+                [const SizedBox(width: 16),
+                 _stat('Flow', '${data.flowRate!.toStringAsFixed(0)} m³/s')],
+            ],
+          ),
         ],
       ),
     );
   }
+
+  Widget _stat(String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.35),
+                  fontSize: 10)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12)),
+        ],
+      );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-class _CwcStat extends StatelessWidget {
-  final String value;
-  final String label;
-  final Color  color;
-  const _CwcStat(this.value, this.label, this.color);
+// ── CWC Station Card ──────────────────────────────────────────────────────────────────
+class _CwcStationCard extends StatelessWidget {
+  const _CwcStationCard({required this.result});
+  final LiveRiverResult result;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(value,
-            style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w800,
-                fontSize: 18)),
-        Text(label,
-            style: const TextStyle(
-                color: Color(0xFF6A7E98), fontSize: 10)),
-      ],
-    );
-  }
-}
+    final s     = result.station;
+    final dc    = s.dangerClass;
+    final color = dc == DangerClass.extreme ? const Color(0xFFEF4444)
+        : dc == DangerClass.severe      ? const Color(0xFFF97316)
+        : dc == DangerClass.aboveNormal ? const Color(0xFFD4A843)
+        : const Color(0xFF22C55E);
+    final noData = result.source == 'NO_DATA';
 
-class _StateChip extends StatelessWidget {
-  final String label;
-  final bool   active;
-  const _StateChip({required this.label, required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.only(right: 8),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: active
-            ? const Color(0xFF00B4C8).withValues(alpha: 0.15)
-            : const Color(0xFF0C1520),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: active
-                ? const Color(0xFF00B4C8).withValues(alpha: 0.5)
-                : Colors.white.withValues(alpha: 0.07)),
+    return Opacity(
+      opacity: noData ? 0.55 : 1.0,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C1520),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(s.city,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14)),
+                      const SizedBox(height: 2),
+                      Text(
+                          '${s.state} • ${s.river}',
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.45),
+                              fontSize: 11)),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: color.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    noData ? 'NO DATA' : dc.name.toUpperCase(),
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            if (!noData) ...
+              [
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _stat('Level',
+                        '${result.currentLevel.toStringAsFixed(2)} m'),
+                    const SizedBox(width: 14),
+                    _stat('Warning',
+                        '${s.warningLevel.toStringAsFixed(2)} m'),
+                    const SizedBox(width: 14),
+                    _stat('Danger',
+                        '${s.dangerLevel.toStringAsFixed(2)} m'),
+                  ],
+                ),
+                if (result.mlFloodProb != null) ...
+                  [
+                    const SizedBox(height: 6),
+                    Text(
+                      'ML flood prob: ${(result.mlFloodProb! * 100).toStringAsFixed(1)}%',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 11),
+                    ),
+                  ],
+              ],
+          ],
+        ),
       ),
-      child: Text(label,
-          style: TextStyle(
-              color: active
-                  ? const Color(0xFF00B4C8)
-                  : const Color(0xFF6A7E98),
-              fontSize: 11,
-              fontWeight:
-                  active ? FontWeight.w700 : FontWeight.w500)),
     );
   }
+
+  Widget _stat(String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.35),
+                  fontSize: 10)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12)),
+        ],
+      );
 }
