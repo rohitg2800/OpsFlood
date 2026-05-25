@@ -1,5 +1,5 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v5.0  (threshold alerts merged)
+// OpsFlood — River Monitor v5.1  (source policy gate + banner wired)
 //
 // TABS:
 //   0 — Stations   (CWC live telemetry + GloFAS threshold overlay)
@@ -27,8 +27,11 @@ import '../constants.dart';
 import '../models/river_station.dart';
 import '../models/threshold_alert.dart';
 import '../providers/alerts_provider.dart';
+import '../providers/source_policy_provider.dart'; // ← source policy
 import '../services/real_time_river_service.dart';
 import '../services/threshold_alert_service.dart';
+import '../widgets/cwc_gated_wrapper.dart';         // ← Option A gate
+import '../widgets/source_policy_banner.dart';      // ← Option B banner
 import 'india_river_explorer_screen.dart';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -336,6 +339,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
         backgroundColor: _kBg,
         body: SafeArea(
           child: Column(children: [
+            // ── Source Policy Banner (Option B) ── always visible, tap to refresh
+            const SourcePolicyBanner(),
             _header(),
             _tabBar(alertsBadge),
             if (_refreshing)
@@ -348,7 +353,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
             Expanded(child: TabBarView(
               controller: _tab,
               children: [
-                _stationsTab(),
+                // ── Tab 0: Stations — gated behind source policy (Option A) ──
+                CwcGatedWrapper(child: _stationsTab()),
                 _alertsTab(),
                 _addCityTab(),
                 const IndiaRiverExplorerScreen(),
@@ -923,7 +929,7 @@ class _LiveCard extends StatefulWidget {
   final LiveRiverResult result;
   final int             index;
   final VoidCallback    onDelete;
-  final ThresholdAlert? alert;     // may be null if GloFAS has no data for this city
+  final ThresholdAlert? alert;
   const _LiveCard({
     super.key,
     required this.result,
@@ -959,7 +965,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
     final dc = s.dangerClass;
     final a  = widget.alert;
 
-    // ── Composite risk ──────────────────────────────────────────────────────
     final risk = RiskCompute.compute(
       cwcCurrent:  s.current,
       cwcWarning:  s.warning,
@@ -992,7 +997,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     style: const TextStyle(color: Color(0xFF3A4A58), fontSize: 10)),
               ],
             )),
-            // Even NO_DATA cards show GloFAS alert if available
             if (a != null) ...[
               _AlertLevelBadge(level: a.level),
               const SizedBox(width: 6),
@@ -1031,7 +1035,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
           decoration: BoxDecoration(
             color: _kSurface,
             borderRadius: BorderRadius.circular(18),
-            // Border colour driven by composite risk band
             border: Border.all(color: risk.band.color.withOpacity(0.28)),
             boxShadow: [
               BoxShadow(
@@ -1041,8 +1044,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
             ],
           ),
           child: Column(children: [
-
-            // ── Header row ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
               child: Row(children: [
@@ -1080,7 +1081,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                   ],
                 )),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  // CWC danger class badge
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                     decoration: BoxDecoration(
@@ -1093,7 +1093,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                             fontWeight: FontWeight.w800)),
                   ),
                   const SizedBox(height: 4),
-                  // Composite risk band badge
                   _RiskBandBadge(risk: risk),
                   const SizedBox(height: 4),
                   GestureDetector(
@@ -1103,8 +1102,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ]),
             ),
-
-            // ── CWC gauge bar ────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: AnimatedBuilder(
@@ -1125,7 +1122,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     ],
                   ),
                   const SizedBox(height: 6),
-                  // CWC gauge height bar
                   Stack(children: [
                     Container(height: 7, decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.05),
@@ -1168,8 +1164,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ),
-
-            // ── GloFAS threshold section (only if alert exists) ──────────────
             if (a != null) ...[
               const SizedBox(height: 8),
               Divider(height: 1,
@@ -1202,7 +1196,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     ),
                   ]),
                   const SizedBox(height: 6),
-                  // GloFAS fill bar
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
@@ -1230,8 +1223,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ],
-
-            // ── Composite risk score bar ─────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
               child: Column(children: [
@@ -1280,8 +1271,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ),
               ]),
             ),
-
-            // ── ML row ───────────────────────────────────────────────────────
             if (r.mlRiskLevel != null) ...[
               Divider(height: 1,
                   color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
@@ -1305,8 +1294,6 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                 ]),
               ),
             ],
-
-            // ── Pills ────────────────────────────────────────────────────────
             const SizedBox(height: 4),
             Divider(height: 1,
                 color: _kGold.withOpacity(0.08), indent: 14, endIndent: 14),
@@ -1393,7 +1380,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
   }
 }
 
-// ── Alert row (compact, for the Alerts tab) ───────────────────────────────────
+// ── Alert row ─────────────────────────────────────────────────────────────────
 class _AlertRow extends StatelessWidget {
   final ThresholdAlert alert;
   const _AlertRow({required this.alert});
@@ -1435,7 +1422,6 @@ class _AlertRow extends StatelessWidget {
         Text('${alert.state} · ${alert.river}',
             style: const TextStyle(color: Color(0xFF7B8A99), fontSize: 10)),
         const SizedBox(height: 8),
-        // Fill bar
         ClipRRect(
           borderRadius: BorderRadius.circular(3),
           child: LinearProgressIndicator(
@@ -1507,7 +1493,7 @@ class _RiskBandBadge extends StatelessWidget {
   );
 }
 
-// ── Alert filter menu (for Alerts tab) ───────────────────────────────────────
+// ── Alert filter menu ─────────────────────────────────────────────────────────
 class _AlertFilterMenu extends StatelessWidget {
   final AlertsProvider provider;
   const _AlertFilterMenu({required this.provider});
