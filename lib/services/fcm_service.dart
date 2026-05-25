@@ -1,7 +1,7 @@
 // lib/services/fcm_service.dart
 //
 // OpsFlood — FcmService
-// Supports both FcmService.instance (old callers) and FcmService() factory.
+// Supports both FcmService.instance (legacy) and FcmService() factory.
 //
 // Topic naming: flood_alert_<State>_<City>  e.g. flood_alert_Bihar_Patna
 // State topic:  flood_state_<State>
@@ -43,18 +43,17 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 class FcmService {
   static final FcmService _instance = FcmService._();
   factory FcmService() => _instance;
-  // Also expose as FcmService.instance for legacy callers (main.dart etc.)
   static FcmService get instance => _instance;
   FcmService._();
 
-  final FirebaseMessaging                _messaging  = FirebaseMessaging.instance;
-  final FlutterLocalNotificationsPlugin  _localNotif = FlutterLocalNotificationsPlugin();
+  final FirebaseMessaging               _messaging  = FirebaseMessaging.instance;
+  final FlutterLocalNotificationsPlugin _localNotif = FlutterLocalNotificationsPlugin();
 
   String?      fcmToken;
   bool         _initialised = false;
   final Set<String> _subscribed = {};
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  // ── Init ───────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
     if (_initialised) return;
@@ -94,17 +93,15 @@ class FcmService {
       if (kDebugMode) debugPrint('[FCM] getToken failed: $e');
     }
 
-    // Subscribe to global India topic
     await subscribeToTopic('flood_alerts_india');
 
-    // Foreground FCM messages → local notification
     FirebaseMessaging.onMessage.listen(_handleForeground);
     FirebaseMessaging.onMessageOpenedApp.listen((msg) {
       if (kDebugMode) debugPrint('[FCM] opened: ${msg.notification?.title}');
     });
   }
 
-  // ── Topic management ──────────────────────────────────────────────────────
+  // ── Topic management ─────────────────────────────────────────────────────
 
   Future<void> subscribeToTopic(String topic) async {
     final clean = _cleanTopic(topic);
@@ -135,6 +132,52 @@ class FcmService {
 
   Future<void> unsubscribeFromState(String state) =>
       unsubscribeFromTopic('flood_state_${state.replaceAll(' ', '_')}');
+
+  // ── showAlertNotification ───────────────────────────────────────────────────
+  //
+  // Called by ThresholdAlertService._notify() with discharge-based data.
+
+  Future<void> showAlertNotification({
+    required String cityName,
+    required String state,
+    required String river,
+    required String severity,          // 'EXTREME' | 'DANGER' | 'WARNING'
+    required double currentLevel,      // m³/s
+    required double dangerLevel,       // m³/s
+    String? message,
+  }) async {
+    final isCrit = severity == 'EXTREME' || severity == 'DANGER';
+    final title  = '$severity FLOOD ALERT — $cityName, $state';
+    final body   = message ??
+        '$river discharge at ${currentLevel.toStringAsFixed(0)} m³/s '
+        '(danger: ${dangerLevel.toStringAsFixed(0)} m³/s)';
+
+    final android = AndroidNotificationDetails(
+      'flood_alerts',
+      'Flood Alerts',
+      channelDescription: 'Live flood risk alerts for Indian cities',
+      importance: isCrit ? Importance.max  : Importance.high,
+      priority:   isCrit ? Priority.max    : Priority.high,
+      playSound: true,
+      enableVibration: true,
+      icon: '@mipmap/ic_launcher',
+    );
+    const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true);
+
+    await _localNotif.show(
+      '$cityName$state'.hashCode,
+      title,
+      body,
+      NotificationDetails(android: android, iOS: ios),
+    );
+
+    // Also subscribe device to the city FCM topic so future server pushes
+    // are received even when app is closed.
+    final topic = 'flood_alert_${state}_$cityName'
+        .replaceAll(' ', '_')
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '');
+    await subscribeToTopic(topic);
+  }
 
   // ── Foreground handler ────────────────────────────────────────────────────
 
