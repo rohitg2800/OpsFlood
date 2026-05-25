@@ -94,3 +94,9 @@ extension DangerClassExt on DangerClass {
     }
   }
 }
+
+// ── Convenience extension on LiveRiverResult ──────────────────────────────────
+// These getters delegate to the embedded RiverStation so call-sites that
+// reference  result.currentLevel  and  result.trend  compile without change.
+// Import real_time_river_service.dart to get LiveRiverResult.
+export 'live_river_result_ext.dart';

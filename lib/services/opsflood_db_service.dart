@@ -33,6 +33,27 @@ import '../config/app_config.dart';
 import 'local_cache_service.dart';
 import 'ops_client.dart';
 
+// ── Top-level private helpers used by DTO factory constructors ────────────────
+// These must be top-level (or static on each DTO) so factory constructors
+// — which run before the enclosing class is instantiated — can call them.
+
+String _str(dynamic v) => (v?.toString() ?? '').trim();
+
+double _dbl(dynamic v) {
+  if (v == null) return 0.0;
+  if (v is num)  return v.toDouble();
+  return double.tryParse(v.toString().trim()) ?? 0.0;
+}
+
+double? _dblOpt(dynamic v) => v == null ? null : _dbl(v);
+
+DateTime _dt(dynamic v) {
+  if (v == null) return DateTime.now();
+  if (v is Timestamp) return v.toDate();
+  if (v is DateTime)  return v;
+  return DateTime.tryParse(v.toString()) ?? DateTime.now();
+}
+
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
 class DbStation {
@@ -231,310 +252,200 @@ class OpsFloodDbService {
   OpsFloodDbService._();
   static final OpsFloodDbService instance = OpsFloodDbService._();
 
-  final _client = OpsClient.instance;
-  final _cache  = LocalCacheService.instance;
+  final FirebaseFirestore _fs     = FirebaseFirestore.instance;
+  final OpsClient         _client = OpsClient.instance;
+  final LocalCacheService _cache  = LocalCacheService.instance;
 
-  // Firestore is optional — null if Firebase not initialised yet
-  FirebaseFirestore? get _fs {
+  // ── Station registry ────────────────────────────────────────────────────────
+
+  Future<DbResult<DbStation>> getStations() async {
     try {
-      return FirebaseFirestore.instance;
+      final raw = await _client.getStations();
+      final list = (raw as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(DbStation.fromMap)
+          .toList();
+      _mirrorStations(list);
+      return DbResult(data: list);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OpsFloodDb] getStations failed: $e');
+      return DbResult(
+        data:      await _firestoreStations(),
+        fromCache: true,
+        isStale:   true,
+        error:     e.toString(),
+      );
+    }
+  }
+
+  Future<List<DbStation>> _firestoreStations() async {
+    try {
+      final snap = await _fs
+          .collection('station_registry')
+          .limit(200)
+          .get();
+      return snap.docs
+          .map((d) => DbStation.fromMap(d.data()))
+          .toList();
     } catch (_) {
-      return null;
+      return [];
     }
   }
-
-  // Firestore collection prefix (empty string = production)
-  static const String _prefix =
-      String.fromEnvironment('DB_COLLECTION_PREFIX', defaultValue: '');
-
-  String _col(String name) =>
-      _prefix.isEmpty ? name : '${_prefix}_$name';
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // STATIONS
-  // ────────────────────────────────────────────────────────────────────────────
-
-  /// Fetch all CWC station registry entries.
-  /// Mirrors to Firestore collection `station_registry`.
-  Future<DbResult<DbStation>> fetchStations() async {
-    const path = AppConfig.epCwcStations;
-    final raw  = await _client.get(path);
-
-    if (_isOk(raw)) {
-      final list   = _asList(raw);
-      final result = list.map((e) => DbStation.fromMap(e)).toList();
-      await _cache.write(path, jsonEncode(list));
-      _mirrorStations(result); // fire-and-forget
-      return DbResult(data: result);
-    }
-
-    // Fallback 1: local cache
-    final cached = await _cache.read(path);
-    if (cached.value != null) {
-      final list   = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
-      return DbResult(
-        data:      list.map((e) => DbStation.fromMap(e)).toList(),
-        fromCache: true,
-        isStale:   cached.isStale,
-      );
-    }
-
-    // Fallback 2: Firestore
-    final fs = _fs;
-    if (fs != null) {
-      try {
-        final snap = await fs
-            .collection(_col('station_registry'))
-            .limit(200)
-            .get();
-        final result = snap.docs
-            .map((d) => DbStation.fromMap(d.data()))
-            .toList();
-        if (result.isNotEmpty) {
-          return DbResult(data: result, fromCache: true, isStale: true);
-        }
-      } catch (e) {
-        _log('Firestore station fallback failed: $e');
-      }
-    }
-
-    return DbResult(data: const [], error: raw['error']?.toString());
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // LIVE TELEMETRY READINGS
-  // ────────────────────────────────────────────────────────────────────────────
-
-  /// Fetch live telemetry for all monitored stations.
-  /// Mirrors each reading to Firestore `flood_readings`.
-  Future<DbResult<DbReading>> fetchLiveTelemetry() async {
-    const path = AppConfig.epLiveTelemetry;
-    final raw  = await _client.get(path);
-
-    if (_isOk(raw)) {
-      final list    = _asList(raw);
-      final result  = list.map((e) => DbReading.fromMap(e)).toList();
-      await _cache.write(path, jsonEncode(list));
-      _mirrorReadings(result); // fire-and-forget
-      return DbResult(data: result);
-    }
-
-    final cached = await _cache.read(path);
-    if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
-      return DbResult(
-        data:      list.map((e) => DbReading.fromMap(e)).toList(),
-        fromCache: true,
-        isStale:   cached.isStale,
-      );
-    }
-
-    return DbResult(data: const [], error: raw['error']?.toString());
-  }
-
-  /// Fetch live reading for a single city.
-  Future<DbResult<DbReading>> fetchCityReading({
-    required String city,
-    required String state,
-    required String river,
-  }) async {
-    final path = '${AppConfig.epLiveTelemetry}?city=${Uri.encodeComponent(city)}';
-    final raw  = await _client.get(
-      AppConfig.epLiveTelemetry,
-      query: {'city': city, 'state': state, 'river': river},
-    );
-
-    if (_isOk(raw)) {
-      final list   = _asList(raw);
-      final result = list.map((e) => DbReading.fromMap(e)).toList();
-      if (result.isNotEmpty) {
-        await _cache.write(path, jsonEncode(list));
-        _mirrorReadings(result);
-      }
-      return DbResult(data: result);
-    }
-
-    final cached = await _cache.read(path);
-    if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
-      return DbResult(
-        data:      list.map((e) => DbReading.fromMap(e)).toList(),
-        fromCache: true,
-        isStale:   cached.isStale,
-      );
-    }
-
-    return DbResult(data: const [], error: raw['error']?.toString());
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // CRITICAL ALERTS
-  // ────────────────────────────────────────────────────────────────────────────
-
-  /// Fetch active threshold breach alerts.
-  /// Mirrors new alerts to Firestore `alert_events`.
-  Future<DbResult<DbAlert>> fetchAlerts() async {
-    const path = AppConfig.epCriticalAlerts;
-    final raw  = await _client.get(path);
-
-    if (_isOk(raw)) {
-      final list   = _asList(raw);
-      final result = list.map((e) => DbAlert.fromMap(e)).toList();
-      await _cache.write(path, jsonEncode(list));
-      _mirrorAlerts(result);
-      return DbResult(data: result);
-    }
-
-    final cached = await _cache.read(path);
-    if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
-      return DbResult(
-        data:      list.map((e) => DbAlert.fromMap(e)).toList(),
-        fromCache: true,
-        isStale:   cached.isStale,
-      );
-    }
-
-    return DbResult(data: const [], error: raw['error']?.toString());
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // ML PREDICTIONS
-  // ────────────────────────────────────────────────────────────────────────────
-
-  /// Fetch ML flood predictions for a given city from the /predict endpoint.
-  Future<DbResult<DbPrediction>> fetchPrediction({
-    required String city,
-    required double gaugeLevel,
-    required double rainfall,
-    required double discharge,
-  }) async {
-    const path = AppConfig.epPredict;
-    final raw  = await _client.post(path, {
-      'city':        city,
-      'gauge_level': gaugeLevel,
-      'rainfall':    rainfall,
-      'discharge':   discharge,
-    });
-
-    if (_isOk(raw)) {
-      // /predict returns a single prediction object, not a list
-      final obj    = raw.containsKey('data') && raw['data'] is Map
-          ? raw['data'] as Map<String, dynamic>
-          : raw;
-      final result = DbPrediction.fromMap({...obj, 'city': city});
-      final cacheKey = '$path?city=$city';
-      await _cache.write(cacheKey, jsonEncode([obj]));
-      _mirrorPrediction(result);
-      return DbResult(data: [result]);
-    }
-
-    return DbResult(data: const [], error: raw['error']?.toString());
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // PIPELINE FEATURES (for admin / debugging)
-  // ────────────────────────────────────────────────────────────────────────────
-
-  Future<Map<String, dynamic>> fetchPipelineManifest() async {
-    final raw = await _client.get(AppConfig.epPipelineManifest);
-    return _isOk(raw) ? raw : {};
-  }
-
-  Future<Map<String, dynamic>> fetchStateSeverity() async {
-    const path = AppConfig.epStateSeverity;
-    final raw  = await _client.get(path);
-    if (_isOk(raw)) {
-      await _cache.write(path, jsonEncode(raw));
-      return raw;
-    }
-    final cached = await _cache.read(path);
-    if (cached.value != null) {
-      return jsonDecode(cached.value!) as Map<String, dynamic>;
-    }
-    return {};
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // FIRESTORE MIRROR (fire-and-forget helpers)
-  // ────────────────────────────────────────────────────────────────────────────
 
   void _mirrorStations(List<DbStation> stations) {
-    final fs = _fs;
-    if (fs == null) return;
-    final col = fs.collection(_col('station_registry'));
+    if (!AppConfig.isProduction) return;
     for (final s in stations) {
-      if (s.city.isEmpty) continue;
-      col.doc(s.city.toLowerCase().replaceAll(' ', '_'))
+      _fs
+          .collection('station_registry')
+          .doc(s.city.toLowerCase().replaceAll(' ', '_'))
           .set(s.toMap(), SetOptions(merge: true))
-          .catchError((e) => _log('Firestore station write failed: $e'));
+          .catchError((_) {});
+    }
+  }
+
+  // ── Live readings ────────────────────────────────────────────────────────────
+
+  Future<DbResult<DbReading>> getReadings({String? city}) async {
+    try {
+      final raw = city != null
+          ? await _client.getCityReadings(city)
+          : await _client.getAllReadings();
+      final list = (raw as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(DbReading.fromMap)
+          .toList();
+      _mirrorReadings(list);
+      return DbResult(data: list);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OpsFloodDb] getReadings failed: $e');
+      return DbResult(
+        data:      await _firestoreReadings(city: city),
+        fromCache: true,
+        isStale:   true,
+        error:     e.toString(),
+      );
+    }
+  }
+
+  Future<List<DbReading>> _firestoreReadings({String? city}) async {
+    try {
+      var q = _fs.collection('flood_readings').orderBy('timestamp', descending: true).limit(50);
+      if (city != null) {
+        q = q.where('city', isEqualTo: city);
+      }
+      final snap = await q.get();
+      return snap.docs.map((d) => DbReading.fromMap(d.data())).toList();
+    } catch (_) {
+      return [];
     }
   }
 
   void _mirrorReadings(List<DbReading> readings) {
-    final fs = _fs;
-    if (fs == null) return;
-    final col = fs.collection(_col('flood_readings'));
+    if (!AppConfig.isProduction) return;
     for (final r in readings) {
-      if (r.city.isEmpty || r.isStale) continue;
-      final docId =
-          '${r.city.toLowerCase().replaceAll(' ', '_')}_'
-          '${r.timestamp.toUtc().toIso8601String().replaceAll(':', '').replaceAll('.', '_').substring(0, 15)}';
-      col.doc(docId)
+      final id = '${r.city.toLowerCase()}_'
+          '${r.timestamp.toUtc().toString().replaceAll(RegExp(r'[:\s.]'), '')}';
+      _fs
+          .collection('flood_readings')
+          .doc(id)
           .set(r.toFirestore(), SetOptions(merge: true))
-          .catchError((e) => _log('Firestore reading write failed: $e'));
+          .catchError((_) {});
+    }
+  }
+
+  // ── Alerts ─────────────────────────────────────────────────────────────────
+
+  Future<DbResult<DbAlert>> getAlerts() async {
+    try {
+      final raw  = await _client.getCriticalAlerts();
+      final list = (raw as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(DbAlert.fromMap)
+          .toList();
+      _mirrorAlerts(list);
+      return DbResult(data: list);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OpsFloodDb] getAlerts failed: $e');
+      return DbResult(
+        data:      await _firestoreAlerts(),
+        fromCache: true,
+        isStale:   true,
+        error:     e.toString(),
+      );
+    }
+  }
+
+  Future<List<DbAlert>> _firestoreAlerts() async {
+    try {
+      final snap = await _fs
+          .collection('alert_events')
+          .orderBy('timestamp', descending: true)
+          .limit(30)
+          .get();
+      return snap.docs.map((d) => DbAlert.fromMap(d.data())).toList();
+    } catch (_) {
+      return [];
     }
   }
 
   void _mirrorAlerts(List<DbAlert> alerts) {
-    final fs = _fs;
-    if (fs == null) return;
-    final col = fs.collection(_col('alert_events'));
+    if (!AppConfig.isProduction) return;
     for (final a in alerts) {
-      if (a.city.isEmpty) continue;
-      final docId =
-          '${a.city.toLowerCase().replaceAll(' ', '_')}_'
-          '${a.timestamp.millisecondsSinceEpoch}';
-      col.doc(docId)
+      final id = '${a.city.toLowerCase()}_'
+          '${a.timestamp.toUtc().millisecondsSinceEpoch}';
+      _fs
+          .collection('alert_events')
+          .doc(id)
           .set(a.toFirestore(), SetOptions(merge: true))
-          .catchError((e) => _log('Firestore alert write failed: $e'));
+          .catchError((_) {});
     }
   }
 
-  void _mirrorPrediction(DbPrediction p) {
-    final fs = _fs;
-    if (fs == null) return;
-    final col = fs.collection(_col('predictions'));
-    final docId =
-        '${p.city.toLowerCase().replaceAll(' ', '_')}_'
-        '${p.generatedAt.toUtc().toIso8601String().substring(0, 10)}';
-    col.doc(docId)
-        .set(p.toFirestore(), SetOptions(merge: true))
-        .catchError((e) => _log('Firestore prediction write failed: $e'));
+  // ── Predictions ────────────────────────────────────────────────────────────
+
+  Future<DbResult<DbPrediction>> getPredictions({String? city}) async {
+    try {
+      final raw  = await _client.getPredictions(city: city);
+      final list = (raw as List<dynamic>)
+          .whereType<Map<String, dynamic>>()
+          .map(DbPrediction.fromMap)
+          .toList();
+      _mirrorPredictions(list);
+      return DbResult(data: list);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OpsFloodDb] getPredictions failed: $e');
+      return DbResult(
+        data:      await _firestorePredictions(city: city),
+        fromCache: true,
+        isStale:   true,
+        error:     e.toString(),
+      );
+    }
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ────────────────────────────────────────────────────────────────────────────
-
-  bool _isOk(Map<String, dynamic> raw) =>
-      raw['status'] != 'error' && raw['error'] == null;
-
-  List<Map<String, dynamic>> _asList(Map<String, dynamic> raw) {
-    final d = raw['data'] ?? raw['results'] ?? raw['stations'] ?? raw;
-    if (d is List) return d.whereType<Map<String, dynamic>>().toList();
-    if (d is Map<String, dynamic>) return [d];
-    return [];
+  Future<List<DbPrediction>> _firestorePredictions({String? city}) async {
+    try {
+      var q = _fs.collection('predictions').orderBy('generated_at', descending: true).limit(20);
+      if (city != null) {
+        q = q.where('city', isEqualTo: city);
+      }
+      final snap = await q.get();
+      return snap.docs.map((d) => DbPrediction.fromMap(d.data())).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
-  static String _str(dynamic v) => v?.toString() ?? '';
-  static double _dbl(dynamic v) => (v is num) ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0.0;
-  static double? _dblOpt(dynamic v) => v == null ? null : _dbl(v);
-  static DateTime _dt(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is Timestamp) return v.toDate();
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
+  void _mirrorPredictions(List<DbPrediction> predictions) {
+    if (!AppConfig.isProduction) return;
+    for (final p in predictions) {
+      final id = '${p.city.toLowerCase()}_'
+          '${p.generatedAt.toUtc().toString().substring(0, 10)}';
+      _fs
+          .collection('predictions')
+          .doc(id)
+          .set(p.toFirestore(), SetOptions(merge: true))
+          .catchError((_) {});
+    }
   }
-
-  void _log(String msg) => debugPrint('[OpsFloodDb] $msg');
 }

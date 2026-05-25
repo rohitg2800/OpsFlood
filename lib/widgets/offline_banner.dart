@@ -78,8 +78,8 @@ class OfflineBanner extends ConsumerWidget {
           ),
           if (isOffline || isUsingCache)
             GestureDetector(
-              onTap: () =>
-                  ref.read(realTimeProvider).refreshData(forceOnlineAttempt: true),
+              // refreshData() takes no parameters — forceOnlineAttempt removed.
+              onTap: () => ref.read(realTimeProvider).refreshData(),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
