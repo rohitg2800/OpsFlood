@@ -1,143 +1,108 @@
 // lib/widgets/premium_stat_card.dart
-// OpsFlood — PremiumStatCard v3 (Abyss Ops rebuild)
+// OpsFlood — PremiumStatCard v3  (Abyss Ops)
+// Minimal KPI chip: icon  |  large number  |  label  |  optional delta badge
+library;
+
 import 'package:flutter/material.dart';
 import '../theme/river_theme.dart';
 
 class PremiumStatCard extends StatelessWidget {
-  final String   label;
-  final String   value;
-  final String?  sub;
   final IconData icon;
+  final String   value;
+  final String   label;
   final Color    color;
-  final bool     pulse;
+  final String?  delta;   // e.g. "+2" or "-1"
+  final bool     isAlert; // pulse border when true
 
   const PremiumStatCard({
     super.key,
-    required this.label,
-    required this.value,
     required this.icon,
-    this.sub,
-    this.color = AppPalette.cyan,
-    this.pulse = false,
+    required this.value,
+    required this.label,
+    required this.color,
+    this.delta,
+    this.isAlert = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(20),
+        color:        AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: color.withValues(alpha: 0.18),
-          width: 1,
+          color: isAlert
+              ? color.withValues(alpha: 0.60)
+              : AppPalette.abyssStroke,
+          width: isAlert ? 1.5 : 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        boxShadow: isAlert
+            ? AppPalette.glowShadow(color, blur: 18)
+            : const [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Icon + pulse dot
+          // icon + optional delta
           Row(
             children: [
               Container(
-                width: 34, height: 34,
+                width: 32, height: 32,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
+                  color:        color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: color, size: 18),
+                child: Icon(icon, color: color, size: 17),
               ),
-              if (pulse) ...[
-                const SizedBox(width: 6),
-                _PulseDot(color: color),
-              ],
+              const Spacer(),
+              if (delta != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color:        color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: color.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    delta!,
+                    style: TextStyle(
+                      color:      color,
+                      fontSize:   10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Value
+          const SizedBox(height: 10),
+          // large metric
           Text(
             value,
             style: TextStyle(
-              fontSize: 22,
+              color:      color,
+              fontSize:   26,
               fontWeight: FontWeight.w900,
-              color: color,
-              letterSpacing: -0.8,
-              height: 1.0,
+              letterSpacing: -0.5,
+              height:     1.0,
             ),
           ),
-          const SizedBox(height: 3),
-          // Label
+          const SizedBox(height: 4),
           Text(
             label,
             style: const TextStyle(
-              fontSize: 10,
-              color: AppPalette.textGrey,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
+              color:      AppPalette.textGrey,
+              fontSize:   11,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.1,
             ),
           ),
-          if (sub != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              sub!,
-              style: TextStyle(
-                fontSize: 9,
-                color: AppPalette.textGrey.withValues(alpha: 0.6),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
-}
-
-class _PulseDot extends StatefulWidget {
-  final Color color;
-  const _PulseDot({required this.color});
-  @override
-  State<_PulseDot> createState() => _PulseDotState();
-}
-
-class _PulseDotState extends State<_PulseDot> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double>   _anim;
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat(reverse: true);
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
-  }
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _anim,
-    builder: (_, __) => Container(
-      width: 7, height: 7,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: widget.color.withValues(alpha: 0.5 + 0.5 * _anim.value),
-        boxShadow: [
-          BoxShadow(
-            color: widget.color.withValues(alpha: 0.6 * _anim.value),
-            blurRadius: 6,
-          ),
-        ],
-      ),
-    ),
-  );
 }

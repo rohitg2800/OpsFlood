@@ -1,5 +1,8 @@
 // lib/screens/home_screen.dart
-// OpsFlood — HomeScreen v5 (Premium Abyss Ops nav bar)
+// OpsFlood — HomeScreen v5  (Abyss Ops Premium Nav)
+// Custom frosted-glass bottom nav with animated glow indicator.
+library;
+
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,23 +27,27 @@ class _HomeScreenState extends State<HomeScreen>
   final RealTimeService _svc = RealTimeService();
   int _currentIndex = 0;
 
+  // Glow animation for selected tab
+  late AnimationController _glowCtrl;
+  late Animation<double>   _glowAnim;
+
   static const _destinations = [
-    _NavEntry(label: 'Dashboard', icon: Icons.dashboard_outlined,      selectedIcon: Icons.dashboard_rounded),
-    _NavEntry(label: 'Monitors',  icon: Icons.monitor_heart_outlined,  selectedIcon: Icons.monitor_heart_rounded),
-    _NavEntry(label: 'Alerts',    icon: Icons.notifications_outlined,  selectedIcon: Icons.notifications_rounded),
-    _NavEntry(label: 'Weather',   icon: Icons.cloud_outlined,          selectedIcon: Icons.cloud_rounded),
-    _NavEntry(label: 'Predict',   icon: Icons.model_training_outlined, selectedIcon: Icons.model_training),
-    _NavEntry(label: 'Rivers',    icon: Icons.water_outlined,          selectedIcon: Icons.water_rounded),
+    _NavEntry(label: 'Home',    icon: Icons.dashboard_rounded,      activeIcon: Icons.dashboard_rounded),
+    _NavEntry(label: 'Rivers',  icon: Icons.water_outlined,          activeIcon: Icons.water_rounded),
+    _NavEntry(label: 'Alerts',  icon: Icons.notifications_outlined,  activeIcon: Icons.notifications_rounded),
+    _NavEntry(label: 'Weather', icon: Icons.cloud_outlined,          activeIcon: Icons.cloud_rounded),
+    _NavEntry(label: 'Predict', icon: Icons.model_training_outlined, activeIcon: Icons.model_training_rounded),
+    _NavEntry(label: 'Monitor', icon: Icons.monitor_heart_outlined,  activeIcon: Icons.monitor_heart_rounded),
   ];
 
   Widget _buildScreen(int index) {
     switch (index) {
       case 0: return const DashboardScreen();
-      case 1: return const MonitorsScreen();
+      case 1: return const RiverMonitorScreen();
       case 2: return const AlertsScreen();
       case 3: return const WeatherScreen();
       case 4: return const PredictScreen();
-      case 5: return const RiverMonitorScreen();
+      case 5: return const MonitorsScreen();
       default: return const DashboardScreen();
     }
   }
@@ -49,124 +56,97 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _svc.startPolling();
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: AppPalette.abyss0,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ));
+    _glowCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400))
+      ..repeat(reverse: true);
+    _glowAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
+        CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
   }
 
   @override
   void dispose() {
     _svc.stopPolling();
+    _glowCtrl.dispose();
     super.dispose();
+  }
+
+  void _onTap(int i) {
+    if (i == _currentIndex) return;
+    HapticFeedback.selectionClick();
+    setState(() => _currentIndex = i);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppPalette.abyss0,
-      body: _buildScreen(_currentIndex),
-      bottomNavigationBar: _PremiumNavBar(
-        currentIndex: _currentIndex,
-        destinations: _destinations,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        systemNavigationBarColor: AppPalette.abyss0,
+      ),
+      child: Scaffold(
+        backgroundColor: AppPalette.abyss0,
+        body: _buildScreen(_currentIndex),
+        bottomNavigationBar: _PremiumNavBar(
+          currentIndex: _currentIndex,
+          destinations: _destinations,
+          glowAnim:     _glowAnim,
+          onTap:        _onTap,
+        ),
       ),
     );
   }
 }
 
-// ── Premium frosted-glass nav bar ─────────────────────────────────────────────
+// ── Premium frosted glass nav bar ─────────────────────────────────────────────
 class _PremiumNavBar extends StatelessWidget {
-  final int currentIndex;
-  final List<_NavEntry> destinations;
-  final ValueChanged<int> onDestinationSelected;
+  final int                  currentIndex;
+  final List<_NavEntry>      destinations;
+  final Animation<double>    glowAnim;
+  final ValueChanged<int>    onTap;
 
   const _PremiumNavBar({
     required this.currentIndex,
     required this.destinations,
-    required this.onDestinationSelected,
+    required this.glowAnim,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
+          height: 62 + bottomPad,
           decoration: BoxDecoration(
-            color: AppPalette.abyss0.withValues(alpha: 0.88),
-            border: Border(
+            color: AppPalette.abyss0.withValues(alpha: 0.85),
+            border: const Border(
               top: BorderSide(
-                color: AppPalette.cyan.withValues(alpha: 0.10),
+                color: Color(0x2200C6FF),
                 width: 1,
               ),
             ),
           ),
-          child: SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 66,
-              child: Row(
-                children: List.generate(destinations.length, (i) {
-                  final d       = destinations[i];
-                  final active  = i == currentIndex;
-                  return Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        onDestinationSelected(i);
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutCubic,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 220),
-                              curve: Curves.easeOutCubic,
-                              width: active ? 42 : 32,
-                              height: active ? 30 : 26,
-                              decoration: active
-                                  ? BoxDecoration(
-                                      color: AppPalette.cyanGlow,
-                                      borderRadius: BorderRadius.circular(12),
-                                    )
-                                  : null,
-                              child: Icon(
-                                active ? d.selectedIcon : d.icon,
-                                size: active ? 21 : 19,
-                                color: active
-                                    ? AppPalette.cyan
-                                    : AppPalette.textGrey.withValues(alpha: 0.6),
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            AnimatedDefaultTextStyle(
-                              duration: const Duration(milliseconds: 220),
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: active
-                                    ? FontWeight.w800
-                                    : FontWeight.w500,
-                                color: active
-                                    ? AppPalette.cyan
-                                    : AppPalette.textGrey.withValues(alpha: 0.55),
-                                letterSpacing: active ? 0.3 : 0.0,
-                              ),
-                              child: Text(d.label),
-                            ),
-                          ],
-                        ),
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottomPad),
+            child: Row(
+              children: List.generate(destinations.length, (i) {
+                final isActive = i == currentIndex;
+                return Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => onTap(i),
+                    child: AnimatedBuilder(
+                      animation: glowAnim,
+                      builder: (_, __) => _NavItem(
+                        entry:     destinations[i],
+                        isActive:  isActive,
+                        glowValue: isActive ? glowAnim.value : 0.0,
                       ),
                     ),
-                  );
-                }),
-              ),
+                  ),
+                );
+              }),
             ),
           ),
         ),
@@ -175,13 +155,69 @@ class _PremiumNavBar extends StatelessWidget {
   }
 }
 
+class _NavItem extends StatelessWidget {
+  final _NavEntry entry;
+  final bool      isActive;
+  final double    glowValue;
+
+  const _NavItem({
+    required this.entry,
+    required this.isActive,
+    required this.glowValue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isActive ? AppPalette.cyan : AppPalette.textDim;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Icon with optional glow container
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          width:  isActive ? 44 : 36,
+          height: isActive ? 30 : 26,
+          decoration: isActive
+              ? BoxDecoration(
+                  color:        AppPalette.cyan.withValues(alpha: 0.10 * glowValue),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color:      AppPalette.cyan.withValues(alpha: 0.25 * glowValue),
+                      blurRadius: 12,
+                    ),
+                  ],
+                )
+              : null,
+          child: Icon(
+            isActive ? entry.activeIcon : entry.icon,
+            size:  isActive ? 22 : 20,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 3),
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 200),
+          style: TextStyle(
+            fontSize:   isActive ? 10.0 : 9.5,
+            fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+            color:      color,
+            letterSpacing: 0.2,
+          ),
+          child: Text(entry.label),
+        ),
+      ],
+    );
+  }
+}
+
 class _NavEntry {
   const _NavEntry({
     required this.label,
     required this.icon,
-    required this.selectedIcon,
+    required this.activeIcon,
   });
   final String   label;
   final IconData icon;
-  final IconData selectedIcon;
+  final IconData activeIcon;
 }

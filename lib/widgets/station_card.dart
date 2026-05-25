@@ -1,216 +1,291 @@
+// lib/widgets/station_card.dart
+// OpsFlood — StationCard v3  (Abyss Ops)
+// Compact premium station card — no circular gauge, clean bar + chips.
+library;
+
 import 'package:flutter/material.dart';
-import '../models/river_station.dart';
+import '../theme/river_theme.dart';
 
 class StationCard extends StatelessWidget {
-  final RiverStation station;
+  final String city;
+  final String river;
+  final String state;
+  final double current;
+  final double warning;
+  final double danger;
+  final String source;  // 'LIVE' | 'SAT' | 'EST' | 'NO_DATA'
+  final String status;  // 'SAFE' | 'WARNING' | 'DANGER' | 'CRITICAL'
+  final String? trend;  // 'RISING' | 'FALLING' | 'STEADY'
+  final VoidCallback? onTap;
   final VoidCallback? onDelete;
 
-  const StationCard({super.key, required this.station, this.onDelete});
+  const StationCard({
+    super.key,
+    required this.city,
+    required this.river,
+    required this.state,
+    required this.current,
+    required this.warning,
+    required this.danger,
+    required this.source,
+    required this.status,
+    this.trend,
+    this.onTap,
+    this.onDelete,
+  });
 
-  Color _dangerColor(DangerClass dc) {
-    switch (dc) {
-      case DangerClass.normal:      return const Color(0xFF437A22);
-      case DangerClass.aboveNormal: return const Color(0xFFD19900);
-      case DangerClass.severe:      return const Color(0xFFDA7101);
-      case DangerClass.extreme:     return const Color(0xFFA13544);
-    }
-  }
+  Color get _statusColor => AppPalette.statusColor(status);
 
-  Color _dangerBg(DangerClass dc) {
-    switch (dc) {
-      case DangerClass.normal:      return const Color(0xFF437A22).withOpacity(0.12);
-      case DangerClass.aboveNormal: return const Color(0xFFD19900).withOpacity(0.14);
-      case DangerClass.severe:      return const Color(0xFFDA7101).withOpacity(0.14);
-      case DangerClass.extreme:     return const Color(0xFFA13544).withOpacity(0.14);
-    }
-  }
+  double get _fillPct => danger > 0
+      ? (current / danger).clamp(0.0, 1.2)
+      : 0.0;
 
   @override
   Widget build(BuildContext context) {
-    final dc  = station.dangerClass;
-    final col = _dangerColor(dc);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1B2A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.07)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── top bar ───────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 12, 0),
-            child: Row(
+    final col = _statusColor;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color:        AppPalette.abyss2,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: col.withValues(alpha: 0.25)),
+          boxShadow: [
+            BoxShadow(
+              color:      col.withValues(alpha: 0.05),
+              blurRadius: 16,
+              offset:     const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // ── Top row ───────────────────────────────────────────
+            Row(
               children: [
+                // Status dot + icon
+                Container(
+                  width: 42, height: 42,
+                  decoration: BoxDecoration(
+                    color:  col.withValues(alpha: 0.10),
+                    shape:  BoxShape.circle,
+                    border: Border.all(
+                        color: col.withValues(alpha: 0.35), width: 1.5),
+                  ),
+                  child: Icon(_statusIcon, color: col, size: 20),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Row(children: [
+                        Flexible(
+                          child: Text(
+                            city,
+                            style: const TextStyle(
+                              color:      AppPalette.textWhite,
+                              fontSize:   15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        _SourceBadge(source: source),
+                      ]),
+                      const SizedBox(height: 2),
                       Text(
-                        station.city,
+                        '$river  ·  $state',
                         style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                          color:    AppPalette.textGrey,
+                          fontSize: 11,
                         ),
-                      ),
-                      Text(
-                        '${station.state}  ·  ${station.river}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white.withOpacity(0.55),
-                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: _dangerBg(dc),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    dc.label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: col,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ),
-                if (onDelete != null) ...
-                  [
-                    const SizedBox(width: 6),
-                    IconButton(
-                      icon: Icon(Icons.close_rounded, size: 18, color: Colors.white.withOpacity(0.35)),
-                      onPressed: onDelete,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ]
-              ],
-            ),
-          ),
-
-          // ── station name + reading ─────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.sensors, size: 14, color: Colors.white.withOpacity(0.4)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    station.station,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withOpacity(0.55),
-                    ),
-                  ),
-                ),
-                Text(
-                  '${station.current.toStringAsFixed(2)} m',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── threshold row ─────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                _ThresholdChip(label: 'Warning', value: station.warning, color: const Color(0xFFD19900)),
-                const SizedBox(width: 8),
-                _ThresholdChip(label: 'Danger',  value: station.danger,  color: const Color(0xFFDA7101)),
-                const SizedBox(width: 8),
-                _ThresholdChip(label: 'HFL',     value: station.hfl,     color: const Color(0xFFA13544)),
-              ],
-            ),
-          ),
-
-          // ── progress bar ─────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: Column(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: SizedBox(
-                    height: 10,
-                    child: LinearProgressIndicator(
-                      value: station.progressPct,
-                      backgroundColor: Colors.white.withOpacity(0.08),
-                      valueColor: AlwaysStoppedAnimation<Color>(col),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('0 m', style: _scaleStyle),
-                    Text('Warning', style: _scaleStyle),
-                    Text('Danger', style: _scaleStyle),
-                    Text('HFL ${station.hfl.toStringAsFixed(1)} m', style: _scaleStyle),
+                    Text(
+                      '${current.toStringAsFixed(2)} m',
+                      style: TextStyle(
+                        color:      col,
+                        fontSize:   20,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    _StatusChip(status: status, color: col),
+                    if (onDelete != null) ...[
+                      const SizedBox(height: 4),
+                      GestureDetector(
+                        onTap: onDelete,
+                        child: const Icon(
+                          Icons.remove_circle_outline,
+                          size: 15, color: AppPalette.textDim,
+                        ),
+                      ),
+                    ],
                   ],
-                )
+                ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            // ── Fill bar ──────────────────────────────────────────
+            Stack(children: [
+              Container(
+                height: 7,
+                decoration: BoxDecoration(
+                  color:        AppPalette.abyss4,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              if (danger > 0 && warning > 0)
+                Positioned(
+                  left: (warning / danger).clamp(0.0, 1.0) *
+                      (MediaQuery.of(context).size.width - 92),
+                  top: 0, bottom: 0,
+                  child: Container(
+                    width: 2,
+                    color: AppPalette.amber.withValues(alpha: 0.65),
+                  ),
+                ),
+              FractionallySizedBox(
+                widthFactor: _fillPct.clamp(0.0, 1.0),
+                child: Container(
+                  height: 7,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        col.withValues(alpha: 0.55),
+                        col,
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color:      col.withValues(alpha: 0.40),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _mini('W ${warning.toStringAsFixed(1)} m', AppPalette.amber),
+                _mini('D ${danger.toStringAsFixed(1)} m',  AppPalette.danger),
+                _mini(
+                  '${(_fillPct * 100).clamp(0, 120).toStringAsFixed(0)}%',
+                  AppPalette.textGrey,
+                ),
+                if (trend != null)
+                  _TrendChip(trend: trend!),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  static const TextStyle _scaleStyle = TextStyle(
-    fontSize: 10,
-    color: Color(0xFF7B8A99),
-    fontFeatures: [FontFeature.tabularFigures()],
+  IconData get _statusIcon {
+    switch (status.toUpperCase()) {
+      case 'CRITICAL': return Icons.crisis_alert_rounded;
+      case 'DANGER':   return Icons.error_outline_rounded;
+      case 'WARNING':  return Icons.warning_amber_rounded;
+      default:         return Icons.check_circle_outline_rounded;
+    }
+  }
+
+  Widget _mini(String t, Color c) => Text(
+    t,
+    style: TextStyle(
+      color: c, fontSize: 9, fontWeight: FontWeight.w600),
   );
 }
 
-class _ThresholdChip extends StatelessWidget {
-  final String label;
-  final double value;
-  final Color color;
-  const _ThresholdChip({required this.label, required this.value, required this.color});
+// ── Sub-widgets ───────────────────────────────────────────────────────────────
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  const _SourceBadge({required this.source});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+    final (label, color) = switch (source.toUpperCase()) {
+      'LIVE' || 'TELEMETRY' || 'LIVE_LEVELS' || 'CWC_FFS' || 'BULK' =>
+        ('● LIVE', AppPalette.safe),
+      'SAT' || 'GLOFAS' =>
+        ('🛰 SAT', const Color(0xFF818CF8)),
+      'NO_DATA' =>
+        ('NO DATA', AppPalette.textGrey),
+      _ =>
+        ('◉ EST', AppPalette.amber),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color:        color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border:       Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color, fontSize: 8, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final String status;
+  final Color  color;
+  const _StatusChip({required this.status, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        margin:  const EdgeInsets.only(top: 4),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(8),
+          color:        color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(7),
+          border:       Border.all(color: color.withValues(alpha: 0.35)),
         ),
-        child: Column(
-          children: [
-            Text(label, style: TextStyle(fontSize: 10, color: color.withOpacity(0.85))),
-            const SizedBox(height: 2),
-            Text(
-              '${value.toStringAsFixed(2)} m',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
+        child: Text(
+          status,
+          style: TextStyle(
+            color:      color,
+            fontSize:   9,
+            fontWeight: FontWeight.w800,
+          ),
         ),
+      );
+}
+
+class _TrendChip extends StatelessWidget {
+  final String trend;
+  const _TrendChip({required this.trend});
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (trend.toUpperCase()) {
+      'RISING'  => ('↑', AppPalette.critical),
+      'FALLING' => ('↓', AppPalette.safe),
+      _         => ('→', AppPalette.amber),
+    };
+    return Text(
+      icon,
+      style: TextStyle(
+        color:    color,
+        fontSize: 14,
+        fontWeight: FontWeight.w900,
       ),
     );
   }
