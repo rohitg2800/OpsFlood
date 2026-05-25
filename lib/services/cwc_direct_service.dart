@@ -1,12 +1,16 @@
 // lib/services/cwc_direct_service.dart
 //
-// OpsFlood — CwcDirectService (v3.1 — compile fix)
+// OpsFlood — CwcDirectService (v3.2 — Bihar WRD HTML scraper)
 //
 // SOURCES (in priority order per city):
 //   1. CWC FFEM national JSON  — ~80 cities, updated every 15 min
 //   2. CWC FFS per-station bulletin — needs cwcStation code
-//   3. WRD Bihar live table   — Bihar only
+//   3. BiharWrdScraper        — Bihar only, HTML table, 103 stations, 10-min cache
 //   4. CWC BEAMS Bihar        — Bihar only, needs cwcStation code
+//
+// v3.2 change: Source-3 now delegates to BiharWrdScraper.instance.fetchForCity()
+// instead of the old _fetchFromBiharWrd() JSON endpoint. The old method is
+// removed. BiharWrdScraper shares a single HTTP fetch across all Bihar cities.
 library;
 
 import 'dart:convert';
@@ -14,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../data/india_cities.dart';
+import 'bihar_wrd_scraper.dart';
 
 // ── Reading model ─────────────────────────────────────────────────────
 class CwcReading {
@@ -70,7 +75,8 @@ class CwcDirectService {
     CwcReading? reading;
     reading ??= await _fetchFromCwcFfem(city);
     reading ??= await _fetchFromCwcFfs(city);
-    reading ??= await _fetchFromBiharWrd(city);
+    // Source 3: Bihar WRD HTML table scraper (103 stations, shared 10-min cache)
+    reading ??= await BiharWrdScraper.instance.fetchForCity(city);
     reading ??= await _fetchFromBiharBeams(city);
 
     if (reading != null) {
@@ -142,7 +148,6 @@ class CwcDirectService {
   static const _ffsBase    = 'https://cwc.gov.in/ffnew/stationwise_bulletin.php';
   static const _ffsApiBase = 'https://cwc.gov.in/api/v1/stations';
 
-  // Per-station cache (station code → last successful CwcReading, 15-min TTL)
   static final Map<String, _CacheEntry> _ffsCache    = {};
   static const _kFfsCacheTTL = Duration(minutes: 15);
 
@@ -156,14 +161,12 @@ class CwcDirectService {
       return cached.reading;
     }
 
-    // Try stationwise_bulletin endpoint
     CwcReading? r = await _tryFfsUrl(
       Uri.parse('$_ffsBase?id=${Uri.encodeComponent(code)}'),
       city,
       'CWC_FFS',
     );
 
-    // Fallback: newer REST API
     r ??= await _tryFfsUrl(
       Uri.parse('$_ffsApiBase/${Uri.encodeComponent(code)}/latest'),
       city,
@@ -216,63 +219,6 @@ class CwcDirectService {
       stationName: m['station_name']?.toString() ?? m['station']?.toString(),
       fetchedAt:   DateTime.now(),
     );
-  }
-
-  // ── Source 3: WRD Bihar live table ─────────────────────────────────────
-  static const _wrdUrl = 'https://irrigation.befiqr.in/state/table/rivers';
-  static List<dynamic>? _wrdCache;
-  static DateTime?       _wrdCacheTime;
-
-  Future<CwcReading?> _fetchFromBiharWrd(IndiaCity city) async {
-    if (!city.state.toLowerCase().contains('bihar')) return null;
-    try {
-      final now = DateTime.now();
-      if (_wrdCache == null ||
-          _wrdCacheTime == null ||
-          now.difference(_wrdCacheTime!) > const Duration(minutes: 10)) {
-        final res = await _client.get(Uri.parse(_wrdUrl)).timeout(_kTimeout);
-        if (res.statusCode != 200) return null;
-        final body = res.body.trim();
-        if (body.startsWith('<')) return null;
-        final parsed = jsonDecode(body);
-        _wrdCache     = parsed is List ? parsed : (parsed['data'] as List? ?? []);
-        _wrdCacheTime = now;
-        if (kDebugMode) {
-          debugPrint('[CwcDirect] WRD Bihar fetched: ${_wrdCache!.length} stations');
-        }
-      }
-
-      final lc = city.name.toLowerCase();
-      final lr = city.river.toLowerCase();
-      Map<String, dynamic>? best;
-      int bestScore = 0;
-      for (final row in _wrdCache!.whereType<Map<String, dynamic>>()) {
-        final sn = (row['station'] ?? row['name'] ?? '').toString().toLowerCase();
-        final rv = (row['river'] ?? row['river_name'] ?? '').toString().toLowerCase();
-        int score = 0;
-        if (sn == lc || sn.contains(lc) || lc.contains(sn)) score += 3;
-        if (rv.contains(lr) || lr.contains(rv))              score += 2;
-        if (score > bestScore) { bestScore = score; best = row; }
-      }
-      if (best == null || bestScore < 2) return null;
-
-      final cl = _parseLevel(best['current_level'] ?? best['wl'] ?? best['level']);
-      final dl = _parseLevel(best['danger_level']  ?? best['dl']);
-      final wl = _parseLevel(best['warning_level'] ?? best['warning']);
-      if (cl == null || cl <= 0) return null;
-
-      return CwcReading(
-        level:       cl,
-        warning:     wl ?? city.warningLevel,
-        danger:      dl ?? city.dangerLevel,
-        source:      'WRD_BIHAR',
-        stationName: (best['station'] ?? best['name'])?.toString(),
-        fetchedAt:   DateTime.now(),
-      );
-    } catch (e) {
-      if (kDebugMode) debugPrint('[CwcDirect] WRD Bihar ${city.name}: $e');
-      return null;
-    }
   }
 
   // ── Source 4: CWC BEAMS Bihar ─────────────────────────────────────────
