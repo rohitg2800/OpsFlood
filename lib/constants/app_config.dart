@@ -1,28 +1,16 @@
 // lib/constants/app_config.dart
-// Domain: API endpoints, polling config, animation durations
-
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-class AppConfig {
-  // ── Backend URLs ─────────────────────────────────────────────────────────
-  static String get baseUrl =>
-      dotenv.maybeGet('BASE_URL') ?? 'https://opsflood.onrender.com';
-  static String get backupBaseUrl => dotenv.maybeGet('BACKUP_URL') ?? '';
-
-  // ── API Endpoints ─────────────────────────────────────────────────────────
-  static const String healthEndpoint          = '/health';
-  static const String liveTelemetryEndpoint   = '/api/live-telemetry';
-  static const String liveLevelsEndpoint      = '/api/live-levels';
-  static const String criticalAlertsEndpoint  = '/api/critical-alerts';
-  static const String predictLegacyEndpoint   = '/predict/legacy';
-  static const String weatherCurrentEndpoint  = '/weather/current';
-  static const String weatherForecastEndpoint = '/weather/forecast';
-
-  // ── Polling & retry ───────────────────────────────────────────────────────
-  static const Duration pollingInterval = Duration(minutes: 5);
-  static const int      maxRetries      = 3;
-
-  // ── Animation ─────────────────────────────────────────────────────────────
-  static const Duration shortAnimDuration = Duration(milliseconds: 300);
-  static const Duration longAnimDuration  = Duration(milliseconds: 800);
-}
+//
+// ── RE-EXPORT SHIM ────────────────────────────────────────────────────────────
+// The canonical AppConfig class lives in lib/config/app_config.dart.
+// That file uses --dart-define env vars (const-safe, no flutter_dotenv).
+//
+// This file previously contained a DUPLICATE AppConfig that used flutter_dotenv
+// and had stale endpoint names (predictLegacyEndpoint, pollingInterval, etc.)
+// that diverged from the real config.
+//
+// All imports that pointed here (import '../constants/app_config.dart') will
+// now get the correct AppConfig transparently.
+//
+// DO NOT add anything new here. Add to lib/config/app_config.dart.
+// ─────────────────────────────────────────────────────────────────────────────
+export '../config/app_config.dart';
