@@ -1,31 +1,25 @@
 // lib/services/offline_rule_engine.dart
 //
-// OpsFlood — OfflineRuleEngine  v1.1
+// OpsFlood — OfflineRuleEngine  v1.2
 //
-// PURPOSE:
-//   When the device has no internet connection, the app still holds the last
-//   fetched river-level snapshots in LocalCacheService and in the in-memory
-//   AllIndiaAlertEngine.allStations list.  This engine:
+// Evaluates flood risk from the last-known in-memory snapshot with ZERO
+// network calls, so risk bands never silently reset to SAFE when offline.
 //
-//     1. Sources data (no network calls, ever):
-//          Primary   — AllIndiaAlertEngine().allStations  (in-memory, fastest)
-//          Secondary — LocalCacheService raw JSON entries (survives restarts)
-//     2. Applies the same CWC danger-class + GloFAS fill-percent rules that
-//        the live engine uses, so risk bands never silently reset to SAFE
-//        when the user goes offline.
-//     3. Emits ValueNotifier<List<RuleResult>> that any widget or Riverpod
-//        provider can watch — no setState boilerplate needed.
-//     4. Fires flutter_local_notifications for any station whose risk
-//        worsened since the last evaluation, even fully offline.
-//     5. Keeps the notification channel separate from the online engine
-//        (channel id: flood_offline) so alerts never collide.
+// Data source (priority order, both in-memory, no I/O):
+//   1. AllIndiaAlertEngine().allStations  (most recent live poll)
+//   2. Empty list — engine idles gracefully until data arrives
+//
+// Rule inputs mapped to actual FloodData fields:
+//   CWC pct   → derived from currentLevel / dangerLevel / warningLevel
+//   GloFAS pct → FloodData.capacityPercent  (0–100)
+//   ML pct     → 0.0  (field not yet on FloodData model)
+//   staleness  → FloodData.lastUpdated
 //
 // INTEGRATION (already done in main.dart):
-//   await LocalCacheService.instance.init();   // must come first
 //   await OfflineRuleEngine.instance.init();
 //   OfflineRuleEngine.instance.start();
 //
-// READING RESULTS in a widget:
+// READING in a widget:
 //   ValueListenableBuilder<List<RuleResult>>(
 //     valueListenable: OfflineRuleEngine.instance.results,
 //     builder: (ctx, list, _) { ... },
@@ -34,41 +28,36 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../models/flood_data.dart';
-import '../models/river_station.dart';   // DangerClass
 import 'all_india_alert_engine.dart';
-import 'local_cache_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Risk band enum
+// Risk band
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum OfflineRisk { safe, elevated, high, critical }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Per-station result emitted by the engine
+// Per-station result
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RuleResult {
   final String      city;
   final String      state;
   final String      river;
-  final double      currentLevel;   // metres  (CWC gauge)
+  final double      currentLevel;    // metres
   final double      warningLevel;
   final double      dangerLevel;
-  final double      hfl;
-  final DangerClass dangerClass;    // CWC classification
-  final double      gloFasFill;     // 0–100 % of GloFAS threshold
-  final double      riskScore;      // 0–100 composite
+  final double      capacityPct;     // 0–100, from FloodData.capacityPercent
+  final double      riskScore;       // 0–100 composite
   final OfflineRisk risk;
-  final DateTime    cachedAt;       // timestamp of last known data
-  final bool        isStale;        // true if data is > 2 h old
+  final DateTime    dataTimestamp;   // FloodData.lastUpdated
+  final bool        isStale;         // true if data > 2 h old
 
   const RuleResult({
     required this.city,
@@ -77,12 +66,10 @@ class RuleResult {
     required this.currentLevel,
     required this.warningLevel,
     required this.dangerLevel,
-    required this.hfl,
-    required this.dangerClass,
-    required this.gloFasFill,
+    required this.capacityPct,
     required this.riskScore,
     required this.risk,
-    required this.cachedAt,
+    required this.dataTimestamp,
     required this.isStale,
   });
 
@@ -100,12 +87,13 @@ class RuleResult {
     OfflineRisk.critical => const Color(0xFFEF4444),
   };
 
+  /// Fraction (0–1.2) of current level vs danger level.
   double get progressFraction =>
       dangerLevel > 0 ? (currentLevel / dangerLevel).clamp(0.0, 1.2) : 0.0;
 
   @override
   String toString() =>
-      'RuleResult($city/$state risk=$riskLabel '
+      'RuleResult($city/$state $riskLabel '
       'score=${riskScore.toStringAsFixed(1)})';
 }
 
@@ -117,23 +105,23 @@ class OfflineRuleEngine {
   static final OfflineRuleEngine instance = OfflineRuleEngine._();
   OfflineRuleEngine._();
 
-  // ── Config constants ────────────────────────────────────────────────────
-  static const Duration _evalInterval  = Duration(minutes: 5);
-  static const Duration _staleAfter    = Duration(hours: 2);
+  // ── Config ────────────────────────────────────────────────────────────
+  static const Duration _evalInterval = Duration(minutes: 5);
+  static const Duration _staleAfter   = Duration(hours: 2);
 
-  // Weights (must match RiskCompute in river_monitor_screen.dart v6.1)
-  static const double _wCwc    = 0.45;
-  static const double _wGloFas = 0.35;
-  static const double _wMl     = 0.20;
+  // Score weights — CWC gauge pct (0.45) + capacity pct (0.35) + ML (0.20).
+  // ML is always 0 until mlFloodProb is added to FloodData.
+  static const double _wCwc  = 0.45;
+  static const double _wCap  = 0.35;
+  static const double _wMl   = 0.20;
 
-  // Thresholds (v6.1 values)
+  // Thresholds (match river_monitor_screen.dart v6.1)
   static const double _tCritical = 70;
   static const double _tHigh     = 45;
   static const double _tElevated = 35;
 
-  // ── Public state ────────────────────────────────────────────────────────
+  // ── Public state ─────────────────────────────────────────────────────
 
-  /// Watch this from any widget or provider.
   final ValueNotifier<List<RuleResult>> results =
       ValueNotifier<List<RuleResult>>([]);
 
@@ -146,23 +134,18 @@ class OfflineRuleEngine {
       FlutterLocalNotificationsPlugin();
   bool   _notifReady = false;
   Timer? _timer;
-
-  // previous risk per "state|city" key for change detection
   final Map<String, OfflineRisk> _prevRisk = {};
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
-  /// Call once after [LocalCacheService.instance.init()] at app startup.
   Future<void> init() async => _initNotifications();
 
-  /// Begin periodic evaluation — also runs immediately.
   void start() {
     _timer?.cancel();
     evaluate();
     _timer = Timer.periodic(_evalInterval, (_) => evaluate());
   }
 
-  /// Stop periodic evaluation (e.g. app paused / widget disposed).
   void stop() {
     _timer?.cancel();
     _timer = null;
@@ -170,75 +153,24 @@ class OfflineRuleEngine {
 
   // ── Evaluate ──────────────────────────────────────────────────────────────
 
-  /// Run one evaluation pass.  Never throws — errors go to [lastError].
   Future<void> evaluate() async {
     try {
-      final snapshot = _resolveSnapshot();
+      final snapshot = AllIndiaAlertEngine().allStations;
       if (snapshot.isEmpty) {
-        if (kDebugMode) debugPrint('[OfflineRuleEngine] no data to evaluate');
+        if (kDebugMode) debugPrint('[OfflineRuleEngine] no cached data yet');
         return;
       }
       _process(snapshot);
     } catch (e, st) {
       lastError = e.toString();
       if (kDebugMode) {
-        debugPrint('[OfflineRuleEngine] evaluate error: $e');
+        debugPrint('[OfflineRuleEngine] error: $e');
         debugPrint(st.toString());
       }
     }
   }
 
-  // ── Data source resolution ──────────────────────────────────────────────────
-
-  /// Returns a deduplicated list of [FloodData] from the best available
-  /// source, with zero network calls.
-  ///
-  /// Priority:
-  ///   1. [AllIndiaAlertEngine().allStations] — already in memory.
-  ///   2. Raw JSON entries in [LocalCacheService] — survives app restarts.
-  List<FloodData> _resolveSnapshot() {
-    // Primary: live engine's in-memory list
-    final live = AllIndiaAlertEngine().allStations;
-    if (live.isNotEmpty) return live;
-
-    // Secondary: walk all cache keys and try to deserialise FloodData.
-    // LocalCacheService stores raw JSON strings keyed by arbitrary API paths.
-    // We attempt FloodData.fromJson() on every entry and collect what parses.
-    final cache  = LocalCacheService.instance;
-    final prefs  = cache.prefsSync; // see note below
-    if (prefs == null) return [];
-
-    final out = <String, FloodData>{};
-    for (final rawKey in prefs.getKeys()) {
-      if (!rawKey.startsWith('opsflood_cache__')) continue;
-      final jsonStr = prefs.getString(rawKey);
-      if (jsonStr == null || jsonStr.isEmpty) continue;
-      try {
-        final decoded = jsonDecode(jsonStr);
-        // Cache entries may be a List or a single Map.
-        if (decoded is List) {
-          for (final item in decoded) {
-            if (item is Map<String, dynamic>) {
-              try {
-                final fd = FloodData.fromJson(item);
-                out['${fd.state}|${fd.city}'.toLowerCase()] = fd;
-              } catch (_) {}
-            }
-          }
-        } else if (decoded is Map<String, dynamic>) {
-          try {
-            final fd = FloodData.fromJson(decoded);
-            out['${fd.state}|${fd.city}'.toLowerCase()] = fd;
-          } catch (_) {}
-        }
-      } catch (_) {
-        // Not a FloodData JSON entry — skip silently.
-      }
-    }
-    return out.values.toList();
-  }
-
-  // ── Process snapshot ────────────────────────────────────────────────────────
+  // ── Process ───────────────────────────────────────────────────────────────
 
   void _process(List<FloodData> snapshot) {
     final now      = DateTime.now();
@@ -253,7 +185,6 @@ class OfflineRuleEngine {
       _prevRisk[key] = r.risk;
     }
 
-    // critical → high → elevated → safe, then A–Z
     output.sort((a, b) {
       final d = b.risk.index - a.risk.index;
       return d != 0 ? d : a.city.compareTo(b.city);
@@ -264,7 +195,7 @@ class OfflineRuleEngine {
     lastError     = null;
 
     if (kDebugMode) {
-      debugPrint('[OfflineRuleEngine] ${output.length} evaluated, '
+      debugPrint('[OfflineRuleEngine] ${output.length} stations, '
           '${worsened.length} worsened');
     }
     for (final r in worsened) {
@@ -272,34 +203,39 @@ class OfflineRuleEngine {
     }
   }
 
-  // ── Rule application (pure, stateless) ──────────────────────────────────────
+  // ── Rule application (pure, stateless) ─────────────────────────────────────
 
   RuleResult _applyRules(FloodData fd, DateTime now) {
     final cur  = fd.currentLevel;
     final warn = fd.warningLevel;
-    final hfl  = fd.hfl;
     final dang = fd.dangerLevel;
+    final safe = fd.safeLevel;
 
-    // 1. CWC pct
+    // ── 1. CWC pct  ────────────────────────────────────────────────────────
+    // Measure how far above warningLevel the current level is,
+    // as a % of the (dangerLevel − warningLevel) band.
     double cwcPct = 0;
-    if (warn > 0 && hfl > warn) {
-      cwcPct = ((cur - warn) / (hfl - warn) * 100).clamp(0.0, 100.0);
-    } else if (hfl > 0) {
-      cwcPct = (cur / hfl * 100).clamp(0.0, 100.0);
+    if (warn > 0 && dang > warn) {
+      cwcPct = ((cur - warn) / (dang - warn) * 100).clamp(0.0, 100.0);
+    } else if (dang > safe) {
+      cwcPct = ((cur - safe) / (dang - safe) * 100).clamp(0.0, 100.0);
     }
 
-    // 2. GloFAS pct (stored in FloodData.fillPercent by ThresholdAlertService)
-    final gloFasPct = (fd.fillPercent ?? 0.0).clamp(0.0, 100.0);
+    // ── 2. Capacity pct  ───────────────────────────────────────────────────
+    // FloodData.capacityPercent = (current-safe)/(danger-safe)*100, clamped 0–100.
+    final capPct = fd.capacityPercent.clamp(0.0, 100.0);
 
-    // 3. ML pct
-    final mlPct = ((fd.mlFloodProb ?? 0.0) * 100).clamp(0.0, 100.0);
+    // ── 3. ML pct  ─────────────────────────────────────────────────────────
+    // Not yet on FloodData — defaults to 0.  When mlFloodProb is added to
+    // the model, replace the 0.0 below with (fd.mlFloodProb * 100).clamp(0,100).
+    const double mlPct = 0.0;
 
-    // 4. Composite
+    // ── 4. Composite score  ────────────────────────────────────────────────
     final score =
-        (_wCwc * cwcPct + _wGloFas * gloFasPct + _wMl * mlPct)
+        (_wCwc * cwcPct + _wCap * capPct + _wMl * mlPct)
             .clamp(0.0, 100.0);
 
-    // 5. Band
+    // ── 5. Risk band  ──────────────────────────────────────────────────────
     final risk = score >= _tCritical
         ? OfflineRisk.critical
         : score >= _tHigh
@@ -308,43 +244,31 @@ class OfflineRuleEngine {
                 ? OfflineRisk.elevated
                 : OfflineRisk.safe;
 
-    // 6. CWC danger class
-    final dc = _dangerClass(cur, warn, dang, hfl);
-
-    // 7. Staleness
-    final cachedAt = fd.cachedAt ?? now;
-    final isStale  = now.difference(cachedAt) > _staleAfter;
+    // ── 6. Staleness  ──────────────────────────────────────────────────────
+    final isStale = now.difference(fd.lastUpdated) > _staleAfter;
 
     return RuleResult(
-      city:         fd.city,
-      state:        fd.state,
-      river:        fd.riverName ?? '',
-      currentLevel: cur,
-      warningLevel: warn,
-      dangerLevel:  dang,
-      hfl:          hfl,
-      dangerClass:  dc,
-      gloFasFill:   gloFasPct,
-      riskScore:    score,
-      risk:         risk,
-      cachedAt:     cachedAt,
-      isStale:      isStale,
+      city:           fd.city,
+      state:          fd.state,
+      river:          fd.riverName ?? '',
+      currentLevel:   cur,
+      warningLevel:   warn,
+      dangerLevel:    dang,
+      capacityPct:    capPct,
+      riskScore:      score,
+      risk:           risk,
+      dataTimestamp:  fd.lastUpdated,
+      isStale:        isStale,
     );
   }
 
-  DangerClass _dangerClass(
-      double cur, double warn, double dang, double hfl) {
-    if (hfl > 0 && cur >= hfl)  return DangerClass.extreme;
-    if (dang > 0 && cur >= dang) return DangerClass.severe;
-    if (warn > 0 && cur >= warn) return DangerClass.aboveNormal;
-    return DangerClass.normal;
-  }
+  // ── Change detection ───────────────────────────────────────────────────
 
   bool _isWorseThan(OfflineRisk current, OfflineRisk? prev) =>
       current.index > (prev?.index ?? 0) &&
       current.index >= OfflineRisk.elevated.index;
 
-  // ── Convenience accessors ─────────────────────────────────────────────────
+  // ── Convenience accessors ───────────────────────────────────────────────
 
   List<RuleResult> get critical =>
       results.value.where((r) => r.risk == OfflineRisk.critical).toList();
@@ -370,7 +294,7 @@ class OfflineRuleEngine {
     return list.isEmpty ? OfflineRisk.safe : list.first.risk;
   }
 
-  // ── Notifications ─────────────────────────────────────────────────────────
+  // ── Notifications ────────────────────────────────────────────────────────
 
   Future<void> _initNotifications() async {
     if (_notifReady) return;
@@ -407,8 +331,9 @@ class OfflineRuleEngine {
     const ios = DarwinNotificationDetails(
         presentAlert: true, presentSound: true);
 
+    // +100000 offset keeps IDs separate from AllIndiaAlertEngine notifications.
     await _notif.show(
-      r.city.hashCode.abs() + 100000, // offset avoids collision with online engine
+      r.city.hashCode.abs() + 100000,
       title,
       body,
       NotificationDetails(android: android, iOS: ios),
