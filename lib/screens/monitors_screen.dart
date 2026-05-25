@@ -5,12 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../constants.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../providers/flood_providers.dart';
-import '../theme/river_theme.dart';
-import '../widgets/flood_gauge.dart';
 import '../widgets/river_level_visualizer.dart';
 
 // ─── color palette ────────────────────────────────────────────────────────────
@@ -113,11 +110,11 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: _kGreen.withOpacity(
-                                    0.12 + _pulseCtrl.value * 0.08),
+                                color: _kGreen.withValues(
+                                    alpha: 0.12 + _pulseCtrl.value * 0.08),
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
-                                    color: _kGreen.withOpacity(0.6)),
+                                    color: _kGreen.withValues(alpha: 0.6)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -129,8 +126,8 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                                       shape: BoxShape.circle,
                                       boxShadow: [
                                         BoxShadow(
-                                          color: _kGreen.withOpacity(
-                                              0.4 + _pulseCtrl.value * 0.4),
+                                          color: _kGreen.withValues(
+                                              alpha: 0.4 + _pulseCtrl.value * 0.4),
                                           blurRadius: 6,
                                         )
                                       ],
@@ -233,9 +230,9 @@ class _SummaryTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.08),
+        color: accent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accent.withOpacity(0.22)),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
       ),
       child: Row(
         children: [
@@ -261,10 +258,10 @@ class _SummaryTile extends StatelessWidget {
 
 // ─── monitor card ─────────────────────────────────────────────────────────────
 class _MonitorCard extends StatelessWidget {
-  final FloodData              item;
+  final FloodData                item;
   final List<RiverLevelSnapshot> history;
-  final AnimationController    pulseCtrl;
-  final int                    rank;
+  final AnimationController      pulseCtrl;
+  final int                      rank;
   const _MonitorCard({
     super.key,
     required this.item,
@@ -281,12 +278,14 @@ class _MonitorCard extends StatelessWidget {
     final lvlText = item.currentLevel.toStringAsFixed(2);
     final dangerM = item.dangerLevel.toStringAsFixed(1);
     final warnM   = item.warningLevel.toStringAsFixed(1);
+    // Map RiverLevelSnapshot history → List<double> for RiverLevelVisualizer
+    final levelHistory = history.map((s) => s.level).toList();
 
     return AnimatedBuilder(
       animation: pulseCtrl,
       builder: (_, child) {
         final glow = isCrit
-            ? riskC.withOpacity(0.04 + pulseCtrl.value * 0.06)
+            ? riskC.withValues(alpha: 0.04 + pulseCtrl.value * 0.06)
             : Colors.transparent;
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -295,8 +294,8 @@ class _MonitorCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: isCrit
-                  ? riskC.withOpacity(0.5 + pulseCtrl.value * 0.3)
-                  : riskC.withOpacity(0.25),
+                  ? riskC.withValues(alpha: 0.5 + pulseCtrl.value * 0.3)
+                  : riskC.withValues(alpha: 0.25),
               width: isCrit ? 1.5 : 1.0,
             ),
             boxShadow: [
@@ -318,9 +317,9 @@ class _MonitorCard extends StatelessWidget {
                   width: 26, height: 26,
                   margin: const EdgeInsets.only(right: 10, top: 2),
                   decoration: BoxDecoration(
-                    color: riskC.withOpacity(0.15),
+                    color: riskC.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(color: riskC.withOpacity(0.4)),
+                    border: Border.all(color: riskC.withValues(alpha: 0.4)),
                   ),
                   child: Center(
                     child: Text('$rank',
@@ -332,23 +331,13 @@ class _MonitorCard extends StatelessWidget {
                 ),
                 Expanded(
                   child: RiverLevelVisualizer(
-                    city: item.city,
-                    river: item.riverName ?? 'River',
-                    currentLevel: item.currentLevel,
-                    safeLevel: item.safeLevel,
-                    warningLevel: item.warningLevel,
-                    dangerLevel: item.dangerLevel,
-                    trend: item.status,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: 96,
-                  child: FloodGauge(
-                    capacity: item.capacityPercent,
-                    riskLevel: item.riskLevel,
-                    size: 96,
-                    label: item.state,
+                    cityName:    item.city,
+                    current:     item.currentLevel,
+                    warning:     item.warningLevel,
+                    danger:      item.dangerLevel,
+                    hfl:         item.dangerLevel,
+                    history:     levelHistory,
+                    lineColor:   riskC,
                   ),
                 ),
               ],
@@ -386,7 +375,7 @@ class _MonitorCard extends StatelessWidget {
                       Container(
                           height: 7,
                           width: double.infinity,
-                          color: Colors.white.withOpacity(0.06)),
+                          color: Colors.white.withValues(alpha: 0.06)),
                       FractionallySizedBox(
                         widthFactor: pct,
                         child: Container(
@@ -394,7 +383,7 @@ class _MonitorCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: [
-                                riskC.withOpacity(0.7),
+                                riskC.withValues(alpha: 0.7),
                                 riskC,
                               ],
                             ),
@@ -406,7 +395,7 @@ class _MonitorCard extends StatelessWidget {
                         child: Container(
                             width: 1.5,
                             height: 7,
-                            color: _kYellow.withOpacity(0.7)),
+                            color: _kYellow.withValues(alpha: 0.7)),
                       ),
                     ],
                   ),
@@ -464,12 +453,12 @@ class _MonitorCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: _kRed.withOpacity(0.12),
+                color: _kRed.withValues(alpha: 0.12),
                 borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(20),
                     bottomRight: Radius.circular(20)),
                 border: Border(
-                    top: BorderSide(color: _kRed.withOpacity(0.25))),
+                    top: BorderSide(color: _kRed.withValues(alpha: 0.25))),
               ),
               child: Row(
                 children: [
@@ -504,9 +493,9 @@ class _Chip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.09),
+        color: color.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -515,7 +504,7 @@ class _Chip extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: color.withOpacity(0.9),
+                  color: color.withValues(alpha: 0.9),
                   fontSize: 10.5,
                   fontWeight: FontWeight.w600)),
         ],
@@ -566,7 +555,7 @@ class _GradientSparkline extends StatelessWidget {
             drawVerticalLine: false,
             horizontalInterval: (maxY - minY) / 3,
             getDrawingHorizontalLine: (_) => FlLine(
-                color: Colors.white.withOpacity(0.05), strokeWidth: 1),
+                color: Colors.white.withValues(alpha: 0.05), strokeWidth: 1),
           ),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
@@ -597,8 +586,8 @@ class _GradientSparkline extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end:   Alignment.bottomCenter,
                   colors: [
-                    lineColor.withOpacity(0.35),
-                    lineColor.withOpacity(0.0),
+                    lineColor.withValues(alpha: 0.35),
+                    lineColor.withValues(alpha: 0.0),
                   ],
                 ),
               ),
@@ -607,7 +596,7 @@ class _GradientSparkline extends StatelessWidget {
           extraLinesData: ExtraLinesData(horizontalLines: [
             HorizontalLine(
               y: warningLevel,
-              color: _kYellow.withOpacity(0.7),
+              color: _kYellow.withValues(alpha: 0.7),
               strokeWidth: 1,
               dashArray: [4, 4],
               label: HorizontalLineLabel(
@@ -620,7 +609,7 @@ class _GradientSparkline extends StatelessWidget {
             ),
             HorizontalLine(
               y: dangerLevel,
-              color: _kRed.withOpacity(0.7),
+              color: _kRed.withValues(alpha: 0.7),
               strokeWidth: 1.2,
               dashArray: [5, 4],
               label: HorizontalLineLabel(
