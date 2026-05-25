@@ -1,9 +1,14 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v6.0  (maths fixed + public display clean)
+// OpsFlood — River Monitor v6.1  (atRisk + ELEVATED threshold fix)
+//
+// MATHS CHANGES v6.1:
+//   _atRisk: only severe/extreme count (not aboveNormal)
+//   RiskBand.elevated threshold: 20 → 35 (avoids false positives from
+//     baseline GloFAS satellite discharge values)
 //
 // MATHS CHANGES v6:
 //   progressPct = current / danger  (CWC standard, not current/hfl)
-//   Risk band:   elevated≥20, high≥45, critical≥70
+//   Risk band:   elevated≥35, high≥45, critical≥70
 //   SourceBadge: all 6 sources mapped (no more ???)
 //
 // PUBLIC DISPLAY v6 — removed:
@@ -101,13 +106,14 @@ class RiskCompute {
     final score =
         (0.45 * cwcPct + 0.35 * gloFasPct + 0.20 * mlPct).clamp(0.0, 100.0);
 
-    // Tightened thresholds to match CWC severity classification:
-    //   ≥70 → CRITICAL, ≥45 → HIGH, ≥20 → ELEVATED, else SAFE
+    // FIX v6.1: raised ELEVATED threshold 20→35 to prevent baseline
+    // GloFAS satellite discharge values from triggering false positives.
+    // Thresholds: ≥70 → CRITICAL, ≥45 → HIGH, ≥35 → ELEVATED, else SAFE
     final band = score >= 70
         ? RiskBand.critical
         : score >= 45
             ? RiskBand.high
-            : score >= 20
+            : score >= 35
                 ? RiskBand.elevated
                 : RiskBand.safe;
 
@@ -237,9 +243,15 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
   }
 
   int get _liveCount => _results.where((r) => r.source != 'NO_DATA').length;
-  int get _atRisk    => _results.where((r) =>
-      r.station.dangerClass != DangerClass.normal &&
+
+  // FIX v6.1: only severe/extreme DangerClass counts as "at risk".
+  // aboveNormal is a routine CWC classification and should NOT
+  // inflate the at-risk counter on the header chip.
+  int get _atRisk => _results.where((r) =>
+      (r.station.dangerClass == DangerClass.severe ||
+       r.station.dangerClass == DangerClass.extreme) &&
       r.source != 'NO_DATA').length;
+
   int get _noData    => _results.where((r) => r.source == 'NO_DATA').length;
 
   List<String> get _stateList {
@@ -1798,133 +1810,4 @@ class _ShimmerCardState extends State<_ShimmerCard>
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
           height: 120,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: LinearGradient(
-              begin: Alignment(_anim.value - 1, 0),
-              end: Alignment(_anim.value + 1, 0),
-              colors: [
-                _kSurface,
-                _kGold.withOpacity(0.07),
-                _kSurface
-              ],
-            ),
-            border: Border.all(color: _kBorder),
-          ),
-        ),
-      );
-}
-
-// ── Atoms ─────────────────────────────────────────────────────────────────────
-class _FilterPill extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final bool     active;
-  const _FilterPill(
-      {required this.icon, required this.label, required this.active});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? _kGold.withOpacity(0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: active
-                  ? _kGold.withOpacity(0.4)
-                  : const Color(0xFF2A3A4A)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon,
-              size: 13,
-              color: active ? _kGold : const Color(0xFF7B8A99)),
-          const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: active ? _kGold : const Color(0xFF7B8A99))),
-        ]),
-      );
-}
-
-class _Pill extends StatelessWidget {
-  final String icon, label;
-  final Color  color;
-  const _Pill(
-      {required this.icon, required this.label, required this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withOpacity(0.3))),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(icon, style: const TextStyle(fontSize: 10)),
-          const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700)),
-        ]),
-      );
-}
-
-class _GoldChip extends StatelessWidget {
-  final String label, sublabel;
-  final Color? color;
-  const _GoldChip(
-      {required this.label, required this.sublabel, this.color});
-  @override
-  Widget build(BuildContext context) {
-    final c = color ?? _kGold;
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-          color: c.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: c.withOpacity(0.3))),
-      child: Column(children: [
-        Text(label,
-            style: TextStyle(
-                color: c,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-                height: 1.1)),
-        Text(sublabel,
-            style: const TextStyle(
-                color: Color(0xFF7B8A99),
-                fontSize: 8,
-                fontWeight: FontWeight.w500)),
-      ]),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  final Color  color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-  @override
-  Widget build(BuildContext context) =>
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: color.withOpacity(0.5), blurRadius: 4)
-              ]),
-        ),
-        const SizedBox(width: 4),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 10, color: Color(0xFF7B8A99))),
-      ]);
-}
+        
