@@ -1,15 +1,24 @@
 // lib/screens/india_river_explorer_screen.dart
 //
-// ── DEAD FILE — STUB ONLY ─────────────────────────────────────────────────────
-// This was a 17k older version of the India river explorer UI.
-// It has been fully superseded by india_rivers_screen.dart (68k, full-featured)
-// which is the screen referenced by:
-//   - dashboard_screen.dart (IndiaRiversScreen)
-//   - home_screen.dart navigation
-//   - main.dart routing
+// ── REDIRECT SHIM ─────────────────────────────────────────────────────────────
+// The original IndiaRiverExplorerScreen (17k) was a superseded version of the
+// India river explorer UI. The canonical, full-featured version is:
+//   lib/screens/india_rivers_screen.dart  (IndiaRiversScreen, 68k)
 //
-// india_river_explorer_screen.dart had zero active navigation references.
-// This stub exists only to prevent stale import errors.
-// DO NOT add anything new here. Use india_rivers_screen.dart instead.
+// river_monitor_screen.dart uses `const IndiaRiverExplorerScreen()` as the
+// 'Map' tab widget, so this class must remain a valid const-constructable
+// widget. It simply delegates to IndiaRiversScreen.
+//
+// DO NOT add screen logic here. Develop in india_rivers_screen.dart.
 // ─────────────────────────────────────────────────────────────────────────────
-library;
+import 'package:flutter/widgets.dart';
+import 'india_rivers_screen.dart';
+
+/// Thin redirect — delegates to the canonical [IndiaRiversScreen].
+/// Kept to satisfy `const IndiaRiverExplorerScreen()` in river_monitor_screen.dart.
+class IndiaRiverExplorerScreen extends StatelessWidget {
+  const IndiaRiverExplorerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => const IndiaRiversScreen();
+}
