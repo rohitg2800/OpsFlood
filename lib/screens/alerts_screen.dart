@@ -1,378 +1,223 @@
 // lib/screens/alerts_screen.dart
 //
 // OpsFlood — AlertsScreen
-// Two tabs:
-//   Tab 1 — Live CWC Gauge Alerts  (ThresholdAlertService, gauge breach events)
-//   Tab 2 — IMD Weather Alerts     (SACHET NDMA, fully parsed via ImdAlert model)
+// Full-screen list of live flood alerts grouped by State → City.
+// Data source: AllIndiaAlertEngine (CWC + GloFAS + OpsFlood backend).
+// Updates in real-time via ChangeNotifier listener.
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/threshold_alert.dart';
-import '../models/imd_alert.dart';
-import '../providers/alerts_provider.dart';
+import '../models/flood_data.dart';
+import '../services/all_india_alert_engine.dart';
+import '../theme/river_theme.dart';
 
-class AlertsScreen extends ConsumerStatefulWidget {
+class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
-  static const route = '/alerts';
-
   @override
-  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
+  State<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsScreenState extends ConsumerState<AlertsScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tab;
+class _AlertsScreenState extends State<AlertsScreen> {
+  final AllIndiaAlertEngine _engine = AllIndiaAlertEngine();
+  String _filterRisk = 'ALL'; // ALL | CRITICAL | HIGH | MODERATE
+  String _searchQuery = '';
+  final _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(alertsProvider).markAllSeen();
-    });
+    _engine.addListener(_rebuild);
+    if (_engine.allStations.isEmpty) _engine.refresh();
   }
 
   @override
   void dispose() {
-    _tab.dispose();
+    _engine.removeListener(_rebuild);
+    _searchCtrl.dispose();
     super.dispose();
   }
 
+  void _rebuild() { if (mounted) setState(() {}); }
+
+  // ── Filtered state list ────────────────────────────────────────────────────
+
+  List<String> _visibleStates() {
+    final q = _searchQuery.toLowerCase();
+    return _engine.stateGroups.keys.where((state) {
+      // filter by search
+      if (q.isNotEmpty) {
+        final match = state.toLowerCase().contains(q) ||
+            (_engine.stateGroups[state] ?? []).any(
+              (fd) => fd.city.toLowerCase().contains(q) ||
+                      (fd.riverName ?? '').toLowerCase().contains(q));
+        if (!match) return false;
+      }
+      // filter by risk
+      if (_filterRisk != 'ALL') {
+        final worst = _engine.stateRisk(state);
+        if (_filterRisk == 'CRITICAL' && worst != 'CRITICAL') return false;
+        if (_filterRisk == 'HIGH' &&
+            worst != 'CRITICAL' && worst != 'HIGH') return false;
+        if (_filterRisk == 'MODERATE' &&
+            worst != 'CRITICAL' && worst != 'HIGH' && worst != 'MODERATE') return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final ap      = ref.watch(alertsProvider);
-    final loading = ap.loading;
-    final imdList = ap.imdAlerts;
+    final states = _visibleStates()
+      ..sort((a, b) {
+        const r = {'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1};
+        return (r[_engine.stateRisk(b)] ?? 0) - (r[_engine.stateRisk(a)] ?? 0);
+      });
+
+    final totalCrit = _engine.allStations.where((f) => f.riskLevel == 'CRITICAL').length;
+    final totalHigh = _engine.allStations.where((f) => f.riskLevel == 'HIGH').length;
+    final totalMod  = _engine.allStations.where((f) => f.riskLevel == 'MODERATE').length;
 
     return Scaffold(
+      backgroundColor: AppPalette.navy0,
       appBar: AppBar(
-        title: const Text('Alerts'),
+        backgroundColor: AppPalette.navy1,
+        elevation: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('All-India Flood Alerts',
+                style: TextStyle(
+                  color: AppPalette.textWhite,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17,
+                )),
+            if (_engine.lastPoll != null)
+              Text(
+                'Updated ${DateFormat("HH:mm").format(_engine.lastPoll!.toLocal())}',
+                style: const TextStyle(
+                    color: AppPalette.textGrey, fontSize: 10),
+              ),
+          ],
+        ),
         actions: [
-          if (loading)
+          if (_engine.isLoading)
             const Padding(
-              padding: EdgeInsets.only(right: 16),
+              padding: EdgeInsets.only(right: 14),
               child: SizedBox(
-                width: 20, height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                width: 16, height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppPalette.cyan),
               ),
             )
           else
             IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () => ref.read(alertsProvider).refresh(),
-              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh_rounded,
+                  color: AppPalette.textGrey, size: 20),
+              onPressed: _engine.refresh,
             ),
-          _FilterMenu(provider: ap),
         ],
-        bottom: TabBar(
-          controller: _tab,
-          tabs: [
-            Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.water, size: 16),
-                  const SizedBox(width: 6),
-                  const Text('CWC Gauge'),
-                  if (ap.critical.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    _Badge(count: ap.critical.length,
-                           color: const Color(0xFFF44336)),
-                  ],
-                ],
-              ),
-            ),
-            Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.thunderstorm_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  const Text('IMD Weather'),
-                  if (imdList.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    _Badge(count: imdList.length,
-                           color: const Color(0xFFF97316)),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tab,
+      body: Column(
         children: [
-          _CwcTab(provider: ap),
-          _ImdTab(alerts: imdList, loading: loading),
-        ],
-      ),
-    );
-  }
-}
 
-// ─── Tab 1: CWC Gauge Alerts ──────────────────────────────────────────────────
-
-class _CwcTab extends StatelessWidget {
-  final AlertsProvider provider;
-  const _CwcTab({required this.provider});
-
-  @override
-  Widget build(BuildContext context) {
-    final alerts   = provider.filtered;
-    final critical = provider.critical;
-    final loading  = provider.loading;
-
-    return Column(
-      children: [
-        if (critical.isNotEmpty)
-          _CriticalBanner(count: critical.length),
-        Expanded(
-          child: alerts.isEmpty
-              ? _EmptyState(
-                  loading: loading,
-                  icon: Icons.water,
-                  message: 'All rivers within safe levels',
-                )
-              : RefreshIndicator(
-                  onRefresh: () => provider.refresh(),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: alerts.length,
-                    itemBuilder: (ctx, i) => _AlertCard(alert: alerts[i]),
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Tab 2: IMD Weather Alerts ────────────────────────────────────────────────
-
-class _ImdTab extends StatelessWidget {
-  final List<ImdAlert> alerts;
-  final bool loading;
-  const _ImdTab({required this.alerts, required this.loading});
-
-  @override
-  Widget build(BuildContext context) {
-    if (alerts.isEmpty) {
-      return _EmptyState(
-        loading: loading,
-        icon: Icons.wb_sunny_outlined,
-        message: 'No active IMD weather alerts',
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: alerts.length,
-      itemBuilder: (ctx, i) => _ImdCard(alert: alerts[i]),
-    );
-  }
-}
-
-class _ImdCard extends StatelessWidget {
-  final ImdAlert alert;
-  const _ImdCard({required this.alert});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = alert.severity.color;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: color, width: 1.5),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header row ──────────────────────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // ── Summary chips ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Row(
               children: [
-                Icon(alert.severity.icon, color: color, size: 22),
+                _SummaryChip('CRIT', totalCrit, AppPalette.critical,
+                    selected: _filterRisk == 'CRITICAL',
+                    onTap: () => setState(() => _filterRisk =
+                        _filterRisk == 'CRITICAL' ? 'ALL' : 'CRITICAL')),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    alert.displayTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                ),
+                _SummaryChip('HIGH', totalHigh, AppPalette.danger,
+                    selected: _filterRisk == 'HIGH',
+                    onTap: () => setState(() => _filterRisk =
+                        _filterRisk == 'HIGH' ? 'ALL' : 'HIGH')),
                 const SizedBox(width: 8),
-                // Severity pill
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: color.withValues(alpha: 0.6)),
-                  ),
-                  child: Text(
-                    alert.severity.label.toUpperCase(),
-                    style: TextStyle(
-                      color: color, fontSize: 9, fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                if (alert.isNew) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text('NEW',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ],
+                _SummaryChip('MOD', totalMod, AppPalette.warning,
+                    selected: _filterRisk == 'MODERATE',
+                    onTap: () => setState(() => _filterRisk =
+                        _filterRisk == 'MODERATE' ? 'ALL' : 'MODERATE')),
+                const Spacer(),
+                Text('${_engine.allStations.length} stations · ${_engine.stateGroups.length} states',
+                    style: const TextStyle(
+                        color: AppPalette.textDim, fontSize: 10)),
               ],
             ),
+          ),
 
-            // ── Area ────────────────────────────────────────────────────────
-            if (alert.area.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(Icons.location_on_outlined, size: 13,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5)),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      alert.area,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface
-                              .withValues(alpha: 0.65)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            // ── Event type chip ─────────────────────────────────────────────
-            if (alert.event.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(6),
+          // ── Search bar ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: TextField(
+              controller: _searchCtrl,
+              style: const TextStyle(color: AppPalette.textWhite, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Search state, city or river…',
+                hintStyle: const TextStyle(
+                    color: AppPalette.textDim, fontSize: 13),
+                prefixIcon: const Icon(Icons.search_rounded,
+                    color: AppPalette.textGrey, size: 18),
+                filled: true,
+                fillColor: AppPalette.navy3,
+                contentPadding: const EdgeInsets.symmetric(
+                    vertical: 10, horizontal: 14),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
                 ),
-                child: Text(
-                  alert.event,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded,
+                            color: AppPalette.textGrey, size: 16),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
               ),
-            ],
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
 
-            // ── Description ─────────────────────────────────────────────────
-            if (alert.description.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                alert.description,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface
-                        .withValues(alpha: 0.75)),
-              ),
-            ],
-
-            // ── Validity row ────────────────────────────────────────────────
-            if (alert.effective != null || alert.expires != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.schedule_outlined, size: 12,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.45)),
-                  const SizedBox(width: 4),
-                  DefaultTextStyle(
-                    style: theme.textTheme.labelSmall!.copyWith(
-                        color: theme.colorScheme.onSurface
-                            .withValues(alpha: 0.5)),
-                    child: Row(
+          // ── State list ────────────────────────────────────────────────────
+          Expanded(
+            child: _engine.isLoading && _engine.allStations.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (alert.effective != null)
-                          Text('From: ${_fmt(alert.effective!)}'),
-                        if (alert.effective != null && alert.expires != null)
-                          const Text('  —  '),
-                        if (alert.expires != null)
-                          Text('Until: ${_fmt(alert.expires!)}'),
+                        CircularProgressIndicator(
+                            color: AppPalette.cyan, strokeWidth: 2),
+                        SizedBox(height: 14),
+                        Text('Fetching all-India station data…',
+                            style: TextStyle(
+                                color: AppPalette.textGrey, fontSize: 13)),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _fmt(DateTime dt) =>
-      DateFormat('dd MMM, HH:mm').format(dt.toLocal());
-}
-
-// ─── Shared widgets ───────────────────────────────────────────────────────────
-
-class _Badge extends StatelessWidget {
-  final int count;
-  final Color color;
-  const _Badge({required this.count, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-          color: color, borderRadius: BorderRadius.circular(10)),
-      child: Text('$count',
-          style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.bold)),
-    );
-  }
-}
-
-class _CriticalBanner extends StatelessWidget {
-  final int count;
-  const _CriticalBanner({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: AlertLevel.danger.color,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.crisis_alert, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          Text(
-            '$count station${count > 1 ? 's' : ''} at or above Danger level',
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
+                  )
+                : states.isEmpty
+                    ? const Center(
+                        child: Text('No stations match your filter.',
+                            style: TextStyle(
+                                color: AppPalette.textGrey, fontSize: 13)),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+                        itemCount: states.length,
+                        itemBuilder: (ctx, i) => _StateSection(
+                          state:   states[i],
+                          cities:  _engine.citiesForState(states[i]),
+                          risk:    _engine.stateRisk(states[i]),
+                          query:   _searchQuery,
+                        ),
+                      ),
           ),
         ],
       ),
@@ -380,231 +225,305 @@ class _CriticalBanner extends StatelessWidget {
   }
 }
 
-class _AlertCard extends StatelessWidget {
-  final ThresholdAlert alert;
-  const _AlertCard({required this.alert});
+// ── State Section (expandable) ─────────────────────────────────────────────
+class _StateSection extends StatefulWidget {
+  final String         state;
+  final List<FloodData> cities;
+  final String         risk;
+  final String         query;
+  const _StateSection({
+    required this.state, required this.cities,
+    required this.risk,  required this.query,
+  });
+  @override
+  State<_StateSection> createState() => _StateSectionState();
+}
+
+class _StateSectionState extends State<_StateSection> {
+  bool _expanded = true; // expand CRITICAL/HIGH by default later
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.risk == 'CRITICAL' || widget.risk == 'HIGH';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme      = Theme.of(context);
-    final levelColor = alert.level.color;
-    final ts = DateFormat('dd MMM, HH:mm').format(alert.timestamp.toLocal());
+    final col = _riskColor(widget.risk);
+    final critCities = widget.cities.where((c) => c.riskLevel == 'CRITICAL').length;
+    final warnCities = widget.cities.where((c) =>
+        c.riskLevel == 'HIGH' || c.riskLevel == 'MODERATE').length;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: levelColor, width: 1.5),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppPalette.navy2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: col.withValues(alpha: 0.3), width: 1),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(alert.level.icon, color: levelColor, size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(alert.cityName,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                ),
-                if (alert.isNew)
+      child: Column(
+        children: [
+          // Header
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                    width: 10, height: 10,
                     decoration: BoxDecoration(
-                        color: levelColor,
-                        borderRadius: BorderRadius.circular(4)),
-                    child: const Text('NEW',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
+                        color: col, shape: BoxShape.circle),
                   ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(widget.state,
+                        style: const TextStyle(
+                          color: AppPalette.textWhite,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        )),
+                  ),
+                  if (critCities > 0)
+                    _MiniTag('$critCities CRIT', AppPalette.critical),
+                  if (warnCities > 0) ...[
+                    const SizedBox(width: 5),
+                    _MiniTag('$warnCities WARN', AppPalette.warning),
+                  ],
+                  const SizedBox(width: 8),
+                  Text('${widget.cities.length}',
+                      style: const TextStyle(
+                          color: AppPalette.textGrey, fontSize: 11)),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: AppPalette.textDim, size: 18,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 6),
-            Text('${alert.state} · ${alert.river}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface
-                        .withValues(alpha: 0.6))),
-            const SizedBox(height: 10),
-            _GaugeBar(
-              warning: alert.warningLevel,
-              danger:  alert.dangerLevel,
-              hfl:     alert.hfl,
-              fill:    alert.fillPercent,
-              color:   levelColor,
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _MetricChip(
-                  label: 'Current',
-                  value: '${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}',
-                  color: levelColor,
-                ),
-                _MetricChip(
-                  label: 'Danger',
-                  value: '${alert.dangerLevel.toStringAsFixed(1)} ${alert.unitLabel}',
-                  color: AlertLevel.danger.color,
-                ),
-                _MetricChip(
-                  label: 'HFL',
-                  value: alert.hfl > 0
-                      ? '${alert.hfl.toStringAsFixed(1)} ${alert.unitLabel}'
-                      : 'N/A',
-                  color: AlertLevel.extreme.color,
-                ),
-                Icon(alert.trend.icon, color: alert.trend.color, size: 20),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(ts,
-                style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurface
-                        .withValues(alpha: 0.5))),
+          ),
+
+          // City rows
+          if (_expanded) ...[
+            const Divider(
+                height: 1, color: AppPalette.navyStroke, thickness: 1),
+            ...widget.cities.map((fd) => _CityRow(fd: fd, query: widget.query)),
           ],
-        ),
+        ],
       ),
     );
   }
 }
 
-class _GaugeBar extends StatelessWidget {
-  final double warning, danger, hfl, fill;
-  final Color color;
-  const _GaugeBar({
-    required this.warning, required this.danger,
-    required this.hfl, required this.fill, required this.color,
-  });
+// ── City Row ───────────────────────────────────────────────────────────────
+class _CityRow extends StatelessWidget {
+  final FloodData fd;
+  final String    query;
+  const _CityRow({required this.fd, required this.query});
 
   @override
   Widget build(BuildContext context) {
-    final clamped = (fill / 100).clamp(0.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: clamped,
-            backgroundColor: color.withValues(alpha: 0.15),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-            minHeight: 10,
+    final col     = _riskColor(fd.riskLevel);
+    final hasLevel = fd.currentLevel > 0 && fd.dangerLevel > 0;
+    final pct      = hasLevel
+        ? (fd.currentLevel / fd.dangerLevel).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: const BoxDecoration(
+        border: Border(
+            bottom: BorderSide(color: AppPalette.navyStroke, width: 0.5)),
+      ),
+      child: Row(
+        children: [
+          // Risk colour stripe
+          Container(
+            width: 3, height: 38,
+            decoration: BoxDecoration(
+              color: col,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // City + river name
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(fd.city,
+                    style: const TextStyle(
+                      color: AppPalette.textWhite,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    )),
+                Text(
+                  fd.riverName ?? fd.state,
+                  style: const TextStyle(
+                      color: AppPalette.textGrey, fontSize: 10),
+                ),
+                if (hasLevel) ...[
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value:           pct,
+                      minHeight:       4,
+                      backgroundColor: AppPalette.navy4,
+                      valueColor:      AlwaysStoppedAnimation<Color>(col),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Level + risk badge
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                hasLevel
+                    ? '${fd.currentLevel.toStringAsFixed(2)} m'
+                    : fd.flowRate != null
+                        ? '${fd.flowRate!.toStringAsFixed(0)} m³/s'
+                        : '—',
+                style: TextStyle(
+                  color: col,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: col.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  fd.riskLevel,
+                  style: TextStyle(
+                    color: col,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              if (hasLevel)
+                Text(
+                  'DL ${fd.dangerLevel.toStringAsFixed(1)} m',
+                  style: const TextStyle(
+                      color: AppPalette.textDim, fontSize: 9),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Summary Chip ───────────────────────────────────────────────────────────
+class _SummaryChip extends StatelessWidget {
+  final String   label;
+  final int      count;
+  final Color    color;
+  final bool     selected;
+  final VoidCallback onTap;
+  const _SummaryChip(this.label, this.count, this.color,
+      {required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.22)
+              : color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? color.withValues(alpha: 0.8)
+                : color.withValues(alpha: 0.25),
+            width: selected ? 1.5 : 1,
           ),
         ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('WL ${warning.toStringAsFixed(1)}',
-                style: const TextStyle(fontSize: 10, color: Colors.orange)),
-            Text('DL ${danger.toStringAsFixed(1)}',
-                style: const TextStyle(fontSize: 10, color: Colors.red)),
-            if (hfl > 0)
-              Text('HFL ${hfl.toStringAsFixed(1)}',
-                  style: const TextStyle(fontSize: 10, color: Colors.purple)),
+            Text(label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                )),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900),
+              ),
+            ),
           ],
         ),
-      ],
+      ),
     );
   }
 }
 
-class _MetricChip extends StatelessWidget {
-  final String label, value;
-  final Color color;
-  const _MetricChip(
-      {required this.label, required this.value, required this.color});
-
+// ── Mini Tag ───────────────────────────────────────────────────────────────
+class _MiniTag extends StatelessWidget {
+  final String label;
+  final Color  color;
+  const _MiniTag(this.label, this.color);
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(label,
-            style: TextStyle(
-                fontSize: 10, color: color, fontWeight: FontWeight.bold)),
-        Text(value, style: const TextStyle(fontSize: 11)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              color: color,
+              fontSize: 8,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4)),
     );
   }
 }
 
-class _FilterMenu extends StatelessWidget {
-  final AlertsProvider provider;
-  const _FilterMenu({required this.provider});
-
-  @override
-  Widget build(BuildContext context) {
-    final hasFilter =
-        provider.filterLevel != null || provider.filterState != null;
-    return PopupMenuButton<String>(
-      icon: Icon(Icons.filter_list,
-          color: hasFilter
-              ? Theme.of(context).colorScheme.primary
-              : null),
-      onSelected: (val) {
-        if (val == 'clear') { provider.clearFilters(); return; }
-        final level = AlertLevel.values
-            .where((l) => l.name == val)
-            .firstOrNull;
-        if (level != null) provider.setFilterLevel(level);
-      },
-      itemBuilder: (_) => [
-        const PopupMenuItem(value: 'clear', child: Text('Clear filters')),
-        const PopupMenuDivider(),
-        ...AlertLevel.values.reversed
-            .where((l) => l != AlertLevel.normal)
-            .map((l) => PopupMenuItem(
-                  value: l.name,
-                  child: Row(
-                    children: [
-                      Icon(l.icon, color: l.color, size: 18),
-                      const SizedBox(width: 8),
-                      Text(l.label),
-                    ],
-                  ),
-                )),
-      ],
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final bool loading;
-  final IconData icon;
-  final String message;
-  const _EmptyState({
-    required this.loading,
-    required this.icon,
-    required this.message,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: loading
-          ? const CircularProgressIndicator()
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon,
-                    size: 64,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.4)),
-                const SizedBox(height: 16),
-                Text(message, style: const TextStyle(fontSize: 16)),
-                const SizedBox(height: 8),
-                const Text('Pull to refresh',
-                    style: TextStyle(color: Colors.grey)),
-              ],
-            ),
-    );
+Color _riskColor(String level) {
+  switch (level) {
+    case 'CRITICAL': return AppPalette.critical;
+    case 'HIGH':     return AppPalette.danger;
+    case 'MODERATE': return AppPalette.warning;
+    default:         return AppPalette.safe;
   }
 }
