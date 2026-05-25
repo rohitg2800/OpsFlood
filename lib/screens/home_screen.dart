@@ -55,7 +55,18 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
-    _svc.startPolling();
+
+    // IMPORTANT: Do NOT call _svc.startPolling() synchronously here.
+    // startPolling() → refreshData() → notifyListeners() fires immediately,
+    // which mutates a Riverpod ChangeNotifierProvider while the widget tree
+    // is still being built — Riverpod throws:
+    //   "Modifying a provider inside didChangeDependencies / initState is not allowed"
+    //
+    // Fix: defer to a microtask so the current build frame completes first.
+    // The polling starts on the very next microtask — effectively instant,
+    // but safely outside the build phase.
+    Future.microtask(_svc.startPolling);
+
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400))
       ..repeat(reverse: true);
@@ -96,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ── Premium frosted glass nav bar ─────────────────────────────────────────────
+// ── Premium frosted glass nav bar ─────────────────────────────────────────────────
 class _PremiumNavBar extends StatelessWidget {
   final int                  currentIndex;
   final List<_NavEntry>      destinations;
@@ -172,7 +183,6 @@ class _NavItem extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Icon with optional glow container
         AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           width:  isActive ? 44 : 36,
