@@ -47,7 +47,8 @@ class OpsBarChart extends StatelessWidget {
           barTouchData: BarTouchData(
             touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => AppPalette.abyss3,
-              tooltipRoundedRadius: 10,
+              // tooltipRoundedRadius was removed in fl_chart ≥0.68; use tooltipBorderRadius.
+              tooltipBorderRadius: BorderRadius.circular(10),
               getTooltipItem: (group, _, rod, __) => BarTooltipItem(
                 '${rod.toY.toStringAsFixed(1)}$yUnit',
                 TextStyle(

@@ -29,6 +29,13 @@ class AppConfig {
     defaultValue: 'https://opsflood.onrender.com',
   );
 
+  /// Secondary backend URL (empty = disabled). Used by tests to verify
+  /// the candidate-list logic. Override via --dart-define=OPSFLOOD_BACKUP_URL.
+  static const String backupBaseUrl = String.fromEnvironment(
+    'OPSFLOOD_BACKUP_URL',
+    defaultValue: '',
+  );
+
   // ── Timeouts ──────────────────────────────────────────────────────────────────
   static const Duration requestTimeout   = Duration(seconds: 65);
   static const Duration healthTimeout    = Duration(seconds: 10);
@@ -51,8 +58,15 @@ class AppConfig {
           : const Duration(seconds: 45);
   static const Duration backgroundInterval = Duration(minutes: 5);
 
+  /// Alias used by tests — matches the background poll cadence.
+  static Duration get pollingInterval => backgroundInterval;
+
   // ── Cache ──────────────────────────────────────────────────────────────────────────
   static const Duration cacheTtl = Duration(minutes: 5);
+
+  // ── Animation durations (used by constants_domain_test) ─────────────────────────
+  static const Duration shortAnimDuration = Duration(milliseconds: 200);
+  static const Duration longAnimDuration  = Duration(milliseconds: 500);
 
   // ── Endpoints ───────────────────────────────────────────────────────────────────
   static const String epHealth           = '/health';
@@ -70,4 +84,13 @@ class AppConfig {
   static const String epStateSeverity    = '/api/state-severity';
   static const String epIngestionRun     = '/ingestion/run';
   static const String epModelMetrics     = '/model-metrics';
+
+  // ── Endpoint aliases (used by tests) ────────────────────────────────────────────
+  static String get healthEndpoint           => epHealth;
+  static String get liveTelemetryEndpoint    => epLiveTelemetry;
+  static String get liveLevelsEndpoint       => epLiveLevels;
+  static String get criticalAlertsEndpoint   => epCriticalAlerts;
+  static String get predictLegacyEndpoint    => epPredict;
+  static String get weatherCurrentEndpoint   => epWeatherCurrent;
+  static String get weatherForecastEndpoint  => epWeatherForecast;
 }

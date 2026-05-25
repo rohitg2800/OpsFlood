@@ -26,6 +26,16 @@ final isOfflineProvider = Provider<bool>((ref) {
   return !ref.watch(realTimeProvider).isOnline;
 });
 
+/// Whether the backend is cold-starting (Render spin-up).
+final isWakingUpProvider = Provider<bool>((ref) {
+  return ref.watch(realTimeProvider).isWakingUp;
+});
+
+/// Latest error message from the fetch engine (null = no error).
+final errorMessageProvider = Provider<String?>((ref) {
+  return ref.watch(realTimeProvider).error;
+});
+
 final imdAlertsProvider = Provider<List<dynamic>>((ref) {
   return ref.watch(realTimeProvider).imdAlerts;
 });
@@ -52,4 +62,36 @@ final criticalAlertsProvider = Provider<List<dynamic>>((ref) {
 
 final activeCriticalAlertsProvider = Provider<List<dynamic>>((ref) {
   return ref.watch(realTimeProvider).activeCriticalAlerts;
+});
+
+// ── City-scoped providers (used by CityDetailScreen) ───────────────────────
+
+/// Latest [FloodData] for a specific city. Returns null when the city has
+/// not been loaded yet.
+final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
+  return ref.watch(realTimeProvider).dataForCity(city);
+});
+
+/// 24-hr level history snapshots for a specific city.
+final cityTrendProvider =
+    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
+  return ref.watch(realTimeProvider).trendForCity(city);
+});
+
+/// Active IMD weather alerts for a given state name.
+final stateImdAlertsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  return ref.watch(realTimeProvider).imdAlertsForState(state);
+});
+
+/// NDMA advisories for a given state name.
+final stateNdmaAdvisoriesProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  return ref.watch(realTimeProvider).ndmaAdvisoriesForState(state);
+});
+
+/// State-specific emergency contacts.
+final stateEmergencyContactsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  return ref.watch(realTimeProvider).emergencyContactsForState(state);
 });

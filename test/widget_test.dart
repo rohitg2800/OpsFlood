@@ -5,12 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('App smoke test — EquinoxApp pumps without exception',
+  testWidgets('App smoke test — OpsFloodApp pumps without exception',
       (WidgetTester tester) async {
-    // ProviderScope is required because EquinoxApp is a ConsumerWidget.
+    // ProviderScope is required because OpsFloodApp is a ConsumerWidget.
     await tester.pumpWidget(
-      const ProviderScope(child: EquinoxApp()),
+      const ProviderScope(child: OpsFloodApp()),
     );
-    expect(find.byType(EquinoxApp), findsOneWidget);
+    expect(find.byType(OpsFloodApp), findsOneWidget);
   });
 }

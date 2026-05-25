@@ -176,7 +176,8 @@ class OpsAreaChart extends StatelessWidget {
           lineTouchData: LineTouchData(
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => AppPalette.abyss3,
-              tooltipRoundedRadius: 10,
+              // tooltipRoundedRadius was removed in fl_chart ≥0.68; use tooltipBorderRadius.
+              tooltipBorderRadius: BorderRadius.circular(10),
               getTooltipItems: (touchedSpots) => touchedSpots
                   .map((s) => LineTooltipItem(
                         '${s.y.toStringAsFixed(2)}$yUnit',
