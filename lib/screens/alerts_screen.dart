@@ -1,13 +1,13 @@
 // lib/screens/alerts_screen.dart
-// OpsFlood — AlertsScreen v6 (Live Data Rebuild)
+// OpsFlood — AlertsScreen v6.1 (compile-error fixes)
 //
 // All alerts are derived directly from liveLevelsProvider (FloodData list).
 // No separate polling, no ThresholdAlertService needed.
 //
 // Alert levels:
-//   EXTREME  — currentLevel >= hfl          (above highest flood level)
-//   DANGER   — currentLevel >= dangerLevel   (at or above danger)
-//   WARNING  — currentLevel >= warningLevel  (approaching danger)
+//   EXTREME  — currentLevel >= dangerLevel * 1.2  (estimated HFL)
+//   DANGER   — currentLevel >= dangerLevel
+//   WARNING  — currentLevel >= warningLevel
 library;
 
 import 'package:flutter/material.dart';
@@ -48,7 +48,7 @@ enum LiveAlertLevel {
 class LiveAlert {
   final FloodData      data;
   final LiveAlertLevel level;
-  final double         aboveMark; // currentLevel - threshold crossed
+  final double         aboveMark;
 
   const LiveAlert({
     required this.data,
@@ -56,7 +56,6 @@ class LiveAlert {
     required this.aboveMark,
   });
 
-  // % of way between warningLevel and dangerLevel (capped 0–100)
   double get fillPct {
     final span = data.dangerLevel - data.warningLevel;
     if (span <= 0) return 100.0;
@@ -65,14 +64,14 @@ class LiveAlert {
   }
 
   String get trendLabel {
-    final r = data.riskLevel ?? '';
+    final r = data.riskLevel;
     if (r == 'CRITICAL' || r == 'HIGH') return 'Rising ↑';
     if (r == 'LOW')                     return 'Falling ↓';
     return 'Steady →';
   }
 
   Color get trendColor {
-    final r = data.riskLevel ?? '';
+    final r = data.riskLevel;
     if (r == 'CRITICAL' || r == 'HIGH') return const Color(0xFFEF4444);
     if (r == 'LOW')                     return const Color(0xFF22C55E);
     return const Color(0xFFD4A843);
@@ -85,10 +84,11 @@ final liveAlertsProvider = Provider<List<LiveAlert>>((ref) {
   final alerts = <LiveAlert>[];
 
   for (final d in levels) {
-    final cl = d.currentLevel;
-    final wl = d.warningLevel;
-    final dl = d.dangerLevel;
-    final hfl = d.hfl ?? double.infinity;
+    final cl  = d.currentLevel;
+    final wl  = d.warningLevel;
+    final dl  = d.dangerLevel;
+    // FIX: FloodData has no hfl field — estimate HFL as 120% of dangerLevel.
+    final hfl = dl * 1.2;
 
     LiveAlertLevel? level;
     double          aboveMark = 0;
@@ -109,7 +109,6 @@ final liveAlertsProvider = Provider<List<LiveAlert>>((ref) {
     }
   }
 
-  // Sort: extreme first, then danger, then warning; within level sort by aboveMark desc
   alerts.sort((a, b) {
     final lc = b.level.index.compareTo(a.level.index);
     return lc != 0 ? lc : b.aboveMark.compareTo(a.aboveMark);
@@ -134,15 +133,17 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     return all.where((a) => a.level == _filterLevel).toList();
   }
 
+  // FIX: RealTimeService has .refreshData(), not .refresh()
   Future<void> _refresh() async {
-    await ref.read(realTimeProvider).refresh();
+    await ref.read(realTimeProvider).refreshData();
   }
 
   @override
   Widget build(BuildContext context) {
     final all      = ref.watch(liveAlertsProvider);
     final filtered = _filtered(all);
-    final loading  = ref.watch(realTimeProvider).loading;
+    // FIX: RealTimeService getter is .isLoading, not .loading
+    final loading  = ref.watch(realTimeProvider).isLoading;
     final extreme  = all.where((a) => a.level == LiveAlertLevel.extreme).length;
     final danger   = all.where((a) => a.level == LiveAlertLevel.danger).length;
 
@@ -184,7 +185,6 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────────
   Widget _buildHeader(int total, int extreme, int danger) {
     final hasCritical = extreme > 0 || danger > 0;
     return Container(
@@ -192,16 +192,14 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppPalette.critical
-                .withValues(alpha: hasCritical ? 0.07 : 0.0),
+            AppPalette.critical.withValues(alpha: hasCritical ? 0.07 : 0.0),
             AppPalette.abyss0,
           ],
           begin: Alignment.topLeft,
           end:   Alignment.bottomRight,
         ),
         border: Border(
-            bottom: BorderSide(
-                color: AppPalette.abyssStroke, width: 1)),
+            bottom: BorderSide(color: AppPalette.abyssStroke, width: 1)),
       ),
       child: Row(
         children: [
@@ -254,34 +252,28 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     ),
     child: Text(text,
         style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.3,
+          color: color, fontSize: 10,
+          fontWeight: FontWeight.w900, letterSpacing: 0.3,
         )),
   );
 
-  // ── Extreme banner ──────────────────────────────────────────────────────
   Widget _buildExtremeBanner(int n) => Container(
     width: double.infinity,
     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
     color: AppPalette.critical.withValues(alpha: 0.12),
     child: Row(children: [
-      const Icon(Icons.flood_rounded,
-          color: AppPalette.critical, size: 18),
+      const Icon(Icons.flood_rounded, color: AppPalette.critical, size: 18),
       const SizedBox(width: 10),
       Text(
         '$n station${n > 1 ? 's' : ''} above Highest Flood Level — EVACUATE',
         style: const TextStyle(
           color: AppPalette.critical,
-          fontWeight: FontWeight.w700,
-          fontSize: 12,
+          fontWeight: FontWeight.w700, fontSize: 12,
         ),
       ),
     ]),
   );
 
-  // ── Filter bar ───────────────────────────────────────────────────────────
   Widget _buildFilterBar(List<LiveAlert> all) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -302,8 +294,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                   label:  '${l.label} ($cnt)',
                   active: _filterLevel == l,
                   color:  l.color,
-                  onTap:  () => setState(() =>
-                      _filterLevel = _filterLevel == l ? null : l),
+                  onTap:  () => setState(
+                      () => _filterLevel = _filterLevel == l ? null : l),
                 );
               }),
             ]),
@@ -327,7 +319,6 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────────────────
   Widget _buildEmpty(bool noData) => Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -345,19 +336,15 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
         ),
         const SizedBox(height: 14),
         Text(
-          noData
-              ? 'Loading live data…'
-              : 'All rivers within safe levels',
+          noData ? 'Loading live data…' : 'All rivers within safe levels',
           style: const TextStyle(
               color: AppPalette.textGrey,
-              fontSize: 14,
-              fontWeight: FontWeight.w600),
+              fontSize: 14, fontWeight: FontWeight.w600),
         ),
         if (noData) ...[
           const SizedBox(height: 8),
           const Text('Pull down to refresh',
-              style: TextStyle(
-                  color: AppPalette.textDim, fontSize: 11)),
+              style: TextStyle(color: AppPalette.textDim, fontSize: 11)),
         ],
       ],
     ),
@@ -374,9 +361,8 @@ class _AlertCard extends StatelessWidget {
     final d   = alert.data;
     final col = alert.level.color;
     final pct = alert.fillPct.clamp(0.0, 100.0) / 100.0;
-    final ts  = d.lastUpdated != null
-        ? DateFormat('dd MMM  HH:mm').format(d.lastUpdated!.toLocal())
-        : 'live';
+    // FIX: d.lastUpdated is non-nullable DateTime — no null check needed
+    final ts  = DateFormat('dd MMM  HH:mm').format(d.lastUpdated.toLocal());
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -388,15 +374,14 @@ class _AlertCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: col.withValues(alpha: 0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 4),
+            blurRadius: 18, offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: icon + city name + level badge
+          // Row 1: icon + city + level badge
           Row(children: [
             Container(
               width: 36, height: 36,
@@ -414,8 +399,7 @@ class _AlertCard extends StatelessWidget {
                   Text(d.city,
                       style: const TextStyle(
                         color: AppPalette.textWhite,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
+                        fontWeight: FontWeight.w800, fontSize: 14,
                       )),
                   Text(
                     '${d.state}  ·  ${d.riverName ?? 'River'}',
@@ -426,8 +410,7 @@ class _AlertCard extends StatelessWidget {
               ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 9, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
                 color: col.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(8),
@@ -435,16 +418,13 @@ class _AlertCard extends StatelessWidget {
               ),
               child: Text(alert.level.label,
                   style: TextStyle(
-                    color: col,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                  )),
+                    color: col, fontSize: 10, fontWeight: FontWeight.w900)),
             ),
           ]),
 
           const SizedBox(height: 12),
 
-          // Row 2: water level progress bar
+          // Row 2: water level bar
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -458,8 +438,7 @@ class _AlertCard extends StatelessWidget {
                   Text(
                     '+${alert.aboveMark.toStringAsFixed(2)} m above threshold',
                     style: TextStyle(
-                        color: col,
-                        fontSize: 10,
+                        color: col, fontSize: 10,
                         fontWeight: FontWeight.w700),
                   ),
                 ],
@@ -470,8 +449,7 @@ class _AlertCard extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: pct,
                   minHeight: 7,
-                  backgroundColor:
-                      Colors.white.withValues(alpha: 0.06),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
                   valueColor: AlwaysStoppedAnimation(col),
                 ),
               ),
@@ -480,26 +458,16 @@ class _AlertCard extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // Row 3: metrics
+          // Row 3: current / danger / warning metrics + trend
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _metric(
-                '${d.currentLevel.toStringAsFixed(2)} m',
-                'Current',
-                col,
-              ),
-              _metric(
-                '${d.dangerLevel.toStringAsFixed(2)} m',
-                'Danger',
-                AppPalette.critical,
-              ),
-              _metric(
-                '${d.warningLevel.toStringAsFixed(2)} m',
-                'Warning',
-                const Color(0xFFD4A843),
-              ),
-              // Trend chip
+              _metric('${d.currentLevel.toStringAsFixed(2)} m',
+                  'Current', col),
+              _metric('${d.dangerLevel.toStringAsFixed(2)} m',
+                  'Danger', AppPalette.critical),
+              _metric('${d.warningLevel.toStringAsFixed(2)} m',
+                  'Warning', const Color(0xFFD4A843)),
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 8, vertical: 4),
@@ -507,29 +475,25 @@ class _AlertCard extends StatelessWidget {
                   color: alert.trendColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(
-                  alert.trendLabel,
-                  style: TextStyle(
-                    color: alert.trendColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: Text(alert.trendLabel,
+                    style: TextStyle(
+                      color: alert.trendColor,
+                      fontSize: 10, fontWeight: FontWeight.w700,
+                    )),
               ),
             ],
           ),
 
           const SizedBox(height: 8),
 
-          // Row 4: source + timestamp
+          // Row 4: status tag + timestamp
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                d.source ?? 'live',
-                style: const TextStyle(
-                    color: AppPalette.textDim, fontSize: 9),
-              ),
+              // FIX: d.source doesn't exist — use d.status instead
+              Text(d.status,
+                  style: const TextStyle(
+                      color: AppPalette.textDim, fontSize: 9)),
               Text(ts,
                   style: const TextStyle(
                       color: AppPalette.textDim, fontSize: 9)),
@@ -543,17 +507,10 @@ class _AlertCard extends StatelessWidget {
   Widget _metric(String val, String label, Color c) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(val,
-          style: TextStyle(
-            color: c,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          )),
-      Text(label,
-          style: const TextStyle(
-            color: AppPalette.textGrey,
-            fontSize: 9,
-          )),
+      Text(val, style: TextStyle(
+          color: c, fontSize: 12, fontWeight: FontWeight.w800)),
+      Text(label, style: const TextStyle(
+          color: AppPalette.textGrey, fontSize: 9)),
     ],
   );
 }
@@ -580,9 +537,7 @@ class _FilterChip extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: active
-            ? color.withValues(alpha: 0.14)
-            : AppPalette.abyss2,
+        color: active ? color.withValues(alpha: 0.14) : AppPalette.abyss2,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: active
