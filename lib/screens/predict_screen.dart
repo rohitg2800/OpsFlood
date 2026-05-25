@@ -1,19 +1,25 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — Predict Screen v7.0
-// MERGED: River Level Trend chart + Flood Risk Predictor in one screen
-// Changes from v6.0:
-//   • Added _RiverTrendPanel — inline sparkline with warning/danger lines
-//   • Chart uses correct metre values from autofill (NOT discharge m³/s)
-//   • Panel appears after autofill badge, collapses when no city selected
+// OpsFlood — Predict Screen v7.1
+// WIRED: _RiverTrendPanel now uses real trendForCity() history from RealTimeService
+// Changes from v7.0:
+//   • PredictScreen → ConsumerStatefulWidget (gains WidgetRef access)
+//   • _applyAF() reads realTimeProvider.trendForCity(city) → _realHistory
+//   • _RiverTrendPanel accepts List<RiverLevelSnapshot>? realHistory
+//   • If realHistory.length >= 2 → uses real FlSpots + HH:mm x-axis labels
+//   • Falls back to synthetic _buildPoints() curve when no live data
 
 import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../constants.dart';
 import '../ml/flood_engine.dart';
+import '../models/river_monitoring.dart';
+import '../providers/flood_providers.dart';
 import '../services/api_service.dart';
 import '../services/predict.dart';
 
@@ -49,7 +55,7 @@ const _allStates = [
   'Andaman and Nicobar','Chandigarh','Lakshadweep',
 ];
 
-// ─── Autofill model ──────────────────────────────────────────────────────────
+// ─── Autofill model ───────────────────────────────────────────────────────────
 class _StationAutofill {
   final double? riverLevelM;
   final double? warningLevelM;
@@ -81,7 +87,7 @@ class _StationAutofill {
   }
 }
 
-// ─── City entry ──────────────────────────────────────────────────────────────
+// ─── City entry ───────────────────────────────────────────────────────────────
 class _CityEntry {
   final String city, state, river;
   const _CityEntry(this.city, this.state, this.river);
@@ -99,37 +105,37 @@ class _CityEntry {
   }
 }
 
-// ─── River Trend Panel (NEW) ─────────────────────────────────────────────────
-/// Inline sparkline card shown between autofill badge and river parameters.
-/// Uses the autofilled riverLevelM / warningLevelM / dangerLevelM (metres)
-/// to draw a synthetic 8-point trend with correct reference lines.
+// ─── River Trend Panel ────────────────────────────────────────────────────────
+/// Shows an fl_chart line chart with real metre values.
+/// • If [realHistory] has ≥ 2 points → uses real FlSpots + HH:mm x-axis
+/// • Otherwise → falls back to a synthetic 8-point curve derived from [af]
 class _RiverTrendPanel extends StatelessWidget {
   final _StationAutofill af;
   final String cityName;
+  /// Real 24-hr snapshots from RealTimeService.trendForCity() — may be empty.
+  final List<RiverLevelSnapshot> realHistory;
 
-  const _RiverTrendPanel({required this.af, required this.cityName});
+  const _RiverTrendPanel({
+    required this.af,
+    required this.cityName,
+    required this.realHistory,
+  });
 
-  /// Build a plausible 8-point history from a single snapshot.
-  /// Trend: RISING → levels increase toward current; FALLING → decrease; else flat.
-  List<double> _buildPoints() {
+  // ── Fallback: synthetic 8-point curve from a single snapshot ───────────────
+  List<double> _buildSynthetic() {
     final level   = af.riverLevelM ?? 0.0;
     final warning = af.warningLevelM ?? level * 0.8;
     final trend   = af.trend ?? 'STABLE';
     if (level <= 0) return List.filled(8, 0.0);
-    // spread over ±15% based on trend direction
     return List.generate(8, (i) {
-      final t = i / 7.0; // 0..1
+      final t = i / 7.0;
       if (trend == 'RISING') {
-        // start low, end at current
         return warning * 0.6 + (level - warning * 0.6) * t;
       } else if (trend == 'FALLING') {
-        // start high, end at current
-        final peak = math.max(level * 1.15, (af.dangerLevelM ?? level * 1.2));
+        final peak = math.max(level * 1.15, af.dangerLevelM ?? level * 1.2);
         return peak - (peak - level) * t;
       } else {
-        // stable: gentle oscillation ±3%
-        final osc = level * 0.03 * math.sin(i * 0.9);
-        return level + osc;
+        return level + level * 0.03 * math.sin(i * 0.9);
       }
     });
   }
@@ -148,24 +154,53 @@ class _RiverTrendPanel extends StatelessWidget {
     final warning = af.warningLevelM;
     final danger  = af.dangerLevelM;
     final safe    = warning != null ? warning * 0.85 : null;
-    final points  = _buildPoints();
     final col     = _levelColor(level);
-    final trendIcon = af.trend == 'RISING'  ? '↑' :
-                      af.trend == 'FALLING' ? '↓' : '→';
 
-    // Y axis range — pad 20% above max reference line
+    // ── Decide data source ──────────────────────────────────────────────────
+    final useReal = realHistory.length >= 2;
+
+    // Sort real history oldest → newest
+    final sorted = useReal
+        ? (List<RiverLevelSnapshot>.from(realHistory)
+            ..sort((a, b) => a.timestamp.compareTo(b.timestamp)))
+        : <RiverLevelSnapshot>[];
+
+    // Build FlSpots
+    final List<FlSpot> spots;
+    if (useReal) {
+      spots = sorted.asMap().entries
+          .map((e) => FlSpot(e.key.toDouble(), e.value.level))
+          .toList();
+    } else {
+      final pts = _buildSynthetic();
+      spots = pts.asMap().entries
+          .map((e) => FlSpot(e.key.toDouble(), e.value))
+          .toList();
+    }
+
+    // Y range
     final allVals = [
-      ...points,
+      ...spots.map((s) => s.y),
       if (warning != null) warning,
       if (danger  != null) danger,
     ];
     final minY = allVals.reduce(math.min) * 0.85;
     final maxY = allVals.reduce(math.max) * 1.20;
 
-    // Build fl_chart line spots
-    final spots = points.asMap().entries
-        .map((e) => FlSpot(e.key.toDouble(), e.value))
-        .toList();
+    final trendIcon = af.trend == 'RISING'  ? '↑' :
+                      af.trend == 'FALLING' ? '↓' : '→';
+
+    // X-axis label helper (only used for real data)
+    final timeFmt = DateFormat('HH:mm');
+    String xLabel(double x) {
+      final i = x.toInt().clamp(0, sorted.length - 1);
+      return timeFmt.format(sorted[i].timestamp.toLocal());
+    }
+
+    // How many x-axis ticks to show (avoid crowding)
+    final tickInterval = useReal
+        ? math.max(1, (spots.length / 4).floor()).toDouble()
+        : 1.0;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -176,12 +211,15 @@ class _RiverTrendPanel extends StatelessWidget {
         boxShadow: [BoxShadow(color: col.withOpacity(0.08), blurRadius: 16)],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // ── Title row ──────────────────────────────────────────────────────
+
+        // ── Title row ────────────────────────────────────────────────────────
         Row(children: [
           const Icon(Icons.show_chart, color: _kCyan, size: 14),
           const SizedBox(width: 6),
           Expanded(child: Text(
-            'River Level Trend  ·  $cityName',
+            useReal
+                ? 'River Level · $cityName  (${sorted.length} readings)'
+                : 'River Level · $cityName  (estimated)',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800,
                 fontSize: 12, letterSpacing: 0.5),
             overflow: TextOverflow.ellipsis,
@@ -199,12 +237,36 @@ class _RiverTrendPanel extends StatelessWidget {
               style: TextStyle(color: col, fontSize: 11, fontWeight: FontWeight.w800),
             ),
           ),
+          // LIVE badge when using real telemetry
+          if (useReal) ...[ 
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: _kCyan.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kCyan.withOpacity(0.3)),
+              ),
+              child: const Text('LIVE', style: TextStyle(
+                  color: _kCyan, fontSize: 8, fontWeight: FontWeight.w800)),
+            ),
+          ],
         ]),
+
+        // Time range subtitle when real data present
+        if (useReal) ...[
+          const SizedBox(height: 4),
+          Text(
+            '${timeFmt.format(sorted.first.timestamp.toLocal())}  →  '
+            '${timeFmt.format(sorted.last.timestamp.toLocal())}',
+            style: const TextStyle(color: _kMuted, fontSize: 9),
+          ),
+        ],
         const SizedBox(height: 12),
 
-        // ── Sparkline chart ────────────────────────────────────────────────
+        // ── Chart ────────────────────────────────────────────────────────────
         SizedBox(
-          height: 110,
+          height: 120,
           child: LineChart(LineChartData(
             minY: minY,
             maxY: maxY,
@@ -218,9 +280,10 @@ class _RiverTrendPanel extends StatelessWidget {
             ),
             borderData: FlBorderData(show: false),
             titlesData: FlTitlesData(
+              // Left axis: metre values
               leftTitles: AxisTitles(sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 36,
+                reservedSize: 38,
                 interval: (maxY - minY) / 4,
                 getTitlesWidget: (v, _) => Text(
                   v.toStringAsFixed(1),
@@ -229,9 +292,25 @@ class _RiverTrendPanel extends StatelessWidget {
               )),
               rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               topTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              // Bottom axis: HH:mm when real, hidden when synthetic
+              bottomTitles: AxisTitles(sideTitles: SideTitles(
+                showTitles: useReal,
+                reservedSize: 18,
+                interval: tickInterval,
+                getTitlesWidget: (v, _) {
+                  if (!useReal) return const SizedBox.shrink();
+                  // Only label at evenly spaced ticks to avoid crowding
+                  final i = v.toInt();
+                  if (i % tickInterval.toInt() != 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(xLabel(v),
+                        style: const TextStyle(color: _kMuted, fontSize: 8)),
+                  );
+                },
+              )),
             ),
-            // ── Reference lines (warning / danger / safe) ──────────────
+            // ── Reference lines ─────────────────────────────────────────────
             extraLinesData: ExtraLinesData(horizontalLines: [
               if (warning != null)
                 HorizontalLine(
@@ -273,6 +352,7 @@ class _RiverTrendPanel extends StatelessWidget {
                   ),
                 ),
             ]),
+            // ── Sparkline ───────────────────────────────────────────────────
             lineBarsData: [
               LineChartBarData(
                 spots: spots,
@@ -306,7 +386,7 @@ class _RiverTrendPanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
 
-        // ── Threshold legend ───────────────────────────────────────────────
+        // ── Threshold legend ─────────────────────────────────────────────────
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           if (warning != null)
             _ThresholdBadge('Warning', '${warning.toStringAsFixed(1)} m', _kAmber),
@@ -314,17 +394,8 @@ class _RiverTrendPanel extends StatelessWidget {
             _ThresholdBadge('Danger',  '${danger.toStringAsFixed(1)} m', _kRed),
           if (safe != null)
             _ThresholdBadge('Safe',    '${safe.toStringAsFixed(1)} m',   _kOliveL),
-          if (af.source == 'LIVE_LEVELS' || af.source == 'CWC_API')
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: _kCyan.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _kCyan.withOpacity(0.3)),
-              ),
-              child: const Text('LIVE', style: TextStyle(
-                  color: _kCyan, fontSize: 8, fontWeight: FontWeight.w800)),
-            ),
+          if (!useReal)
+            const _ThresholdBadge('Data', 'Estimated', _kMuted),
         ]),
       ]),
     );
@@ -348,13 +419,15 @@ class _ThresholdBadge extends StatelessWidget {
   );
 }
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
-class PredictScreen extends StatefulWidget {
+// ─── Screen ───────────────────────────────────────────────────────────────────
+// Converted to ConsumerStatefulWidget so _applyAF() can call
+// ref.read(realTimeProvider).trendForCity(city) without a BuildContext.
+class PredictScreen extends ConsumerStatefulWidget {
   const PredictScreen({super.key});
-  @override State<PredictScreen> createState() => _PredictScreenState();
+  @override ConsumerState<PredictScreen> createState() => _PredictScreenState();
 }
 
-class _PredictScreenState extends State<PredictScreen>
+class _PredictScreenState extends ConsumerState<PredictScreen>
     with SingleTickerProviderStateMixin {
 
   late AnimationController _gaugeCtrl;
@@ -379,6 +452,9 @@ class _PredictScreenState extends State<PredictScreen>
   bool   _sectionRain  = true;
   bool   _useOffline   = false;
   _StationAutofill? _lastAF;
+
+  /// Real 24-hr snapshots — populated in _applyAF() from trendForCity().
+  List<RiverLevelSnapshot> _realHistory = [];
 
   late final List<_CityEntry> _allCities;
   final _svc = const PredictionService();
@@ -423,6 +499,7 @@ class _PredictScreenState extends State<PredictScreen>
       _selectedCity  = e.city;
       _selectedState = e.state.isNotEmpty && _allStates.contains(e.state) ? e.state : _selectedState;
       _autofilled = false; _lastAF = null;
+      _realHistory = [];
       _cityCtrl.text = e.city;
     });
     _autofillFromLive(e.city, e.state);
@@ -435,7 +512,7 @@ class _PredictScreenState extends State<PredictScreen>
       final raw = r['data'];
       if (raw is List && raw.isNotEmpty) {
         final af = _matchList(raw, city, state, 'CWC_API');
-        if (af != null) { _applyAF(af); return; }
+        if (af != null) { _applyAF(af, city); return; }
       }
     } catch (_) {}
     try {
@@ -443,11 +520,11 @@ class _PredictScreenState extends State<PredictScreen>
       final raw = _extractList(r);
       if (raw.isNotEmpty) {
         final af = _matchList(raw, city, state, 'LIVE_LEVELS');
-        if (af != null) { _applyAF(af); return; }
+        if (af != null) { _applyAF(af, city); return; }
       }
     } catch (_) {}
     final af = _matchConst(city, state);
-    if (af != null) { _applyAF(af); return; }
+    if (af != null) { _applyAF(af, city); return; }
     if (mounted) setState(() => _autofilling = false);
   }
 
@@ -522,8 +599,13 @@ class _PredictScreenState extends State<PredictScreen>
     return [];
   }
 
-  void _applyAF(_StationAutofill af) {
+  /// Applies autofill fields AND fetches real 24-hr history from RealTimeService.
+  void _applyAF(_StationAutofill af, String city) {
     if (!mounted) return;
+
+    // ── Pull real trend history via Riverpod ──────────────────────────────
+    final history = ref.read(realTimeProvider).trendForCity(city);
+
     final lv = af.riverLevelM;
     if (lv != null && lv > 0) _peakCtrl.text = lv.toStringAsFixed(2);
     _durCtrl.text      = af.derivedDuration.toStringAsFixed(0);
@@ -531,7 +613,13 @@ class _PredictScreenState extends State<PredictScreen>
     _recCtrl.text      = af.derivedRecession(lv).toStringAsFixed(0);
     final r7 = af.derivedRainfall7d;
     for (int i = 0; i < 7; i++) _rainCtrl[i].text = r7[i].toStringAsFixed(1);
-    setState(() { _autofilling = false; _autofilled = true; _lastAF = af; });
+
+    setState(() {
+      _autofilling = false;
+      _autofilled  = true;
+      _lastAF      = af;
+      _realHistory = history; // ← wired: real snapshots (or [] if none yet)
+    });
   }
 
   static double _sfp(dynamic v) => (v == null || v == '') ? 0.0 : (double.tryParse(v.toString()) ?? 0.0);
@@ -587,21 +675,22 @@ class _PredictScreenState extends State<PredictScreen>
                 _citySearchRow(),
                 const SizedBox(height: 14),
 
-                // ── Autofill badge ──────────────────────────────────────
+                // ── Autofill badge ──────────────────────────────────────────
                 if (_autofilled && _lastAF != null) _autofillBadge(_lastAF!),
                 if (_autofilled && _lastAF != null) const SizedBox(height: 12),
 
-                // ── RIVER LEVEL TREND (merged from city_detail_screen) ──
+                // ── River Level Trend chart (real or synthetic) ─────────────
                 if (_autofilled && _lastAF != null &&
                     (_lastAF!.riverLevelM ?? 0) > 0) ...[
                   _RiverTrendPanel(
                     af: _lastAF!,
                     cityName: _selectedCity ?? '',
+                    realHistory: _realHistory,   // ← wired
                   ),
                   const SizedBox(height: 12),
                 ],
 
-                // ── River parameters ────────────────────────────────────
+                // ── River parameters ────────────────────────────────────────
                 _collapsible(
                   title: '  RIVER PARAMETERS',
                   icon: Icons.water_outlined,
@@ -611,7 +700,7 @@ class _PredictScreenState extends State<PredictScreen>
                 ),
                 const SizedBox(height: 12),
 
-                // ── 7-day rainfall ──────────────────────────────────────
+                // ── 7-day rainfall ──────────────────────────────────────────
                 _collapsible(
                   title: '  7-DAY RAINFALL  (mm/day)',
                   icon: Icons.cloudy_snowing,
@@ -723,7 +812,7 @@ class _PredictScreenState extends State<PredictScreen>
             prefixIcon: const Icon(Icons.search, color: _kOlive, size: 18),
             suffixIcon: ctrl.text.isNotEmpty
                 ? IconButton(icon: Icon(Icons.clear, color: _kMuted, size: 16),
-                    onPressed: () { ctrl.clear(); setState(() { _selectedCity = null; _autofilled = false; _lastAF = null; }); })
+                    onPressed: () { ctrl.clear(); setState(() { _selectedCity = null; _autofilled = false; _lastAF = null; _realHistory = []; }); })
                 : null,
             isDense: true,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
@@ -839,6 +928,19 @@ class _PredictScreenState extends State<PredictScreen>
                   style: TextStyle(color: _trendCol(af.trend!), fontSize: 9, fontWeight: FontWeight.w700)),
             ),
           ],
+          // Show reading count from real history
+          if (_realHistory.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _kCyan.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _kCyan.withOpacity(0.35))),
+              child: Text('${_realHistory.length} pts',
+                  style: const TextStyle(color: _kCyan, fontSize: 9, fontWeight: FontWeight.w700)),
+            ),
+          ],
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 6, runSpacing: 6, children: [
@@ -858,7 +960,7 @@ class _PredictScreenState extends State<PredictScreen>
   String _trendIcon(String t) => t=='RISING' ? '↑' : t=='FALLING' ? '↓' : '→';
   Color _statCol(String s) => s=='CRITICAL' ? _kRed : s=='WARNING' ? _kAmber : const Color(0xFF4CAF50);
 
-  // ─── Collapsible section ─────────────────────────────────────────────────────
+  // ─── Collapsible ─────────────────────────────────────────────────────────────
   Widget _collapsible({
     required String title, required IconData icon,
     required bool expanded, required VoidCallback onToggle, required Widget child,
@@ -986,7 +1088,7 @@ class _PredictScreenState extends State<PredictScreen>
     );
   }
 
-  // ─── Error banner ────────────────────────────────────────────────────────────
+  // ─── Error banner ─────────────────────────────────────────────────────────────
   Widget _errorBanner() => Container(
     margin: const EdgeInsets.only(top: 12),
     padding: const EdgeInsets.all(14),
@@ -1012,7 +1114,7 @@ class _PredictScreenState extends State<PredictScreen>
     ]),
   );
 
-  // ─── Results ─────────────────────────────────────────────────────────────────
+  // ─── Results ──────────────────────────────────────────────────────────────────
   Widget _results() {
     final r   = _result!;
     final col = _severityColors[r.severity] ?? _kAmber;
@@ -1241,7 +1343,7 @@ class _MilCard extends StatelessWidget {
     decoration: BoxDecoration(
       color: _kSurface, borderRadius: BorderRadius.circular(16),
       border: Border.all(color: borderColor ?? _kBorder),
-      boxShadow: shadowColor != null
+      boxShadows: shadowColor != null
           ? [BoxShadow(color: shadowColor!, blurRadius: 24, spreadRadius: 2)] : null),
     child: child,
   );
