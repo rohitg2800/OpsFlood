@@ -1,19 +1,23 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood Bihar — LiveFetchEngine (v18.0 Bihar-only)
+// OpsFlood Bihar — LiveFetchEngine (v19.0 — portal-only, no backend)
 //
-// CHANGES in v18.0:
+// DATA SOURCES (ALL direct, no OpsFlood backend):
+//   1. WrdBiharService  → irrigation.befiqr.in / beams.fmiscwrdbihar.gov.in
+//      Official Bihar WRD portal. Primary real-gauge source.
+//   2. GloFAS           → flood-api.open-meteo.com
+//      River discharge (m³/s) and 7-day history for every city lat/lon.
+//   3. Open-Meteo       → api.open-meteo.com
+//      Precipitation, temperature, humidity.
+//   4. CwcDirectService → cwc.gov.in HTML scrape
+//      CWC gauge readings when available.
+//   5. SACHET/NDMA      → sachet.ndma.gov.in
+//      IMD weather alerts.
 //
-//   1. WrdBiharService is now the UNCONDITIONAL primary gauge source.
-//      The old `city.state == 'Bihar'` guard is removed — every city
-//      in kIndiaCities is a Bihar station, so the guard was redundant.
-//
-//   2. _fetchBackendLevels() and CwcDirectService are kept as fallbacks
-//      but WRD override always wins when wrd != null.
-//
-//   3. healthySources now counts WRD in slot [5].
-//
-// v17.3 → v18.0: no logic changes other than removing the state guard.
+// REMOVED in v19.0:
+//   - _wakeBackend()         — was pinging dead opsflood.onrender.com
+//   - _fetchBackendLevels()  — was the sole cause of 404 GET /live/levels
+//   - _backendAwake flag     — not needed without backend
 library;
 
 import 'dart:async';
@@ -27,7 +31,6 @@ import '../data/india_cities.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'cwc_direct_service.dart';
-import 'flood_api.dart';
 import 'wrd_bihar_service.dart';
 
 class MlInferenceEngine {}
@@ -58,16 +61,22 @@ class LiveFetchEngine {
   factory LiveFetchEngine() => _instance;
   LiveFetchEngine._internal();
 
-  final _api = FloodApi.instance;
   final http.Client _externalClient = http.Client();
   final CwcDirectService _cwcDirect = CwcDirectService.instance;
   final Random           _rng       = Random();
 
-  Map<String, dynamic>? _matchCity(List<Map<String, dynamic>> raw, String cityName) {
+  Map<String, dynamic>? _matchCity(
+      List<Map<String, dynamic>> raw, String cityName) {
     final target = cityName.toLowerCase().trim();
     for (final station in raw) {
-      final name = (station['station'] ?? station['stationName'] ?? station['city'] ?? station['name'] ?? '')
-          .toString().toLowerCase().trim();
+      final name = (station['station'] ??
+              station['stationName'] ??
+              station['city'] ??
+              station['name'] ??
+              '')
+          .toString()
+          .toLowerCase()
+          .trim();
       if (name.contains(target) || target.contains(name)) return station;
     }
     return null;
@@ -75,7 +84,6 @@ class LiveFetchEngine {
 
   Timer? _timer;
   bool   _lock = false;
-  bool _backendAwake = false;
 
   static bool get _runningOnWeb => kIsWeb;
 
@@ -91,18 +99,19 @@ class LiveFetchEngine {
   int       queuedOfflineCycles = 0;
   String?   fetchingCity;
 
-  List<FloodData>    liveLevels           = [];
-  List<dynamic>      activeCriticalAlerts = [];
-  List<dynamic>      criticalAlerts       = [];
-  int                criticalCount        = 0;
-  List<dynamic>      cwcStations          = [];
-  bool               hasCwcLiveData       = false;
-  List<dynamic>      imdAlerts            = [];
-  List<dynamic>      ndmaAdvisories       = [];
-  List<dynamic>      emergencyContacts    = [];
+  List<FloodData> liveLevels           = [];
+  List<dynamic>   activeCriticalAlerts = [];
+  List<dynamic>   criticalAlerts       = [];
+  int             criticalCount        = 0;
+  List<dynamic>   cwcStations          = [];
+  bool            hasCwcLiveData       = false;
+  List<dynamic>   imdAlerts            = [];
+  List<dynamic>   ndmaAdvisories       = [];
+  List<dynamic>   emergencyContacts    = [];
 
   MultiLocationMonitoring monitoringData = MultiLocationMonitoring(
-    locations: [], fetchedAt: DateTime.now(),
+    locations: [],
+    fetchedAt: DateTime.now(),
   );
 
   Map<String, dynamic> debugLevelsRaw    = {};
@@ -140,13 +149,14 @@ class LiveFetchEngine {
         return s.toLowerCase() == state.toLowerCase() || s == 'All India';
       }).toList();
 
-  // Bihar-only convenience getters
   List<dynamic> get biharAlerts => criticalAlerts
-      .where((a) => (a is Map ? a['state'] : null)?.toString() == 'Bihar')
+      .where((a) =>
+          (a is Map ? a['state'] : null)?.toString() == 'Bihar')
       .toList();
 
   List<dynamic> get biharImdAlerts => imdAlertsForState('Bihar');
 
+  // ── Polling ──────────────────────────────────────────────────────────────────────
   Future<void> startPolling() async {
     _timer?.cancel();
     await refreshData();
@@ -158,54 +168,23 @@ class LiveFetchEngine {
     _timer = null;
   }
 
-  Future<bool> _wakeBackend() async {
-    if (_runningOnWeb || _backendAwake) return _backendAwake;
-    try {
-      debugWakeAttempts++;
-      if (kDebugMode) debugPrint('[LiveFetch] waking backend…');
-      final res = await _api.healthCheck(coldStart: true);
-      _backendAwake = res['status'] != 'error';
-      if (kDebugMode) debugPrint('[LiveFetch] backend awake: $_backendAwake');
-    } catch (e) {
-      _backendAwake = false;
-      if (kDebugMode) debugPrint('[LiveFetch] backend wake failed: $e');
-    }
-    return _backendAwake;
-  }
-
-  Future<http.Response> _externalGet(
-    Uri uri, {
-    Duration timeout = const Duration(seconds: 12),
-  }) async {
-    var res = await _externalClient.get(uri).timeout(timeout);
-    if (res.statusCode == 429) {
-      final retryAfter = int.tryParse(res.headers['retry-after'] ?? '') ?? 60;
-      final wait = Duration(seconds: retryAfter) +
-          Duration(milliseconds: _rng.nextInt(3000));
-      if (kDebugMode) debugPrint('[LiveFetch] 429 on $uri — waiting ${wait.inSeconds}s');
-      await Future.delayed(wait);
-      res = await _externalClient.get(uri).timeout(timeout);
-    }
-    return res;
-  }
-
+  // ── Main refresh cycle ───────────────────────────────────────────────────────────
   Future<void> refreshData() async {
     if (_lock) return;
     _lock     = true;
     isLoading = true;
-    if (!isOnline) isWakingUp = true;
     Future.delayed(Duration.zero, () => onStateChanged?.call());
 
     try {
-      await _wakeBackend();
-      isWakingUp = false;
+      // Warm WRD Bihar cache once per refresh cycle.
+      await WrdBiharService.instance.fetch();
 
       final cities       = _priorityCities();
       final newLevels    = <FloodData>[];
       final newLocations = <RiverMonitoring>[];
       final newAlerts    = <Map<String, dynamic>>[];
       final newCwc       = <Map<String, dynamic>>[];
-      int   healthy      = 0;
+      int healthy        = 0;
 
       for (final city in cities) {
         fetchingCity = city.name;
@@ -241,7 +220,7 @@ class LiveFetchEngine {
             'currentLevel': snap['cwcLevel'],
             'dangerLevel':  snap['dangerLevel'],
             'warningLevel': snap['warningLevel'],
-            'source':       snap['cwcSource'] ?? 'CWC',
+            'source':       snap['cwcSource'] ?? 'WRD_BIHAR',
           });
         }
 
@@ -250,13 +229,15 @@ class LiveFetchEngine {
 
         liveLevels           = List.of(newLevels);
         criticalAlerts       = List.of(newAlerts);
-        activeCriticalAlerts = newAlerts.where((a) => a['severity'] == 'CRITICAL').toList();
-        criticalCount        = activeCriticalAlerts.length;
-        cwcStations          = List.of(newCwc);
-        hasCwcLiveData       = newCwc.isNotEmpty;
-        isOnline             = true;
-        error                = null;
-        lastFetchTime        = DateTime.now();
+        activeCriticalAlerts = newAlerts
+            .where((a) => a['severity'] == 'CRITICAL')
+            .toList();
+        criticalCount = activeCriticalAlerts.length;
+        cwcStations   = List.of(newCwc);
+        hasCwcLiveData = newCwc.isNotEmpty;
+        isOnline      = true;
+        error         = null;
+        lastFetchTime = DateTime.now();
         monitoringData = MultiLocationMonitoring(
           locations: List.of(newLocations),
           fetchedAt: lastFetchTime!,
@@ -265,9 +246,12 @@ class LiveFetchEngine {
         Future.delayed(Duration.zero, () => onStateChanged?.call());
 
         if (kDebugMode) {
-          debugPrint('[LiveFetch] ✓ ${city.name} | src=${snap['healthySources']} '
-              '| risk=${snap['riskLabel']} | level=${snap['cwcLevel']} '
-              '| flow=${snap['flowRate']} m³/s | wrdSrc=${snap['cwcSource']}');
+          debugPrint('[LiveFetch] ✓ ${city.name} | '
+              'src=${snap['healthySources']} '
+              '| risk=${snap['riskLabel']} '
+              '| level=${snap['cwcLevel']} '
+              '| flow=${snap['flowRate']} m³/s '
+              '| wrdSrc=${snap['cwcSource']}');
         }
 
         if (city != cities.last) {
@@ -293,91 +277,78 @@ class LiveFetchEngine {
       }
     } catch (e, st) {
       isOnline     = false;
-      isWakingUp   = false;
       fetchingCity = null;
       error        = e.toString();
       debugRetryCount++;
       if (kDebugMode) debugPrint('[LiveFetch] error: $e\n$st');
     } finally {
       isLoading    = false;
+      isWakingUp   = false;
       fetchingCity = null;
       _lock        = false;
       Future.delayed(Duration.zero, () => onStateChanged?.call());
     }
   }
 
+  // ── Per-city fetch: WRD Bihar + GloFAS + Open-Meteo + CWC Direct + IMD ───
   Future<Map<String, dynamic>?> _fetchCity(IndiaCity city) async {
     try {
       final weatherFut   = _fetchWeather(city);
       final glofasFut    = _fetchGloFas(city);
       final cwcDirectFut = _cwcDirect.fetch(city);
-      final backendFut   = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
-      final imdFut       = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
-      // WRD Bihar is primary for ALL cities (every city is Bihar)
+      final imdFut       = _runningOnWeb
+          ? Future<List<dynamic>?>.value(null)
+          : _fetchImdAlerts(city);
+      // WRD Bihar is primary for ALL cities in kIndiaCities
       final wrdFut = WrdBiharService.instance.fetchBestMatch(
         city.name,
         river: city.river,
       );
 
-      final results = await Future.wait([
-        weatherFut, glofasFut, cwcDirectFut, backendFut, imdFut, wrdFut,
-      ], eagerError: false);
+      final results = await Future.wait(
+        [weatherFut, glofasFut, cwcDirectFut, imdFut, wrdFut],
+        eagerError: false,
+      );
 
       final weather   = results[0] as Map<String, dynamic>?;
       final glofas    = results[1] as Map<String, dynamic>?;
       final cwcDirect = results[2] as CwcReading?;
-      final backend   = results[3] as Map<String, dynamic>?;
-      final imd       = results[4] as List<dynamic>?;
-      final wrd       = results[5] as WrdStation?;
+      final imd       = results[3] as List<dynamic>?;
+      final wrd       = results[4] as WrdStation?;
 
-      if (weather == null && glofas == null && backend == null && wrd == null) return null;
+      // Need at least one live source
+      if (weather == null && glofas == null && wrd == null) return null;
 
       final healthySources = [
         weather != null, glofas != null,
-        cwcDirect != null, backend != null, imd != null, wrd != null,
+        cwcDirect != null, imd != null, wrd != null,
       ].where((v) => v).length;
 
       final precipMm    = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
-      final discharge7d = (glofas?['discharge7d'] as List?)?.cast<double>() ?? <double>[];
-      final backendFlow  = (backend?['flow_rate']  as num?)?.toDouble() ?? 0.0;
-      final glofasFlow   = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
-      final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
+      final discharge7d = (glofas?['discharge7d'] as List?)
+                              ?.cast<double>() ?? <double>[];
+      final glofasFlow  = (glofas?['discharge'] as num?)?.toDouble() ?? 0.0;
 
-      double? cwcLevel    = _safeLevel(backend?['current_level']);
-      double? dangerLevel = _safeLevel(backend?['danger_level']);
-      double? warnLevel   = _safeLevel(backend?['warning_level']);
-      double? safeLevel   = _safeLevel(backend?['safe_level']);
-      String? backendSrc  = backend?['data_source'] as String?;
+      double? cwcLevel    = null;
+      double? dangerLevel = null;
+      double? warnLevel   = null;
+      double? safeLevel   = null;
+      String? cwcSource   = null;
 
-      final isSyntheticBackend =
-          backendSrc != null && _kSyntheticSources.contains(backendSrc.toUpperCase());
-
-      String? backendRisk;
-      if (!isSyntheticBackend) {
-        backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
-      } else {
-        cwcLevel = dangerLevel = warnLevel = safeLevel = null;
-        if (kDebugMode) debugPrint('[LiveFetch] ${city.name}: skip synthetic bkSrc=$backendSrc');
-      }
-      String? cwcSource = (!isSyntheticBackend && backend != null)
-          ? (backendSrc ?? 'BACKEND')
-          : null;
-
+      // CWC Direct (lower priority than WRD)
       if (cwcDirect != null) {
-        cwcLevel    = cwcDirect.level    ?? cwcLevel;
-        dangerLevel = cwcDirect.danger   ?? dangerLevel;
-        warnLevel   = cwcDirect.warning  ?? warnLevel;
+        cwcLevel    = cwcDirect.level   ?? cwcLevel;
+        dangerLevel = cwcDirect.danger  ?? dangerLevel;
+        warnLevel   = cwcDirect.warning ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null;
       }
 
-      // WRD Bihar — highest-priority real gauge override
+      // WRD Bihar — highest-priority real gauge
       if (wrd != null) {
         cwcLevel    = wrd.currentLevel  ?? cwcLevel;
         dangerLevel = wrd.dangerLevel   ?? dangerLevel;
         warnLevel   = wrd.warningLevel  ?? warnLevel;
         cwcSource   = 'WRD_BIHAR';
-        backendRisk = null;
         if (kDebugMode) {
           debugPrint('[LiveFetch] WRD ✓ ${city.name}: '
               'level=${wrd.currentLevel} danger=${wrd.dangerLevel} '
@@ -385,62 +356,93 @@ class LiveFetchEngine {
         }
       }
 
+      // Fallback to city config thresholds
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
       warnLevel   ??= city.warningLevel > 0 ? city.warningLevel : null;
 
-      final String riskLabel;
-      if (backendRisk != null && backendRisk.isNotEmpty) {
-        riskLabel = _upgradeRiskFromLevel(backendRisk, cwcLevel, dangerLevel, warnLevel);
-      } else {
-        riskLabel = _inferRisk(
-          precipMm:     precipMm,
-          dischargeM3s: dischargeM3s,
-          discharge7d:  discharge7d,
-          currentLevel: cwcLevel,
-          dangerLevel:  dangerLevel,
-        );
-      }
+      final riskLabel = _inferRisk(
+        precipMm:     precipMm,
+        dischargeM3s: glofasFlow,
+        discharge7d:  discharge7d,
+        currentLevel: cwcLevel,
+        dangerLevel:  dangerLevel,
+        wrdRisk:      wrd?.riskLabel,
+      );
 
       return {
         'precip_mm':      precipMm,
-        'discharge':      dischargeM3s,
+        'discharge':      glofasFlow,
         'discharge7d':    discharge7d,
-        'flowRate':       dischargeM3s,
+        'flowRate':       glofasFlow,
         'cwcLevel':       cwcLevel,
         'dangerLevel':    dangerLevel,
         'warningLevel':   warnLevel,
         'safeLevel':      safeLevel,
         'cwcSource':      cwcSource,
-        'backendSource':  backendSrc,
         'riskLabel':      riskLabel,
         'healthySources': healthySources,
         'imdAlerts':      imd ?? <dynamic>[],
       };
-    } catch (_) {
+    } catch (e) {
+      if (kDebugMode) debugPrint('[LiveFetch] _fetchCity ${city.name}: $e');
       return null;
     }
   }
 
-  String _upgradeRiskFromLevel(
-    String base, double? current, double? danger, double? warning,
-  ) {
-    const rank = {'CRITICAL': 4, 'HIGH': 3, 'MODERATE': 2, 'LOW': 1, 'NORMAL': 1};
-    int score = rank[base] ?? 1;
-    if (current != null && danger != null && danger > 0) {
-      final r = current / danger;
-      if (r >= 1.0  && score < 4) score = 4;
-      else if (r >= 0.85 && score < 3) score = 3;
-      else if (r >= 0.70 && score < 2) score = 2;
-    } else if (current != null && warning != null && warning > 0) {
-      final r = current / warning;
-      if (r >= 1.0 && score < 3) score = 3;
+  // ── Risk inference (WRD label takes priority when available) ────────────
+  String _inferRisk({
+    required double precipMm,
+    required double dischargeM3s,
+    required List<double> discharge7d,
+    double? currentLevel,
+    double? dangerLevel,
+    String? wrdRisk,         // from WrdStation.riskLabel
+  }) {
+    // WRD Bihar gives us an official label directly — use it if high enough
+    if (wrdRisk != null) {
+      switch (wrdRisk.toUpperCase()) {
+        case 'CRITICAL': return 'CRITICAL';
+        case 'HIGH':     return 'HIGH';
+        case 'MODERATE': break;  // still check GloFAS below
+        default:         break;
+      }
     }
-    return score >= 4 ? 'CRITICAL'
-         : score == 3 ? 'HIGH'
-         : score == 2 ? 'MODERATE'
-         : 'LOW';
+
+    double score = 0.0;
+    if (precipMm > 150)       score += 0.35;
+    else if (precipMm > 80)   score += 0.25;
+    else if (precipMm > 40)   score += 0.15;
+    else if (precipMm > 15)   score += 0.07;
+
+    if (dischargeM3s > 8000)      score += 0.35;
+    else if (dischargeM3s > 4000) score += 0.25;
+    else if (dischargeM3s > 1500) score += 0.15;
+    else if (dischargeM3s > 500)  score += 0.07;
+
+    if (currentLevel != null && dangerLevel != null && dangerLevel > 0) {
+      final r = currentLevel / dangerLevel;
+      if (r >= 1.0)       score += 0.30;
+      else if (r >= 0.85) score += 0.20;
+      else if (r >= 0.70) score += 0.10;
+    }
+
+    if (discharge7d.length >= 2 &&
+        discharge7d.last > discharge7d.first * 1.3) {
+      score += 0.05;
+    }
+
+    // If WRD says MODERATE, don't downgrade below that
+    final computed = score >= 0.75 ? 'CRITICAL'
+                   : score >= 0.50 ? 'HIGH'
+                   : score >= 0.30 ? 'MODERATE'
+                   : 'LOW';
+
+    if (wrdRisk?.toUpperCase() == 'MODERATE' &&
+        computed == 'LOW') return 'MODERATE';
+    return computed;
   }
 
+  // ── Weather (Open-Meteo direct) ───────────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     final key    = _tileKey(city.lat, city.lon);
     final cached = _weatherCache[key];
@@ -457,7 +459,9 @@ class LiveFetchEngine {
       final j      = jsonDecode(res.body) as Map<String, dynamic>;
       final hourly = j['hourly'] as Map<String, dynamic>;
       final precip = _doubles(hourly['precipitation']);
-      final last24 = precip.length >= 24 ? precip.sublist(precip.length - 24) : precip;
+      final last24 = precip.length >= 24
+          ? precip.sublist(precip.length - 24)
+          : precip;
       final result = {
         'precip_mm': last24.fold(0.0, (a, b) => a + b),
         'temp_c':    _doubles(hourly['temperature_2m']).lastOrNull ?? 25.0,
@@ -471,6 +475,7 @@ class LiveFetchEngine {
     }
   }
 
+  // ── GloFAS (flood-api.open-meteo.com) ───────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     final key    = _tileKey(city.lat, city.lon);
     final cached = _glofasCache[key];
@@ -495,31 +500,7 @@ class LiveFetchEngine {
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
-    try {
-      final resp = await _api.levelsByState(city.state, limit: 200);
-      if (resp['status'] == 'error') return null;
-      final raw = resp['data'];
-      if (raw is! List || raw.isEmpty) return null;
-      if (raw is String && (raw as String).trimLeft().startsWith('<')) return null;
-      final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
-      if (station == null) return null;
-      return {
-        'current_level':    _num(station['current_level']),
-        'safe_level':       _num(station['safe_level']),
-        'warning_level':    _num(station['warning_level']),
-        'danger_level':     _num(station['danger_level']),
-        'flow_rate':        _num(station['flow_rate'] ?? station['river_discharge']),
-        'risk_level':       station['risk_level'] as String?,
-        'capacity_percent': _num(station['capacity_percent']),
-        'data_source':      station['data_source'] as String?,
-      };
-    } catch (e) {
-      if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: $e');
-      return null;
-    }
-  }
-
+  // ── IMD / SACHET alerts ────────────────────────────────────────────────────────
   List<dynamic> _imdCache     = [];
   DateTime?     _imdCacheTime;
 
@@ -532,16 +513,20 @@ class LiveFetchEngine {
     }
     try {
       final res = await _externalClient
-          .get(Uri.parse('https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails'))
+          .get(Uri.parse(
+              'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails'))
           .timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return null;
-      final raw = jsonDecode(res.body);
+      final raw   = jsonDecode(res.body);
       List<dynamic> items = [];
       if (raw is List) {
         items = raw;
       } else if (raw is Map) {
         for (final k in ['features', 'alerts', 'data', 'items', 'results']) {
-          if (raw[k] is List) { items = raw[k] as List; break; }
+          if (raw[k] is List) {
+            items = raw[k] as List;
+            break;
+          }
         }
       }
       _imdCache     = items;
@@ -566,42 +551,14 @@ class LiveFetchEngine {
     }).toList();
   }
 
-  String _inferRisk({
-    required double precipMm,
-    required double dischargeM3s,
-    required List<double> discharge7d,
-    double? currentLevel,
-    double? dangerLevel,
-  }) {
-    double score = 0.0;
-    if (precipMm > 150)       score += 0.35;
-    else if (precipMm > 80)   score += 0.25;
-    else if (precipMm > 40)   score += 0.15;
-    else if (precipMm > 15)   score += 0.07;
-    if (dischargeM3s > 8000)      score += 0.35;
-    else if (dischargeM3s > 4000) score += 0.25;
-    else if (dischargeM3s > 1500) score += 0.15;
-    else if (dischargeM3s > 500)  score += 0.07;
-    if (currentLevel != null && dangerLevel != null && dangerLevel > 0) {
-      final r = currentLevel / dangerLevel;
-      if (r >= 1.0)       score += 0.30;
-      else if (r >= 0.85) score += 0.20;
-      else if (r >= 0.70) score += 0.10;
-    }
-    if (discharge7d.length >= 2 && discharge7d.last > discharge7d.first * 1.3) score += 0.05;
-    if (score >= 0.75) return 'CRITICAL';
-    if (score >= 0.50) return 'HIGH';
-    if (score >= 0.30) return 'MODERATE';
-    return 'LOW';
-  }
-
+  // ── FloodData builder ───────────────────────────────────────────────────────────
   FloodData _snapToFloodData(IndiaCity city, Map<String, dynamic> snap) {
     final danger  = (snap['dangerLevel']  as num?)?.toDouble() ?? city.dangerLevel;
     final warning = (snap['warningLevel'] as num?)?.toDouble() ?? city.warningLevel;
     final safe    = (snap['safeLevel']    as num?)?.toDouble()
                  ?? (warning - 2.0).clamp(0.0, double.infinity);
-    final current = (snap['cwcLevel']     as double?) ?? 0.0;
-    final flow    = (snap['flowRate']     as num?)?.toDouble();
+    final current = (snap['cwcLevel'] as double?) ?? 0.0;
+    final flow    = (snap['flowRate'] as num?)?.toDouble();
     final risk    = snap['riskLabel'] as String? ?? 'LOW';
     final precip  = (snap['precip_mm'] as num?)?.toDouble() ?? 0.0;
     final imdSev  = precip >= 115 ? 'RED'
@@ -629,36 +586,55 @@ class LiveFetchEngine {
     );
   }
 
+  // ── Trend builder ───────────────────────────────────────────────────────────────
   List<RiverLevelSnapshot> _buildTrend(dynamic discharge7d) {
-    final vals = (discharge7d is List) ? discharge7d.cast<double>() : <double>[];
+    final vals =
+        (discharge7d is List) ? discharge7d.cast<double>() : <double>[];
     if (vals.isEmpty) return [];
     final now = DateTime.now();
-    return List.generate(vals.length, (i) => RiverLevelSnapshot(
-      timestamp: now.subtract(Duration(days: vals.length - 1 - i)),
-      level:     0,
-      flowRate:  vals[i],
-      status:    'historical',
-    ));
+    return List.generate(
+        vals.length,
+        (i) => RiverLevelSnapshot(
+              timestamp: now.subtract(
+                  Duration(days: vals.length - 1 - i)),
+              level:     0,
+              flowRate:  vals[i],
+              status:    'historical',
+            ));
   }
 
+  // ── City priority sort ───────────────────────────────────────────────────────────
   List<IndiaCity> _priorityCities() {
-    // CWC-coded stations polled first (faster live data), then WRD-only
     final cwcFirst  = kIndiaCities.where((c) => c.cwcStation != null).toList();
     final remaining = kIndiaCities.where((c) => c.cwcStation == null).toList();
     return [...cwcFirst, ...remaining];
   }
 
-  double? _safeLevel(dynamic v) {
-    if (v == null) return null;
-    final d = double.tryParse(v.toString().trim()) ?? (v is num ? v.toDouble() : null);
-    if (d == null) return null;
-    return (d >= 0.5 && d <= 250.0) ? d : null;
+  // ── HTTP helper (handles 429 rate-limit retry) ────────────────────────────
+  Future<http.Response> _externalGet(
+    Uri uri, {
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    var res = await _externalClient.get(uri).timeout(timeout);
+    if (res.statusCode == 429) {
+      final retryAfter =
+          int.tryParse(res.headers['retry-after'] ?? '') ?? 60;
+      final wait = Duration(seconds: retryAfter) +
+          Duration(milliseconds: _rng.nextInt(3000));
+      if (kDebugMode) {
+        debugPrint('[LiveFetch] 429 on $uri — waiting ${wait.inSeconds}s');
+      }
+      await Future.delayed(wait);
+      res = await _externalClient.get(uri).timeout(timeout);
+    }
+    return res;
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────────────────────
   List<double> _doubles(dynamic raw) {
     if (raw is! List) return [];
-    return raw.map((e) => e == null ? 0.0 : (e as num).toDouble()).toList();
+    return raw
+        .map((e) => e == null ? 0.0 : (e as num).toDouble())
+        .toList();
   }
-
-  double? _num(dynamic v) => v == null ? null : (v as num).toDouble();
 }
