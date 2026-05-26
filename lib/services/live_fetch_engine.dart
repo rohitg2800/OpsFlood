@@ -1,25 +1,27 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.1 — _matchCity + STATE_SEVERITY_MATRIX fix)
+// OpsFlood — LiveFetchEngine (v17.2 — OpsClient migration)
 //
-// BUGS FIXED in v17.1:
+// CHANGES in v17.2:
 //
-//   1. _matchCity() was returning stations.first when no city match was found.
-//      With the backend returning ALL stations for a state, this meant every
-//      city in Bihar got Patna’s reading (level=6.2) and every city in Assam
-//      got Guwahati’s reading (level=5.47), causing the “46 WARNING” badge.
-//      Fix: return null on no-match so the backend slot stays empty and
-//      _inferRisk() uses GloFAS + weather instead.
+//   1. Rogue http.Client REMOVED for OpsFlood backend calls:
+//      - _wakeBackend()         → FloodApi.instance.healthCheck()
+//      - _fetchBackendLevels()  → FloodApi.instance.levelsByState()
+//      Auth headers, retry policy, and timeout caps from OpsClient now
+//      apply to every per-city backend fetch (110 cities × 45s poll cycle).
 //
-//   2. backendRisk was being trusted when data_source == STATE_SEVERITY_MATRIX
-//      or FALLBACK.  These sources are synthetic averages, not live gauge data;
-//      trusting them caused every city to show MODERATE regardless of actual
-//      conditions.  Fix: if backendSrc is a synthetic source, clear backendRisk
-//      so _inferRisk() is used instead.
+//   2. _externalClient introduced for THIRD-PARTY APIs only:
+//      - open-meteo.com  (weather)
+//      - flood-api.open-meteo.com  (GloFAS)
+//      - sachet.ndma.gov.in  (IMD alerts)
+//      These are free public APIs — OpsClient auth/retry does NOT apply.
 //
-// v17 fixes retained:
-//   • _priorityCities() returns all 110 cities, CWC-monitored first.
-//   • backendRisk trusted for any non-null non-synthetic backendSrc.
+//   3. Cache TTL unified: hardcoded _kCacheTtl (20 min) replaced with
+//      AppConfig.cacheTtl (5 min). Both caches now expire at the same rate.
+//
+// v17.1 fixes retained:
+//   • _matchCity() returns null on no-match.
+//   • Synthetic source guard (STATE_SEVERITY_MATRIX, FALLBACK, etc.).
 //   • CWC HTML maintenance page guard.
 //   • 429-backoff + 300 ms inter-city delay.
 library;
@@ -35,16 +37,16 @@ import '../data/india_cities.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'cwc_direct_service.dart';
+import 'flood_api.dart';
 
 class MlInferenceEngine {}
-
-const Duration _kCacheTtl = Duration(minutes: 20);
 
 class _CacheEntry<T> {
   final T data;
   final DateTime at;
   _CacheEntry(this.data) : at = DateTime.now();
-  bool get valid => DateTime.now().difference(at) < _kCacheTtl;
+  // TTL is now driven by AppConfig.cacheTtl (default 5 min)
+  bool get valid => DateTime.now().difference(at) < AppConfig.cacheTtl;
 }
 
 final _weatherCache = <String, _CacheEntry<Map<String, dynamic>>>{};
@@ -54,8 +56,6 @@ String _tileKey(double lat, double lon) =>
     '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
 
 // Sources that are synthetic/computed averages, NOT live gauge readings.
-// When data_source is one of these, backendRisk is NOT trusted — we fall
-// through to _inferRisk() which uses real GloFAS discharge + rainfall.
 const _kSyntheticSources = {
   'STATE_SEVERITY_MATRIX',
   'FALLBACK',
@@ -69,7 +69,12 @@ class LiveFetchEngine {
   factory LiveFetchEngine() => _instance;
   LiveFetchEngine._internal();
 
-  final http.Client      _client    = http.Client();
+  // OpsFlood backend calls → FloodApi (routed through OpsClient)
+  final _api = FloodApi.instance;
+
+  // Third-party public APIs (open-meteo, GloFAS, NDMA) — no auth/retry
+  final http.Client _externalClient = http.Client();
+
   final CwcDirectService _cwcDirect = CwcDirectService.instance;
   final Random           _rng       = Random();
   Timer? _timer;
@@ -151,16 +156,15 @@ class LiveFetchEngine {
     _timer = null;
   }
 
+  // ── Backend wake using FloodApi (OpsClient) ────────────────────────────────
   Future<bool> _wakeBackend() async {
     if (_runningOnWeb || _backendAwake) return _backendAwake;
     try {
       debugWakeAttempts++;
       if (kDebugMode) debugPrint('[LiveFetch] waking backend…');
-      final res = await _client
-          .get(Uri.parse('${AppConfig.baseUrl}${AppConfig.epHealth}'))
-          .timeout(AppConfig.coldStartTimeout);
-      _backendAwake = res.statusCode < 500;
-      if (kDebugMode) debugPrint('[LiveFetch] backend awake (${res.statusCode})');
+      final res = await _api.healthCheck(coldStart: true);
+      _backendAwake = res['status'] != 'error';
+      if (kDebugMode) debugPrint('[LiveFetch] backend awake: $_backendAwake');
     } catch (e) {
       _backendAwake = false;
       if (kDebugMode) debugPrint('[LiveFetch] backend wake failed: $e');
@@ -168,11 +172,12 @@ class LiveFetchEngine {
     return _backendAwake;
   }
 
-  Future<http.Response> _fetchWithRetry(
+  // ── External-only 429 retry (open-meteo / GloFAS) ─────────────────────────
+  Future<http.Response> _externalGet(
     Uri uri, {
     Duration timeout = const Duration(seconds: 12),
   }) async {
-    var res = await _client.get(uri).timeout(timeout);
+    var res = await _externalClient.get(uri).timeout(timeout);
     if (res.statusCode == 429) {
       final retryAfter = int.tryParse(
             res.headers['retry-after'] ?? '',
@@ -183,7 +188,7 @@ class LiveFetchEngine {
         debugPrint('[LiveFetch] 429 on $uri — waiting ${wait.inSeconds}s');
       }
       await Future.delayed(wait);
-      res = await _client.get(uri).timeout(timeout);
+      res = await _externalClient.get(uri).timeout(timeout);
     }
     return res;
   }
@@ -343,21 +348,13 @@ class LiveFetchEngine {
       double? safeLevel   = _safeLevel(backend?['safe_level']);
       String? backendSrc  = backend?['data_source'] as String?;
 
-      // FIX: Do NOT trust risk labels from synthetic/averaged sources.
-      // STATE_SEVERITY_MATRIX, FALLBACK, ESTIMATED etc. are computed averages
-      // for the whole state — they make every city in the state look MODERATE.
-      // For these sources also discard the level values (they are state averages,
-      // not per-city gauge readings) so _inferRisk uses GloFAS + rainfall.
       final isSyntheticBackend =
           backendSrc != null && _kSyntheticSources.contains(backendSrc.toUpperCase());
 
       String? backendRisk;
       if (!isSyntheticBackend) {
         backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
-        // cwcLevel/dangerLevel/warnLevel already set from backend above — keep them.
       } else {
-        // Synthetic source: discard all level data from backend, rely on
-        // CWC Direct + GloFAS + rainfall for risk inference.
         cwcLevel    = null;
         dangerLevel = null;
         warnLevel   = null;
@@ -375,7 +372,7 @@ class LiveFetchEngine {
         dangerLevel = cwcDirect.danger   ?? dangerLevel;
         warnLevel   = cwcDirect.warning  ?? warnLevel;
         cwcSource   = cwcDirect.source;
-        backendRisk = null; // CWC Direct is ground truth — always re-infer
+        backendRisk = null;
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
@@ -436,6 +433,7 @@ class LiveFetchEngine {
          : 'LOW';
   }
 
+  // ── Weather — external API (open-meteo.com) ────────────────────────────────
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
     final cached = _weatherCache[key];
@@ -450,7 +448,7 @@ class LiveFetchEngine {
         '&hourly=precipitation,temperature_2m,relative_humidity_2m'
         '&forecast_days=2&timezone=Asia%2FKolkata',
       );
-      final res = await _fetchWithRetry(uri);
+      final res = await _externalGet(uri);
       if (res.statusCode != 200) {
         if (kDebugMode) debugPrint('[LiveFetch] weather ${city.name}: HTTP ${res.statusCode}');
         return null;
@@ -472,6 +470,7 @@ class LiveFetchEngine {
     }
   }
 
+  // ── GloFAS discharge — external API (flood-api.open-meteo.com) ────────────
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     final key = _tileKey(city.lat, city.lon);
     final cached = _glofasCache[key];
@@ -485,7 +484,7 @@ class LiveFetchEngine {
         '?latitude=${city.lat}&longitude=${city.lon}'
         '&daily=river_discharge&past_days=4&forecast_days=1',
       );
-      final res = await _fetchWithRetry(uri);
+      final res = await _externalGet(uri);
       if (res.statusCode != 200) {
         if (kDebugMode) debugPrint('[LiveFetch] GloFAS ${city.name}: HTTP ${res.statusCode}');
         return null;
@@ -502,29 +501,25 @@ class LiveFetchEngine {
     }
   }
 
+  // ── Backend gauge levels — via FloodApi (OpsClient, auth-aware) ───────────
   Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
     try {
-      final uri = Uri.parse(
-        '${AppConfig.baseUrl}${AppConfig.epLiveLevels}'
-        '?state=${Uri.encodeComponent(city.state)}',
-      );
-      final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
-      if (res.statusCode != 200) {
-        if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTTP ${res.statusCode}');
+      final resp = await _api.levelsByState(city.state, limit: 200);
+      if (resp['status'] == 'error') {
+        if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: ${resp['error']}');
         return null;
       }
-      final body = res.body.trim();
-      if (body.startsWith('<')) {
+
+      // Unwrap the data list (OpsClient normalises list responses to {status, data:[...]})
+      final raw = resp['data'];
+      if (raw is! List || raw.isEmpty) return null;
+
+      // Guard: HTML maintenance page
+      if (raw is String && (raw as String).trimLeft().startsWith('<')) {
         if (kDebugMode) debugPrint('[LiveFetch] backend ${city.name}: HTML response (maintenance?)');
         return null;
       }
 
-      final j   = jsonDecode(body) as Map<String, dynamic>;
-      final raw = j['data'];
-      if (raw is! List || raw.isEmpty) return null;
-
-      // FIX: _matchCity now returns null on no-match (previously returned
-      // stations.first, giving every city in a state the same level reading).
       final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
       if (station == null) return null;
 
@@ -550,46 +545,19 @@ class LiveFetchEngine {
     }
   }
 
-  // FIX: Returns null when no station matches the city name.
-  // Previously returned stations.first as a fallback, which caused every
-  // city in a state to receive the first station’s gauge reading.
-  Map<String, dynamic>? _matchCity(
-    List<Map<String, dynamic>> stations, String cityName,
-  ) {
-    if (stations.isEmpty) return null;
-    final needle = cityName.trim().toLowerCase();
-
-    // Exact match
-    for (final s in stations) {
-      if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
-    }
-    // Prefix match
-    for (final s in stations) {
-      if ((s['city'] as String? ?? '').toLowerCase().startsWith(needle)) return s;
-    }
-    // Substring match (both directions, min 4 chars to avoid false positives)
-    if (needle.length >= 4) {
-      for (final s in stations) {
-        final sc = (s['city'] as String? ?? '').toLowerCase();
-        if (sc.contains(needle) || needle.contains(sc)) return s;
-      }
-    }
-    // No match — return null so GloFAS + weather inference is used instead.
-    return null;
-  }
-
+  // ── IMD alerts — external API (sachet.ndma.gov.in) ────────────────────────
   List<dynamic> _imdCache     = [];
   DateTime?     _imdCacheTime;
 
   Future<List<dynamic>?> _fetchImdAlerts(IndiaCity city) async {
     final now = DateTime.now();
     if (_imdCacheTime != null &&
-        now.difference(_imdCacheTime!) < const Duration(minutes: 10) &&
+        now.difference(_imdCacheTime!) < AppConfig.cacheTtl &&
         _imdCache.isNotEmpty) {
       return _filterImd(city.state);
     }
     try {
-      final res = await _client
+      final res = await _externalClient
           .get(Uri.parse(
             'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails',
           ))
