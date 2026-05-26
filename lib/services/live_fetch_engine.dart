@@ -77,6 +77,15 @@ class LiveFetchEngine {
 
   final CwcDirectService _cwcDirect = CwcDirectService.instance;
   final Random           _rng       = Random();
+
+  Map<String, dynamic>? _matchCity(List<Map<String, dynamic>> raw, String cityName) {
+    final target = cityName.toLowerCase().trim();
+    for (final station in raw) {
+      final name = (station['station'] ?? station['stationName'] ?? station['city'] ?? station['name'] ?? '').toString().toLowerCase().trim();
+      if (name.contains(target) || target.contains(name)) return station;
+    }
+    return null;
+  }
   Timer? _timer;
   bool   _lock = false;
 
@@ -694,4 +703,9 @@ class LiveFetchEngine {
   }
 
   double? _num(dynamic v) => v == null ? null : (v as num).toDouble();
+}
+
+// Added by patch — restores _matchCity used at line 523
+extension _LiveFetchEngineMatch on LiveFetchEngine {
+  // ignore: unused_element
 }

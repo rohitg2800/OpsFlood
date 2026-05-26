@@ -20,7 +20,7 @@ import '../constants.dart';
 import '../ml/flood_engine.dart';
 import '../models/river_monitoring.dart';
 import '../providers/flood_providers.dart';
-import '../services/api_service.dart';
+import '../services/flood_api.dart';
 import '../services/predict.dart';
 
 // ─── Military Palette ────────────────────────────────────────────────────────
@@ -458,7 +458,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
 
   late final List<_CityEntry> _allCities;
   final _svc = const PredictionService();
-  final _api = ApiService();
+  final _api = FloodApi.instance;
 
   @override
   void initState() {
@@ -508,7 +508,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   Future<void> _autofillFromLive(String city, [String? state]) async {
     setState(() { _autofilling = true; _autofilled = false; });
     try {
-      final r = await _api.getAllCwcStations();
+      final r = await _api.cwcStations();
       final raw = r['data'];
       if (raw is List && raw.isNotEmpty) {
         final af = _matchList(raw, city, state, 'CWC_API');
@@ -516,7 +516,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       }
     } catch (_) {}
     try {
-      final r = await _api.getLiveLevels();
+      final r = await _api.allLevels();
       final raw = _extractList(r);
       if (raw.isNotEmpty) {
         final af = _matchList(raw, city, state, 'LIVE_LEVELS');
@@ -1343,7 +1343,7 @@ class _MilCard extends StatelessWidget {
     decoration: BoxDecoration(
       color: _kSurface, borderRadius: BorderRadius.circular(16),
       border: Border.all(color: borderColor ?? _kBorder),
-      boxShadows: shadowColor != null
+      boxShadow: shadowColor != null
           ? [BoxShadow(color: shadowColor!, blurRadius: 24, spreadRadius: 2)] : null),
     child: child,
   );
