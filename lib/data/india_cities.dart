@@ -1,15 +1,14 @@
 // lib/data/india_cities.dart
 //
-// OpsFlood Bihar — IndiaCity registry (v2.0 Bihar-only)
+// OpsFlood Bihar — IndiaCity registry (v2.1 Bihar-only)
 //
-// REPLACES the pan-India 110-city list with the 31 WRD Bihar gauge stations.
-// All coordinates, danger levels, and warning levels sourced from:
+// 31 WRD Bihar gauge stations across 9 rivers.
+// Danger/warning levels sourced from:
 //   WRD Bihar Central Flood Control Cell (2024-25)
 //   CWC FFS: https://beams.fmiscwrdbihar.gov.in
 //
-// The IndiaCity class and kIndiaCities constant are kept unchanged so that
-// all existing service code (LiveFetchEngine, CwcDirectService, etc.)
-// compiles without modification.
+// hfl (highest flood level) is derived as dangerLevel × 1.10,
+// matching the convention used by AlertEvaluator.fromDischarge().
 library;
 
 class IndiaCity {
@@ -21,6 +20,7 @@ class IndiaCity {
   final double lon;
   final double dangerLevel;   // m MSL
   final double warningLevel;  // m MSL
+  final double hfl;           // m MSL — danger × 1.10
   final String? cwcStation;   // CWC station code (null = WRD-only gauge)
 
   const IndiaCity({
@@ -32,14 +32,15 @@ class IndiaCity {
     required this.lon,
     required this.dangerLevel,
     required this.warningLevel,
+    double? hfl,
     this.cwcStation,
-  });
+  }) : hfl = hfl ?? dangerLevel * 1.10;
 }
 
 /// 31 WRD Bihar gauge stations — the only monitored cities in this app.
 const List<IndiaCity> kIndiaCities = [
 
-  // ── GANGA ─────────────────────────────────────────────────────────────────
+  // ── GANGA ──────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'gandhighat', name: 'Gandhighat', state: 'Bihar',
     river: 'Ganga', lat: 25.6129, lon: 85.1376,
@@ -76,7 +77,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 60.30, warningLevel: 59.20,
   ),
 
-  // ── KOSI ──────────────────────────────────────────────────────────────────
+  // ── KOSI ───────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'birpur', name: 'Birpur', state: 'Bihar',
     river: 'Kosi', lat: 26.5167, lon: 86.9000,
@@ -98,7 +99,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 30.00, warningLevel: 28.80, cwcStation: 'KAT',
   ),
 
-  // ── GANDAK ────────────────────────────────────────────────────────────────
+  // ── GANDAK ─────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'chatia', name: 'Chatia', state: 'Bihar',
     river: 'Gandak', lat: 26.8500, lon: 84.9000,
@@ -120,7 +121,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 50.32, warningLevel: 49.40,
   ),
 
-  // ── BAGMATI ───────────────────────────────────────────────────────────────
+  // ── BAGMATI ────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'dheng_bridge', name: 'Dheng Bridge', state: 'Bihar',
     river: 'Bagmati', lat: 26.5800, lon: 85.4900,
@@ -137,7 +138,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 45.72, warningLevel: 44.50,
   ),
 
-  // ── BURHI GANDAK ──────────────────────────────────────────────────────────
+  // ── BURHI GANDAK ───────────────────────────────────────────────────────────
   IndiaCity(
     id: 'sikandarpur', name: 'Sikandarpur', state: 'Bihar',
     river: 'Burhi Gandak', lat: 26.1209, lon: 85.3647,
@@ -159,7 +160,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 36.58, warningLevel: 35.40,
   ),
 
-  // ── GHAGHRA ───────────────────────────────────────────────────────────────
+  // ── GHAGHRA ────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'darauli', name: 'Darauli', state: 'Bihar',
     river: 'Ghaghra', lat: 25.9500, lon: 84.1500,
@@ -171,7 +172,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 57.04, warningLevel: 56.00,
   ),
 
-  // ── MAHANANDA ─────────────────────────────────────────────────────────────
+  // ── MAHANANDA ──────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'dhengraghat', name: 'Dhengraghat', state: 'Bihar',
     river: 'Mahananda', lat: 25.7800, lon: 87.4800,
@@ -183,7 +184,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 66.00, warningLevel: 64.80,
   ),
 
-  // ── KAMLA / KAMALABALAN ───────────────────────────────────────────────────
+  // ── KAMLA / KAMALABALAN ────────────────────────────────────────────────────
   IndiaCity(
     id: 'jainagar', name: 'Jainagar', state: 'Bihar',
     river: 'Kamla', lat: 26.6000, lon: 86.2700,
@@ -195,7 +196,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 50.00, warningLevel: 48.80,
   ),
 
-  // ── ADHWARA GROUP ─────────────────────────────────────────────────────────
+  // ── ADHWARA ────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'sonbarsa', name: 'Sonbarsa', state: 'Bihar',
     river: 'Adhwara', lat: 26.6500, lon: 85.5500,
@@ -212,7 +213,7 @@ const List<IndiaCity> kIndiaCities = [
     dangerLevel: 46.94, warningLevel: 45.80,
   ),
 
-  // ── PUNPUN ────────────────────────────────────────────────────────────────
+  // ── PUNPUN ─────────────────────────────────────────────────────────────────
   IndiaCity(
     id: 'sripalpur', name: 'Sripalpur', state: 'Bihar',
     river: 'Punpun', lat: 25.4833, lon: 85.1333,
