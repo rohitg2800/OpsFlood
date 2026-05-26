@@ -6,17 +6,18 @@
 //   severity_from_entry()         — dual-axis scoring
 //   danger_level_override_guard() — Option-A CWC guard
 //   risk_score formula            — identical weight map
-//   STATE_SEVERITY_MATRIX         — all 36 states + UTs
+//   STATE_SEVERITY_MATRIX         — Bihar-only (scoped build)
 //
-// FIXES (v1.1):
-//   1. Delhi uses absolute MSL elevation — added usesAbsoluteElevation flag;
-//      peakFloodLevelM for Delhi must be in MSL metres (e.g. 205.4).
-//   2. Unknown-state fallback now returns a safe PLAINS generic entry
-//      instead of Maharashtra thresholds.
-//   3. Rule engine probability distribution is right-skewed (under-predict
-//      is worse than over-predict for disaster systems).
-//   4. Duration, timeToPeak, recessionTime features now contribute to
-//      combinedScore in on-device path.
+// SCOPE CHANGE (Bihar-only build):
+//   stateSeverityMatrix trimmed to 'bihar' only.
+//   All helper logic (getStateEntry, _unknownStateFallback, regionRainfallThresholds)
+//   retained unchanged so the engine compiles and works for any future expansion.
+//
+// FIXES (v1.1, retained):
+//   1. Delhi MSL-elevation flag (not needed for Bihar, kept for forward compat).
+//   2. Unknown-state fallback returns PLAINS generic instead of Maharashtra.
+//   3. Rule engine probability distribution is right-skewed.
+//   4. Duration, timeToPeak, recessionTime contribute to combinedScore.
 
 class FloodInput {
   final double peakFloodLevelM;
@@ -129,8 +130,9 @@ Map<String, double> getRegionRainfallThresholds(String region) =>
     regionRainfallThresholds['PLAINS']!;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STATE SEVERITY MATRIX  (ported from state_severity_matrix.py)
-// Keys normalised to lowercase for lookup
+// STATE SEVERITY MATRIX — Bihar only (scoped build)
+// Keys normalised to lowercase for lookup.
+// Other states removed to match monitoredCities scope restriction.
 // ─────────────────────────────────────────────────────────────────────────────
 class StateEntry {
   final String region;
@@ -141,7 +143,6 @@ class StateEntry {
   final double hflM;
   final List<String> primaryRivers;
   final List<String> vulnerableDistricts;
-  // FIX-1: Delhi and some stations report level as MSL elevation, not depth
   final bool usesAbsoluteElevation;
 
   const StateEntry({
@@ -181,8 +182,7 @@ StateEntry _entry({
   );
 }
 
-// FIX-2: Safe generic fallback for unknown states uses PLAINS defaults
-// instead of silently mapping to Maharashtra thresholds.
+// FIX-2: Safe generic fallback for unknown states uses PLAINS defaults.
 final StateEntry _unknownStateFallback = _entry(
   region: 'PLAINS',
   peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
@@ -192,269 +192,12 @@ final StateEntry _unknownStateFallback = _entry(
 );
 
 final Map<String, StateEntry> stateSeverityMatrix = {
-  'maharashtra': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.0},
-    danger: 11.5, warning: 9.5, hfl: 14.2,
-    rivers: ['Krishna', 'Godavari', 'Bhima', 'Koyna', 'Panchganga'],
-    districts: ['Kolhapur', 'Sangli', 'Satara', 'Pune', 'Nashik'],
-  ),
-  'kerala': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.5},
-    danger: 11.0, warning: 9.0, hfl: 14.5,
-    rivers: ['Periyar', 'Pampa', 'Bharathapuzha', 'Chaliyar'],
-    districts: ['Ernakulam', 'Thrissur', 'Pathanamthitta', 'Idukki', 'Alappuzha'],
-  ),
-  'assam': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.2,
-    rivers: ['Brahmaputra', 'Barak', 'Subansiri', 'Dhansiri'],
-    districts: ['Kamrup', 'Dhubri', 'Goalpara', 'Barpeta', 'Morigaon'],
-  ),
   'bihar': _entry(
     region: 'PLAINS',
     peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.5},
     danger: 11.5, warning: 9.2, hfl: 14.0,
     rivers: ['Gandak', 'Kosi', 'Bagmati', 'Kamla', 'Mahananda'],
     districts: ['Darbhanga', 'Sitamarhi', 'Muzaffarpur', 'Supaul', 'Madhubani'],
-  ),
-  'uttar pradesh': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.8,
-    rivers: ['Ganga', 'Yamuna', 'Ghaghra', 'Rapti', 'Sharda'],
-    districts: ['Varanasi', 'Allahabad', 'Ballia', 'Gonda', 'Bahraich'],
-  ),
-  'odisha': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 9.5, 'severe': 12.0, 'critical': 14.0},
-    danger: 12.0, warning: 10.0, hfl: 14.8,
-    rivers: ['Mahanadi', 'Baitarani', 'Brahmani', 'Subarnarekha'],
-    districts: ['Puri', 'Kendrapara', 'Bhadrak', 'Balasore', 'Jagatsinghpur'],
-  ),
-  'west bengal': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Ganga', 'Damodar', 'Ajay', 'Mayurakshi', 'Teesta'],
-    districts: ['Murshidabad', 'Malda', 'Cooch Behar', 'South 24 Parganas'],
-  ),
-  'andhra pradesh': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.5},
-    danger: 11.5, warning: 9.5, hfl: 14.0,
-    rivers: ['Krishna', 'Godavari', 'Tungabhadra', 'Penna'],
-    districts: ['East Godavari', 'West Godavari', 'Krishna', 'Guntur'],
-  ),
-  'telangana': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.0},
-    danger: 11.5, warning: 9.5, hfl: 13.8,
-    rivers: ['Godavari', 'Krishna', 'Manjira', 'Musi'],
-    districts: ['Khammam', 'Warangal', 'Nizamabad', 'Karimnagar'],
-  ),
-  'karnataka': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.5},
-    danger: 11.5, warning: 9.5, hfl: 14.2,
-    rivers: ['Cauvery', 'Krishna', 'Tungabhadra', 'Kabini', 'Sharavathi'],
-    districts: ['Kodagu', 'Hassan', 'Dakshina Kannada', 'Raichur'],
-  ),
-  'tamil nadu': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.8,
-    rivers: ['Cauvery', 'Vaigai', 'Tamiraparani', 'Palar'],
-    districts: ['Chennai', 'Cuddalore', 'Nagapattinam', 'Thanjavur'],
-  ),
-  'gujarat': _entry(
-    region: 'ARID',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Narmada', 'Tapti', 'Sabarmati', 'Mahi', 'Banas'],
-    districts: ['Vadodara', 'Bharuch', 'Anand', 'Kheda', 'Gandhinagar'],
-  ),
-  'rajasthan': _entry(
-    region: 'ARID',
-    peak: {'moderate': 6.0, 'severe': 8.5, 'critical': 11.0},
-    danger: 8.5, warning: 6.5, hfl: 11.5,
-    rivers: ['Chambal', 'Luni', 'Banas', 'Mahi'],
-    districts: ['Barmer', 'Jalore', 'Pali', 'Sikar', 'Alwar'],
-  ),
-  'madhya pradesh': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Narmada', 'Chambal', 'Tapti', 'Betwa', 'Sone'],
-    districts: ['Gwalior', 'Morena', 'Bhind', 'Jabalpur', 'Hoshangabad'],
-  ),
-  'chhattisgarh': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Mahanadi', 'Sheonath', 'Indravati', 'Jonk'],
-    districts: ['Raipur', 'Rajnandgaon', 'Dhamtari', 'Kanker'],
-  ),
-  'jharkhand': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Subarnarekha', 'Damodar', 'Koel', 'Sankh'],
-    districts: ['Sahebganj', 'Pakur', 'Godda', 'Dumka'],
-  ),
-  'uttarakhand': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Ganga', 'Yamuna', 'Alaknanda', 'Mandakini', 'Tons'],
-    districts: ['Haridwar', 'Dehradun', 'Rishikesh', 'Chamoli', 'Rudraprayag'],
-  ),
-  'himachal pradesh': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Beas', 'Sutlej', 'Ravi', 'Chenab'],
-    districts: ['Mandi', 'Kullu', 'Kangra', 'Solan'],
-  ),
-  'jammu and kashmir': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 7.0, 'severe': 9.5, 'critical': 11.5},
-    danger: 9.5, warning: 7.5, hfl: 12.0,
-    rivers: ['Jhelum', 'Chenab', 'Tawi'],
-    districts: ['Srinagar', 'Anantnag', 'Jammu', 'Poonch'],
-  ),
-  'punjab': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Sutlej', 'Beas', 'Ravi', 'Ghaggar'],
-    districts: ['Jalandhar', 'Ludhiana', 'Gurdaspur', 'Hoshiarpur'],
-  ),
-  'haryana': _entry(
-    region: 'PLAINS',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Yamuna', 'Ghaggar', 'Saraswati'],
-    districts: ['Kurukshetra', 'Ambala', 'Yamunanagar', 'Karnal'],
-  ),
-  // FIX-1: Delhi uses Yamuna MSL elevation (204–207m). Flag explicitly.
-  'delhi': _entry(
-    region: 'URBAN_UT',
-    peak: {'moderate': 204.0, 'severe': 205.5, 'critical': 206.5},
-    danger: 205.33, warning: 204.5, hfl: 207.49,
-    rivers: ['Yamuna'],
-    districts: ['East Delhi', 'North Delhi', 'South Delhi'],
-    absoluteElevation: true,
-  ),
-  'meghalaya': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Umkhrah', 'Umiam', 'Kopili'],
-    districts: ['East Khasi Hills', 'Ri Bhoi', 'West Garo Hills'],
-  ),
-  'manipur': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Imphal', 'Iril', 'Thoubal'],
-    districts: ['Imphal West', 'Bishnupur', 'Chandel'],
-  ),
-  'mizoram': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 98.0, 'severe': 110.0, 'critical': 118.0},
-    danger: 112.0, warning: 100.0, hfl: 121.0,
-    rivers: ['Tlawng', 'Tuirial', 'Chhimtuipui'],
-    districts: ['Aizawl', 'Lunglei', 'Champhai'],
-    absoluteElevation: true,
-  ),
-  'nagaland': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Dhansiri', 'Doyang', 'Tizu'],
-    districts: ['Dimapur', 'Peren', 'Wokha'],
-  ),
-  'tripura': _entry(
-    region: 'NORTHEAST',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Gomati', 'Haora', 'Khowai'],
-    districts: ['West Tripura', 'Sepahijala', 'Gomati'],
-  ),
-  'arunachal pradesh': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Siang', 'Subansiri', 'Kameng', 'Lohit'],
-    districts: ['East Siang', 'Lower Dibang', 'Lohit', 'Papum Pare'],
-  ),
-  'sikkim': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 6.0, 'severe': 8.5, 'critical': 10.5},
-    danger: 8.5, warning: 6.5, hfl: 11.0,
-    rivers: ['Teesta', 'Rangit', 'Rangpo'],
-    districts: ['East Sikkim', 'South Sikkim', 'West Sikkim'],
-  ),
-  'goa': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Mandovi', 'Zuari', 'Sal'],
-    districts: ['North Goa', 'South Goa'],
-  ),
-  // Missing states added in v1.1
-  'ladakh': _entry(
-    region: 'HIMALAYAN',
-    peak: {'moderate': 5.0, 'severe': 7.5, 'critical': 10.0},
-    danger: 7.5, warning: 5.5, hfl: 10.5,
-    rivers: ['Indus', 'Shyok', 'Zanskar'],
-    districts: ['Leh', 'Kargil'],
-  ),
-  'dadra and nagar haveli': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Damanganga'],
-    districts: ['Dadra and Nagar Haveli'],
-  ),
-  'daman and diu': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 7.5, 'severe': 10.0, 'critical': 12.0},
-    danger: 10.0, warning: 8.0, hfl: 12.5,
-    rivers: ['Damanganga'],
-    districts: ['Daman', 'Diu'],
-  ),
-  // UTs
-  'chandigarh': _entry(
-    region: 'URBAN_UT',
-    peak: {'moderate': 7.5, 'severe': 9.5, 'critical': 11.5},
-    danger: 9.5, warning: 7.5, hfl: 12.0,
-    rivers: ['Ghaggar', 'Sukhna'],
-    districts: ['Chandigarh'],
-  ),
-  'andaman and nicobar': _entry(
-    region: 'ISLAND',
-    peak: {'moderate': 8.5, 'severe': 11.0, 'critical': 13.0},
-    danger: 11.0, warning: 9.0, hfl: 13.5,
-    rivers: ['Andaman', 'Nicobar Streams'],
-    districts: ['South Andaman', 'North and Middle Andaman'],
-  ),
-  'lakshadweep': _entry(
-    region: 'ISLAND',
-    peak: {'moderate': 6.0, 'severe': 8.0, 'critical': 10.0},
-    danger: 8.0, warning: 6.0, hfl: 10.5,
-    rivers: [],
-    districts: ['Kavaratti'],
-  ),
-  'puducherry': _entry(
-    region: 'COASTAL',
-    peak: {'moderate': 8.0, 'severe': 10.5, 'critical': 12.5},
-    danger: 10.5, warning: 8.5, hfl: 13.0,
-    rivers: ['Gingee', 'Malattar'],
-    districts: ['Puducherry', 'Karaikal'],
   ),
 };
 
@@ -555,8 +298,6 @@ String severityFromEntry({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RULE ENGINE — FIX-3: right-skewed distribution
-// Under-predicting a flood is worse than over-predicting.
-// Weights are asymmetric: higher-severity neighbours get more mass.
 // ─────────────────────────────────────────────────────────────────────────────
 Map<String, double> _ruleEngineProbMap(String thresholdSev) {
   final rank = _severityOrder[thresholdSev]!;
@@ -564,18 +305,18 @@ Map<String, double> _ruleEngineProbMap(String thresholdSev) {
   final probs = <String, double>{};
   double total = 0;
   for (final label in all) {
-    final diff = _severityOrder[label]! - rank; // positive = higher severity
+    final diff = _severityOrder[label]! - rank;
     double w;
     if (diff == 0) {
-      w = 0.60; // anchor class
+      w = 0.60;
     } else if (diff == 1) {
-      w = 0.25; // one step above — higher weight (right-skew)
+      w = 0.25;
     } else if (diff == -1) {
-      w = 0.10; // one step below — lower weight
+      w = 0.10;
     } else if (diff > 1) {
-      w = 0.04; // two+ steps above
+      w = 0.04;
     } else {
-      w = 0.01; // two+ steps below
+      w = 0.01;
     }
     probs[label] = w;
     total += w;
@@ -585,20 +326,18 @@ Map<String, double> _ruleEngineProbMap(String thresholdSev) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HEURISTIC ON-DEVICE ENGINE
-// FIX-4: Duration, timeToPeak, and recessionTime now contribute to score.
+// FIX-4: Duration, timeToPeak, recessionTime contribute to score.
 // ─────────────────────────────────────────────────────────────────────────────
 FloodResult runOnDeviceEngine(FloodInput input) {
   final entry = getStateEntry(input.state);
   final rainfall7d = input.rainfall7d;
 
-  // --- Threshold severity (rule engine axis) ---
   final thresholdSev = severityFromEntry(
     peakLevelM: input.peakFloodLevelM,
     rainfall7dMm: rainfall7d,
     entry: entry,
   );
 
-  // --- Peak level score ---
   final critP = entry.peakLevelM['critical']!;
   final sevP = entry.peakLevelM['severe']!;
   final modP = entry.peakLevelM['moderate']!;
@@ -614,7 +353,6 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     peakScore = 0.33 * (input.peakFloodLevelM / modP).clamp(0, 1);
   }
 
-  // --- Rainfall score ---
   final rainT = getRegionRainfallThresholds(entry.region);
   double rainScore;
   if (rainfall7d >= rainT['critical']!) {
@@ -627,22 +365,17 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     rainScore = 0.33 * (rainfall7d / rainT['moderate']!).clamp(0, 1);
   }
 
-  // --- FIX-4: Temporal feature score ---
-  // Long duration + fast rise + slow recession = higher risk
-  // Each sub-score 0..1, blended with 10% total weight
   final durationScore = (input.eventDurationDays / 14.0).clamp(0.0, 1.0);
   final riseScore = input.timeToPeakDays > 0
-      ? (1.0 - (input.timeToPeakDays / 7.0).clamp(0.0, 1.0)) // faster rise = higher score
+      ? (1.0 - (input.timeToPeakDays / 7.0).clamp(0.0, 1.0))
       : 0.0;
-  final recessionScore = (input.recessionTimeDay / 10.0).clamp(0.0, 1.0); // slower recession = higher score
+  final recessionScore = (input.recessionTimeDay / 10.0).clamp(0.0, 1.0);
   final temporalScore = (durationScore * 0.4 + riseScore * 0.35 + recessionScore * 0.25)
       .clamp(0.0, 1.0);
 
-  // Weighted combination: peak=52%, rain=38%, temporal=10%
   final combinedScore =
       (peakScore * 0.52 + rainScore * 0.38 + temporalScore * 0.10).clamp(0.0, 1.0);
 
-  // Map combinedScore to 4-class probability vector
   final mlRank = (combinedScore * 3.0).clamp(0.0, 3.0);
   final mlProbs = <String, double>{};
   double mlTotal = 0;
@@ -654,10 +387,8 @@ FloodResult runOnDeviceEngine(FloodInput input) {
   }
   final normMlProbs = {for (final e in mlProbs.entries) e.key: e.value / mlTotal};
 
-  // --- Rule engine probs ---
   final ruleProbs = _ruleEngineProbMap(thresholdSev);
 
-  // --- Blend: ML=0.75, rule=0.25 ---
   const mlW = 0.75;
   const ruleW = 0.25;
   final finalProbs = <String, double>{};
@@ -672,7 +403,6 @@ FloodResult runOnDeviceEngine(FloodInput input) {
   String severity =
       normFinal.entries.reduce((a, b) => a.value > b.value ? a : b).key;
 
-  // Safety suppression: below warning level → cap at MODERATE
   final warnM = entry.warningLevelM;
   if (warnM > 0 &&
       input.peakFloodLevelM < warnM &&
