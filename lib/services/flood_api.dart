@@ -117,4 +117,13 @@ class FloodApi {
 
   Future<Map<String, dynamic>> modelMetrics() =>
       _c.get(AppConfig.epModelMetrics);
+
+  // ── NDMA (advisories + emergency contacts via backend) ────────────────────
+  Future<Map<String, dynamic>> ndmaAdvisories(String state) =>
+      _c.get(AppConfig.epNdmaAdvisories,
+          query: {'state': state});
+
+  Future<Map<String, dynamic>> ndmaContacts(String state) =>
+      _c.get(AppConfig.epNdmaContacts,
+          query: {'state': state});
 }

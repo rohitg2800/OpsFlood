@@ -1,12 +1,15 @@
 // lib/services/ndma_service.dart
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import '../config/app_config.dart';
+//
+// OpsFlood — NDMA Advisories + Emergency Contacts
+//
+// All calls go through FloodApi → OpsClient (auth, retry, timeouts).
+// Endpoints are defined in AppConfig — no magic URL strings.
+library;
 
-// BUG FIX: was using AppEnvironment.apiBaseUrl which defaulted to
-// 'https://gdacs.org/' — completely wrong backend URL.
-// Now uses AppConfig.baseUrl → 'https://opsflood.onrender.com'
+import 'package:flutter/foundation.dart';
+import 'flood_api.dart';
+
+// ── Models ───────────────────────────────────────────────────────────────────
 
 class EmergencyContact {
   final String role;
@@ -22,53 +25,48 @@ class EmergencyContact {
   });
 }
 
-class NdmaService {
-  static final NdmaService instance = NdmaService._();
-  NdmaService._();
+// ── NdmaService ──────────────────────────────────────────────────────────────
 
+class NdmaService {
+  NdmaService._();
+  static final NdmaService instance = NdmaService._();
+
+  final FloodApi _api = FloodApi.instance;
+
+  /// Returns raw advisory maps from the backend.
+  /// The backend proxies data.ndma.gov.in and caches it server-side.
   Future<List<dynamic>> fetchAdvisories(String state) async {
     try {
-      final uri = Uri.parse(
-        '${AppConfig.baseUrl}/api/ndma/advisories'
-        '?state=${Uri.encodeComponent(state)}',
-      );
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final body = response.body.trim();
-        if (body.startsWith('<')) return []; // HTML maintenance page guard
-        return json.decode(body) as List<dynamic>;
-      }
+      final raw = await _api.ndmaAdvisories(state);
+      // Unwrap if backend wraps in { data: [...] }
+      if (raw['data'] is List) return raw['data'] as List<dynamic>;
+      if (raw is List) return raw as List<dynamic>;
+      return [];
     } catch (e) {
       if (kDebugMode) debugPrint('[NdmaService] fetchAdvisories $state: $e');
+      return [];
     }
-    return [];
   }
 
+  /// Returns typed emergency contacts for a state.
   Future<List<EmergencyContact>> fetchEmergencyContacts(String state) async {
     try {
-      final uri = Uri.parse(
-        '${AppConfig.baseUrl}/api/ndma/emergency-contacts'
-        '?state=${Uri.encodeComponent(state)}',
-      );
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final body = response.body.trim();
-        if (body.startsWith('<')) return [];
-        final raw = json.decode(body);
-        final list = raw is List ? raw : (raw is Map ? raw['data'] as List? ?? [] : []);
-        return list
-            .whereType<Map<String, dynamic>>()
-            .map((m) => EmergencyContact(
-                  role:  m['role']?.toString()  ?? '',
-                  name:  m['name']?.toString()  ?? '',
-                  phone: m['phone']?.toString() ?? '',
-                  state: m['state']?.toString() ?? state,
-                ))
-            .toList();
-      }
+      final raw = await _api.ndmaContacts(state);
+      final list = raw['data'] is List
+          ? raw['data'] as List<dynamic>
+          : (raw is List ? raw as List<dynamic> : <dynamic>[]);
+      return list
+          .whereType<Map<String, dynamic>>()
+          .map((m) => EmergencyContact(
+                role:  m['role']?.toString()  ?? '',
+                name:  m['name']?.toString()  ?? '',
+                phone: m['phone']?.toString() ?? '',
+                state: m['state']?.toString() ?? state,
+              ))
+          .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('[NdmaService] fetchEmergencyContacts $state: $e');
+      return [];
     }
-    return [];
   }
 }

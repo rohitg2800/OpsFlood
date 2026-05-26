@@ -87,4 +87,8 @@ class AppConfig {
   static const String epStateSeverity    = '/api/state-severity';
   static const String epIngestionRun     = '/ingestion/run';
   static const String epModelMetrics     = '/model-metrics';
+
+  // ── NDMA endpoints ────────────────────────────────────────────────────────
+  static const String epNdmaAdvisories   = '/api/ndma/advisories';
+  static const String epNdmaContacts     = '/api/ndma/emergency-contacts';
 }
