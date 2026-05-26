@@ -7,8 +7,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_config.dart';
 import '../providers/flood_providers.dart';
-import '../services/api_service.dart';
+import '../services/ops_client.dart';
 import '../theme/river_theme.dart';
 import 'home_screen.dart';
 
@@ -120,9 +121,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   Future<void> _checkBackend() async {
     try {
-      final health = await ApiService()
-          .checkHealth()
-          .timeout(const Duration(seconds: 3));
+      final health = await OpsClient.instance
+          .get(AppConfig.epHealth)
+          .timeout(AppConfig.healthTimeout);
       _backendOnline =
           health['status'] != 'offline' && health['status'] != 'error';
     } catch (_) {
@@ -130,7 +131,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
     if (!mounted) return;
     setState(() {
-      _statusText = _backendOnline ? 'Systems online  \u2705' : 'Loading cached data  \u23f3';
+      _statusText = _backendOnline
+          ? 'Systems online  \u2705'
+          : 'Loading cached data  \u23f3';
     });
     await Future.delayed(const Duration(milliseconds: 800));
     _navigate();
@@ -175,7 +178,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       backgroundColor: _bg,
       body: Stack(
         children: [
-          // Deep radial glow — cyan instead of red
           Container(
             decoration: BoxDecoration(
               gradient: RadialGradient(
@@ -188,9 +190,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               ),
             ),
           ),
-          // Minimal dot-grid background
           CustomPaint(size: size, painter: _DotGridPainter()),
-          // Diagonal sweep line
           AnimatedBuilder(
             animation: _sweepCtrl,
             builder: (_, __) {
@@ -213,12 +213,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               );
             },
           ),
-          // ── Main content ────────────────────────────────────────────
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
                 AnimatedBuilder(
                   animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
                   builder: (_, __) => Opacity(
@@ -230,7 +228,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            // outer pulse ring
                             Transform.scale(
                               scale: _pulseScale.value,
                               child: Container(
@@ -245,7 +242,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                                 ),
                               ),
                             ),
-                            // logo circle
                             Container(
                               width: 96, height: 96,
                               decoration: BoxDecoration(
@@ -281,7 +277,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   ),
                 ),
                 const SizedBox(height: 32),
-                // Title
                 SlideTransition(
                   position: _titleSlide,
                   child: FadeTransition(
@@ -316,7 +311,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   ),
                 ),
                 const SizedBox(height: 72),
-                // Status
                 FadeTransition(
                   opacity: _statusOpacity,
                   child: Column(
@@ -361,7 +355,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               ],
             ),
           ),
-          // Version stamp
           Positioned(
             bottom: 32, left: 0, right: 0,
             child: Center(
@@ -396,6 +389,7 @@ class _DotGridPainter extends CustomPainter {
       }
     }
   }
+
   @override
   bool shouldRepaint(_DotGridPainter old) => false;
 }
