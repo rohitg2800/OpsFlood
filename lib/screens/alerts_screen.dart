@@ -12,6 +12,9 @@ import 'predict_screen.dart';
 class AlertsScreen extends StatelessWidget {
   const AlertsScreen({super.key});
 
+  // Required by main.dart routes map
+  static const String route = '/alerts';
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -147,7 +150,9 @@ class _SeveritySummaryBar extends StatelessWidget {
         children: [
           _pill('CRITICAL', '${app.criticalCount}', Colors.red),
           _pill('HIGH', '${app.highCount}', Colors.orange),
-          _pill('WATCH', '${app.activeAlerts.where((a) => a.risk == AppRisk.watch).length}', Colors.amber),
+          _pill('WATCH',
+              '${app.activeAlerts.where((a) => a.risk == AppRisk.watch).length}',
+              Colors.amber),
           _pill('SOURCE', 'WRD BH', Colors.tealAccent),
         ],
       ),
@@ -196,7 +201,6 @@ class _AlertCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Expanded(
@@ -259,7 +263,6 @@ class _AlertCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            // Gauge
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
@@ -270,7 +273,6 @@ class _AlertCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            // Footer row
             Row(
               children: [
                 Icon(
@@ -293,7 +295,6 @@ class _AlertCard extends StatelessWidget {
                     style: const TextStyle(
                         color: Colors.white38, fontSize: 10)),
                 const SizedBox(width: 12),
-                // Deep link to Predict
                 GestureDetector(
                   onTap: () {
                     Navigator.of(ctx).push(MaterialPageRoute(

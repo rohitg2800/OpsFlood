@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../services/app_state_service.dart';
 import '../services/real_time_service.dart';
+import '../services/wrd_bihar_service.dart'; // required for WrdStation type
 import '../theme/river_theme.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
@@ -256,12 +257,13 @@ class _CriticalBanner extends StatelessWidget {
           ),
           GestureDetector(
             onTap: () {
-              // Navigate to Alerts tab (index 2)
-              final home = context.findAncestorStateOfType<_HomeScreenState>();
+              final home =
+                  context.findAncestorStateOfType<_HomeScreenState>();
               home?._onTap(2);
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(8),
@@ -293,11 +295,11 @@ class _RiskMeterRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF0D1B2A),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _riskColor(app.avgRisk).withOpacity(0.35)),
+          border:
+              Border.all(color: _riskColor(app.avgRisk).withOpacity(0.35)),
         ),
         child: Row(
           children: [
-            // Risk dial
             Stack(
               alignment: Alignment.center,
               children: [
@@ -328,8 +330,8 @@ class _RiskMeterRow extends StatelessWidget {
                           fontWeight: FontWeight.bold),
                     ),
                     const Text('LIVE',
-                        style: TextStyle(
-                            color: Colors.white38, fontSize: 8)),
+                        style:
+                            TextStyle(color: Colors.white38, fontSize: 8)),
                   ],
                 ),
               ],
@@ -351,7 +353,6 @@ class _RiskMeterRow extends StatelessWidget {
                         color: Colors.white54, fontSize: 12),
                   ),
                   const SizedBox(height: 8),
-                  // Risk band
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
@@ -448,7 +449,8 @@ class _StatsRow extends StatelessWidget {
             value: '${app.criticalCount}',
             label: 'Critical',
             icon: Icons.crisis_alert,
-            color: app.criticalCount > 0 ? Colors.redAccent : Colors.white38,
+            color:
+                app.criticalCount > 0 ? Colors.redAccent : Colors.white38,
           )),
           const SizedBox(width: 10),
           Expanded(child: _StatCard(
@@ -496,7 +498,8 @@ class _StatCard extends StatelessWidget {
           const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(
-                  color: Colors.white38, fontSize: 9,
+                  color: Colors.white38,
+                  fontSize: 9,
                   letterSpacing: 0.5),
               textAlign: TextAlign.center),
         ],
@@ -513,13 +516,16 @@ class _WrdLiveSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final critical = app.wrdStations
-        .where((s) => s.riskLabel == 'CRITICAL').toList();
+        .where((s) => s.riskLabel == 'CRITICAL')
+        .toList();
     final high = app.wrdStations
-        .where((s) => s.riskLabel == 'HIGH').toList();
+        .where((s) => s.riskLabel == 'HIGH')
+        .toList();
     final rising = app.wrdStations
         .where((s) =>
             s.hasLiveData &&
-            (s.trend?.toLowerCase().contains('ris') ?? false)).toList();
+            (s.trend?.toLowerCase().contains('ris') ?? false))
+        .toList();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -538,7 +544,8 @@ class _WrdLiveSummary extends StatelessWidget {
                 Container(
                   width: 8, height: 8,
                   decoration: const BoxDecoration(
-                      color: Colors.tealAccent, shape: BoxShape.circle),
+                      color: Colors.tealAccent,
+                      shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 8),
                 const Text('WRD Bihar Live Database',
@@ -576,9 +583,7 @@ class _WrdLiveSummary extends StatelessWidget {
                           ? Colors.redAccent
                           : Colors.white38),
                   _wrdRow('High Risk', '${high.length}',
-                      high.isNotEmpty
-                          ? Colors.orange
-                          : Colors.white38),
+                      high.isNotEmpty ? Colors.orange : Colors.white38),
                   _wrdRow('Rising Trend', '${rising.length}',
                       rising.isNotEmpty
                           ? Colors.amberAccent
@@ -622,12 +627,13 @@ class _WrdLiveSummary extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${s.site} — ${s.currentLevel?.toStringAsFixed(2) ?? "-"}m/${s.dangerLevel?.toStringAsFixed(2) ?? "-"}m DL',
+              '${s.site} — ${s.currentLevel?.toStringAsFixed(2) ?? "–"}m/${s.dangerLevel?.toStringAsFixed(2) ?? "–"}m DL',
               style: const TextStyle(color: Colors.white70, fontSize: 11),
             ),
           ),
           Text('${s.river}',
-              style: const TextStyle(color: Colors.white38, fontSize: 10)),
+              style:
+                  const TextStyle(color: Colors.white38, fontSize: 10)),
         ],
       ),
     );
@@ -673,9 +679,8 @@ class _QuickNavGrid extends StatelessWidget {
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
             childAspectRatio: 2.2,
-            children: _cards
-                .map((c) => _QuickNavTile(card: c))
-                .toList(),
+            children:
+                _cards.map((c) => _QuickNavTile(card: c)).toList(),
           ),
         ],
       ),
@@ -772,8 +777,8 @@ class _PremiumNavBar extends StatelessWidget {
             padding: EdgeInsets.only(bottom: bottomPad),
             child: Row(
               children: List.generate(destinations.length, (i) {
-                final isActive = i == currentIndex;
-                final showBadge = i == 2 && alertCount > 0;
+                final isActive   = i == currentIndex;
+                final showBadge  = i == 2 && alertCount > 0;
                 return Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -842,11 +847,13 @@ class _NavItem extends StatelessWidget {
           width: isActive ? 44 : 36, height: isActive ? 30 : 26,
           decoration: isActive
               ? BoxDecoration(
-                  color: AppPalette.cyan.withValues(alpha: 0.10 * glowValue),
+                  color: AppPalette.cyan
+                      .withValues(alpha: 0.10 * glowValue),
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: [
                     BoxShadow(
-                      color: AppPalette.cyan.withValues(alpha: 0.25 * glowValue),
+                      color: AppPalette.cyan
+                          .withValues(alpha: 0.25 * glowValue),
                       blurRadius: 12,
                     ),
                   ],
@@ -861,9 +868,9 @@ class _NavItem extends StatelessWidget {
         AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 200),
           style: TextStyle(
-            fontSize:   isActive ? 10.0 : 9.5,
-            fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-            color:      color,
+            fontSize:      isActive ? 10.0 : 9.5,
+            fontWeight:    isActive ? FontWeight.w700 : FontWeight.w400,
+            color:         color,
             letterSpacing: 0.2,
           ),
           child: Text(entry.label),
