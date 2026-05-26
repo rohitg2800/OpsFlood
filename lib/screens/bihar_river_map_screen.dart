@@ -26,17 +26,17 @@ const _kRiverOrder = [
 
 // River accent colors
 const _kRiverColors = <String, Color>{
-  'Ganga':       Color(0xFF0097A7),   // teal
-  'Kosi':        Color(0xFFE53935),   // red (historically flood-prone)
-  'Gandak':      Color(0xFF43A047),   // green
-  'Bagmati':     Color(0xFF8E24AA),   // purple
-  'Burhi Gandak':Color(0xFF00ACC1),   // cyan
-  'Ghaghra':     Color(0xFFFF7043),   // deep orange
-  'Mahananda':   Color(0xFF039BE5),   // blue
-  'Kamla':       Color(0xFFD81B60),   // pink
-  'Kamalabalan': Color(0xFFAD1457),   // dark pink
-  'Adhwara':     Color(0xFF6D4C41),   // brown
-  'Punpun':      Color(0xFF558B2F),   // light green
+  'Ganga':       Color(0xFF0097A7),
+  'Kosi':        Color(0xFFE53935),
+  'Gandak':      Color(0xFF43A047),
+  'Bagmati':     Color(0xFF8E24AA),
+  'Burhi Gandak':Color(0xFF00ACC1),
+  'Ghaghra':     Color(0xFFFF7043),
+  'Mahananda':   Color(0xFF039BE5),
+  'Kamla':       Color(0xFFD81B60),
+  'Kamalabalan': Color(0xFFAD1457),
+  'Adhwara':     Color(0xFF6D4C41),
+  'Punpun':      Color(0xFF558B2F),
 };
 
 class BiharRiverMapScreen extends StatefulWidget {
@@ -94,7 +94,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
     }
   }
 
-  // ── Summary stats ────────────────────────────────────────────────────────────
   int get _totalStations => _grouped.values.fold(0, (s, v) => s + v.length);
   int get _liveCount     => _grouped.values
       .expand((v) => v).where((s) => s.hasLiveData).length;
@@ -220,8 +219,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
     );
   }
 
-  // ── Summary bar ──────────────────────────────────────────────────────────────
-
   Widget _buildSummaryBar() {
     return Container(
       color: const Color(0xFF0D1B2A),
@@ -278,8 +275,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
       ),
     );
   }
-
-  // ── River tab content ────────────────────────────────────────────────────────────
 
   Widget _buildRiverTab(String river) {
     final stations = _grouped[river] ?? [];
@@ -394,7 +389,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header row
             Row(
               children: [
                 Expanded(
@@ -458,7 +452,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
                     ],
                   ),
                 ),
-                // Current level display
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -483,12 +476,10 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
               ],
             ),
 
-            // ── Gauge bar (only when live)
             if (live && danger != null && danger > 0) ...[
               const SizedBox(height: 12),
               _buildGaugeBar(cur!, danger, station.warningLevel, gaugeColor),
               const SizedBox(height: 8),
-              // Threshold row
               Row(
                 children: [
                   _thresholdChip(
@@ -522,7 +513,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
               ),
             ],
 
-            // ── NA explanation
             if (!live) ...[
               const SizedBox(height: 8),
               Row(
@@ -530,10 +520,9 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
                   const Icon(Icons.info_outline,
                       size: 13, color: Colors.white24),
                   const SizedBox(width: 4),
-                  Text(
+                  const Text(
                     'No gauge reading — typical before monsoon (June+)',
-                    style: const TextStyle(
-                        color: Colors.white24, fontSize: 10),
+                    style: TextStyle(color: Colors.white24, fontSize: 10),
                   ),
                 ],
               ),
@@ -553,7 +542,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
               ),
             ],
 
-            // ── Trend + HFL row
             if (live && station.trend != null) ...[
               const SizedBox(height: 8),
               Row(
@@ -603,15 +591,18 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
     );
   }
 
-  // ── Gauge bar ──────────────────────────────────────────────────────────────────
+  // ── Gauge bar ─────────────────────────────────────────────────────────────────
+  // NOTE: Container.margin must be non-negative. Use Transform.translate
+  // for the danger marker overhang instead of a negative EdgeInsets.
 
   Widget _buildGaugeBar(
       double current, double danger, double? warning, Color color) {
-    final pct         = (current / danger).clamp(0.0, 1.2);
-    final warningPct  = warning != null ? (warning / danger).clamp(0.0, 1.0) : null;
-    final dangerFrac  = (1.0 / 1.2);  // danger line at 83.3% of visual bar
+    final pct        = (current / danger).clamp(0.0, 1.2);
+    final warningPct = warning != null ? (warning / danger).clamp(0.0, 1.0) : null;
+    final dangerFrac = (1.0 / 1.2); // danger line at 83.3% of visual bar
 
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         // Track
         Container(
@@ -638,20 +629,18 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
             widthFactor: warningPct / 1.2,
             child: Align(
               alignment: Alignment.centerRight,
-              child: Container(
-                width: 2, height: 8, color: Colors.amber,
-              ),
+              child: Container(width: 2, height: 8, color: Colors.amber),
             ),
           ),
-        // Danger marker
+        // Danger marker — use Transform.translate to achieve the 2px upward
+        // overhang; Container.margin cannot be negative.
         FractionallySizedBox(
           widthFactor: dangerFrac,
           child: Align(
             alignment: Alignment.centerRight,
-            child: Container(
-              width: 2, height: 12,
-              color: Colors.redAccent,
-              margin: const EdgeInsets.only(top: -2),
+            child: Transform.translate(
+              offset: const Offset(0, -2),
+              child: Container(width: 2, height: 12, color: Colors.redAccent),
             ),
           ),
         ),
@@ -692,8 +681,6 @@ class _BiharRiverMapScreenState extends State<BiharRiverMapScreen>
       ),
     );
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────────
 
   Color _riskColor(String risk) {
     switch (risk) {
