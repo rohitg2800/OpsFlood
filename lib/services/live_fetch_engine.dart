@@ -1,25 +1,19 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine (v17.3 — WRD Bihar integration)
+// OpsFlood Bihar — LiveFetchEngine (v18.0 Bihar-only)
 //
-// CHANGES in v17.3:
+// CHANGES in v18.0:
 //
-//   1. WrdBiharService wired into _fetchCity():
-//      - Bihar cities now fetch real gauge readings from Central Flood
-//        Control Cell, WRD Patna (31 stations).
-//      - WRD data overrides synthetic STATE_SEVERITY_MATRIX levels.
-//      - cwcSource set to 'WRD_BIHAR' when WRD data is used.
+//   1. WrdBiharService is now the UNCONDITIONAL primary gauge source.
+//      The old `city.state == 'Bihar'` guard is removed — every city
+//      in kIndiaCities is a Bihar station, so the guard was redundant.
 //
-// v17.2 changes retained:
-//   • FloodApi (OpsClient) for all backend calls.
-//   • _externalClient for third-party APIs.
-//   • AppConfig.cacheTtl for unified TTL.
+//   2. _fetchBackendLevels() and CwcDirectService are kept as fallbacks
+//      but WRD override always wins when wrd != null.
 //
-// v17.1 fixes retained:
-//   • _matchCity() returns null on no-match.
-//   • Synthetic source guard.
-//   • CWC HTML maintenance page guard.
-//   • 429-backoff + 300 ms inter-city delay.
+//   3. healthySources now counts WRD in slot [5].
+//
+// v17.3 → v18.0: no logic changes other than removing the state guard.
 library;
 
 import 'dart:async';
@@ -146,6 +140,13 @@ class LiveFetchEngine {
         return s.toLowerCase() == state.toLowerCase() || s == 'All India';
       }).toList();
 
+  // Bihar-only convenience getters
+  List<dynamic> get biharAlerts => criticalAlerts
+      .where((a) => (a is Map ? a['state'] : null)?.toString() == 'Bihar')
+      .toList();
+
+  List<dynamic> get biharImdAlerts => imdAlertsForState('Bihar');
+
   Future<void> startPolling() async {
     _timer?.cancel();
     await refreshData();
@@ -157,7 +158,6 @@ class LiveFetchEngine {
     _timer = null;
   }
 
-  // ── Backend wake ───────────────────────────────────────────────────────────
   Future<bool> _wakeBackend() async {
     if (_runningOnWeb || _backendAwake) return _backendAwake;
     try {
@@ -173,7 +173,6 @@ class LiveFetchEngine {
     return _backendAwake;
   }
 
-  // ── External 429 retry ────────────────────────────────────────────────────
   Future<http.Response> _externalGet(
     Uri uri, {
     Duration timeout = const Duration(seconds: 12),
@@ -268,7 +267,7 @@ class LiveFetchEngine {
         if (kDebugMode) {
           debugPrint('[LiveFetch] ✓ ${city.name} | src=${snap['healthySources']} '
               '| risk=${snap['riskLabel']} | level=${snap['cwcLevel']} '
-              '| flow=${snap['flowRate']} m³/s | bkSrc=${snap['backendSource']}');
+              '| flow=${snap['flowRate']} m³/s | wrdSrc=${snap['cwcSource']}');
         }
 
         if (city != cities.last) {
@@ -285,12 +284,12 @@ class LiveFetchEngine {
 
       if (healthy == 0) {
         isOnline = false;
-        error    = 'All city fetches failed';
+        error    = 'All Bihar gauge fetches failed';
       }
 
       if (kDebugMode) {
-        debugPrint('[LiveFetch] ✓ done | $healthy/${cities.length} healthy | '
-            '${criticalCount} critical | cwcLive=${newCwc.length}');
+        debugPrint('[LiveFetch Bihar] ✓ done | $healthy/${cities.length} healthy | '
+            '${criticalCount} critical | wrdLive=${newCwc.length}');
       }
     } catch (e, st) {
       isOnline     = false;
@@ -314,10 +313,11 @@ class LiveFetchEngine {
       final cwcDirectFut = _cwcDirect.fetch(city);
       final backendFut   = _runningOnWeb ? Future.value(null) : _fetchBackendLevels(city);
       final imdFut       = _runningOnWeb ? Future.value(null) : _fetchImdAlerts(city);
-      // ── WRD Bihar: only fired for Bihar cities ──────────────────────────
-      final wrdFut = city.state == 'Bihar'
-          ? WrdBiharService.instance.fetchBestMatch(city.name, river: city.river)
-          : Future<WrdStation?>.value(null);
+      // WRD Bihar is primary for ALL cities (every city is Bihar)
+      final wrdFut = WrdBiharService.instance.fetchBestMatch(
+        city.name,
+        river: city.river,
+      );
 
       final results = await Future.wait([
         weatherFut, glofasFut, cwcDirectFut, backendFut, imdFut, wrdFut,
@@ -339,7 +339,6 @@ class LiveFetchEngine {
 
       final precipMm    = (weather?['precip_mm']  as num?)?.toDouble() ?? 0.0;
       final discharge7d = (glofas?['discharge7d'] as List?)?.cast<double>() ?? <double>[];
-
       final backendFlow  = (backend?['flow_rate']  as num?)?.toDouble() ?? 0.0;
       final glofasFlow   = (glofas?['discharge']   as num?)?.toDouble() ?? 0.0;
       final dischargeM3s = backendFlow > 0 ? backendFlow : glofasFlow;
@@ -357,11 +356,8 @@ class LiveFetchEngine {
       if (!isSyntheticBackend) {
         backendRisk = (backend?['risk_level'] as String?)?.toUpperCase();
       } else {
-        cwcLevel    = null;
-        dangerLevel = null;
-        warnLevel   = null;
-        safeLevel   = null;
-        if (kDebugMode) debugPrint('[LiveFetch] ${city.name}: skipping synthetic bkSrc=$backendSrc');
+        cwcLevel = dangerLevel = warnLevel = safeLevel = null;
+        if (kDebugMode) debugPrint('[LiveFetch] ${city.name}: skip synthetic bkSrc=$backendSrc');
       }
       String? cwcSource = (!isSyntheticBackend && backend != null)
           ? (backendSrc ?? 'BACKEND')
@@ -375,13 +371,13 @@ class LiveFetchEngine {
         backendRisk = null;
       }
 
-      // ── WRD Bihar override: most authoritative gauge source for Bihar ──
+      // WRD Bihar — highest-priority real gauge override
       if (wrd != null) {
         cwcLevel    = wrd.currentLevel  ?? cwcLevel;
         dangerLevel = wrd.dangerLevel   ?? dangerLevel;
         warnLevel   = wrd.warningLevel  ?? warnLevel;
         cwcSource   = 'WRD_BIHAR';
-        backendRisk = null; // let risk be re-inferred from real level
+        backendRisk = null;
         if (kDebugMode) {
           debugPrint('[LiveFetch] WRD ✓ ${city.name}: '
               'level=${wrd.currentLevel} danger=${wrd.dangerLevel} '
@@ -445,7 +441,6 @@ class LiveFetchEngine {
          : 'LOW';
   }
 
-  // ── Weather ────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchWeather(IndiaCity city) async {
     final key    = _tileKey(city.lat, city.lon);
     final cached = _weatherCache[key];
@@ -476,7 +471,6 @@ class LiveFetchEngine {
     }
   }
 
-  // ── GloFAS ─────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchGloFas(IndiaCity city) async {
     final key    = _tileKey(city.lat, city.lon);
     final cached = _glofasCache[key];
@@ -501,7 +495,6 @@ class LiveFetchEngine {
     }
   }
 
-  // ── Backend gauge levels ───────────────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchBackendLevels(IndiaCity city) async {
     try {
       final resp = await _api.levelsByState(city.state, limit: 200);
@@ -511,11 +504,6 @@ class LiveFetchEngine {
       if (raw is String && (raw as String).trimLeft().startsWith('<')) return null;
       final station = _matchCity(raw.cast<Map<String, dynamic>>(), city.name);
       if (station == null) return null;
-      if (kDebugMode) {
-        debugPrint('[LiveFetch] backend ✓ ${city.name}: '
-            'level=${station['current_level']} danger=${station['danger_level']} '
-            'risk=${station['risk_level']} src=${station['data_source']}');
-      }
       return {
         'current_level':    _num(station['current_level']),
         'safe_level':       _num(station['safe_level']),
@@ -532,7 +520,6 @@ class LiveFetchEngine {
     }
   }
 
-  // ── IMD alerts ─────────────────────────────────────────────────────────────
   List<dynamic> _imdCache     = [];
   DateTime?     _imdCacheTime;
 
@@ -591,21 +578,17 @@ class LiveFetchEngine {
     else if (precipMm > 80)   score += 0.25;
     else if (precipMm > 40)   score += 0.15;
     else if (precipMm > 15)   score += 0.07;
-
     if (dischargeM3s > 8000)      score += 0.35;
     else if (dischargeM3s > 4000) score += 0.25;
     else if (dischargeM3s > 1500) score += 0.15;
     else if (dischargeM3s > 500)  score += 0.07;
-
     if (currentLevel != null && dangerLevel != null && dangerLevel > 0) {
       final r = currentLevel / dangerLevel;
       if (r >= 1.0)       score += 0.30;
       else if (r >= 0.85) score += 0.20;
       else if (r >= 0.70) score += 0.10;
     }
-
     if (discharge7d.length >= 2 && discharge7d.last > discharge7d.first * 1.3) score += 0.05;
-
     if (score >= 0.75) return 'CRITICAL';
     if (score >= 0.50) return 'HIGH';
     if (score >= 0.30) return 'MODERATE';
@@ -659,6 +642,7 @@ class LiveFetchEngine {
   }
 
   List<IndiaCity> _priorityCities() {
+    // CWC-coded stations polled first (faster live data), then WRD-only
     final cwcFirst  = kIndiaCities.where((c) => c.cwcStation != null).toList();
     final remaining = kIndiaCities.where((c) => c.cwcStation == null).toList();
     return [...cwcFirst, ...remaining];
