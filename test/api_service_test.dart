@@ -1,81 +1,122 @@
 // test/api_service_test.dart
 //
-// flutter_dotenv must be initialised before any code that calls
-// dotenv.maybeGet() is executed.  Tests never run main(), so we
-// call dotenv.testLoad() in setUpAll with hard-coded fallback
-// values that mirror .env.example. This keeps tests hermetic —
-// no .env file required on CI.
+// AppConfig unit tests.
+//
+// AppConfig uses String/bool.fromEnvironment (dart-define) — NOT flutter_dotenv.
+// No initialisation is required before tests; the compile-time constants
+// resolve to their defaultValue in test mode automatically.
+//
+// Run: flutter test test/api_service_test.dart
 
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:equinox_flood/constants/constants.dart';
+import 'package:equinox_flood/config/app_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  setUpAll(() {
-    // testLoad() initialises dotenv in-memory without reading any file.
-    // Values here mirror .env.example — safe to commit.
-    dotenv.testLoad(fileInput: '''
-BASE_URL=https://opsflood.onrender.com
-BACKUP_URL=
-''');
-  });
-
+  // ── URL safety ───────────────────────────────────────────────────────────
   group('AppConfig URL safety', () {
     test('baseUrl is non-empty and starts with https', () {
       expect(AppConfig.baseUrl, isNotEmpty);
       expect(AppConfig.baseUrl, startsWith('https://'));
     });
 
-    test('backupBaseUrl is empty so candidate list has 1 entry', () {
-      final candidates = [
-        AppConfig.baseUrl,
-        if (AppConfig.backupBaseUrl.isNotEmpty) AppConfig.backupBaseUrl,
-      ];
-      expect(candidates.length, 1,
-          reason: 'Only baseUrl should be present when backupBaseUrl is empty');
-    });
-
-    test('backupBaseUrl is either empty or different from baseUrl', () {
-      final base   = AppConfig.baseUrl;
-      final backup = AppConfig.backupBaseUrl;
-      expect(
-        backup.isEmpty || backup != base,
-        isTrue,
-        reason: 'backupBaseUrl must not be identical to baseUrl',
-      );
+    test('baseUrl + epHealth forms a valid URI', () {
+      final url = Uri.tryParse(AppConfig.baseUrl + AppConfig.epHealth);
+      expect(url, isNotNull);
+      expect(url!.hasScheme, isTrue);
+      expect(url.host, isNotEmpty);
     });
 
     test('all API endpoints start with /', () {
       for (final ep in [
-        AppConfig.healthEndpoint,
-        AppConfig.liveTelemetryEndpoint,
-        AppConfig.liveLevelsEndpoint,
-        AppConfig.criticalAlertsEndpoint,
-        AppConfig.predictLegacyEndpoint,
-        AppConfig.weatherCurrentEndpoint,
-        AppConfig.weatherForecastEndpoint,
+        AppConfig.epHealth,
+        AppConfig.epPredict,
+        AppConfig.epLiveTelemetry,
+        AppConfig.epLiveLevels,
+        AppConfig.epCriticalAlerts,
+        AppConfig.epWeatherCurrent,
+        AppConfig.epWeatherForecast,
+        AppConfig.epNdmaAdvisories,
+        AppConfig.epNdmaContacts,
       ]) {
         expect(ep, startsWith('/'), reason: 'endpoint must start with /: $ep');
       }
     });
 
-    test('baseUrl + endpoint forms a valid URL', () {
-      final url = Uri.tryParse(
-        AppConfig.baseUrl + AppConfig.healthEndpoint,
-      );
-      expect(url, isNotNull);
-      expect(url!.hasScheme, isTrue);
-      expect(url.host, isNotEmpty);
+    test('baseUrl + every endpoint forms a valid URI', () {
+      for (final ep in [
+        AppConfig.epHealth,
+        AppConfig.epPredict,
+        AppConfig.epLiveTelemetry,
+        AppConfig.epLiveLevels,
+        AppConfig.epCriticalAlerts,
+        AppConfig.epWeatherCurrent,
+        AppConfig.epWeatherForecast,
+        AppConfig.epNdmaAdvisories,
+        AppConfig.epNdmaContacts,
+      ]) {
+        final url = Uri.tryParse(AppConfig.baseUrl + ep);
+        expect(url, isNotNull,
+            reason: 'baseUrl + $ep must parse as a valid URI');
+        expect(url!.hasScheme, isTrue);
+        expect(url.host, isNotEmpty);
+      }
     });
   });
 
-  group('AppConfig polling config', () {
-    test('pollingInterval is exactly 5 minutes', () {
-      expect(AppConfig.pollingInterval, const Duration(minutes: 5));
+  // ── Timeout config ──────────────────────────────────────────────────────────
+  group('AppConfig timeout config', () {
+    test('requestTimeout is positive and reasonable (5–60 s)', () {
+      final secs = AppConfig.requestTimeout.inSeconds;
+      expect(secs, inInclusiveRange(5, 60));
+    });
+
+    test('coldStartTimeout is longer than requestTimeout', () {
+      expect(
+        AppConfig.coldStartTimeout > AppConfig.requestTimeout,
+        isTrue,
+        reason: 'coldStartTimeout must exceed requestTimeout',
+      );
+    });
+
+    test('healthTimeout is <= requestTimeout', () {
+      expect(
+        AppConfig.healthTimeout <= AppConfig.requestTimeout,
+        isTrue,
+        reason: 'healthTimeout must not exceed requestTimeout',
+      );
+    });
+  });
+
+  // ── Polling + retry config ───────────────────────────────────────────────
+  group('AppConfig polling + retry', () {
+    test('realtimeInterval is at least 10 seconds', () {
+      expect(AppConfig.realtimeInterval.inSeconds, greaterThanOrEqualTo(10));
     });
 
     test('maxRetries is between 1 and 10', () {
       expect(AppConfig.maxRetries, inInclusiveRange(1, 10));
+    });
+
+    test('cacheTtl is positive', () {
+      expect(AppConfig.cacheTtl.inSeconds, greaterThan(0));
+    });
+
+    test('backgroundInterval is at least 1 minute', () {
+      expect(AppConfig.backgroundInterval.inMinutes, greaterThanOrEqualTo(1));
+    });
+  });
+
+  // ── Environment defaults ─────────────────────────────────────────────────
+  group('AppConfig environment defaults', () {
+    test('env defaults to production in test mode', () {
+      // dart-define not set in test runner → defaultValue kicks in
+      expect(AppConfig.env, equals('production'));
+      expect(AppConfig.isProduction, isTrue);
+      expect(AppConfig.isDevelopment, isFalse);
+    });
+
+    test('apiToken defaults to empty string', () {
+      expect(AppConfig.apiToken, isEmpty);
     });
   });
 }
