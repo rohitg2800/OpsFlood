@@ -1,397 +1,376 @@
 // lib/screens/alerts_screen.dart
-// OpsFlood — AlertsScreen v5 (Abyss Ops rebuild)
-// Minimal, accurate, premium. Removed noisy gauge references.
+// OpsFlood — AlertsScreen v3  (Flood Alert Command)
+// New UI: severity bands (CRITICAL / HIGH / WATCH), WRD Bihar sourced,
+// connected to predict window via deep-link. Shows discharge + level data.
+library;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import '../services/app_state_service.dart';
+import '../services/wrd_bihar_service.dart';
+import 'predict_screen.dart';
 
-import '../models/threshold_alert.dart';
-import '../providers/alerts_provider.dart';
-import '../theme/river_theme.dart';
-import '../widgets/risk_bar.dart';
-
-class AlertsScreen extends ConsumerStatefulWidget {
-  static const route = '/alerts';
+class AlertsScreen extends StatelessWidget {
   const AlertsScreen({super.key});
-  @override
-  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
-}
 
-class _AlertsScreenState extends ConsumerState<AlertsScreen> {
   @override
   Widget build(BuildContext context) {
-    final provider = ref.watch(alertsProvider);
-    final alerts   = provider.filtered;
-    final critical = provider.critical;
+    return ListenableBuilder(
+      listenable: AppStateService.instance,
+      builder: (context, _) {
+        final app = AppStateService.instance;
+        return Scaffold(
+          backgroundColor: const Color(0xFF060C1A),
+          body: CustomScrollView(
+            slivers: [
+              _buildAppBar(context, app),
+              if (app.loading && app.activeAlerts.isEmpty)
+                const SliverFillRemaining(
+                  child: Center(
+                    child: CircularProgressIndicator(color: Colors.tealAccent),
+                  ),
+                )
+              else if (app.activeAlerts.isEmpty)
+                SliverFillRemaining(child: _EmptyAlerts())
+              else
+                SliverList(
+                  delegate: SliverChildListDelegate([
+                    _SeveritySummaryBar(app: app),
+                    const SizedBox(height: 8),
+                    if (app.criticalCount > 0) ..._section(
+                        'CRITICAL', app.activeAlerts
+                            .where((a) => a.risk == AppRisk.critical).toList(),
+                        Colors.red, context),
+                    if (app.highCount > 0) ..._section(
+                        'HIGH RISK', app.activeAlerts
+                            .where((a) => a.risk == AppRisk.high).toList(),
+                        Colors.orange, context),
+                    ..._section(
+                        'WATCH', app.activeAlerts
+                            .where((a) => a.risk == AppRisk.watch).toList(),
+                        Colors.amber, context),
+                    const SizedBox(height: 24),
+                  ]),
+                ),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            backgroundColor: const Color(0xFF0D1B2A),
+            foregroundColor: Colors.tealAccent,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Refresh'),
+            onPressed: () => AppStateService.instance.refresh(),
+          ),
+        );
+      },
+    );
+  }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      provider.markAllSeen();
-    });
-
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
-        body: SafeArea(
-          child: Column(
+  SliverAppBar _buildAppBar(BuildContext context, AppStateService app) {
+    return SliverAppBar(
+      backgroundColor: const Color(0xFF060C1A),
+      pinned: true,
+      title: Row(
+        children: [
+          const Icon(Icons.notifications_active, color: Colors.tealAccent, size: 22),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _header(critical.length, alerts.length),
-              if (critical.isNotEmpty)
-                _criticalBanner(critical.length),
-              _filterBar(provider),
-              Expanded(
-                child: alerts.isEmpty
-                    ? _emptyState(provider.loading)
-                    : RefreshIndicator(
-                        color: AppPalette.cyan,
-                        backgroundColor: AppPalette.abyss2,
-                        onRefresh: provider.refresh,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-                          itemCount: alerts.length,
-                          itemBuilder: (_, i) => _AlertCard(alert: alerts[i]),
-                        ),
-                      ),
+              const Text('Flood Alerts',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+              Text(
+                '${app.alertCount} active · WRD Bihar',
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _header(int critCount, int total) => Container(
-    padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [
-          AppPalette.critical.withValues(alpha: critCount > 0 ? 0.07 : 0.0),
-          AppPalette.abyss0,
-        ],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
-      border: Border(
-          bottom: BorderSide(
-              color: AppPalette.abyssStroke, width: 1)),
-    ),
-    child: Row(children: [
-      Container(
-        width: 42, height: 42,
-        decoration: BoxDecoration(
-          color: AppPalette.critical.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: AppPalette.critical.withValues(alpha: 0.30)),
-        ),
-        child: const Icon(Icons.notifications_rounded,
-            color: AppPalette.critical, size: 22),
-      ),
-      const SizedBox(width: 14),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  List<Widget> _section(String title, List<FloodAlertEntry> alerts,
+      Color color, BuildContext context) {
+    if (alerts.isEmpty) return [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+        child: Row(
           children: [
-            const Text('Flood Alerts',
+            Container(width: 3, height: 16,
+                color: color,
+                margin: const EdgeInsets.only(right: 8)),
+            Text(title,
                 style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w900,
-                  color: AppPalette.textWhite, letterSpacing: -0.6,
-                )),
-            Text(
-              '$total active alert${total != 1 ? 's' : ''}',
-              style: const TextStyle(
-                  fontSize: 11, color: AppPalette.textGrey),
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6)),
+              child: Text('${alerts.length}',
+                  style: TextStyle(
+                      color: color, fontSize: 10,
+                      fontWeight: FontWeight.bold)),
             ),
           ],
         ),
       ),
-      if (critCount > 0)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: AppPalette.critical.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: AppPalette.critical.withValues(alpha: 0.40)),
-          ),
-          child: Text(
-            '$critCount CRITICAL',
-            style: const TextStyle(
-              color: AppPalette.critical, fontSize: 10,
-              fontWeight: FontWeight.w900, letterSpacing: 0.3,
-            ),
-          ),
-        ),
-    ]),
-  );
-
-  Widget _criticalBanner(int n) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-    color: AppPalette.critical.withValues(alpha: 0.12),
-    child: Row(children: [
-      const Icon(Icons.crisis_alert_rounded,
-          color: AppPalette.critical, size: 18),
-      const SizedBox(width: 10),
-      Text(
-        '$n station${n > 1 ? 's' : ''} at or above danger level',
-        style: const TextStyle(
-          color: AppPalette.critical,
-          fontWeight: FontWeight.w700, fontSize: 12,
-        ),
-      ),
-    ]),
-  );
-
-  Widget _filterBar(AlertsProvider provider) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-    child: Row(children: [
-      Expanded(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            _FilterChip(
-              label: 'All',
-              active: provider.filterLevel == null,
-              onTap: provider.clearFilters,
-              color: AppPalette.cyan,
-            ),
-            ...AlertLevel.values.reversed
-                .where((l) => l != AlertLevel.normal)
-                .map((l) => _FilterChip(
-                      label: l.label,
-                      active: provider.filterLevel == l,
-                      onTap: () => provider.setFilterLevel(l),
-                      color: l.color,
-                    )),
-          ]),
-        ),
-      ),
-      GestureDetector(
-        onTap: provider.refresh,
-        child: Container(
-          width: 34, height: 34,
-          margin: const EdgeInsets.only(left: 8),
-          decoration: BoxDecoration(
-            color: AppPalette.abyss2,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppPalette.abyssStroke),
-          ),
-          child: const Icon(Icons.refresh_rounded,
-              color: AppPalette.textGrey, size: 17),
-        ),
-      ),
-    ]),
-  );
-
-  Widget _emptyState(bool loading) => Center(
-    child: loading
-        ? const CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation(AppPalette.cyan))
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64, height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppPalette.safe.withValues(alpha: 0.08),
-                  border: Border.all(
-                      color: AppPalette.safe.withValues(alpha: 0.20)),
-                ),
-                child: const Icon(Icons.check_circle_outline_rounded,
-                    size: 32, color: AppPalette.safe),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'All rivers within safe levels',
-                style: TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-  );
+      ...alerts.map((a) => _AlertCard(alert: a, context: context)),
+    ];
+  }
 }
 
-// ── Alert Card ────────────────────────────────────────────────────────────
-class _AlertCard extends StatelessWidget {
-  final ThresholdAlert alert;
-  const _AlertCard({required this.alert});
+class _SeveritySummaryBar extends StatelessWidget {
+  final AppStateService app;
+  const _SeveritySummaryBar({required this.app});
 
   @override
   Widget build(BuildContext context) {
-    final col = alert.level.color;
-    final ts  = DateFormat('dd MMM  HH:mm').format(alert.timestamp.toLocal());
-    final pct = (alert.fillPercent).clamp(0.0, 100.0);
-
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: col.withValues(alpha: 0.25), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: col.withValues(alpha: 0.06),
-            blurRadius: 18, offset: const Offset(0, 4),
-          ),
-        ],
+        color: const Color(0xFF0D1B2A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          // Row 1: icon + city + level badge + new pill
-          Row(children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: col.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Icon(alert.level.icon, color: col, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(alert.cityName,
-                      style: const TextStyle(
-                        color: AppPalette.textWhite,
-                        fontWeight: FontWeight.w800, fontSize: 14,
-                      )),
-                  Text('${alert.state}  ·  ${alert.river}',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 10)),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: col.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: col.withValues(alpha: 0.38)),
-              ),
-              child: Text(alert.level.label,
-                  style: TextStyle(
-                    color: col, fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                  )),
-            ),
-            if (alert.isNew) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 5, vertical: 3),
-                decoration: BoxDecoration(
-                  color: col,
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: const Text('NEW',
-                    style: TextStyle(
-                      color: Colors.white, fontSize: 8,
-                      fontWeight: FontWeight.w900,
-                    )),
-              ),
-            ],
-          ]),
-          const SizedBox(height: 14),
-          // Risk bar (replaces gauge)
-          RiskBar(
-            value:    pct,
-            warning:  60,
-            danger:   80,
-            barColor: col,
-            label:    'Fill Level',
-            height:   8,
-          ),
-          const SizedBox(height: 12),
-          // Row 3: metrics
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _metric(
-                '${alert.currentValue.toStringAsFixed(0)} m³/s',
-                'Current flow', col,
-              ),
-              _metric(
-                '${alert.dangerLevel.toStringAsFixed(0)} m³/s',
-                'Danger level', AppPalette.critical,
-              ),
-              Row(children: [
-                Icon(alert.trend.icon,
-                    size: 12, color: alert.trend.color),
-                const SizedBox(width: 4),
-                Text(alert.trend.name,
-                    style: TextStyle(
-                      color: alert.trend.color,
-                      fontSize: 10, fontWeight: FontWeight.w700,
-                    )),
-              ]),
-              Text(ts,
-                  style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9)),
-            ],
-          ),
+          _pill('CRITICAL', '${app.criticalCount}', Colors.red),
+          _pill('HIGH', '${app.highCount}', Colors.orange),
+          _pill('WATCH', '${app.activeAlerts.where((a) => a.risk == AppRisk.watch).length}', Colors.amber),
+          _pill('SOURCE', 'WRD BH', Colors.tealAccent),
         ],
       ),
     );
   }
 
-  Widget _metric(String val, String label, Color c) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(val, style: TextStyle(
-        color: c, fontSize: 12, fontWeight: FontWeight.w800)),
-      Text(label, style: const TextStyle(
-        color: AppPalette.textGrey, fontSize: 9)),
-    ],
-  );
+  Widget _pill(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value,
+            style: TextStyle(
+                color: color, fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label,
+            style: const TextStyle(
+                color: Colors.white38, fontSize: 9, letterSpacing: 0.8)),
+      ],
+    );
+  }
 }
 
-// ── Filter chip ────────────────────────────────────────────────────────────
-class _FilterChip extends StatelessWidget {
-  final String   label;
-  final bool     active;
-  final Color    color;
-  final VoidCallback onTap;
-  const _FilterChip({
-    required this.label,
-    required this.active,
-    required this.color,
-    required this.onTap,
-  });
+class _AlertCard extends StatelessWidget {
+  final FloodAlertEntry alert;
+  final BuildContext    context;
+  const _AlertCard({required this.alert, required this.context});
+
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  Widget build(BuildContext ctx) {
+    final color = _riskColor(alert.risk);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       decoration: BoxDecoration(
-        color: active ? color.withValues(alpha: 0.14) : AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: active
-              ? color.withValues(alpha: 0.42)
-              : AppPalette.abyssStroke,
-          width: active ? 1.5 : 1,
+        color: const Color(0xFF0D1B2A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.45)),
+        boxShadow: alert.isCritical
+            ? [
+                BoxShadow(
+                    color: color.withOpacity(0.15),
+                    blurRadius: 12, spreadRadius: 1)
+              ]
+            : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(alert.station,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              alert.risk == AppRisk.critical
+                                  ? '🚨 CRITICAL'
+                                  : alert.risk == AppRisk.high
+                                      ? '⚠ HIGH'
+                                      : '👁 WATCH',
+                              style: TextStyle(
+                                  color: color,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text('${alert.river} · ${alert.district}',
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${alert.currentLevel.toStringAsFixed(2)}m',
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '${alert.pct.toStringAsFixed(0)}% DL',
+                      style: TextStyle(
+                          color: color.withOpacity(0.7), fontSize: 10),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Gauge
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: (alert.pct / 120).clamp(0.0, 1.0),
+                backgroundColor: Colors.white10,
+                valueColor: AlwaysStoppedAnimation(color),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Footer row
+            Row(
+              children: [
+                Icon(
+                  alert.trend.toLowerCase().contains('ris')
+                      ? Icons.trending_up
+                      : alert.trend.toLowerCase().contains('fal')
+                          ? Icons.trending_down
+                          : Icons.trending_flat,
+                  size: 14,
+                  color: alert.trend.toLowerCase().contains('ris')
+                      ? Colors.orangeAccent
+                      : Colors.tealAccent,
+                ),
+                const SizedBox(width: 4),
+                Text(alert.trend,
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 10)),
+                const Spacer(),
+                Text('DL: ${alert.dangerLevel.toStringAsFixed(2)}m',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 10)),
+                const SizedBox(width: 12),
+                // Deep link to Predict
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(ctx).push(MaterialPageRoute(
+                      builder: (_) => const PredictScreen(),
+                    ));
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8E24AA).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: const Color(0xFF8E24AA).withOpacity(0.5)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.model_training_rounded,
+                            color: Color(0xFFCE93D8), size: 12),
+                        SizedBox(width: 4),
+                        Text('PREDICT',
+                            style: TextStyle(
+                                color: Color(0xFFCE93D8),
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: active ? FontWeight.w800 : FontWeight.w500,
-          color: active ? color : AppPalette.textGrey,
-        ),
+    );
+  }
+
+  Color _riskColor(AppRisk r) {
+    switch (r) {
+      case AppRisk.critical: return Colors.red;
+      case AppRisk.high:     return Colors.orange;
+      case AppRisk.watch:    return Colors.amber;
+      default:               return Colors.white38;
+    }
+  }
+}
+
+class _EmptyAlerts extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              color: Colors.tealAccent.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check_circle_outline,
+                color: Colors.tealAccent, size: 44),
+          ),
+          const SizedBox(height: 16),
+          const Text('No Active Alerts',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text(
+            'All monitored stations are\nbelow warning thresholds.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white38, fontSize: 13),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
