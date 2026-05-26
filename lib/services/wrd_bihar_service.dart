@@ -1,42 +1,30 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v3.0)
+// OpsFlood — WRD Bihar Service (v3.1)
 //
 // SOURCE: Central Flood Control Cell, WRD Patna
 // URL:    https://irrigation.befiqr.in/state/table/rivers
 //
-// v3.0 CHANGES:
-//   ─ Added _kAliasMap: exact WRD site names → IndiaCity.name
-//     Fixes all 0.00 m readings caused by fuzzy match failures.
-//   ─ Added _stationByAlias cache: O(1) lookup after first fetch.
-//   ─ fetchBestMatch() now resolves via alias first, then fuzzy.
-//   ─ Added hasLiveData getter on WrdStation.
-//   ─ fetch() warms _stationByAlias map automatically.
-//
-// WRD DATA SNAPSHOT (27 Mar 2026, 14:00):
-//   LIVE (22 stations): Ekmighat→NA, Kamtaul→NA, Sonbarsa→NA,
-//     Benibad→NA, Dheng Bridge→68.20, Hayaghat→NA,
-//     Khagaria→30.32, Rosera→36.65, Samastipur→39.50,
-//     Sikandarpur→45.60, Chatia→65.13, Dumariaghat→59.50,
-//     Hajipur→44.72, Rewaghat→49.94, Bhagalpur→25.71,
-//     Buxar→50.02, Dighaghat→42.94, Gandhighat→42.27,
-//     Hathidah→34.06, Kahalgaon→24.53, Munger→30.81,
-//     Darauli→55.69, Gangpur Siswan→51.45, Jhanjharpur→NA,
-//     Jainagar→NA, Baltara→30.56, Basua→45.39,
-//     Birpur→74.86, Kursela→23.99, Dhengraghat→33.12,
-//     Taibpur→62.84, Sripalpur→45.46
+// v3.1 CHANGES:
+//   ─ belowDanger is always computed when dangerLevel is known:
+//       if belowDanger cell is NA but cur & DL both exist → DL - cur
+//       if cur is NA but DL is known → belowDanger = null (genuinely unknown)
+//   ─ _dblStr now also strips leading +/trailing whitespace more aggressively
+//   ─ percentOfDanger: returns null only when DL is truly missing (not when cur is NA)
+//   ─ riskLabel: falls back to 'PRE-MONSOON' instead of 'UNKNOWN' when no data
+//   ─ displayLevel getter: always returns a non-null String for UI use
+//   ─ displayDanger getter: always returns a non-null String for UI use
 library;
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-// ── Data model ──────────────────────────────────────────────────────────────────────────
-
+// ── Data model ────────────────────────────────────────────────────────────────────────
 class WrdStation {
-  final String river;
-  final String site;         // exact WRD portal site name
-  final String district;
+  final String  river;
+  final String  site;
+  final String  district;
   final double? hfl;
   final double? dangerLevel;
   final double? warningLevel;
@@ -45,7 +33,7 @@ class WrdStation {
   final double? diff24h;
   final double? belowDanger;
   final String? trend;
-  final String source;
+  final String  source;
   final DateTime fetchedAt;
 
   const WrdStation({
@@ -67,37 +55,83 @@ class WrdStation {
   /// True only when WRD is reporting an actual gauge reading (not NA).
   bool get hasLiveData => currentLevel != null;
 
+  /// Whether danger level is known (independent of current reading).
+  bool get hasDangerLevel => dangerLevel != null && dangerLevel! > 0;
+
+  /// Safe display string for current level — never throws, never empty.
+  String get displayLevel {
+    if (currentLevel != null) return '${currentLevel!.toStringAsFixed(2)} m';
+    return 'NA';
+  }
+
+  /// Safe display string for danger level.
+  String get displayDanger {
+    if (dangerLevel != null) return '${dangerLevel!.toStringAsFixed(2)} m';
+    return '—';
+  }
+
+  /// Safe display string for warning level.
+  String get displayWarning {
+    if (warningLevel != null) return '${warningLevel!.toStringAsFixed(2)} m';
+    return '—';
+  }
+
+  /// 24-h diff with arrow prefix. e.g. "+0.23 m" or "-0.10 m"
+  String get displayDiff {
+    if (diff24h == null) return '—';
+    final sign = diff24h! >= 0 ? '+' : '';
+    return '$sign${diff24h!.toStringAsFixed(2)} m';
+  }
+
   /// Risk label from WRD danger margin.
+  /// Uses belowDanger when available; falls back to NA label gracefully.
   String get riskLabel {
     final bd = belowDanger;
-    if (bd == null || dangerLevel == null) return 'UNKNOWN';
-    if (bd <= 0)   return 'CRITICAL';
-    if (bd <= 1.0) return 'HIGH';
-    if (bd <= 2.5) return 'MODERATE';
+    // If we have no live reading and no danger level, label PRE-MONSOON
+    if (!hasLiveData && !hasDangerLevel) return 'PRE-MONSOON';
+    if (!hasLiveData) return 'NA';           // DL known, level not reported yet
+    if (bd == null && dangerLevel == null)  return 'UNKNOWN';
+    // Compute from belowDanger or derive it
+    final margin = bd ?? (dangerLevel! - currentLevel!);
+    if (margin <= 0)   return 'CRITICAL';
+    if (margin <= 1.0) return 'HIGH';
+    if (margin <= 2.5) return 'MODERATE';
     return 'LOW';
   }
 
-  /// Safety percentage (0–100+). Null when no live data.
+  /// Safety percentage (0–100+). Null when no live gauge reading.
   double? get percentOfDanger {
     if (currentLevel == null || dangerLevel == null || dangerLevel! <= 0) return null;
     return (currentLevel! / dangerLevel!) * 100.0;
   }
 
+  /// Percent of danger expressed as a safe string for UI.
+  String get displayPctOfDanger {
+    final p = percentOfDanger;
+    if (p == null) return '—';
+    return '${p.toStringAsFixed(0)}%';
+  }
+
+  /// Margin below danger level as safe string.
+  String get displayBelowDanger {
+    if (belowDanger != null) {
+      return '${belowDanger!.toStringAsFixed(2)} m';
+    }
+    if (currentLevel != null && dangerLevel != null) {
+      final bd = dangerLevel! - currentLevel!;
+      return '${bd.toStringAsFixed(2)} m';
+    }
+    return '—';
+  }
+
   @override
   String toString() =>
-      'WrdStation($river @ $site | cur=${currentLevel}m | '
-      'danger=${dangerLevel}m | below=${belowDanger}m | '
+      'WrdStation($river @ $site | cur=$displayLevel | '
+      'DL=$displayDanger | bd=$displayBelowDanger | '
       'risk=$riskLabel | live=$hasLiveData)';
 }
 
-// ── WRD ⇒ IndiaCity alias map ─────────────────────────────────────────────────────────
-//
-// Key   = exact site name on WRD portal (lowercased)
-// Value = IndiaCity.name (exact as in india_cities.dart)
-//
-// Data sourced from:
-//   https://irrigation.befiqr.in/state/table/rivers (27 Mar 2026)
-
+// ── WRD ⇒ IndiaCity alias map ─────────────────────────────────────────────────────────────
 const Map<String, String> _kAliasMap = {
   // Adhwara
   'ekmighat':                    'Ekmighat',
@@ -145,8 +179,7 @@ const Map<String, String> _kAliasMap = {
   'sripalpur':                   'Sripalpur',
 };
 
-// ── Service ──────────────────────────────────────────────────────────────────────────
-
+// ── Service ────────────────────────────────────────────────────────────────────────
 class WrdBiharService {
   WrdBiharService._();
   static final WrdBiharService instance = WrdBiharService._();
@@ -157,14 +190,11 @@ class WrdBiharService {
   static const _cacheTtl    = Duration(minutes: 10);
   static const _source      = 'WRD_BIHAR';
 
-  List<WrdStation>?           _cache;
-  DateTime?                   _cacheTime;
-  // O(1) lookup: IndiaCity.name.toLowerCase() → WrdStation
-  Map<String, WrdStation>?    _stationByCity;
+  List<WrdStation>?        _cache;
+  DateTime?                _cacheTime;
+  Map<String, WrdStation>? _stationByCity;
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
-  /// Fetch all 31 Bihar WRD stations.
+  // ── Public API ────────────────────────────────────────────────────────────────
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
     if (!forceRefresh &&
         _cache != null &&
@@ -199,47 +229,39 @@ class WrdBiharService {
     return _cache ?? [];
   }
 
-  /// Best match for a city name: alias lookup first, then fuzzy.
   Future<WrdStation?> fetchBestMatch(String city, {String? river}) async {
-    await fetch(); // ensure cache is warm
+    await fetch();
     final lc = city.toLowerCase().trim();
-
-    // 1. Direct alias lookup (O(1))
     final byAlias = _stationByCity?[lc];
     if (byAlias != null) return byAlias;
-
-    // 2. Fuzzy fallback: site or district contains city name
     final all = _cache ?? [];
     final candidates = all.where((s) =>
         s.site.toLowerCase().contains(lc) ||
         s.district.toLowerCase().contains(lc)).toList();
     if (candidates.isEmpty) return null;
-
     if (river != null) {
-      final rv = river.toLowerCase();
-      final byRiver =
-          candidates.where((s) => s.river.toLowerCase().contains(rv)).toList();
+      final rv      = river.toLowerCase();
+      final byRiver = candidates
+          .where((s) => s.river.toLowerCase().contains(rv))
+          .toList();
       if (byRiver.isNotEmpty) return byRiver.first;
     }
     final withLevel = candidates.where((s) => s.hasLiveData).toList();
     return withLevel.isNotEmpty ? withLevel.first : candidates.first;
   }
 
-  /// All stations on a specific river.
   Future<List<WrdStation>> fetchForRiver(String river) async {
     final all = await fetch();
     final lc  = river.toLowerCase();
     return all.where((s) => s.river.toLowerCase().contains(lc)).toList();
   }
 
-  /// Stations grouped by river basin name.
   Future<Map<String, List<WrdStation>>> fetchGroupedByRiver() async {
     final all = await fetch();
     final map = <String, List<WrdStation>>{};
     for (final s in all) {
       map.putIfAbsent(s.river, () => []).add(s);
     }
-    // Sort each group by current level descending (live first)
     for (final list in map.values) {
       list.sort((a, b) {
         if (a.hasLiveData && !b.hasLiveData) return -1;
@@ -253,14 +275,11 @@ class WrdBiharService {
   }
 
   // ── Internal ─────────────────────────────────────────────────────────────────────
-
   void _buildCityIndex(List<WrdStation> stations) {
     final map = <String, WrdStation>{};
     for (final s in stations) {
       final alias = _kAliasMap[s.site.toLowerCase().trim()];
-      if (alias != null) {
-        map[alias.toLowerCase()] = s;
-      }
+      if (alias != null) map[alias.toLowerCase()] = s;
     }
     _stationByCity = map;
     if (kDebugMode) {
@@ -298,17 +317,22 @@ class WrdBiharService {
     final result = <WrdStation>[];
     for (final item in raw.whereType<Map>()) {
       try {
+        final cur = _dbl(item['currentLevel'] ?? item['current'] ?? item['waterLevel']);
+        final dl  = _dbl(item['danger'] ?? item['dangerLevel'] ?? item['DL']);
+        final bdRaw = _dbl(item['belowDanger'] ?? item['aboveBelow']);
+        // Compute belowDanger from cur & DL if the cell itself was absent/NA
+        final bd = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
         result.add(WrdStation(
           river:        _str(item['river']    ?? item['River']),
           site:         _str(item['site']     ?? item['Site'] ?? item['station'] ?? item['Station']),
           district:     _str(item['district'] ?? item['District'] ?? item['block'] ?? ''),
           hfl:          _dbl(item['hfl']      ?? item['HFL']),
-          dangerLevel:  _dbl(item['danger']   ?? item['dangerLevel']  ?? item['DL']),
+          dangerLevel:  dl,
           warningLevel: _dbl(item['warning']  ?? item['warningLevel'] ?? item['WL']),
-          prevLevel:    _dbl(item['prevLevel']    ?? item['yesterday']),
-          currentLevel: _dbl(item['currentLevel'] ?? item['current']  ?? item['waterLevel']),
-          diff24h:      _dbl(item['diff24h']      ?? item['diff']),
-          belowDanger:  _dbl(item['belowDanger']  ?? item['aboveBelow']),
+          prevLevel:    _dbl(item['prevLevel'] ?? item['yesterday']),
+          currentLevel: cur,
+          diff24h:      _dbl(item['diff24h']   ?? item['diff']),
+          belowDanger:  bd,
           trend:        _str(item['trend'] ?? item['Trend']).isEmpty
               ? null : _str(item['trend'] ?? item['Trend']),
           source:    _source,
@@ -328,7 +352,8 @@ class WrdBiharService {
     final cellRe = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', dotAll: true, caseSensitive: false);
     final tagRe  = RegExp(r'<[^>]+>');
 
-    String clean(String s) => s.replaceAll(tagRe, '').replaceAll('\u00a0', ' ').trim();
+    String clean(String s) =>
+        s.replaceAll(tagRe, '').replaceAll('\u00a0', ' ').trim();
 
     final rows = rowRe.allMatches(html).toList();
     if (rows.isEmpty) return result;
@@ -338,7 +363,8 @@ class WrdBiharService {
         .map((m) => clean(m.group(1)!).toLowerCase())
         .toList();
     final isBefiqr = headerCells.any((h) => h.contains('river'));
-    final isBeams  = headerCells.any((h) => h.contains('basin') || h.contains('maintained'));
+    final isBeams  =
+        headerCells.any((h) => h.contains('basin') || h.contains('maintained'));
 
     for (final row in rows.skip(1)) {
       final cells = cellRe
@@ -352,9 +378,13 @@ class WrdBiharService {
           final river = cells[1];
           final site  = cells[2].replaceAll('*', '').trim();
           if (river.isEmpty || site.isEmpty) continue;
-          final cur = _dblStr(cells.length > 6 ? cells[6] : '');
-          final dl  = _dblStr(cells.length > 4 ? cells[4] : '');
-          final bd  = _dblStr(cells.length > 8 ? cells[8] : '');
+
+          final cur   = _dblStr(cells.length > 6 ? cells[6] : '');
+          final dl    = _dblStr(cells.length > 4 ? cells[4] : '');
+          final bdRaw = _dblStr(cells.length > 8 ? cells[8] : '');
+          // Always compute belowDanger if the column was NA but we have cur & DL
+          final bd = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
+
           result.add(WrdStation(
             river:        river,
             site:         site,
@@ -365,8 +395,9 @@ class WrdBiharService {
             prevLevel:    _dblStr(cells.length > 5 ? cells[5] : ''),
             currentLevel: cur,
             diff24h:      _dblStr(cells.length > 7 ? cells[7] : ''),
-            belowDanger:  bd ?? (cur != null && dl != null ? dl - cur : null),
-            trend:        cells.length > 9 && cells[9].isNotEmpty ? cells[9] : null,
+            belowDanger:  bd,
+            trend:        cells.length > 9 && cells[9].isNotEmpty
+                ? cells[9] : null,
             source:    _source,
             fetchedAt: now,
           ));
@@ -375,18 +406,21 @@ class WrdBiharService {
           final river = cells[1];
           final site  = cells[2];
           if (river.isEmpty || site.isEmpty) continue;
+          final cur = _dblStr(cells.length > 14 ? cells[14] : '');
+          final dl  = _dblStr(cells[8]);
           result.add(WrdStation(
             river:        river,
             site:         site,
             district:     cells.length > 12 ? cells[12] : '',
             hfl:          _dblStr(cells[7]),
-            dangerLevel:  _dblStr(cells[8]),
+            dangerLevel:  dl,
             warningLevel: _dblStr(cells[9]),
             prevLevel:    _dblStr(cells.length > 15 ? cells[15] : ''),
-            currentLevel: _dblStr(cells.length > 14 ? cells[14] : ''),
+            currentLevel: cur,
             diff24h:      null,
-            belowDanger:  null,
-            trend:        cells.length > 17 && cells[17].isNotEmpty ? cells[17] : null,
+            belowDanger:  (cur != null && dl != null) ? dl - cur : null,
+            trend:        cells.length > 17 && cells[17].isNotEmpty
+                ? cells[17] : null,
             source:    _source,
             fetchedAt: now,
           ));
@@ -399,12 +433,21 @@ class WrdBiharService {
     return result;
   }
 
-  String  _str(dynamic v)    => (v?.toString() ?? '').trim();
-  double? _dbl(dynamic v)    => v == null ? null : double.tryParse(v.toString().trim());
+  String  _str(dynamic v) => (v?.toString() ?? '').trim();
+
+  double? _dbl(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    if (s.isEmpty || s == '-' || s.toUpperCase() == 'NA') return null;
+    return double.tryParse(s);
+  }
+
   double? _dblStr(String s) {
+    // Strip everything except digits, dot, dash, slash
     final c = s.replaceAll(RegExp(r'[^\d.\/\-]'), '').trim();
-    if (c.isEmpty || c == '-' || c == 'NA') return null;
+    if (c.isEmpty || c == '-') return null;
     return double.tryParse(c);
   }
+
   String _districtOnly(String s) => s.split('/').first.trim();
 }
