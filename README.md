@@ -1,120 +1,264 @@
-# INDIA_FLOODS OPS
+# 🌊 OpsFlood — AI-Powered Flood Monitoring App
 
-INDIA_FLOODS OPS is a full-stack flood readiness and flood-risk analysis platform built with FastAPI, React, TypeScript, and Vite. It combines manual hydrology inputs, state-aware severity thresholds, live or policy-bounded telemetry, weather intelligence, and PostgreSQL-backed operational archives into a single demo-ready command console.
+> **Flutter mobile application** that provides real-time flood monitoring, AI-driven predictions, and push-alert notifications for **80+ CWC-monitored cities across India.**  
+> Backed by the [OpsFlood FastAPI backend](https://opsflood.onrender.com) (XGBoost + RandomForest ensemble), with a full **on-device fallback ML engine** for offline use.
 
-## What the app does
+---
 
-- Generates flood-risk predictions across four severity bands: `LOW`, `MODERATE`, `SEVERE`, `CRITICAL`
-- Uses state-specific severity matrices and multi-bundle ML artifact selection
-- Displays scoped telemetry for a selected state, city, or station
-- Shows weather context with live API support and deterministic local fallbacks
-- Persists prediction history, telemetry snapshots, and audit logs in PostgreSQL-backed archive tables
-- Schedules weather and water-level ingestion into `raw`, `cleaned`, and feature-ready dataset layers
-- Presents geo-spatial context, hotspot heatmaps, and monitoring guidance for demo flows
+## 📱 Screenshots & Key Screens
 
-## Main user-facing areas
+| Screen | Description |
+|---|---|
+| Splash | Animated brand screen with backend health check |
+| Dashboard | National flood status overview with risk heatmap |
+| Predict | Manual flood prediction with feature sliders |
+| River Monitor | Live CWC gauge telemetry per river |
+| India Rivers | Full all-India river map with alert overlays |
+| India River Explorer | State-by-state river browsing & filtering |
+| Alerts | Critical + warning push notifications log |
+| Weather | IMD weather data with rainfall forecasts |
+| Monitors | CWC gauge station directory |
+| City Detail | Deep-dive view for a single monitored city |
+| State Matrix | State-level risk severity matrix |
+| Model Info | On-device ML model transparency screen |
+| Home | Bottom-nav shell |
 
-### Dashboard
+---
 
-- Prediction input matrix for peak flood level, event timing, and 7-day rainfall
-- State matrix lookup and state filter
-- Scenario presets for quick demo inputs
-- Monitoring alert card with severity-aware messaging
-- Weather console, regional water levels, CWC data display, and risk heatmap
-- Historical flood logs panel with clean fallback messaging when no packaged dataset is mapped
+## 🏗️ Architecture
 
-### Geo-Spatial Console
-
-- State and station geo lock resolution
-- Embedded OpenStreetMap view and external launch link
-- Weather context for the locked location
-- Probability lane visualization and tactical mapping summaries
-
-### Telemetry Feed
-
-- Scoped sensor cards for the selected state or nearby city/station network
-- Node status, trend, river level, rainfall, and sync metadata
-- Manual refresh for live telemetry fetches
-
-### Archives Vault
-
-- Historical flood logs from packaged datasets when available
-- PostgreSQL-backed prediction history, telemetry snapshot counts, and audit activity
-- CSV and JSON export for archive data
-
-## UI highlights
-
-- Premium dark command shell with branded navigation, status cluster, and responsive bottom nav on mobile
-- Dashboard-first layout with hero strip, KPI row, structured prediction workspace, monitoring alert, telemetry, weather, and analytics grid
-- Refined alert/telemetry/weather/log modules with disciplined severity tones and empty/loading states
-- Consistent panel, badge, button, input, and typography system tuned for readability and operational density
-- When adding screenshots, capture the Dashboard hero + KPI row and one telemetry/geo panel; place them alongside this README for quick reference
-
-## Backend API groups
-
-- Core service: `/`, `/health`, `/source-policy`
-- Model inspection: `/model-artifacts`, `/model-artifacts/{state_name}`
-- State thresholds: `/state-severity-matrix`, `/state-severity-matrix/{state_name}`
-- Prediction: `/predict`, `/prediction-history`
-- Historical logs: `/historical-logs`
-- Telemetry: `/sensors`, `/api/live-telemetry`, `/cwc-live-data`, `/telemetry-snapshots`
-- Data engineering: `/ingestion/status`, `/ingestion/run`
-- Audit: `/audit-logs`
-- Weather: `/weather/status`, `/weather/current`, `/weather/search`, `/weather/reverse-geocode`, `/weather/forecast`, `/weather/air-quality`, `/weather/uv`, `/weather/historical`, `/weather/alerts`
-
-## Backend improvements (OpsFlood safety + metrics)
-
-- **Production training freeze**: `KolhapurFloodPredictor.train_with_real_data()` is blocked by default. Only runs when `ALLOW_PRODUCTION_TRAINING=true`.
-- **Hybrid ML + CWC guard wiring fix (SEVERE/CRITICAL bug)**: `/predict` now consistently applies the Option-A CWC danger-level guard (`danger_level_override_guard`) in **both** the hybrid ML+rules path and the heuristic fallback path by correctly threading `river_level_m` into `severity_from_entry(..., river_level_m=...)`.
-- **Offline canonical INDOFLOODS training**: added `backend/train_indofloods.py` which:
-  - validates CRITICAL label alignment via a proxy check
-  - computes **macro AUROC**
-  - persists `artifacts/metrics/indofloods_metrics.json`
-  - overwrites `indofloods_production_model.pkl` only when the new model beats current on **macro F1 AND macro AUROC**
-- **Honest heuristic fallback**: when ML artifacts are missing/unavailable, `/predict` returns:
-  - `algorithm: "Heuristic Fallback – NO ML"`
-  - `probabilities: {}` (no fabricated ML probability distribution)
-- **Durable metric persistence**: `backend/model_metrics.py` now computes macro AUROC and writes metric JSON to `artifacts/metrics/{model_name}_metrics.json` (and attempts non-fatal Postgres persistence).
-- **Datum warning documentation**: `backend/state_severity_matrix.py` includes a top-of-file warning about Delhi/Mizoram datum mismatch when interpreting peak-level values for CRITICAL labeling.
-
-
-## Documentation map
-
-- [FEATURES.md](FEATURES.md): complete feature inventory and capability breakdown
-- [QUICKSTART.md](QUICKSTART.md): setup and local run instructions
-- [frontend/README.md](frontend/README.md): frontend routes, architecture, and key components
-- [frontend/DOCUMENTATION_INDEX.md](frontend/DOCUMENTATION_INDEX.md): current documentation map and legacy doc references
-
-## Repo structure
-
-```text
-artifacts/
-  dvc/models/             DVC-backed model artifact store (models, scalers, features)
-
-backend/
-  app.py                  FastAPI app, ML orchestration, telemetry, weather, archives
-  data_pipeline.py        Scheduled ingestion, raw/cleaned/features materialization
-  postgres_store.py       PostgreSQL schema/bootstrap and archive persistence helpers
-
-data/
-  raw/                    Append-only weather and water-level ingestion captures
-  cleaned/                Normalized analytical datasets
-  features/               Feature-ready joined datasets
-  manifest/               Ingestion run summaries
-
-frontend/
-  src/App.tsx             Route shell
-  src/pages/              Dashboard, Geo-Spatial, Telemetry, Archives
-  src/components/         Weather, telemetry, monitoring, charts, navigation
-  src/context/            App-wide reducer and provider
-  src/hooks/              Prediction, telemetry, CWC, validation, initialization hooks
+```
+android-flood-app/
+├── lib/
+│   ├── main.dart                    # App entry — dotenv, FCM, WorkManager init
+│   ├── constants/                   # Domain-split constants (v2)
+│   │   ├── app_config.dart          # API endpoints, polling, animation durations
+│   │   ├── flood_thresholds.dart    # Severity %, water levels, risk colors/icons
+│   │   ├── alert_channels.dart      # Notification channel IDs
+│   │   ├── india_geodata.dart       # 36 states + 80+ CWC gauge cities
+│   │   └── constants.dart           # Barrel export
+│   ├── constants.dart               # @Deprecated shim — backward compat only
+│   ├── config/                      # Runtime configuration
+│   ├── ml/
+│   │   └── flood_engine.dart        # On-device fallback ML (pure Dart, offline)
+│   ├── models/                      # Data models (FloodResult, RiverData, etc.)
+│   ├── providers/                   # Riverpod / ChangeNotifier state providers
+│   ├── screens/                     # 13 UI screens
+│   ├── services/                    # 15 data + business-logic services
+│   ├── theme/                       # Dark theme, color tokens
+│   └── widgets/                     # Shared reusable widgets
+├── test/
+│   └── constants_domain_test.dart   # 30 unit tests for constants layer
+├── docs/
+│   └── architecture/
+│       └── flood_engine_boundary.md # On-device vs backend boundary contract
+├── .env.example                     # Required environment variables
+├── pubspec.yaml
+├── SETUP.md
+└── P2_IMD_NDMA_PLAN.md              # Phase 2 IMD + NDMA integration roadmap
 ```
 
-## Notes
+---
 
-- Model artifacts live in `artifacts/dvc/models/`.
-- Override artifact location with `MODEL_ARTIFACTS_DIR`; label storage type with `MODEL_ARTIFACTS_BACKEND` if needed.
-- Set `DATABASE_URL` to enable PostgreSQL persistence for predictions, telemetry snapshots, and audit logs.
-- Set `ENABLE_DATA_INGESTION_SCHEDULER=1` to run scheduled weather and water-level ingestion in the backend process.
-- Tune ingestion cadence with `DATA_INGESTION_INTERVAL_MINUTES` and targets with `DATA_INGESTION_TARGETS`.
+## ⚙️ Services Layer (`lib/services/`)
 
+| Service | Responsibility |
+|---|---|
+| `real_time_service.dart` | Primary data orchestrator — polls backend, triggers alerts |
+| `real_time_river_service.dart` | Live CWC river gauge telemetry polling |
+| `cwc_direct_service.dart` | Direct CWC API integration (raw gauge data) |
+| `cwc_open_data_service.dart` | CWC Open Data portal scraper/parser |
+| `cwc_live_provider.dart` | Provider wrapper for CWC live stream |
+| `imd_service.dart` | IMD rainfall & weather data fetcher |
+| `ndma_service.dart` | NDMA disaster alerts integration |
+| `prediction_service.dart` | Calls FastAPI `/predict/legacy` endpoint |
+| `prediction_facade.dart` | Facade: routes prediction to backend or on-device fallback |
+| `predict.dart` | Low-level prediction request builder |
+| `prediction_history_service.dart` | Persists prediction history locally |
+| `api_service.dart` | Base HTTP client with retry & timeout logic |
+| `fcm_service.dart` | Firebase Cloud Messaging — push notification handler |
+| `background_service.dart` | WorkManager background polling (every 5 min) |
+| `real_time_service_notif_patch.dart` | ⚠️ Temporary patch — pending merge into `real_time_service.dart` |
+
+---
+
+## 🤖 ML Architecture
+
+### Backend (Primary)
+- **XGBoost + RandomForest ensemble** trained on CWC historical flood data
+- Hosted at `https://opsflood.onrender.com/predict/legacy`
+- Feature inputs: rainfall (mm), river level (m), capacity (%), zone, river type, state severity
+- Returns: `flood_probability`, `risk_level`, `confidence`
+
+### On-Device Fallback (`lib/ml/flood_engine.dart`)
+- Pure Dart heuristic engine — **no network required**
+- Activates automatically when FastAPI backend is unreachable
+- Always sets `isOfflineEstimate = true` on results
+- Mirrors the state severity matrix from `state_severity_matrix.py` (backend)
+- See [`docs/architecture/flood_engine_boundary.md`](docs/architecture/flood_engine_boundary.md) for the full contract
+
+```
+Online:   App → prediction_facade → FastAPI /predict/legacy → FloodResult
+Offline:  App → prediction_facade → flood_engine.dart (Dart) → FloodResult (isOfflineEstimate=true)
+```
+
+---
+
+## 📡 Data Sources
+
+| Source | Data | Service |
+|---|---|---|
+| CWC (Central Water Commission) | Live river gauge levels, danger/warning thresholds | `cwc_direct_service`, `cwc_open_data_service` |
+| IMD (India Meteorological Dept.) | Rainfall forecasts, weather data | `imd_service` |
+| NDMA (National Disaster Mgmt. Authority) | Disaster alerts, state risk bulletins | `ndma_service` |
+| OpsFlood FastAPI Backend | ML predictions, aggregated telemetry | `prediction_service`, `real_time_service` |
+| Firebase Cloud Messaging | Push notification delivery | `fcm_service` |
+
+---
+
+## 🚀 Setup & Running
+
+### Prerequisites
+- Flutter SDK ≥ 3.x
+- Dart SDK ≥ 3.x
+- Android Studio / Xcode (for device/emulator)
+- A `.env` file (copy from `.env.example`)
+
+### 1. Clone & Install
+```bash
+git clone https://github.com/rohitg2800/android-flood-app.git
+cd android-flood-app
+flutter pub get
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+# Edit .env and set:
+# BASE_URL=https://opsflood.onrender.com
+# BACKUP_URL=           (optional)
+```
+
+### 3. Run
+```bash
+# Android (emulator or device)
+flutter run
+
+# iOS
+flutter run -d ios
+
+# With verbose logging
+flutter run --verbose
+```
+
+### 4. Build Release APK
+```bash
+flutter build apk --release
+# Output: build/app/outputs/flutter-apk/app-release.apk
+```
+
+> 📖 For full platform-specific setup (Firebase, permissions, signing), see [SETUP.md](SETUP.md).
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+flutter test
+
+# Run constants domain tests (30 tests)
+flutter test test/constants_domain_test.dart
+```
+
+### Test Coverage
+| Test File | Coverage Area | Tests |
+|---|---|---|
+| `constants_domain_test.dart` | `AppConfig`, `FloodThresholds`, `AlertChannels`, `IndiaGeodata` | 30 |
+
+**Upcoming:** Service unit tests for `real_time_service`, `prediction_facade`, and `flood_engine` are planned (tracked in issues).
+
+---
+
+## 📦 Key Dependencies
+
+| Package | Purpose |
+|---|---|
+| `flutter_riverpod` / `provider` | State management |
+| `http` | HTTP client for API calls |
+| `flutter_dotenv` | `.env` config loading |
+| `firebase_messaging` | Push notifications (FCM) |
+| `flutter_local_notifications` | On-device notification display |
+| `workmanager` | Background periodic tasks |
+| `flutter_map` + `latlong2` | Interactive India river maps |
+| `fl_chart` | River level & weather charts |
+| `shared_preferences` | Local prediction history persistence |
+| `geolocator` | User location for nearest city detection |
+
+> Full dependency list: [`pubspec.yaml`](pubspec.yaml)
+
+---
+
+## 🗂️ Constants Architecture (v2)
+
+The old `lib/constants.dart` God-file has been split into four domain-focused files:
+
+```dart
+// New — use this in all new code:
+import 'package:equinox_flood/constants/constants.dart';
+
+AppConfig.baseUrl                  // API config
+FloodThresholds.critical           // 90.0%
+AlertChannels.criticalId           // 'opsflood_critical'
+IndiaGeodata.monitoredCities       // 80+ CWC cities
+```
+
+The old `AppConstants` class is kept as a `@Deprecated` shim for backward compatibility during migration.
+
+---
+
+## 🔔 Notifications
+
+OpsFlood uses a two-channel notification system:
+
+| Channel | ID | Trigger |
+|---|---|---|
+| Critical Flood Alert | `opsflood_critical` | River capacity ≥ 90% |
+| Flood Warning | `opsflood_warning` | River capacity ≥ 75% |
+
+Background polling runs every **5 minutes** via WorkManager. FCM handles server-pushed alerts when the app is killed.
+
+---
+
+## 🗺️ Monitored Coverage
+
+- **80+ cities** across all 28 states + 8 UTs
+- CWC-published `danger_level` and `warning_level` (metres above sea level) per gauge
+- Historical flood frequency (`flood_freq`) from NDMA/CWC hazard atlas
+- River types: `perennial` · `seasonal` · `glacier` · `coastal`
+- Zones: `himalayan` · `northeastern` · `peninsular` · `coastal` · `arid` · `central`
+
+---
+
+## 📋 Roadmap
+
+- [ ] Merge `real_time_service_notif_patch.dart` into `real_time_service.dart`
+- [ ] Break `india_rivers_screen.dart` (68KB) into sub-widgets
+- [ ] Add unit tests for `real_time_service`, `prediction_facade`, `flood_engine`
+- [ ] IMD + NDMA Phase 2 integration (see [`P2_IMD_NDMA_PLAN.md`](P2_IMD_NDMA_PLAN.md))
+- [ ] Migrate all files from `AppConstants` → new domain constants
+- [ ] Delete deprecated `lib/constants.dart` shim post-migration
+
+---
+
+## 👤 Author
+
+
+**Rohit Raj  
+GitHub: [@rohitg2800](https://github.com/rohitg2800)
+
+---
+
+## 📄 License
+
+This project is for educational and research purposes. All CWC/IMD/NDMA data is used under their respective open data policies.
