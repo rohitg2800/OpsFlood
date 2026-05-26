@@ -159,7 +159,6 @@ class ThresholdAlertService {
   // ── Per-city evaluation (IndiaCity) ───────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateCity(IndiaCity city) async {
-    // 1. Ensure return-period thresholds are loaded for this city.
     final rp = await _ensureThresholds(
       id:  city.id,
       lat: city.lat,
@@ -167,7 +166,6 @@ class ThresholdAlertService {
     );
     if (rp == null) return null;
 
-    // 2. Fetch latest live discharge.
     final discharge = await _fetchLatestDischarge(
         GloFasUrls.discharge(city.lat, city.lon));
     if (discharge == null) return null;
@@ -175,7 +173,6 @@ class ThresholdAlertService {
     final prev = _prevValues[city.id];
     _prevValues[city.id] = discharge;
 
-    // 3. Evaluate — all values in m³/s.
     return AlertEvaluator.fromDischarge(
       cityId:           city.id,
       cityName:         city.name,
@@ -347,7 +344,7 @@ class ThresholdAlertService {
       state:        alert.state,
       river:        alert.river,
       severity:     severity,
-      currentLevel: alert.currentLevel,
+      currentLevel: alert.currentValue,   // fixed: ThresholdAlert has currentValue, not currentLevel
       dangerLevel:  alert.dangerLevel,
       message:      body,
     );
