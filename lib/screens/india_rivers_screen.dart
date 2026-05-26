@@ -326,9 +326,9 @@ class _CwcTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = result.station;
-    // Use result.reading?.level — LiveRiverResult has no .currentLevel getter
-    final levelStr = result.reading?.level != null
-        ? '${result.reading!.level.toStringAsFixed(1)} m'
+    // FIX: LiveRiverResult has no .reading field — level lives in station.current
+    final levelStr = s.current > 0
+        ? '${s.current.toStringAsFixed(1)} m'
         : '—';
     return ListTile(
       title: Text(s.city,
