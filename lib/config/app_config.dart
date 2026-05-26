@@ -11,7 +11,7 @@ library;
 class AppConfig {
   AppConfig._();
 
-  // ── Environment ────────────────────────────────────────────────────────────────────
+  // ── Environment ──────────────────────────────────────────────────────────
   static const String env = String.fromEnvironment(
     'OPSFLOOD_ENV', defaultValue: 'production',
   );
@@ -23,38 +23,55 @@ class AppConfig {
     'OPSFLOOD_DEBUG_LOGGING', defaultValue: false,
   );
 
-  // ── Primary backend ───────────────────────────────────────────────────────────
+  // ── Primary backend ──────────────────────────────────────────────────────
   static const String baseUrl = String.fromEnvironment(
     'OPSFLOOD_BASE_URL',
     defaultValue: 'https://opsflood.onrender.com',
   );
 
-  // ── Timeouts ──────────────────────────────────────────────────────────────────
-  static const Duration requestTimeout   = Duration(seconds: 65);
+  // ── Optional Bearer token (leave empty if backend is open) ───────────────
+  // Pass at build time: --dart-define=OPSFLOOD_API_TOKEN=<token>
+  static const String apiToken = String.fromEnvironment(
+    'OPSFLOOD_API_TOKEN', defaultValue: '',
+  );
+
+  // ── Timeouts ─────────────────────────────────────────────────────────────
+  //
+  // requestTimeout   : normal in-session calls — kept short so the UI never
+  //                    freezes waiting for a hung connection.
+  // coldStartTimeout : first health probe only — Render free-tier can take
+  //                    ~50 s to wake; 65 s gives a comfortable margin.
+  // healthTimeout    : warm health probes (no cold-start path).
+  static const Duration requestTimeout   = Duration(seconds: 20);
   static const Duration healthTimeout    = Duration(seconds: 10);
   static const Duration coldStartTimeout = Duration(seconds: 65);
 
-  // ── Retry policy ────────────────────────────────────────────────────────────────
-  static const int      maxRetries           = 3;
-  static const int      healthRetries        = 2;
-  static const Duration retryBackoff         = Duration(seconds: 2);
-  static const Duration serverOverloadWait   = Duration(seconds: 5);
+  // ── Retry policy ──────────────────────────────────────────────────────────
+  static const int      maxRetries         = 3;
+  static const int      healthRetries      = 2;
+  static const Duration retryBackoff       = Duration(seconds: 2);
+  //
+  // 503 back-off: wait = serverOverloadWait * attempt
+  // Capped so the total wait never exceeds requestTimeout:
+  //   attempt 1 → min(5, 20) = 5 s
+  //   attempt 2 → min(10, 20) = 10 s
+  //   attempt 3 → final attempt, no wait needed
+  static const Duration serverOverloadWait = Duration(seconds: 5);
 
-  // ── Polling ────────────────────────────────────────────────────────────────────
+  // ── Polling ───────────────────────────────────────────────────────────────
   static const int _pollSecondsOverride = int.fromEnvironment(
     'OPSFLOOD_POLL_SECONDS', defaultValue: 0,
   );
-  // Non-const getter is fine; only the fromEnvironment call itself must be const
   static Duration get realtimeInterval =>
       _pollSecondsOverride > 0
           ? Duration(seconds: _pollSecondsOverride)
           : const Duration(seconds: 45);
   static const Duration backgroundInterval = Duration(minutes: 5);
 
-  // ── Cache ──────────────────────────────────────────────────────────────────────────
+  // ── Cache ─────────────────────────────────────────────────────────────────
   static const Duration cacheTtl = Duration(minutes: 5);
 
-  // ── Endpoints ───────────────────────────────────────────────────────────────────
+  // ── Endpoints ─────────────────────────────────────────────────────────────
   static const String epHealth           = '/health';
   static const String epPredict          = '/predict';
   static const String epLiveTelemetry    = '/api/live-telemetry';
