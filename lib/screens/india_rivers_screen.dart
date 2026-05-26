@@ -1,10 +1,7 @@
 // lib/screens/india_rivers_screen.dart
-// OpsFlood — India Rivers (merged Live Gauges + CWC Stations)
-//
-// Tab 0 — Live Gauges : OpsFlood backend via Riverpod liveLevelsProvider
-//          State/city/risk/search filters + sparkline
-// Tab 1 — CWC Stations: RealTimeRiverService telemetry, ML risk badges,
-//          stale/NO_DATA handling, Add City flow
+// OpsFlood — India Rivers v2 (compile-fixed)
+// liveLevelsProvider is Provider<List<FloodData>> — NOT FutureProvider.
+// Use ref.watch() directly, no .when().
 
 import 'dart:async';
 
@@ -19,7 +16,6 @@ import '../providers/flood_providers.dart';
 import '../services/real_time_river_service.dart';
 import '../theme/river_theme.dart';
 
-// ── Screen ────────────────────────────────────────────────────────────────────
 class IndiaRiversScreen extends ConsumerStatefulWidget {
   const IndiaRiversScreen({super.key});
   @override
@@ -33,14 +29,12 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
 
-  // ── Live Gauges filter state ───────────────────────────────────────────────
   String  _selectedState = 'All India';
   String? _selectedCity;
   String  _searchQuery   = '';
   String  _riskFilter    = 'ALL';
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // ── CWC Stations state ────────────────────────────────────────────────────
   final _cwcSvc         = RealTimeRiverService();
   final _cwcSearchCtrl  = TextEditingController();
   List<LiveRiverResult> _cwcResults     = [];
@@ -78,15 +72,11 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     super.dispose();
   }
 
-  // ── CWC fetch ─────────────────────────────────────────────────────────────
   Future<void> _fetchCwc({bool silent = false}) async {
     if (!mounted) return;
     setState(() {
-      if (!silent) {
-        _cwcLoading = true;
-      } else {
-        _cwcRefreshing = true;
-      }
+      if (!silent) _cwcLoading = true;
+      else _cwcRefreshing = true;
       _cwcError = '';
     });
     try {
@@ -107,7 +97,6 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     }
   }
 
-  // ── CWC helpers ───────────────────────────────────────────────────────────
   List<LiveRiverResult> get _cwcList {
     var l = List<LiveRiverResult>.from(_cwcResults);
     if (_cwcFilterState.isNotEmpty) {
@@ -122,24 +111,6 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
       });
     }
     return l;
-  }
-
-  int get _cwcLive => _cwcResults.where((r) => r.source != 'NO_DATA').length;
-  int get _cwcAtRisk => _cwcResults
-      .where((r) =>
-          r.station.dangerClass != DangerClass.normal &&
-          r.source != 'NO_DATA')
-      .length;
-  int get _cwcNoData => _cwcResults.where((r) => r.source == 'NO_DATA').length;
-
-  List<String> get _cwcStateList {
-    final seen = <String>{};
-    final out  = <String>[];
-    for (final r in _cwcResults) {
-      if (seen.add(r.station.state)) out.add(r.station.state);
-    }
-    out.sort();
-    return out;
   }
 
   void _cwcSearch(String q) {
@@ -211,7 +182,6 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     ));
   }
 
-  // ── Live Gauges helpers ───────────────────────────────────────────────────
   List<FloodData> _filteredLevels(List<FloodData> levels) {
     return levels.where((d) {
       final stateMatch =
@@ -227,7 +197,6 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
     }).toList();
   }
 
-  // ── BUILD ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -250,72 +219,48 @@ class _IndiaRiversScreenState extends ConsumerState<IndiaRiversScreen>
       body: TabBarView(
         controller: _tab,
         children: [
-          _LiveGaugesTab(screen: this),
-          _CwcStationsTab(screen: this),
+          _buildLiveGaugesTab(),
+          _buildCwcStationsTab(),
         ],
       ),
     );
   }
-}
 
-// ── Tab 0: Live Gauges ────────────────────────────────────────────────────────
-class _LiveGaugesTab extends StatelessWidget {
-  final _IndiaRiversScreenState screen;
-  const _LiveGaugesTab({required this.screen});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer(builder: (ctx, ref, _) {
-      final async = ref.watch(liveLevelsProvider);
-      return async.when(
-        loading: () => const Center(
-            child: CircularProgressIndicator(
-                color: AppPalette.cyan)),
-        error: (e, _) => Center(
-            child: Text('Error: $e',
-                style: const TextStyle(color: AppPalette.textGrey))),
-        data: (levels) {
-          final filtered = screen._filteredLevels(levels);
-          return Column(
-            children: [
-              _SearchBar(screen: screen),
-              Expanded(
-                child: filtered.isEmpty
-                    ? const Center(
-                        child: Text('No results',
-                            style:
-                                TextStyle(color: AppPalette.textGrey)))
-                    : ListView.builder(
-                        itemCount: filtered.length,
-                        itemBuilder: (_, i) =>
-                            _FloodDataTile(data: filtered[i]),
-                      ),
-              ),
-            ],
-          );
-        },
-      );
-    });
+  // ── Tab 0: Live Gauges ────────────────────────────────────────────────────
+  // liveLevelsProvider is Provider<List<FloodData>> — watch returns List directly
+  Widget _buildLiveGaugesTab() {
+    final levels   = ref.watch(liveLevelsProvider);
+    final filtered = _filteredLevels(levels);
+    return Column(
+      children: [
+        _SearchBar(searchCtrl: _searchCtrl, onChanged: (v) =>
+            setState(() => _searchQuery = v)),
+        Expanded(
+          child: filtered.isEmpty
+              ? const Center(
+                  child: Text('No results',
+                      style: TextStyle(color: AppPalette.textGrey)))
+              : ListView.builder(
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) => _FloodDataTile(data: filtered[i]),
+                ),
+        ),
+      ],
+    );
   }
-}
 
-// ── Tab 1: CWC Stations ───────────────────────────────────────────────────────
-class _CwcStationsTab extends StatelessWidget {
-  final _IndiaRiversScreenState screen;
-  const _CwcStationsTab({required this.screen});
-
-  @override
-  Widget build(BuildContext context) {
-    if (screen._cwcLoading) {
+  // ── Tab 1: CWC Stations ───────────────────────────────────────────────────
+  Widget _buildCwcStationsTab() {
+    if (_cwcLoading) {
       return const Center(
           child: CircularProgressIndicator(color: AppPalette.cyan));
     }
-    if (screen._cwcError.isNotEmpty) {
+    if (_cwcError.isNotEmpty) {
       return Center(
-          child: Text('Error: ${screen._cwcError}',
+          child: Text('Error: $_cwcError',
               style: const TextStyle(color: AppPalette.textGrey)));
     }
-    final list = screen._cwcList;
+    final list = _cwcList;
     return ListView.builder(
       itemCount: list.length,
       itemBuilder: (_, i) => _CwcTile(result: list[i]),
@@ -323,23 +268,23 @@ class _CwcStationsTab extends StatelessWidget {
   }
 }
 
-// ── Search bar ────────────────────────────────────────────────────────────────
+// ── Search bar ──────────────────────────────────────────────────────────────
 class _SearchBar extends StatelessWidget {
-  final _IndiaRiversScreenState screen;
-  const _SearchBar({required this.screen});
+  final TextEditingController searchCtrl;
+  final ValueChanged<String>  onChanged;
+  const _SearchBar({required this.searchCtrl, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: TextField(
-        controller: screen._searchCtrl,
+        controller: searchCtrl,
         style: const TextStyle(color: AppPalette.textWhite),
         decoration: InputDecoration(
           hintText: 'Search city or river…',
           hintStyle: const TextStyle(color: AppPalette.textGrey),
-          prefixIcon:
-              const Icon(Icons.search, color: AppPalette.textGrey),
+          prefixIcon: const Icon(Icons.search, color: AppPalette.textGrey),
           filled: true,
           fillColor: AppPalette.abyss1,
           border: OutlineInputBorder(
@@ -347,14 +292,13 @@ class _SearchBar extends StatelessWidget {
             borderSide: BorderSide.none,
           ),
         ),
-        onChanged: (v) =>
-            screen.setState(() => screen._searchQuery = v),
+        onChanged: onChanged,
       ),
     );
   }
 }
 
-// ── FloodData tile ────────────────────────────────────────────────────────────
+// ── FloodData tile ──────────────────────────────────────────────────────────
 class _FloodDataTile extends StatelessWidget {
   final FloodData data;
   const _FloodDataTile({required this.data});
@@ -367,14 +311,14 @@ class _FloodDataTile extends StatelessWidget {
       subtitle: Text('${data.state}  •  ${data.riverName ?? "—"}',
           style: const TextStyle(color: AppPalette.textGrey)),
       trailing: Text(
-        '${data.currentLevel?.toStringAsFixed(1) ?? "—"} m',
+        '${data.currentLevel.toStringAsFixed(1)} m',
         style: const TextStyle(color: AppPalette.cyan),
       ),
     );
   }
 }
 
-// ── CWC tile ──────────────────────────────────────────────────────────────────
+// ── CWC tile ────────────────────────────────────────────────────────────────
 class _CwcTile extends StatelessWidget {
   final LiveRiverResult result;
   const _CwcTile({required this.result});
@@ -382,13 +326,17 @@ class _CwcTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = result.station;
+    // Use result.reading?.level — LiveRiverResult has no .currentLevel getter
+    final levelStr = result.reading?.level != null
+        ? '${result.reading!.level.toStringAsFixed(1)} m'
+        : '—';
     return ListTile(
       title: Text(s.city,
           style: const TextStyle(color: AppPalette.textWhite)),
       subtitle: Text('${s.state}  •  ${s.river}',
           style: const TextStyle(color: AppPalette.textGrey)),
       trailing: Text(
-        '${result.currentLevel?.toStringAsFixed(1) ?? "—"} m',
+        levelStr,
         style: const TextStyle(
             color: AppPalette.amber, fontWeight: FontWeight.w600),
       ),

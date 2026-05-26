@@ -8,7 +8,7 @@ import '../theme/river_theme.dart';
 class OpsBarChart extends StatelessWidget {
   final List<double>  values;
   final List<String>  labels;
-  final List<Color>?  colors;      // per-bar color (optional)
+  final List<Color>?  colors;
   final Color         defaultColor;
   final double        maxY;
   final String        yUnit;
@@ -47,7 +47,7 @@ class OpsBarChart extends StatelessWidget {
           barTouchData: BarTouchData(
             touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => AppPalette.abyss3,
-              tooltipRoundedRadius: 10,
+              // tooltipRoundedRadius removed — not in fl_chart 1.2.0
               getTooltipItem: (group, _, rod, __) => BarTooltipItem(
                 '${rod.toY.toStringAsFixed(1)}$yUnit',
                 TextStyle(
