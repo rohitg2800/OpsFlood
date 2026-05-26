@@ -474,7 +474,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
     ]),
   );
 
-  // ── Tab bar (v6.2: 5 tabs) ────────────────────────────────────────────────
+  // ── Tab bar (v6.2: 5 tabs, scrollable) ───────────────────────────────────
   Widget _tabBar(int alertsBadge) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
     child: Container(
@@ -487,7 +487,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
       child: TabBar(
         controller: _tab,
         isScrollable: true,
-        tabAlignment: TabAlignment.fill,
+        tabAlignment: TabAlignment.start,   // fix: .fill is invalid for scrollable bars
         dividerColor: Colors.transparent,
         indicator: BoxDecoration(
           gradient: const LinearGradient(
