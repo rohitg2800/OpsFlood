@@ -1,5 +1,11 @@
 // lib/services/real_time_river_service.dart
-// OpsFlood — Real-Time River Data Service (v9.1 — trend fix)
+// OpsFlood — Real-Time River Data Service (v9.2 — FloodApi migration)
+//
+// CHANGES in v9.2:
+//   - ApiService (tombstone, wouldn't compile) replaced with FloodApi.instance
+//   - All 6 call sites migrated to FloodApi equivalents
+//   - Factory/static singleton removed — Riverpod owns the lifecycle
+//   - dispose() added to cleanly detach notifier callbacks
 //
 // ARCHITECTURE — Platform-aware 5-source cascade:
 //
@@ -11,7 +17,7 @@
 //     UI (providers, screens) works identically on all platforms.
 //
 //   ON MOBILE / DESKTOP:
-//     Original 5-source backend cascade unchanged.
+//     Original 5-source backend cascade — now via FloodApi/OpsClient.
 //
 // GAUGE SANITY RULE:
 //   Indian river gauge heights (metres MSL / above datum) are always
@@ -20,28 +26,19 @@
 //   column-parsing artifact.  _extractLevel() enforces this clamp;
 //   values outside it are treated as 0 (→ NO_DATA fallback).
 //
-// TREND RULE (v9.1):
+// TREND RULE (v9.1, retained):
 //   _deriveTrend() is a LAST-RESORT fallback used only when the live feed
-//   provides no trend field.  It must NOT infer 'RISING' simply because
-//   current > warningLevel — that is true for almost every station in
-//   monsoon and causes the entire list to show warning badges.
-//
-//   New logic (uses absolute m-MSL values correctly):
-//     DANGER_BREACH  → current >= dangerLevel          → 'RISING'
-//     NEAR_DANGER    → current >= dangerLevel * 0.97   → 'RISING'
-//     ABOVE_WARNING  → current >= warningLevel          → 'STEADY'
-//     APPROACHING_WL → current >= warningLevel * 0.90  → 'STEADY'
-//     FALLING        → current < warningLevel * 0.80   → 'FALLING'
-//     else                                              → 'STEADY'
-//
-//   The web branch inline trends in _fetchAllWeb / _fetchCityGloFas
-//   have been updated to use the same helper instead of the old ratio.
+//   provides no trend field.  Rules (absolute metres MSL):
+//     current >= dangerLevel × 0.97  → RISING
+//     current >= warningLevel         → STEADY
+//     current <  warningLevel × 0.80 → FALLING
+//     else                            → STEADY
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../constants.dart';
 import '../models/river_station.dart';
-import 'api_service.dart';
+import 'flood_api.dart';
 import 'live_fetch_engine.dart';
 
 // ── Result model ─────────────────────────────────────────────────────────────
@@ -71,12 +68,12 @@ void _log(String msg) {
 
 // ── Service ───────────────────────────────────────────────────────────────────
 class RealTimeRiverService extends ChangeNotifier {
-  static final RealTimeRiverService instance = RealTimeRiverService._internal();
-  factory RealTimeRiverService() => instance;
-  RealTimeRiverService._internal();
+  // No singleton — Riverpod owns the lifecycle.
+  RealTimeRiverService();
 
-  final ApiService        _api    = ApiService();
-  final LiveFetchEngine   _lfe    = LiveFetchEngine();
+  // All backend calls go through FloodApi → OpsClient (auth, retry, timeouts).
+  final FloodApi      _api = FloodApi.instance;
+  final LiveFetchEngine _lfe = LiveFetchEngine();
 
   // ── Cache ─────────────────────────────────────────────────────────────────
   List<dynamic>                    _bulkList       = [];
@@ -98,8 +95,6 @@ class RealTimeRiverService extends ChangeNotifier {
   static const _predTimeout              = Duration(seconds: 8);
   static const double _minConfidence     = 0.35;
 
-  // Gauge heights for Indian river stations are always 0.01 – 200 m.
-  // Anything outside this is a discharge value, error code, or wrong column.
   static const double _gaugeMin = 0.01;
   static const double _gaugeMax = 200.0;
 
@@ -113,19 +108,13 @@ class RealTimeRiverService extends ChangeNotifier {
   // PUBLIC: Fetch all monitored cities
   // ══════════════════════════════════════════════════════════════════════════
   Future<List<LiveRiverResult>> fetchAll() async {
-    // ── Web bridge: use LiveFetchEngine (Open-Meteo + GloFAS, CORS-safe) ────
-    if (kIsWeb) {
-      return _fetchAllWeb();
-    }
+    if (kIsWeb) return _fetchAllWeb();
     return _fetchAllMobile();
   }
 
   // ── Web: build results from LiveFetchEngine ─────────────────────────────
   Future<List<LiveRiverResult>> _fetchAllWeb() async {
-    // Make sure LFE has run at least once
-    if (_lfe.liveLevels.isEmpty) {
-      await _lfe.refreshData();
-    }
+    if (_lfe.liveLevels.isEmpty) await _lfe.refreshData();
 
     final results = <LiveRiverResult>[];
     for (final mc in AppConstants.monitoredCities) {
@@ -136,7 +125,6 @@ class RealTimeRiverService extends ChangeNotifier {
       final dl    = _fp(mc['danger_level']);
       final hfl   = dl > 0 ? dl * 1.10 : wl * 1.25;
 
-      // Try LFE cache first (fast, no HTTP)
       final fd = _lfe.dataForCity(city);
       if (fd != null) {
         final lv   = fd.currentLevel ?? 0.0;
@@ -154,10 +142,8 @@ class RealTimeRiverService extends ChangeNotifier {
             danger:           dlEf,
             hfl:              hfl,
             rainfallLastHour: fd.rainfall24h != null && fd.rainfall24h! > 0
-                ? fd.rainfall24h! / 24
-                : null,
+                ? fd.rainfall24h! / 24 : null,
             flowRate:         fd.flowRate,
-            // FIX: use _deriveTrend so only danger-level breach → RISING
             trend:            _deriveTrend(lv, wlEf, dlEf),
             liveStatus:       risk,
             lastUpdated:      fd.lastUpdated.toIso8601String(),
@@ -174,7 +160,6 @@ class RealTimeRiverService extends ChangeNotifier {
         continue;
       }
 
-      // City not yet in LFE cache — enqueue an individual fetch
       results.add(await _fetchCityGloFas(
         city: city, state: state, river: river,
         warningLevel: wl, dangerLevel: dl,
@@ -197,26 +182,17 @@ class RealTimeRiverService extends ChangeNotifier {
     required double dangerLevel,
   }) async {
     final hfl = dangerLevel > 0 ? dangerLevel * 1.10 : warningLevel * 1.25;
-    // Find lat/lon from monitoredCities
     final mc = AppConstants.monitoredCities.firstWhere(
       (m) => (m['city'] as String).toLowerCase() == city.toLowerCase(),
       orElse: () => <String, dynamic>{},
     );
     final lat = _fp(mc['lat']);
     final lon = _fp(mc['lon']);
-    if (lat == 0 && lon == 0) return _noData(city, state, river, warningLevel, dangerLevel, hfl);
+    if (lat == 0 && lon == 0) {
+      return _noData(city, state, river, warningLevel, dangerLevel, hfl);
+    }
 
     try {
-      // Reuse LFE's GloFAS fetcher indirectly via a direct HTTP call
-      // (Open-Meteo flood API is CORS-safe)
-      final uri = Uri.parse(
-        'https://flood-api.open-meteo.com/v1/flood'
-        '?latitude=$lat&longitude=$lon'
-        '&daily=river_discharge&past_days=7&forecast_days=1',
-      );
-      // Use Dart's built-in Uri approach — no need to import http again,
-      // LiveFetchEngine._client is private; just call lfe.refreshData for this city.
-      // Simpler: trigger LFE refresh which covers all cities, then re-read.
       await _lfe.refreshData();
       final fd2 = _lfe.dataForCity(city);
       if (fd2 != null) {
@@ -227,15 +203,14 @@ class RealTimeRiverService extends ChangeNotifier {
         return LiveRiverResult(
           station: RiverStation(
             city: city, state: state, river: river,
-            station: '$city GloFAS',
-            current: lv,
-            warning: wlEf,
-            danger:  dlEf,
-            hfl:     hfl,
+            station:     '$city GloFAS',
+            current:     lv,
+            warning:     wlEf,
+            danger:      dlEf,
+            hfl:         hfl,
             rainfallLastHour: fd2.rainfall24h != null && fd2.rainfall24h! > 0
                 ? fd2.rainfall24h! / 24 : null,
             flowRate:    fd2.flowRate,
-            // FIX: use _deriveTrend instead of raw lv > warningLevel
             trend:       _deriveTrend(lv, wlEf, dlEf),
             liveStatus:  risk,
             lastUpdated: fd2.lastUpdated.toIso8601String(),
@@ -275,7 +250,7 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // MOBILE: original backend cascade
+  // MOBILE: 5-source backend cascade via FloodApi
   // ══════════════════════════════════════════════════════════════════════════
   Future<List<LiveRiverResult>> _fetchAllMobile() async {
     await _warmCache();
@@ -300,18 +275,19 @@ class RealTimeRiverService extends ChangeNotifier {
 
     if (noDataIndices.isNotEmpty) {
       _log('Pass3-FFS: firing for ${noDataIndices.length} NO_DATA cities in parallel');
-      final ffsFutures = noDataIndices.map((i) {
-        final mc = AppConstants.monitoredCities[i];
-        return _fetchCity(
-          city:         mc['city']  as String,
-          state:        mc['state'] as String,
-          river:        mc['river'] as String,
-          warningLevel: _fp(mc['warning_level']),
-          dangerLevel:  _fp(mc['danger_level']),
-          allowFfsCall: true,
-        );
-      });
-      final ffsResults = await Future.wait(ffsFutures);
+      final ffsResults = await Future.wait(
+        noDataIndices.map((i) {
+          final mc = AppConstants.monitoredCities[i];
+          return _fetchCity(
+            city:         mc['city']  as String,
+            state:        mc['state'] as String,
+            river:        mc['river'] as String,
+            warningLevel: _fp(mc['warning_level']),
+            dangerLevel:  _fp(mc['danger_level']),
+            allowFfsCall: true,
+          );
+        }),
+      );
       for (int k = 0; k < noDataIndices.length; k++) {
         results[noDataIndices[k]] = ffsResults[k];
       }
@@ -379,8 +355,14 @@ class RealTimeRiverService extends ChangeNotifier {
     _noDataLogged.clear();
   }
 
+  @override
+  void dispose() {
+    _invalidateCache();
+    super.dispose();
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
-  // MOBILE ONLY: 5-source cascade for one city
+  // MOBILE ONLY: 5-source cascade for one city (FloodApi calls)
   // ══════════════════════════════════════════════════════════════════════════
   Future<LiveRiverResult> _fetchCity({
     required String city,
@@ -392,24 +374,32 @@ class RealTimeRiverService extends ChangeNotifier {
   }) async {
     final hfl = dangerLevel > 0 ? dangerLevel * 1.10 : warningLevel * 1.25;
 
+    // Source 1: bulk telemetry cache
     if (_bulkList.isNotEmpty) {
       final m = _bestMatch(_bulkList, city, state, river);
       if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
-          return _buildResult(city: city, state: state, river: river,
-              wl: warningLevel, dl: dangerLevel, hfl: hfl,
-              lv: lv, record: m.record, source: 'BULK', confidence: m.confidence);
+          return _buildResult(
+            city: city, state: state, river: river,
+            wl: warningLevel, dl: dangerLevel, hfl: hfl,
+            lv: lv, record: m.record, source: 'BULK', confidence: m.confidence,
+          );
         }
       }
     }
 
+    // Source 2: per-state telemetry — FloodApi.telemetryByState()
     final stKey = _stateKey(state);
     if (!_bulkSucceeded && !_stateCache.containsKey(stKey)) {
       try {
-        final r = await _api.getLiveTelemetry(state: state, limit: 500).timeout(_stateTimeout);
+        final r = await _api
+            .telemetryByState(state, limit: 500)
+            .timeout(_stateTimeout);
         _stateCache[stKey] = _deepList(r);
-      } catch (_) { _stateCache[stKey] = []; }
+      } catch (_) {
+        _stateCache[stKey] = [];
+      }
     }
     final stData = _stateCache[stKey] ?? [];
     if (stData.isNotEmpty) {
@@ -417,61 +407,76 @@ class RealTimeRiverService extends ChangeNotifier {
       if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
-          return _buildResult(city: city, state: state, river: river,
-              wl: warningLevel, dl: dangerLevel, hfl: hfl,
-              lv: lv, record: m.record, source: 'TELEMETRY', confidence: m.confidence);
+          return _buildResult(
+            city: city, state: state, river: river,
+            wl: warningLevel, dl: dangerLevel, hfl: hfl,
+            lv: lv, record: m.record, source: 'TELEMETRY', confidence: m.confidence,
+          );
         }
       }
     }
 
+    // Source 3: live levels cache
     if (_liveLevels.isNotEmpty) {
       final m = _bestMatch(_liveLevels, city, state, river);
       if (m != null && m.confidence >= _minConfidence) {
         final lv = _extractLevel(m.record);
         if (lv > 0) {
-          return _buildResult(city: city, state: state, river: river,
-              wl: warningLevel, dl: dangerLevel, hfl: hfl,
-              lv: lv, record: m.record, source: 'LIVE_LEVELS', confidence: m.confidence);
+          return _buildResult(
+            city: city, state: state, river: river,
+            wl: warningLevel, dl: dangerLevel, hfl: hfl,
+            lv: lv, record: m.record, source: 'LIVE_LEVELS', confidence: m.confidence,
+          );
         }
       }
     }
 
+    // Source 4: CWC FFS forecast — FloodApi.cwcForecast()
     if (allowFfsCall) {
       try {
-        final ffs = await _api.getFloodForecast(city: city, state: state).timeout(_ffsTimeout);
-        final fl  = _deepList(ffs);
+        final ffs = await _api
+            .cwcForecast(city: city, state: state)
+            .timeout(_ffsTimeout);
+        final fl = _deepList(ffs);
         for (final item in fl.whereType<Map<String, dynamic>>()) {
           final lv = _extractLevel(item);
           if (lv > 0) {
-            return _buildResult(city: city, state: state, river: river,
-                wl: warningLevel, dl: dangerLevel, hfl: hfl,
-                lv: lv, record: item, source: 'CWC_FFS', confidence: 0.85);
+            return _buildResult(
+              city: city, state: state, river: river,
+              wl: warningLevel, dl: dangerLevel, hfl: hfl,
+              lv: lv, record: item, source: 'CWC_FFS', confidence: 0.85,
+            );
           }
         }
       } catch (_) {}
     }
 
+    // Source 5: reservoir levels — FloodApi.reservoirLevels()
     if (allowFfsCall) {
       if (!_reservoirCache.containsKey(stKey)) {
         try {
-          final res = await _api.getReservoirLevels(state: state).timeout(_resTimeout);
+          final res = await _api
+              .reservoirLevels(state)
+              .timeout(_resTimeout);
           _reservoirCache[stKey] = _deepList(res);
-        } catch (_) { _reservoirCache[stKey] = []; }
+        } catch (_) {
+          _reservoirCache[stKey] = [];
+        }
       }
       final rl = _reservoirCache[stKey] ?? [];
       if (rl.isNotEmpty) {
         final m = _bestMatch(rl, city, state, river);
         if (m != null && m.confidence >= _minConfidence) {
-          final lv = _fp(
+          final lv = _sanityClamp(_fp(
             m.record['current_level_m'] ?? m.record['current_level'] ??
             m.record['wl']              ?? m.record['water_level'],
-          );
-          // Reservoir levels are also m MSL — apply same sanity clamp
-          final lvSane = _sanityClamp(lv);
-          if (lvSane > 0) {
-            return _buildResult(city: city, state: state, river: river,
-                wl: warningLevel, dl: dangerLevel, hfl: hfl,
-                lv: lvSane, record: m.record, source: 'RESERVOIR', confidence: m.confidence);
+          ));
+          if (lv > 0) {
+            return _buildResult(
+              city: city, state: state, river: river,
+              wl: warningLevel, dl: dangerLevel, hfl: hfl,
+              lv: lv, record: m.record, source: 'RESERVOIR', confidence: m.confidence,
+            );
           }
         }
       }
@@ -490,27 +495,34 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // MOBILE ONLY: Cache warmer
+  // MOBILE ONLY: Cache warmer — FloodApi.allTelemetry() + allLevels()
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _warmCache({bool force = false}) async {
     if (!force && _cacheValid) return;
 
     List<dynamic> bulkResult = [];
+
+    // Attempt 1: bulk all-states telemetry
     try {
-      final bulk = await _api.getAllLiveTelemetry(limit: 1000).timeout(_bulkTimeout);
+      final bulk = await _api.allTelemetry(limit: 1000).timeout(_bulkTimeout);
       bulkResult = _deepList(bulk);
       _log('Bulk attempt 1: ${bulkResult.length} records');
-    } catch (e) { _log('Bulk attempt 1 failed: $e'); }
+    } catch (e) {
+      _log('Bulk attempt 1 failed: $e');
+    }
 
+    // Attempt 2: cold-start retry
     if (bulkResult.isEmpty) {
       _log('Bulk empty — Render cold-starting. Retrying (55 s)…');
       try {
-        final bulk2 = await _api.getAllLiveTelemetry(limit: 1000).timeout(_bulkRetryTimeout);
+        final bulk2 = await _api.allTelemetry(limit: 1000).timeout(_bulkRetryTimeout);
         bulkResult  = _deepList(bulk2);
         _log(bulkResult.isNotEmpty
             ? 'Cold-start retry OK: ${bulkResult.length} records'
             : 'Cold-start retry also empty');
-      } catch (e) { _log('Cold-start retry failed: $e'); }
+      } catch (e) {
+        _log('Cold-start retry failed: $e');
+      }
     }
 
     _bulkAttempted = true;
@@ -528,8 +540,9 @@ class RealTimeRiverService extends ChangeNotifier {
       _bulkList = [];
     }
 
+    // Live levels: FloodApi.allLevels()
     try {
-      final ll = await _api.getLiveLevels().timeout(_stateTimeout);
+      final ll = await _api.allLevels().timeout(_stateTimeout);
       _liveLevels = _deepList(ll);
       _log('Live levels: ${_liveLevels.length} records');
     } catch (e) {
@@ -542,7 +555,7 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // BUILD RESULT (mobile only)
+  // BUILD RESULT — FloodApi.predict() for ML risk overlay
   // ══════════════════════════════════════════════════════════════════════════
   Future<LiveRiverResult> _buildResult({
     required String city, required String state, required String river,
@@ -561,8 +574,6 @@ class RealTimeRiverService extends ChangeNotifier {
     final ts  = _s(record['timestamp'] ?? record['updated_at'] ?? record['last_updated']
                    ?? record['lastUpdated']);
     final rawTrend = _s(record['trend'] ?? record['level_trend'] ?? record['water_trend']);
-    // FIX: only fall back to _deriveTrend when the feed provides no trend.
-    // _deriveTrend now requires a genuine danger-level breach to emit 'RISING'.
     final trend    = rawTrend.isNotEmpty ? rawTrend.toUpperCase() : _deriveTrend(lv, wlR, dlR);
 
     bool stale = false;
@@ -572,28 +583,32 @@ class RealTimeRiverService extends ChangeNotifier {
     }
 
     final stationName = _s(
-      record['station'] ?? record['stationName'] ?? record['station_name']
-      ?? record['name']  ?? record['gaugeStation'],
+      record['station']      ?? record['stationName'] ?? record['station_name']
+      ?? record['name']      ?? record['gaugeStation'],
     ).let((v) => v.isNotEmpty ? _cap(v) : '$city CWC Gauge');
 
     final station = RiverStation(
       city: city, state: state, river: river, station: stationName,
       current: lv, warning: wlR, danger: dlR, hfl: hlR,
-      rainfallLastHour: rf > 0 ? rf : null, flowRate: fl > 0 ? fl : null,
-      trend: trend.isNotEmpty ? trend : null,
-      liveStatus: _s(record['status'] ?? record['alert_status'] ?? record['flood_status'])
+      rainfallLastHour: rf > 0 ? rf : null,
+      flowRate:         fl > 0 ? fl : null,
+      trend:            trend.isNotEmpty ? trend : null,
+      liveStatus:       _s(record['status'] ?? record['alert_status'] ?? record['flood_status'])
           .let((v) => v.isNotEmpty ? v.toUpperCase() : null),
-      lastUpdated: ts.isNotEmpty ? ts : null,
-      dataSource: source, isLive: true,
+      lastUpdated:      ts.isNotEmpty ? ts : null,
+      dataSource:       source,
+      isLive:           true,
     );
 
+    // ML risk overlay via FloodApi.predict()
     String? mlRisk;
     double? mlProb;
     try {
       final pred = await _api.predict({
         'city': city, 'state': state,
-        'river_level': lv, 'warning_level': wlR, 'danger_level': dlR,
-        'rainfall': rf, 'flow_rate': fl, 'trend': trend,
+        'river_level':   lv,   'warning_level': wlR,
+        'danger_level':  dlR,  'rainfall':      rf,
+        'flow_rate':     fl,   'trend':         trend,
       }).timeout(_predTimeout);
       final rawRisk = _s(pred['risk_level'] ?? pred['riskLevel'] ?? pred['flood_risk']);
       mlRisk = rawRisk.isNotEmpty ? rawRisk.toUpperCase() : null;
@@ -603,9 +618,13 @@ class RealTimeRiverService extends ChangeNotifier {
     } catch (_) {}
 
     return LiveRiverResult(
-      station: station, source: source, confidence: confidence,
-      mlRiskLevel: mlRisk, mlFloodProb: mlProb,
-      isStale: stale, rawTimestamp: ts.isNotEmpty ? ts : null,
+      station:     station,
+      source:      source,
+      confidence:  confidence,
+      mlRiskLevel: mlRisk,
+      mlFloodProb: mlProb,
+      isStale:     stale,
+      rawTimestamp: ts.isNotEmpty ? ts : null,
     );
   }
 
@@ -619,22 +638,23 @@ class RealTimeRiverService extends ChangeNotifier {
     final lr = river.toLowerCase().trim();
 
     for (final item in list.whereType<Map<String, dynamic>>()) {
-      final sc  = _s(item['station'] ?? item['stationName'] ?? item['station_name']
-                  ?? item['city']   ?? item['location']    ?? item['name']
-                  ?? item['site_name'] ?? item['gaugeStation'] ?? item['gauge_station']);
-      final ist = _s(item['state_name'] ?? item['state'] ?? item['stateName'] ?? item['State'] ?? '');
-      final rv  = _s(item['river_name'] ?? item['river'] ?? item['riverName']
-                  ?? item['river_basin'] ?? item['basin'] ?? item['River'] ?? '');
+      final sc  = _s(item['station']    ?? item['stationName']  ?? item['station_name']
+                  ?? item['city']       ?? item['location']     ?? item['name']
+                  ?? item['site_name']  ?? item['gaugeStation'] ?? item['gauge_station']);
+      final ist = _s(item['state_name'] ?? item['state']        ?? item['stateName']
+                  ?? item['State']      ?? '');
+      final rv  = _s(item['river_name'] ?? item['river']        ?? item['riverName']
+                  ?? item['river_basin']?? item['basin']        ?? item['River'] ?? '');
 
       double conf = 0.0;
-      if      (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', ''))          conf = 1.00;
-      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))                conf = 0.90;
-      else if (_tok(sc, lc) && lr.isNotEmpty && rv.contains(lr) && ist.contains(ls)) conf = 0.85;
-      else if (_tok(sc, lc))                                                          conf = 0.80;
+      if      (sc == lc || sc.replaceAll(' ', '') == lc.replaceAll(' ', ''))           conf = 1.00;
+      else if (sc.contains(lc) || (lc.contains(sc) && sc.length > 3))                 conf = 0.90;
+      else if (_tok(sc, lc) && lr.isNotEmpty && rv.contains(lr) && ist.contains(ls))  conf = 0.85;
+      else if (_tok(sc, lc))                                                           conf = 0.80;
       else if (lr.isNotEmpty && rv.contains(lr) && ist.isNotEmpty && ist.contains(ls)) conf = 0.70;
-      else if (lr.isNotEmpty && rv.contains(lr))                                      conf = 0.60;
-      else if (ls.isNotEmpty && ist.contains(ls) && lr.isNotEmpty && _rvTok(rv, lr)) conf = 0.45;
-      else if (ls.isNotEmpty && ist.contains(ls))                                     conf = 0.38;
+      else if (lr.isNotEmpty && rv.contains(lr))                                       conf = 0.60;
+      else if (ls.isNotEmpty && ist.contains(ls) && lr.isNotEmpty && _rvTok(rv, lr))  conf = 0.45;
+      else if (ls.isNotEmpty && ist.contains(ls))                                      conf = 0.38;
 
       if (conf > (best?.confidence ?? 0)) best = _MatchResult(record: item, confidence: conf);
       if (conf >= 1.0) break;
@@ -654,20 +674,15 @@ class RealTimeRiverService extends ChangeNotifier {
   }
 
   // ── Gauge sanity clamp ────────────────────────────────────────────────────
-  // Returns 0.0 (→ NO_DATA) if value is outside the physically plausible
-  // range for Indian river gauge heights (metres MSL / above datum).
-  // This rejects discharge values (m³/s) and parse errors.
   double _sanityClamp(double v) {
     if (v < _gaugeMin || v > _gaugeMax) {
-      _log('SANITY_REJECT: $v m is outside [$_gaugeMin, $_gaugeMax] — treating as NO_DATA');
+      _log('SANITY_REJECT: $v m outside [$_gaugeMin, $_gaugeMax] — treating as NO_DATA');
       return 0.0;
     }
     return v;
   }
 
-  // ── Level extractor ──────────────────────────────────────────────────────
-  // Tries every known field name in priority order, then applies the
-  // sanity clamp so discharge/error values never become gauge readings.
+  // ── Level extractor ───────────────────────────────────────────────────────
   double _extractLevel(Map<String, dynamic> d) {
     final raw = _fp(
       d['river_level']     ?? d['riverLevel']      ?? d['current_level']  ??
@@ -676,25 +691,14 @@ class RealTimeRiverService extends ChangeNotifier {
       d['stage']           ?? d['obs_level']        ?? d['observed_level'] ??
       d['gauge']           ?? d['rl']               ?? d['wl']             ??
       d['current']         ?? d['present_level']    ?? d['today_level']    ??
-      d['live_level']      ?? d['liveLevel']         ?? d['gauge_value']   ??
-      d['water_elevation'] ?? d['elevation']         ?? d['obsLevel']      ??
-      d['currentObs']      ?? d['river_stage']       ?? d['gaugeReading'],
+      d['live_level']      ?? d['liveLevel']        ?? d['gauge_value']    ??
+      d['water_elevation'] ?? d['elevation']        ?? d['obsLevel']       ??
+      d['currentObs']      ?? d['river_stage']      ?? d['gaugeReading'],
     );
     return _sanityClamp(raw);
   }
 
-  // ── Trend derivation ──────────────────────────────────────────────────────
-  // LAST-RESORT fallback: called only when the live feed has no trend field.
-  //
-  // All inputs are absolute metres MSL (e.g. current=48.12, warning=47.50,
-  // danger=48.60).  A ratio like lv/wl is meaningless (48/47 ≈ 1.02 → every
-  // station looks "rising" even when 0.5 m below danger).
-  //
-  // Rules (all comparisons in absolute metres):
-  //   current >= dangerLevel × 0.97  → RISING   (within 3 % of danger or above)
-  //   current >= warningLevel         → STEADY   (above-normal but not near danger)
-  //   current < warningLevel × 0.80  → FALLING  (clearly below warning band)
-  //   else                            → STEADY
+  // ── Trend derivation ─────────────────────────────────────────────────────
   String _deriveTrend(double lv, double wl, double dl) {
     if (dl > 0 && lv >= dl * 0.97) return 'RISING';
     if (wl > 0 && lv >= wl)        return 'STEADY';
@@ -702,7 +706,7 @@ class RealTimeRiverService extends ChangeNotifier {
     return 'STEADY';
   }
 
-  // ── Deep list ──────────────────────────────────────────────────────────────
+  // ── Deep list unwrapper ───────────────────────────────────────────────────
   List<dynamic> _deepList(dynamic payload, {int depth = 0}) {
     if (depth > 8) return [];
     if (payload is List) return payload.where((e) => e != null).toList();
@@ -736,8 +740,11 @@ class RealTimeRiverService extends ChangeNotifier {
   static double _fp(dynamic v) =>
       v == null ? 0.0 : (double.tryParse(v.toString().trim()) ?? 0.0);
   static String _s(dynamic v) => (v?.toString() ?? '').trim().toLowerCase();
-  static String _cap(String s) => s.isEmpty ? s
-      : s.split(' ').map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
+  static String _cap(String s) => s.isEmpty
+      ? s
+      : s.split(' ').map((w) => w.isEmpty
+          ? w
+          : w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
 }
 
 // ── Match result ──────────────────────────────────────────────────────────────
