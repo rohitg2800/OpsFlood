@@ -4,8 +4,12 @@
 //
 // Fetches live flood + heavy-rain alerts from:
 //   Primary  : SACHET NDMA public CAP API (JSON)
-//   Fallback : IMD Agromet XML RSS
-//   Static   : hardcoded seasonal advisory when both are unavailable
+//   Fallback : seasonal advisory when SACHET is unavailable
+//
+// NOTE: SACHET is a public 3rd-party government API — NOT our backend.
+// We use a plain http.Client here intentionally (OpsClient wraps only
+// opsflood.onrender.com). The client is long-lived so it reuses TCP
+// connections across calls.
 //
 // Circuit-breaker: after 3 consecutive failures backs off 30 min.
 library;
@@ -13,6 +17,7 @@ library;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 // ── Model ────────────────────────────────────────────────────────────────────
 
@@ -49,25 +54,22 @@ class ImdAlert {
         ? {for (final p in params) (p['valueName'] ?? ''): p['value']}
         : <String, dynamic>{};
 
-    // Derive state from areaDesc or area geocode description
     final areaDesc = area['areaDesc']?.toString() ?? '';
     final state    = _matchState(areaDesc);
 
-    // Event type
     final event    = (info['event'] ?? '').toString().toUpperCase();
     String type;
-    if (event.contains('FLOOD'))       type = 'FLOOD';
-    else if (event.contains('CYCLONE'))type = 'CYCLONE';
-    else if (event.contains('RAIN'))   type = 'HEAVY_RAIN';
-    else                               type = 'GENERAL';
+    if (event.contains('FLOOD'))        type = 'FLOOD';
+    else if (event.contains('CYCLONE')) type = 'CYCLONE';
+    else if (event.contains('RAIN'))    type = 'HEAVY_RAIN';
+    else                                type = 'GENERAL';
 
-    // Severity from IMD colour code
-    final colour   = (paramMap['ColourCode'] ?? '').toString().toUpperCase();
+    final colour = (paramMap['ColourCode'] ?? '').toString().toUpperCase();
     String severity;
-    if (colour.contains('RED'))         severity = 'RED';
-    else if (colour.contains('ORANGE')) severity = 'ORANGE';
-    else if (colour.contains('YELLOW')) severity = 'YELLOW';
-    else                                severity = 'GREEN';
+    if (colour.contains('RED'))          severity = 'RED';
+    else if (colour.contains('ORANGE'))  severity = 'ORANGE';
+    else if (colour.contains('YELLOW'))  severity = 'YELLOW';
+    else                                 severity = 'GREEN';
 
     return ImdAlert(
       id:          j['identifier']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
@@ -92,13 +94,13 @@ class ImdAlert {
   }
 
   static const _states = [
-    'Assam','Bihar','Odisha','Kerala','Gujarat','West Bengal',
-    'Uttar Pradesh','Maharashtra','Andhra Pradesh','Telangana',
-    'Karnataka','Tamil Nadu','Rajasthan','Madhya Pradesh',
-    'Chhattisgarh','Jharkhand','Punjab','Uttarakhand',
-    'Himachal Pradesh','Haryana','Manipur','Meghalaya',
-    'Arunachal Pradesh','Tripura','Sikkim','Nagaland','Goa',
-    'Delhi','Jammu and Kashmir',
+    'Assam', 'Bihar', 'Odisha', 'Kerala', 'Gujarat', 'West Bengal',
+    'Uttar Pradesh', 'Maharashtra', 'Andhra Pradesh', 'Telangana',
+    'Karnataka', 'Tamil Nadu', 'Rajasthan', 'Madhya Pradesh',
+    'Chhattisgarh', 'Jharkhand', 'Punjab', 'Uttarakhand',
+    'Himachal Pradesh', 'Haryana', 'Manipur', 'Meghalaya',
+    'Arunachal Pradesh', 'Tripura', 'Sikkim', 'Nagaland', 'Goa',
+    'Delhi', 'Jammu and Kashmir',
   ];
 
   static String _matchState(String text) {
@@ -112,11 +114,15 @@ class ImdAlert {
 
 // ── Circuit breaker state ────────────────────────────────────────────────────
 
-int       _failures        = 0;
+int       _failures   = 0;
 DateTime? _backoffUntil;
-bool      _loggedOnce      = false;
-const     _maxFail         = 3;
-const     _backoffDur      = Duration(minutes: 30);
+bool      _loggedOnce = false;
+const     _maxFail    = 3;
+const     _backoffDur = Duration(minutes: 30);
+
+// SACHET public CAP endpoint — government API, not our backend.
+const _sachetUrl =
+    'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails';
 
 // ── ImdService ───────────────────────────────────────────────────────────────
 
@@ -124,23 +130,25 @@ class ImdService {
   ImdService._();
   static final ImdService instance = ImdService._();
 
+  // Long-lived client for TCP reuse — intentionally NOT OpsClient
+  // because SACHET is a 3rd-party public API.
   final http.Client _client = http.Client();
-  static const _timeout = Duration(seconds: 10);
 
-  // Cache: reuse within same 10-min window
+  static final Duration _timeout  = AppConfig.requestTimeout;
+  static final Duration _cacheTtl = AppConfig.cacheTtl; // 5 min — matches app-wide policy
+
   List<ImdAlert> _cache     = [];
   DateTime?      _cacheTime;
-  static const   _cacheTtl  = Duration(minutes: 10);
 
   Future<List<ImdAlert>> getAlerts({required String state}) async {
-    // Return cache if fresh
+    // Return cache if still fresh
     if (_cacheTime != null &&
         DateTime.now().difference(_cacheTime!) < _cacheTtl &&
         _cache.isNotEmpty) {
       return _cache.where((a) => a.state == state || a.state == 'India').toList();
     }
 
-    // Circuit open?
+    // Circuit open — wait out the backoff
     if (_backoffUntil != null && DateTime.now().isBefore(_backoffUntil!)) {
       if (kDebugMode && !_loggedOnce) {
         debugPrint('[IMD] circuit open until ${_backoffUntil!.toLocal()}');
@@ -148,16 +156,17 @@ class ImdService {
       }
       return _seasonal(state);
     }
+    // Reset circuit after backoff expires
     if (_backoffUntil != null && DateTime.now().isAfter(_backoffUntil!)) {
-      _failures = 0; _backoffUntil = null; _loggedOnce = false;
+      _failures = 0;
+      _backoffUntil = null;
+      _loggedOnce   = false;
     }
 
-    // Try SACHET NDMA CAP JSON
+    // Fetch from SACHET NDMA CAP JSON
     try {
       final res = await _client
-          .get(Uri.parse(
-            'https://sachet.ndma.gov.in/cap_public_website/FetchAllAlertDetails',
-          ))
+          .get(Uri.parse(_sachetUrl))
           .timeout(_timeout);
 
       if (res.statusCode == 200) {
@@ -180,16 +189,18 @@ class ImdService {
             .whereType<ImdAlert>()
             .toList();
 
-        _cacheTime = DateTime.now();
-        _failures  = 0;
+        // Evict expired alerts immediately
+        final now = DateTime.now();
+        _cache = _cache
+            .where((a) => a.expiresAt == null || a.expiresAt!.isAfter(now))
+            .toList();
+
+        _cacheTime    = DateTime.now();
+        _failures     = 0;
         _backoffUntil = null;
         _loggedOnce   = false;
 
         if (kDebugMode) debugPrint('[IMD] fetched ${_cache.length} alerts from SACHET');
-
-        // Filter out expired
-        final now = DateTime.now();
-        _cache = _cache.where((a) => a.expiresAt == null || a.expiresAt!.isAfter(now)).toList();
 
         return _cache.where((a) => a.state == state || a.state == 'India').toList();
       }
@@ -212,7 +223,7 @@ class ImdService {
   }
 
   List<ImdAlert> _seasonal(String state) {
-    final now = DateTime.now();
+    final now      = DateTime.now();
     final isMonsoon = now.month >= 6 && now.month <= 10;
     if (!isMonsoon) return [];
     return [
