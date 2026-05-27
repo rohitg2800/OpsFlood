@@ -1408,8 +1408,36 @@ def get_data_ingestion_targets() -> list:
     ]
 
 
-data_pipeline = OperationalDataPipeline(store=operational_store)
-data_ingestion_scheduler = ScheduledIngestionService(pipeline=data_pipeline)
+def _pipeline_weather_fetcher(target: IngestionTarget) -> Dict[str, Any]:
+    """Fetch weather snapshot for a pipeline ingestion target."""
+    return build_fallback_current_weather(
+        city=target.weather_query,
+        lat=target.lat,
+        lon=target.lon,
+    )
+
+
+def _pipeline_water_level_fetcher(target: IngestionTarget) -> Dict[str, Any]:
+    """Fetch water level snapshot for a pipeline ingestion target."""
+    return build_policy_bound_telemetry(
+        state_name=target.state_name,
+        station_name=target.station_name,
+        limit=6,
+    )
+
+
+data_pipeline = OperationalDataPipeline(
+    repo_dir=REPO_DIR,
+    weather_fetcher=_pipeline_weather_fetcher,
+    water_level_fetcher=_pipeline_water_level_fetcher,
+    targets=get_data_ingestion_targets(),
+)
+data_ingestion_scheduler = ScheduledIngestionService(
+    pipeline=data_pipeline,
+    interval_seconds=3600,
+    enabled=False,
+    run_on_startup=False,
+)
 
 
 @app.on_event("startup")
