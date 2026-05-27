@@ -7,17 +7,27 @@ Data sources (priority order)
 ------------------------------
 1. FMISC Daily Water Level & FF Bulletin PDF
    https://www.fmiscwrdbihar.gov.in/bulletin/fmis%20daily%20water%20level%20and%20FF%20data.pdf
-   Published once daily (updated during flood season Jun 15 – Oct 15).
-   Contains: Station | River | DL | HFL/Year | Observed levels (last 3 days)
+   Updated daily during flood season (Jun 15 – Oct 15).
+
+   Confirmed column layout (pdfplumber, Nov 2025 bulletin):
+     col 0 : Sl No.
+     col 1 : Name of River          (merged rows — may be blank)
+     col 2 : Site/Station           ← station name
+     col 3 : District
+     col 4 : Danger Level (DL)      ← danger level (m)
+     col 5 : H.F.L (m)/Year         (skip)
+     col 6 : Observed WL at 8:00 AM ← current observed level
+     col 7 : Forecast D+0 (3 PM)
+     col 8 : Forecast D+1
+     col 9 : Forecast D+2
+     col 10: Remarks
+     col 11: Compared to DL         ← portal_status ("Below DL", "Above DL", etc.)
 
 2. Ganga Model Result PDF (3-day forecast + observed)
    https://www.fmiscwrdbihar.gov.in/bulletin/Ganga_Model_Result.pdf
-   Contains Buxar, Dighaghat (Gandhi Setu), Gandhighat, Hathidah,
-   Munger, Bhagalpur, Kahalgaon with observed + forecast levels.
 
 3. Static BIHAR_STATION_REGISTRY fallback
-   Used when both PDFs are unavailable (network error, off-season).
-   Provides correct danger/warning thresholds and coordinates always.
+   Used off-season or when PDFs are unavailable.
 
 Exported symbols
 ----------------
@@ -31,7 +41,7 @@ import datetime
 import io
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -47,13 +57,22 @@ _BULLETIN_PDF_URL = (
 _GANGA_PDF_URL = (
     "https://www.fmiscwrdbihar.gov.in/bulletin/Ganga_Model_Result.pdf"
 )
-_SCRAPE_TIMEOUT  = (8, 20)   # (connect, read) seconds
-_CACHE_TTL_SECS  = 60 * 60   # 1 hour — bulletin updates once daily
+_SCRAPE_TIMEOUT = (8, 25)    # (connect, read) seconds
+_CACHE_TTL_SECS = 60 * 60    # 1 hour — bulletin publishes once daily
+
+# Bulletin column indices (confirmed from live PDF diagnostic)
+_COL_SL       = 0
+_COL_RIVER    = 1
+_COL_STATION  = 2
+_COL_DISTRICT = 3
+_COL_DL       = 4
+_COL_HFL      = 5
+_COL_OBSERVED = 6
+_COL_STATUS   = 11   # "Compared to DL"
 
 
 # ---------------------------------------------------------------------------
-# Static registry — coordinates, rivers, standard danger/warning levels
-# Sourced from CWC Flood Forecast bulletins for Bihar (authoritative).
+# Static registry — coordinates, danger/warning/safe thresholds
 # ---------------------------------------------------------------------------
 BIHAR_STATION_REGISTRY: List[Dict[str, Any]] = [
     {"station": "Gandhi Setu",  "river": "Ganga",        "lat": 25.736, "lon": 85.004,
@@ -101,9 +120,22 @@ BIHAR_STATION_REGISTRY: List[Dict[str, Any]] = [
     {"station": "Manihari",     "river": "Ganga",        "lat": 25.406, "lon": 87.621,
      "danger_level_m": 28.96, "warning_level_m": 27.96, "safe_level_m": 25.00,
      "pdf_aliases": ["manihari"]},
+    # Extra stations present in bulletin but not in original registry
+    {"station": "Sonakhan",     "river": "Bagmati",      "lat": 26.550, "lon": 85.450,
+     "danger_level_m": 68.80, "warning_level_m": 67.80, "safe_level_m": 65.00,
+     "pdf_aliases": ["sonakhan"]},
+    {"station": "Dubbadhar",    "river": "Bagmati",      "lat": 26.520, "lon": 85.070,
+     "danger_level_m": 61.28, "warning_level_m": 60.28, "safe_level_m": 57.00,
+     "pdf_aliases": ["dubbadhar"]},
+    {"station": "Kansar",       "river": "Bagmati",      "lat": 26.470, "lon": 85.530,
+     "danger_level_m": 59.06, "warning_level_m": 58.06, "safe_level_m": 55.00,
+     "pdf_aliases": ["kansar"]},
+    {"station": "Runisaidpur",  "river": "Bagmati",      "lat": 26.395, "lon": 85.660,
+     "danger_level_m": 55.00, "warning_level_m": 54.00, "safe_level_m": 51.00,
+     "pdf_aliases": ["runisaidpur", "saulighat"]},
 ]
 
-# Flat alias -> registry entry map for O(1) lookup
+# Alias -> registry entry lookup
 _ALIAS_INDEX: Dict[str, Dict[str, Any]] = {}
 for _entry in BIHAR_STATION_REGISTRY:
     for _alias in _entry.get("pdf_aliases", []):
@@ -112,7 +144,7 @@ for _entry in BIHAR_STATION_REGISTRY:
 
 
 # ---------------------------------------------------------------------------
-# Pure helper functions
+# Pure helpers
 # ---------------------------------------------------------------------------
 
 def _now_iso() -> str:
@@ -121,16 +153,16 @@ def _now_iso() -> str:
 
 def _safe_float(val: str) -> Optional[float]:
     try:
-        cleaned = re.sub(r"[^\d.\-]", "", val.strip())
+        cleaned = re.sub(r"[^\d.\-]", "", str(val).strip())
         return float(cleaned) if cleaned not in ("", "-") else None
     except (ValueError, TypeError):
         return None
 
 
 def _risk_level(observed: float, danger: float, warning: float) -> str:
-    if danger  > 0 and observed >= danger:          return "CRITICAL"
-    if warning > 0 and observed >= warning:         return "HIGH"
-    if warning > 0 and observed >= warning * 0.90:  return "MODERATE"
+    if danger  > 0 and observed >= danger:         return "CRITICAL"
+    if warning > 0 and observed >= warning:        return "HIGH"
+    if warning > 0 and observed >= warning * 0.90: return "MODERATE"
     return "LOW"
 
 
@@ -155,12 +187,9 @@ def _alert(risk: str) -> str:
 
 
 def _match_registry(name: str) -> Optional[Dict[str, Any]]:
-    """Fuzzy-match a PDF station name to the registry."""
     needle = name.strip().lower()
-    # Exact alias match first
     if needle in _ALIAS_INDEX:
         return _ALIAS_INDEX[needle]
-    # Partial match: any alias that is a substring of the PDF name or vice versa
     for alias, entry in _ALIAS_INDEX.items():
         if alias in needle or needle in alias:
             return entry
@@ -169,6 +198,7 @@ def _match_registry(name: str) -> Optional[Dict[str, Any]]:
 
 def _build_station_dict(
     name: str,
+    river_pdf: str,
     observed: Optional[float],
     danger_pdf: Optional[float],
     portal_status: str,
@@ -185,11 +215,12 @@ def _build_station_dict(
         river     = reg["river"]
         canon     = reg["station"]
     else:
+        # Unknown station — derive thresholds from PDF danger level
         danger_m  = danger_pdf if danger_pdf is not None else 0.0
         warning_m = round(danger_m * 0.94, 2) if danger_m > 0 else 0.0
         safe_m    = round(danger_m * 0.80, 2) if danger_m > 0 else 0.0
         lat, lon  = None, None
-        river     = "Unknown"
+        river     = river_pdf or "Unknown"
         canon     = name
 
     current = observed if observed is not None else round((safe_m + warning_m) / 2, 2)
@@ -248,110 +279,121 @@ def _station_from_registry(reg: Dict[str, Any], timestamp: str) -> Dict[str, Any
 
 
 # ---------------------------------------------------------------------------
-# PDF parsing
+# Bulletin PDF parser  (column layout confirmed from live diagnostic)
 # ---------------------------------------------------------------------------
+
+# Header cell fragments to skip (multi-line merged header rows)
+_HEADER_FRAGMENTS = {
+    "sl", "no.", "no", "name", "site", "station", "district",
+    "danger", "level", "h.f.l", "observed", "forecast",
+    "compared", "remarks", "river", "wl", "am", "pm", "year",
+}
+
+
+def _is_header_row(cells: List[str]) -> bool:
+    """Return True if this row is a header / continuation-header row."""
+    station_cell = cells[_COL_STATION] if len(cells) > _COL_STATION else ""
+    sl_cell      = cells[_COL_SL]      if len(cells) > _COL_SL      else ""
+    # Serial number column should be a digit for data rows
+    if sl_cell and not sl_cell.replace(".", "").isdigit():
+        # Could still be a valid row if station is non-empty
+        words = station_cell.lower().split()
+        if any(w in _HEADER_FRAGMENTS for w in words):
+            return True
+    return False
+
 
 def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
     """
-    Parse the FMISC daily water level bulletin PDF.
+    Parse FMISC Daily Water Level Bulletin PDF.
 
-    Table layout (text extracted per row):
-      Station Name | River | DL (m) | HFL/Year | Obs Day-2 | Obs Day-1 | Obs Today | Status
-
-    We use pdfplumber for text extraction and regex to pull numeric values.
-    pdfplumber is lightweight and already pulls table text reliably from
-    government PDFs of this format.
+    Column layout (confirmed):
+      0=Sl, 1=River, 2=Station, 3=District, 4=DL, 5=HFL,
+      6=ObservedWL, 7=FcstD0, 8=FcstD1, 9=FcstD2, 10=Remarks, 11=ComparedToDL
     """
     try:
         import pdfplumber  # type: ignore
     except ImportError:
-        logger.warning("[wrd_bihar] pdfplumber not installed — pip install pdfplumber")
+        logger.warning("[wrd_bihar] pdfplumber not installed — run: pip install pdfplumber")
         return []
 
-    results: List[Dict[str, Any]] = []
-    seen_stations: set = set()
+    results:  List[Dict[str, Any]] = []
+    seen:     set = set()
+    last_river = ""
 
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
-                # Extract structured table rows first
                 tables = page.extract_tables()
                 for table in tables:
                     for row in table:
-                        if not row or len(row) < 4:
+                        if not row:
                             continue
                         cells = [str(c or "").strip() for c in row]
-                        name = cells[0]
-                        if not name or name.lower() in ("station", "s.no", "sl", "#", ""):
-                            continue
-                        if name[0].isdigit() and len(name) <= 3:
-                            # Serial number cell — shift
-                            cells = cells[1:]
-                            name = cells[0] if cells else ""
-                        if not name or len(name) < 3:
+
+                        # Pad to at least 12 columns
+                        while len(cells) < 12:
+                            cells.append("")
+
+                        # Skip pure header rows
+                        if _is_header_row(cells):
                             continue
 
-                        # DL column is usually col index 2, observed today is last numeric col
-                        dl_val  = _safe_float(cells[2]) if len(cells) > 2 else None
-                        # Try last 3 columns for observed — take the most recent non-None
-                        observed = None
-                        for idx in range(min(len(cells) - 1, 7), 2, -1):
-                            v = _safe_float(cells[idx])
-                            if v is not None and v > 0:
-                                observed = v
-                                break
+                        station_name = cells[_COL_STATION].strip()
+                        if not station_name or len(station_name) < 2:
+                            continue
 
-                        portal_status = cells[-1] if cells else "Normal"
-                        canon_key = name.strip().lower()
-                        if canon_key in seen_stations:
-                            continue
-                        seen_stations.add(canon_key)
+                        # River name may be blank in merged-cell rows — carry forward
+                        river_name = cells[_COL_RIVER].strip()
+                        if river_name:
+                            last_river = river_name
+                        else:
+                            river_name = last_river
 
-                        station = _build_station_dict(
-                            name, observed, dl_val, portal_status, timestamp, "WRD_BIHAR"
-                        )
-                        results.append(station)
+                        # Parse DL and observed level from confirmed columns
+                        dl_val   = _safe_float(cells[_COL_DL])
+                        observed = _safe_float(cells[_COL_OBSERVED])
 
-                # Fallback: raw text line scan when table extractor misses rows
-                if not results:
-                    text = page.extract_text() or ""
-                    for line in text.splitlines():
-                        numbers = re.findall(r"\d{2,3}\.\d{2}", line)
-                        if len(numbers) < 2:
+                        # Validate: both values should be plausible Bihar river levels
+                        # Bihar gauge levels typically 20–120 m (MSL)
+                        if observed is not None and not (10.0 <= observed <= 200.0):
+                            observed = None
+                        if dl_val is not None and not (10.0 <= dl_val <= 200.0):
+                            dl_val = None
+
+                        portal_status = cells[_COL_STATUS].strip() or "Normal"
+
+                        canon_key = station_name.lower()
+                        if canon_key in seen:
                             continue
-                        # Heuristic: first token(s) are station name
-                        tokens = line.split()
-                        name_tokens = []
-                        for tok in tokens:
-                            if re.match(r"^\d+\.\d+$", tok):
-                                break
-                            name_tokens.append(tok)
-                        name = " ".join(name_tokens).strip()
-                        if not name or len(name) < 3:
-                            continue
-                        canon_key = name.lower()
-                        if canon_key in seen_stations:
-                            continue
-                        dl_val   = _safe_float(numbers[0]) if numbers else None
-                        observed = _safe_float(numbers[-1]) if numbers else None
-                        seen_stations.add(canon_key)
+                        seen.add(canon_key)
+
                         results.append(
                             _build_station_dict(
-                                name, observed, dl_val, "Normal", timestamp, "WRD_BIHAR"
+                                station_name, river_name, observed,
+                                dl_val, portal_status, timestamp, "WRD_BIHAR"
                             )
+                        )
+                        logger.debug(
+                            "[wrd_bihar] Parsed: %s | river=%s | obs=%s | DL=%s | status=%s",
+                            station_name, river_name, observed, dl_val, portal_status
                         )
 
     except Exception as exc:
-        logger.warning("[wrd_bihar] PDF parse error: %s", exc)
+        logger.warning("[wrd_bihar] Bulletin PDF parse error: %s", exc)
 
+    logger.info("[wrd_bihar] Bulletin PDF: %d stations extracted", len(results))
     return results
 
 
+# ---------------------------------------------------------------------------
+# Ganga Model Result PDF parser
+# ---------------------------------------------------------------------------
+
 def _parse_ganga_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
     """
-    Parse the Ganga Model Result PDF for Ganga-belt observed levels.
-    Format: Station | Observed | Forecast D+1 | Forecast D+2 | Forecast D+3
-    Only the observed column is extracted.
+    Parse Ganga_Model_Result.pdf.
+    Layout: Station | Observed | FcstD+1 | FcstD+2 | FcstD+3  (approx)
     """
     try:
         import pdfplumber  # type: ignore
@@ -359,7 +401,7 @@ def _parse_ganga_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
         return []
 
     results: List[Dict[str, Any]] = []
-    seen: set = set()
+    seen:    set = set()
 
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -370,47 +412,47 @@ def _parse_ganga_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
                         if not row or len(row) < 2:
                             continue
                         cells = [str(c or "").strip() for c in row]
-                        name = cells[0]
-                        if not name or name.lower() in ("station", "gauge", "location", ""):
+                        name  = cells[0].strip()
+                        if not name or len(name) < 2:
                             continue
-                        # Observed is col 1 in Ganga PDF layout
+                        words = name.lower().split()
+                        if any(w in _HEADER_FRAGMENTS for w in words):
+                            continue
+                        # Only accept stations we can match to registry
+                        if _match_registry(name) is None:
+                            continue
                         observed = _safe_float(cells[1]) if len(cells) > 1 else None
                         dl_val   = None
-                        # DL may appear in col 2 or 3
-                        for idx in (2, 3):
+                        for idx in (2, 3, 4):
                             if len(cells) > idx:
                                 v = _safe_float(cells[idx])
-                                if v is not None:
+                                if v is not None and 10.0 <= v <= 200.0:
                                     dl_val = v
                                     break
-                        canon_key = name.strip().lower()
+                        canon_key = name.lower()
                         if canon_key in seen:
-                            continue
-                        # Only accept if we can match registry (Ganga belt stations)
-                        if _match_registry(name) is None:
                             continue
                         seen.add(canon_key)
                         results.append(
                             _build_station_dict(
-                                name, observed, dl_val, "Normal", timestamp, "WRD_BIHAR"
+                                name, "", observed, dl_val,
+                                "Normal", timestamp, "WRD_BIHAR"
                             )
                         )
     except Exception as exc:
         logger.warning("[wrd_bihar] Ganga PDF parse error: %s", exc)
 
+    logger.info("[wrd_bihar] Ganga PDF: %d stations extracted", len(results))
     return results
 
 
 # ---------------------------------------------------------------------------
-# HTTP fetch helpers
+# HTTP fetch
 # ---------------------------------------------------------------------------
 
 _HEADERS = {
-    "User-Agent": (
-        "OpsFlood/1.0 (Flood Early Warning Research; "
-        "contact: opsflood@example.com)"
-    ),
-    "Accept": "application/pdf,*/*",
+    "User-Agent": "OpsFlood/1.0 (Flood Early Warning Research)",
+    "Accept":     "application/pdf,*/*",
 }
 
 
@@ -418,30 +460,29 @@ def _fetch_pdf(url: str) -> Optional[bytes]:
     try:
         resp = requests.get(url, timeout=_SCRAPE_TIMEOUT, headers=_HEADERS)
         resp.raise_for_status()
-        if "pdf" in resp.headers.get("content-type", "").lower() or len(resp.content) > 5000:
+        ct = resp.headers.get("content-type", "").lower()
+        if "pdf" in ct or len(resp.content) > 5_000:
             return resp.content
-        logger.warning("[wrd_bihar] Unexpected content-type from %s", url)
+        logger.warning("[wrd_bihar] Unexpected content from %s (ct=%s)", url, ct)
     except requests.exceptions.Timeout:
-        logger.warning("[wrd_bihar] Timeout fetching %s", url)
+        logger.warning("[wrd_bihar] Timeout: %s", url)
     except requests.exceptions.ConnectionError as exc:
-        logger.warning("[wrd_bihar] Connection error fetching %s: %s", url, exc)
+        logger.warning("[wrd_bihar] Connection error: %s | %s", url, exc)
     except Exception as exc:
-        logger.warning("[wrd_bihar] Error fetching %s: %s", url, exc)
+        logger.warning("[wrd_bihar] Fetch error: %s | %s", url, exc)
     return None
 
 
 # ---------------------------------------------------------------------------
-# Merge helper: combine bulletin + Ganga PDF results, dedupe by station
+# Merge
 # ---------------------------------------------------------------------------
 
 def _merge_pdf_results(
     bulletin: List[Dict[str, Any]],
     ganga: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Bulletin takes priority; Ganga PDF fills in missing Ganga-belt stations."""
-    merged: Dict[str, Dict[str, Any]] = {}
-    for s in bulletin:
-        merged[s["station"].lower()] = s
+    """Bulletin is authoritative; Ganga PDF fills in missing Ganga-belt entries."""
+    merged: Dict[str, Dict[str, Any]] = {s["station"].lower(): s for s in bulletin}
     for s in ganga:
         key = s["station"].lower()
         if key not in merged:
@@ -454,27 +495,16 @@ def _merge_pdf_results(
 # ---------------------------------------------------------------------------
 
 class WRDBiharScraper:
-    """
-    Fetches live Bihar flood gauge data from FMISC WRD Bihar PDF bulletins.
-
-    Priority:
-      1. FMISC Daily Water Level Bulletin PDF  (all Bihar rivers)
-      2. Ganga Model Result PDF               (Ganga belt only, supplementary)
-      3. Static BIHAR_STATION_REGISTRY        (off-season / network failure)
-    """
+    """TTL-cached PDF fetcher for FMISC WRD Bihar flood bulletin."""
 
     def __init__(self) -> None:
         self._cache:    Optional[List[Dict[str, Any]]] = None
         self._cache_ts: Optional[datetime.datetime]    = None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def get_live_stations(
         self,
         station_filter: Optional[str] = None,
-        limit: int = 20,
+        limit: int = 50,
     ) -> Dict[str, Any]:
         stations = self._get_cached_or_fetch()
 
@@ -497,12 +527,7 @@ class WRDBiharScraper:
         }
 
     def get_all_stations_for_live_levels(self) -> List[Dict[str, Any]]:
-        """Return raw station list for merging into /api/live-levels."""
         return self._get_cached_or_fetch()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _cache_valid(self) -> bool:
         if self._cache is None or self._cache_ts is None:
@@ -512,46 +537,28 @@ class WRDBiharScraper:
 
     def _get_cached_or_fetch(self) -> List[Dict[str, Any]]:
         if self._cache_valid() and self._cache:
-            logger.debug("[wrd_bihar] Returning cached data (%d stations)", len(self._cache))
+            logger.debug("[wrd_bihar] cache hit (%d stations)", len(self._cache))
             return self._cache
         return self._fetch_and_cache()
 
     def _fetch_and_cache(self) -> List[Dict[str, Any]]:
         timestamp = _now_iso()
 
-        # --- Attempt 1: Daily bulletin PDF (primary) ---
         bulletin_bytes = _fetch_pdf(_BULLETIN_PDF_URL)
         bulletin_data  = _parse_bulletin_pdf(bulletin_bytes, timestamp) if bulletin_bytes else []
 
-        if bulletin_data:
-            logger.info(
-                "[wrd_bihar] ✅ Bulletin PDF: %d stations parsed", len(bulletin_data)
-            )
-
-        # --- Attempt 2: Ganga PDF (supplementary for Ganga belt) ---
         ganga_bytes = _fetch_pdf(_GANGA_PDF_URL)
         ganga_data  = _parse_ganga_pdf(ganga_bytes, timestamp) if ganga_bytes else []
 
-        if ganga_data:
-            logger.info(
-                "[wrd_bihar] ✅ Ganga PDF: %d stations parsed", len(ganga_data)
-            )
-
-        # --- Merge PDF results ---
         live_data = _merge_pdf_results(bulletin_data, ganga_data)
 
         if live_data:
             self._cache    = live_data
             self._cache_ts = datetime.datetime.utcnow()
-            logger.info(
-                "[wrd_bihar] ✅ Total live stations cached: %d", len(live_data)
-            )
+            logger.info("[wrd_bihar] ✅ Cached %d live stations", len(live_data))
             return live_data
 
-        # --- Fallback: static registry ---
-        logger.warning(
-            "[wrd_bihar] ⚠️  Both PDFs empty/failed — returning static registry fallback"
-        )
+        logger.warning("[wrd_bihar] ⚠️  PDFs empty/failed — using registry fallback")
         fallback = [_station_from_registry(r, timestamp) for r in BIHAR_STATION_REGISTRY]
         self._cache    = fallback
         self._cache_ts = datetime.datetime.utcnow()
