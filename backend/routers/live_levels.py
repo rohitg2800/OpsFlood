@@ -2,9 +2,10 @@
 Live Levels router: Serves /api/live-levels and /api/critical-alerts
 for the OpsFlood Flutter app.
 
-Data priority order:
-  1. GloFAS in-memory cache (OPEN_METEO_GLOFAS) — real river discharge data
-  2. STATE_SEVERITY_MATRIX fallback — used only when GloFAS has no entry for a state
+Data priority order (per state):
+  1. WRD Bihar scraper (WRD_BIHAR)      — for Bihar only; real gauge readings
+  2. GloFAS in-memory cache (OPEN_METEO_GLOFAS) — real river discharge data
+  3. STATE_SEVERITY_MATRIX fallback     — used only when neither above covers a state
 """
 
 from fastapi import APIRouter
@@ -22,18 +23,10 @@ router = APIRouter(tags=["live-levels"])
 
 # ---------------------------------------------------------------------------
 # GloFAS cache accessor
-# The main app.py stores the GloFAS cache in a module-level dict.
-# We import it at call time (not import time) to avoid circular imports.
 # ---------------------------------------------------------------------------
 
 def _get_glofas_cache() -> List[Dict[str, Any]]:
-    """
-    Return the in-memory GloFAS station list built by app.py.
-    Returns [] if not yet populated or unavailable.
-    The cache variable is named GLOFAS_STATION_CACHE in app.py.
-    """
     try:
-        # app module is the top-level entry point registered as 'backend.app' or 'app'
         for mod_name in ('backend.app', 'app'):
             mod = sys.modules.get(mod_name)
             if mod is not None:
@@ -43,6 +36,28 @@ def _get_glofas_cache() -> List[Dict[str, Any]]:
     except Exception:
         pass
     return []
+
+
+# ---------------------------------------------------------------------------
+# WRD Bihar scraper accessor
+# ---------------------------------------------------------------------------
+
+def _get_wrd_bihar_stations() -> List[Dict[str, Any]]:
+    """
+    Pull live WRD Bihar gauge readings from the scraper singleton.
+    Returns [] when the scraper module is not importable (graceful degradation).
+    """
+    try:
+        import importlib.util as _ilu
+        if _ilu.find_spec("backend") is not None:
+            from backend.wrd_bihar_scraper import wrd_bihar_scraper
+        else:
+            from wrd_bihar_scraper import wrd_bihar_scraper   # type: ignore[no-redef]
+        stations = wrd_bihar_scraper.get_all_stations_for_live_levels()
+        return stations if isinstance(stations, list) else []
+    except Exception as exc:
+        print(f"[live_levels] WRD Bihar import/fetch failed: {exc}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -56,14 +71,12 @@ def _risk_from_capacity(cap: float) -> str:
     return "LOW"
 
 def _risk_from_discharge(discharge: float, danger_q: float, warning_q: float) -> str:
-    """Map GloFAS river_discharge to risk using danger/warning thresholds."""
-    if danger_q > 0 and discharge >= danger_q:    return "CRITICAL"
-    if warning_q > 0 and discharge >= warning_q:  return "HIGH"
+    if danger_q > 0 and discharge >= danger_q:          return "CRITICAL"
+    if warning_q > 0 and discharge >= warning_q:        return "HIGH"
     if warning_q > 0 and discharge >= warning_q * 0.7: return "MODERATE"
     return "LOW"
 
 def _capacity_from_discharge(discharge: float, danger_q: float) -> float:
-    """Convert discharge to a 0-100 capacity percent."""
     if danger_q <= 0:
         return 50.0
     return min(round(discharge / danger_q * 100.0, 1), 100.0)
@@ -163,22 +176,76 @@ def _normalise_state_key(state_str: str) -> str:
     return state_str.strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def _build_levels_from_glofas(glofas_cache: List[Dict]) -> List[Dict[str, Any]]:
+# ---------------------------------------------------------------------------
+# WRD Bihar -> live-levels normaliser
+# ---------------------------------------------------------------------------
+
+def _build_levels_from_wrd_bihar(
+    wrd_stations: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], set]:
     """
-    Convert the raw GloFAS station list into the standard live-levels format
-    the Flutter app expects:
-      city, state, river_name, current_level, safe_level, warning_level,
-      danger_level, capacity_percent, risk_level, status, alert,
-      flow_rate, data_source, timestamp
+    Convert WRD Bihar station list into the standard live-levels format.
+    Returns (list_of_level_dicts, {"bihar"}) so the caller can exclude Bihar
+    from subsequent GloFAS / matrix passes.
     """
     now_iso = current_timestamp_iso()
+    result: List[Dict[str, Any]] = []
+
+    for s in wrd_stations:
+        station_name = str(s.get("station") or s.get("city") or "").strip()
+        river        = str(s.get("river_name") or s.get("river") or "Ganga").strip()
+        current_m    = float(s.get("current_level") or s.get("observed_level_m") or 0.0)
+        danger_m     = float(s.get("danger_level")  or 0.0)
+        warning_m    = float(s.get("warning_level") or 0.0)
+        safe_m       = float(s.get("safe_level")    or 0.0)
+        capacity     = float(s.get("capacity_percent") or 0.0)
+        risk         = str(s.get("risk_level") or "LOW").upper()
+        ts           = str(s.get("timestamp")  or now_iso)
+
+        result.append({
+            "city":             station_name,
+            "state":            "Bihar",
+            "river_name":       river,
+            "station":          station_name,
+            "current_level":    current_m,
+            "safe_level":       safe_m,
+            "warning_level":    warning_m,
+            "danger_level":     danger_m,
+            "river_discharge":  None,
+            "capacity_percent": capacity,
+            "risk_level":       risk,
+            "status":           _status_from_risk(risk),
+            "alert":            _alert_from_risk(risk),
+            "flow_rate":        s.get("flow_rate"),
+            "lat":              s.get("lat"),
+            "lon":              s.get("lon"),
+            "portal_status":    s.get("portal_status"),
+            "data_source":      str(s.get("data_source") or "WRD_BIHAR"),
+            "timestamp":        ts,
+        })
+
+    covered = {"bihar"} if result else set()
+    return result, covered
+
+
+# ---------------------------------------------------------------------------
+# GloFAS -> live-levels normaliser
+# ---------------------------------------------------------------------------
+
+def _build_levels_from_glofas(
+    glofas_cache: List[Dict],
+    exclude_state_keys: set = None,
+) -> tuple[List[Dict[str, Any]], set]:
+    """
+    Convert the raw GloFAS station list into the standard live-levels format.
+    Skips states already covered by a higher-priority source.
+    """
+    exclude  = exclude_state_keys or set()
+    now_iso  = current_timestamp_iso()
     result: List[Dict[str, Any]] = []
     seen_state_keys: set = set()
 
     for station in glofas_cache:
-        # GloFAS fields: station_name, state_name, river_name, lat, lon,
-        #   river_discharge (m3/s), warning_discharge, danger_discharge,
-        #   risk_level, timestamp, ...
         city  = str(station.get("station_name") or station.get("city") or station.get("name") or "").strip()
         state = str(station.get("state_name")   or station.get("state") or "").strip()
         river = str(station.get("river_name")   or station.get("river") or "").strip()
@@ -187,28 +254,22 @@ def _build_levels_from_glofas(glofas_cache: List[Dict]) -> List[Dict[str, Any]]:
             continue
 
         state_key = _normalise_state_key(state)
+        if state_key in exclude:
+            continue   # already covered by WRD Bihar (or another higher source)
 
-        # Take one representative station per state (highest discharge wins)
-        # This matches the app’s Pass2 best-by-state logic.
-        discharge    = float(station.get("river_discharge")    or station.get("discharge")    or 0.0)
-        warning_q    = float(station.get("warning_discharge")  or station.get("warning_level") or 0.0)
-        danger_q     = float(station.get("danger_discharge")   or station.get("danger_level")  or 0.0)
+        discharge  = float(station.get("river_discharge")   or station.get("discharge")    or 0.0)
+        warning_q  = float(station.get("warning_discharge") or station.get("warning_level") or 0.0)
+        danger_q   = float(station.get("danger_discharge")  or station.get("danger_level")  or 0.0)
 
-        base = _BASE_LEVELS.get(state_key, {"safe": 2.0, "warning": 3.5, "danger": 5.0})
+        base      = _BASE_LEVELS.get(state_key, {"safe": 2.0, "warning": 3.5, "danger": 5.0})
+        current_m = float(station.get("current_level_m") or station.get("gauge_level") or 0.0)
+        warning_m = float(station.get("warning_level_m") or base["warning"])
+        danger_m  = float(station.get("danger_level_m")  or base["danger"])
+        safe_m    = float(station.get("safe_level_m")    or base["safe"])
 
-        # Use GloFAS discharge as current_level (m3/s is real; scale to metres
-        # using the existing base danger_level ratio if absolute metre values missing).
-        # If the GloFAS station exposes metre values directly, prefer those.
-        current_m    = float(station.get("current_level_m") or station.get("gauge_level") or 0.0)
-        warning_m    = float(station.get("warning_level_m") or base["warning"])
-        danger_m     = float(station.get("danger_level_m")  or base["danger"])
-        safe_m       = float(station.get("safe_level_m")    or base["safe"])
-
-        # If no metre values from GloFAS, derive from discharge ratio
         if current_m == 0.0 and discharge > 0 and danger_q > 0:
-            # scale: danger_q discharge → danger_m metres
             current_m = round(safe_m + (danger_m - safe_m) * (discharge / danger_q), 2)
-            current_m = min(current_m, danger_m * 1.5)   # cap at 150% of danger level
+            current_m = min(current_m, danger_m * 1.5)
 
         capacity = _capacity_from_discharge(discharge, danger_q) if danger_q > 0 \
                    else _capacity_from_discharge(current_m - safe_m, danger_m - safe_m)
@@ -227,7 +288,7 @@ def _build_levels_from_glofas(glofas_cache: List[Dict]) -> List[Dict[str, Any]]:
             "safe_level":       safe_m,
             "warning_level":    warning_m,
             "danger_level":     danger_m,
-            "river_discharge":  discharge,   # raw GloFAS value (m3/s) — extra info
+            "river_discharge":  discharge,
             "capacity_percent": capacity,
             "risk_level":       risk,
             "status":           status,
@@ -245,7 +306,7 @@ def _build_levels_from_glofas(glofas_cache: List[Dict]) -> List[Dict[str, Any]]:
 
 
 def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, Any]]:
-    """Build river-level list from STATE_SEVERITY_MATRIX for states NOT covered by GloFAS."""
+    """Build river-level list from STATE_SEVERITY_MATRIX for states NOT covered above."""
     exclude = exclude_state_keys or set()
     now_iso = current_timestamp_iso()
     result: List[Dict[str, Any]] = []
@@ -259,15 +320,15 @@ def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, 
         base = _BASE_LEVELS.get(state_key, {
             "safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 50.0,
         })
-        city, river = _CITY_RIVER_MAP.get(state_key, ("Unknown", "River"))
+        city, river   = _CITY_RIVER_MAP.get(state_key, ("Unknown", "River"))
         state_display = _STATE_DISPLAY.get(state_key, state_key.replace("_", " ").title())
 
         matrix_severity = entry.get("default_severity", "MODERATE").upper()
-        cap_override = {"CRITICAL": 88.0, "HIGH": 75.0, "MODERATE": 55.0, "LOW": 35.0}.get(matrix_severity, base["cap"])
-        capacity = cap_override
-        risk = _risk_from_capacity(capacity)
-        status = _status_from_risk(risk)
-        alert = _alert_from_risk(risk)
+        cap_override    = {"CRITICAL": 88.0, "HIGH": 75.0, "MODERATE": 55.0, "LOW": 35.0}.get(matrix_severity, base["cap"])
+        capacity        = cap_override
+        risk            = _risk_from_capacity(capacity)
+        status          = _status_from_risk(risk)
+        alert           = _alert_from_risk(risk)
 
         danger_level  = float(entry.get("danger_threshold_m")  or base["danger"])
         warning_level = float(entry.get("warning_threshold_m") or base["warning"])
@@ -298,21 +359,36 @@ def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, 
 
 def _build_all_levels() -> List[Dict[str, Any]]:
     """
-    Merge GloFAS (real) + Matrix (fallback for uncovered states).
-    GloFAS data always wins if available.
+    Merge all sources with priority: WRD Bihar > GloFAS > Matrix.
+    Bihar stations always come from WRD Bihar (real gauge data).
+    Other states use GloFAS when available, Matrix otherwise.
     """
-    glofas_cache = _get_glofas_cache()
-
-    if glofas_cache:
-        glofas_levels, covered_states = _build_levels_from_glofas(glofas_cache)
-        matrix_levels = _build_levels_from_matrix(exclude_state_keys=covered_states)
-        all_levels = glofas_levels + matrix_levels
-        print(f"[live_levels] ✅ GloFAS: {len(glofas_levels)} stations, "
-              f"Matrix fallback: {len(matrix_levels)} states")
+    # --- Layer 1: WRD Bihar (highest priority for Bihar) ---
+    wrd_stations = _get_wrd_bihar_stations()
+    if wrd_stations:
+        wrd_levels, wrd_covered = _build_levels_from_wrd_bihar(wrd_stations)
+        print(f"[live_levels] ✅ WRD Bihar: {len(wrd_levels)} stations "
+              f"(source={wrd_stations[0].get('data_source', 'WRD_BIHAR')})")
     else:
-        all_levels = _build_levels_from_matrix()
-        print("[live_levels] ⚠️  GloFAS cache empty — using static matrix")
+        wrd_levels, wrd_covered = [], set()
 
+    # --- Layer 2: GloFAS (excludes states already covered by WRD Bihar) ---
+    glofas_cache = _get_glofas_cache()
+    if glofas_cache:
+        glofas_levels, glofas_covered = _build_levels_from_glofas(
+            glofas_cache, exclude_state_keys=wrd_covered
+        )
+        print(f"[live_levels] ✅ GloFAS: {len(glofas_levels)} stations")
+    else:
+        glofas_levels, glofas_covered = [], set()
+
+    # --- Layer 3: Matrix fallback for everything else ---
+    all_covered   = wrd_covered | glofas_covered
+    matrix_levels = _build_levels_from_matrix(exclude_state_keys=all_covered)
+    if not glofas_cache:
+        print(f"[live_levels] ⚠️  GloFAS cache empty — matrix fallback for non-Bihar states")
+
+    all_levels = wrd_levels + glofas_levels + matrix_levels
     all_levels.sort(key=lambda x: x["capacity_percent"], reverse=True)
     return all_levels
 
@@ -334,18 +410,28 @@ async def get_live_levels(
 
     levels = levels[:limit]
 
-    glofas_count  = sum(1 for l in levels if l.get("data_source") == "OPEN_METEO_GLOFAS")
-    matrix_count  = len(levels) - glofas_count
-    data_source   = "GLOFAS+MATRIX" if glofas_count > 0 else "OPSFLOOD_MATRIX"
+    wrd_count    = sum(1 for l in levels if l.get("data_source") in ("WRD_BIHAR", "WRD_BIHAR_REGISTRY"))
+    glofas_count = sum(1 for l in levels if l.get("data_source") == "OPEN_METEO_GLOFAS")
+    matrix_count = len(levels) - wrd_count - glofas_count
+
+    if wrd_count > 0 and glofas_count > 0:
+        data_source = "WRD_BIHAR+GLOFAS+MATRIX"
+    elif wrd_count > 0:
+        data_source = "WRD_BIHAR+MATRIX"
+    elif glofas_count > 0:
+        data_source = "GLOFAS+MATRIX"
+    else:
+        data_source = "OPSFLOOD_MATRIX"
 
     return {
-        "status":      "success",
-        "data_source": data_source,
-        "glofas_count": glofas_count,
-        "matrix_count": matrix_count,
-        "total":       len(levels),
-        "timestamp":   current_timestamp_iso(),
-        "data":        levels,
+        "status":        "success",
+        "data_source":   data_source,
+        "wrd_bihar_count": wrd_count,
+        "glofas_count":  glofas_count,
+        "matrix_count":  matrix_count,
+        "total":         len(levels),
+        "timestamp":     current_timestamp_iso(),
+        "data":          levels,
     }
 
 
