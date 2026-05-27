@@ -120,7 +120,6 @@ BIHAR_STATION_REGISTRY: List[Dict[str, Any]] = [
     {"station": "Manihari",     "river": "Ganga",        "lat": 25.406, "lon": 87.621,
      "danger_level_m": 28.96, "warning_level_m": 27.96, "safe_level_m": 25.00,
      "pdf_aliases": ["manihari"]},
-    # Extra stations present in bulletin but not in original registry
     {"station": "Sonakhan",     "river": "Bagmati",      "lat": 26.550, "lon": 85.450,
      "danger_level_m": 68.80, "warning_level_m": 67.80, "safe_level_m": 65.00,
      "pdf_aliases": ["sonakhan"]},
@@ -133,6 +132,82 @@ BIHAR_STATION_REGISTRY: List[Dict[str, Any]] = [
     {"station": "Runisaidpur",  "river": "Bagmati",      "lat": 26.395, "lon": 85.660,
      "danger_level_m": 55.00, "warning_level_m": 54.00, "safe_level_m": 51.00,
      "pdf_aliases": ["runisaidpur", "saulighat"]},
+    # Kosi belt stations (appear in bulletin with distance suffixes in PDF)
+    {"station": "Chatra Bazar", "river": "Kosi",         "lat": 26.790, "lon": 87.100,
+     "danger_level_m": 74.50, "warning_level_m": 73.50, "safe_level_m": 70.00,
+     "pdf_aliases": ["chatra bazar", "chatra"]},
+    {"station": "Rajabas",      "river": "Kosi",         "lat": 26.680, "lon": 86.980,
+     "danger_level_m": 72.00, "warning_level_m": 71.00, "safe_level_m": 68.00,
+     "pdf_aliases": ["rajabas"]},
+    {"station": "Birpur",       "river": "Kosi",         "lat": 26.510, "lon": 87.030,
+     "danger_level_m": 68.00, "warning_level_m": 67.00, "safe_level_m": 64.00,
+     "pdf_aliases": ["birpur"]},
+    {"station": "Kosi Mahasetu","river": "Kosi",         "lat": 25.960, "lon": 86.960,
+     "danger_level_m": 43.28, "warning_level_m": 42.28, "safe_level_m": 39.00,
+     "pdf_aliases": ["kosi mahasetu", "mahasetu"]},
+    {"station": "Basua",        "river": "Kosi",         "lat": 25.800, "lon": 87.050,
+     "danger_level_m": 38.00, "warning_level_m": 37.00, "safe_level_m": 34.00,
+     "pdf_aliases": ["basua"]},
+    {"station": "Baluwaha Bridge","river": "Gandak",     "lat": 27.100, "lon": 84.350,
+     "danger_level_m": 80.00, "warning_level_m": 79.00, "safe_level_m": 76.00,
+     "pdf_aliases": ["baluwaha", "baluwaha bridge"]},
+    {"station": "Dumri",        "river": "Gandak",       "lat": 26.560, "lon": 84.480,
+     "danger_level_m": 68.00, "warning_level_m": 67.00, "safe_level_m": 64.00,
+     "pdf_aliases": ["dumri"]},
+    {"station": "Baltara",      "river": "Burhi Gandak", "lat": 25.760, "lon": 85.870,
+     "danger_level_m": 42.00, "warning_level_m": 41.00, "safe_level_m": 38.00,
+     "pdf_aliases": ["baltara"]},
+    {"station": "Vijay Ghat Bridge","river": "Gandak",   "lat": 25.940, "lon": 84.730,
+     "danger_level_m": 60.00, "warning_level_m": 59.00, "safe_level_m": 56.00,
+     "pdf_aliases": ["vijay ghat", "vijay ghat bridge"]},
+    {"station": "Dagmara",      "river": "Kamla Balan",  "lat": 26.420, "lon": 86.570,
+     "danger_level_m": 60.00, "warning_level_m": 59.00, "safe_level_m": 56.00,
+     "pdf_aliases": ["dagmara"]},
+    {"station": "Laukaha",      "river": "Kamla Balan",  "lat": 26.400, "lon": 86.090,
+     "danger_level_m": 55.00, "warning_level_m": 54.00, "safe_level_m": 51.00,
+     "pdf_aliases": ["laukaha"]},
+    {"station": "Phulparas",    "river": "Kamla Balan",  "lat": 26.450, "lon": 86.380,
+     "danger_level_m": 57.00, "warning_level_m": 56.00, "safe_level_m": 53.00,
+     "pdf_aliases": ["phulparas"]},
+    {"station": "Jainagar",     "river": "Kamla Balan",  "lat": 26.596, "lon": 86.231,
+     "danger_level_m": 65.00, "warning_level_m": 64.00, "safe_level_m": 61.00,
+     "pdf_aliases": ["jainagar"]},
+    {"station": "Kothram",      "river": "Bagmati",      "lat": 26.650, "lon": 85.700,
+     "danger_level_m": 90.00, "warning_level_m": 89.00, "safe_level_m": 86.00,
+     "pdf_aliases": ["kothram"]},
+    {"station": "Jhawa",        "river": "Bagmati",      "lat": 26.600, "lon": 85.620,
+     "danger_level_m": 85.00, "warning_level_m": 84.00, "safe_level_m": 81.00,
+     "pdf_aliases": ["jhawa"]},
+    {"station": "Buxar",        "river": "Ganga",        "lat": 25.569, "lon": 83.982,
+     "danger_level_m": 62.42, "warning_level_m": 61.42, "safe_level_m": 58.00,
+     "pdf_aliases": ["buxar"]},
+    {"station": "Munger",       "river": "Ganga",        "lat": 25.376, "lon": 86.473,
+     "danger_level_m": 38.00, "warning_level_m": 37.00, "safe_level_m": 34.00,
+     "pdf_aliases": ["munger"]},
+    {"station": "Kahalgaon",    "river": "Ganga",        "lat": 25.241, "lon": 87.273,
+     "danger_level_m": 30.17, "warning_level_m": 29.17, "safe_level_m": 26.00,
+     "pdf_aliases": ["kahalgaon"]},
+    {"station": "Barahkshetra", "river": "Kosi",         "lat": 26.830, "lon": 87.120,
+     "danger_level_m": 76.50, "warning_level_m": 75.50, "safe_level_m": 72.00,
+     "pdf_aliases": ["barahkshetra", "barah kshetra"]},
+    {"station": "Ekmighat",     "river": "Bagmati",      "lat": 26.380, "lon": 85.760,
+     "danger_level_m": 50.00, "warning_level_m": 49.00, "safe_level_m": 46.00,
+     "pdf_aliases": ["ekmighat", "ekmi ghat"]},
+    {"station": "Kamtaul",      "river": "Kamla Balan",  "lat": 26.310, "lon": 86.050,
+     "danger_level_m": 50.00, "warning_level_m": 49.00, "safe_level_m": 46.00,
+     "pdf_aliases": ["kamtaul"]},
+    {"station": "Chatia",       "river": "Burhi Gandak", "lat": 26.350, "lon": 85.150,
+     "danger_level_m": 58.00, "warning_level_m": 57.00, "safe_level_m": 54.00,
+     "pdf_aliases": ["chatia"]},
+    {"station": "Rewaghat",     "river": "Kosi",         "lat": 25.650, "lon": 87.040,
+     "danger_level_m": 34.00, "warning_level_m": 33.00, "safe_level_m": 30.00,
+     "pdf_aliases": ["rewaghat"]},
+    {"station": "Khadda",       "river": "Gandak",       "lat": 26.250, "lon": 84.420,
+     "danger_level_m": 65.00, "warning_level_m": 64.00, "safe_level_m": 61.00,
+     "pdf_aliases": ["khadda"]},
+    {"station": "Lalganj",      "river": "Gandak",       "lat": 25.870, "lon": 85.220,
+     "danger_level_m": 56.00, "warning_level_m": 55.00, "safe_level_m": 52.00,
+     "pdf_aliases": ["lalganj"]},
 ]
 
 # Alias -> registry entry lookup
@@ -157,6 +232,20 @@ def _safe_float(val: str) -> Optional[float]:
         return float(cleaned) if cleaned not in ("", "-") else None
     except (ValueError, TypeError):
         return None
+
+
+def _clean_station_name(raw: str) -> str:
+    """
+    Normalise a station name from the PDF:
+      - Collapse embedded newlines to a single space
+      - Strip parenthetical distance suffixes: '(47 km u/s)', '(64.25 km d/s)'
+      - Strip leading/trailing whitespace
+    """
+    # Replace newlines (and any surrounding whitespace) with a single space
+    name = re.sub(r"\s*\n\s*", " ", raw)
+    # Drop trailing parenthetical: ' (xx km u/s)' or ' (xx km d/s)'
+    name = re.sub(r"\s*\(\s*[\d.]+\s*km\s*[ud]/s\s*\)", "", name, flags=re.IGNORECASE)
+    return name.strip()
 
 
 def _risk_level(observed: float, danger: float, warning: float) -> str:
@@ -215,7 +304,6 @@ def _build_station_dict(
         river     = reg["river"]
         canon     = reg["station"]
     else:
-        # Unknown station — derive thresholds from PDF danger level
         danger_m  = danger_pdf if danger_pdf is not None else 0.0
         warning_m = round(danger_m * 0.94, 2) if danger_m > 0 else 0.0
         safe_m    = round(danger_m * 0.80, 2) if danger_m > 0 else 0.0
@@ -282,7 +370,6 @@ def _station_from_registry(reg: Dict[str, Any], timestamp: str) -> Dict[str, Any
 # Bulletin PDF parser  (column layout confirmed from live diagnostic)
 # ---------------------------------------------------------------------------
 
-# Header cell fragments to skip (multi-line merged header rows)
 _HEADER_FRAGMENTS = {
     "sl", "no.", "no", "name", "site", "station", "district",
     "danger", "level", "h.f.l", "observed", "forecast",
@@ -291,15 +378,17 @@ _HEADER_FRAGMENTS = {
 
 
 def _is_header_row(cells: List[str]) -> bool:
-    """Return True if this row is a header / continuation-header row."""
     station_cell = cells[_COL_STATION] if len(cells) > _COL_STATION else ""
     sl_cell      = cells[_COL_SL]      if len(cells) > _COL_SL      else ""
-    # Serial number column should be a digit for data rows
-    if sl_cell and not sl_cell.replace(".", "").isdigit():
-        # Could still be a valid row if station is non-empty
+    # Reject if sl cell is non-numeric (header continuation rows)
+    if sl_cell and not re.match(r"^\d+\.?$", sl_cell.strip()):
         words = station_cell.lower().split()
         if any(w in _HEADER_FRAGMENTS for w in words):
             return True
+    # Reject if station cell itself is a header keyword
+    words = station_cell.lower().split()
+    if words and all(w in _HEADER_FRAGMENTS for w in words[:2]):
+        return True
     return False
 
 
@@ -317,8 +406,8 @@ def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]
         logger.warning("[wrd_bihar] pdfplumber not installed — run: pip install pdfplumber")
         return []
 
-    results:  List[Dict[str, Any]] = []
-    seen:     set = set()
+    results:   List[Dict[str, Any]] = []
+    seen:      set = set()
     last_river = ""
 
     try:
@@ -331,31 +420,30 @@ def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]
                             continue
                         cells = [str(c or "").strip() for c in row]
 
-                        # Pad to at least 12 columns
                         while len(cells) < 12:
                             cells.append("")
 
-                        # Skip pure header rows
                         if _is_header_row(cells):
                             continue
 
-                        station_name = cells[_COL_STATION].strip()
+                        # ── Station name: clean newlines + distance suffixes ──
+                        raw_name     = cells[_COL_STATION]
+                        station_name = _clean_station_name(raw_name)
                         if not station_name or len(station_name) < 2:
                             continue
 
-                        # River name may be blank in merged-cell rows — carry forward
-                        river_name = cells[_COL_RIVER].strip()
+                        # ── River: carry forward from merged cells ──
+                        river_name = _clean_station_name(cells[_COL_RIVER])
                         if river_name:
                             last_river = river_name
                         else:
                             river_name = last_river
 
-                        # Parse DL and observed level from confirmed columns
+                        # ── Levels from confirmed columns ──
                         dl_val   = _safe_float(cells[_COL_DL])
                         observed = _safe_float(cells[_COL_OBSERVED])
 
-                        # Validate: both values should be plausible Bihar river levels
-                        # Bihar gauge levels typically 20–120 m (MSL)
+                        # Sanity check: Bihar gauge levels are 10–200 m MSL
                         if observed is not None and not (10.0 <= observed <= 200.0):
                             observed = None
                         if dl_val is not None and not (10.0 <= dl_val <= 200.0):
@@ -363,6 +451,7 @@ def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]
 
                         portal_status = cells[_COL_STATUS].strip() or "Normal"
 
+                        # Dedup by cleaned lower-case name
                         canon_key = station_name.lower()
                         if canon_key in seen:
                             continue
@@ -375,8 +464,8 @@ def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]
                             )
                         )
                         logger.debug(
-                            "[wrd_bihar] Parsed: %s | river=%s | obs=%s | DL=%s | status=%s",
-                            station_name, river_name, observed, dl_val, portal_status
+                            "[wrd_bihar] %-22s | obs=%-6s | DL=%-6s | %s",
+                            station_name, observed, dl_val, portal_status
                         )
 
     except Exception as exc:
@@ -391,10 +480,6 @@ def _parse_bulletin_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]
 # ---------------------------------------------------------------------------
 
 def _parse_ganga_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
-    """
-    Parse Ganga_Model_Result.pdf.
-    Layout: Station | Observed | FcstD+1 | FcstD+2 | FcstD+3  (approx)
-    """
     try:
         import pdfplumber  # type: ignore
     except ImportError:
@@ -412,13 +497,12 @@ def _parse_ganga_pdf(pdf_bytes: bytes, timestamp: str) -> List[Dict[str, Any]]:
                         if not row or len(row) < 2:
                             continue
                         cells = [str(c or "").strip() for c in row]
-                        name  = cells[0].strip()
+                        name  = _clean_station_name(cells[0])
                         if not name or len(name) < 2:
                             continue
                         words = name.lower().split()
                         if any(w in _HEADER_FRAGMENTS for w in words):
                             continue
-                        # Only accept stations we can match to registry
                         if _match_registry(name) is None:
                             continue
                         observed = _safe_float(cells[1]) if len(cells) > 1 else None
