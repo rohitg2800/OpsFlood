@@ -1,6 +1,6 @@
 services:
 - type: web
-  name: opsflood
+  name: equinox-bh
   runtime: docker
   plan: free
   autoDeploy: true
