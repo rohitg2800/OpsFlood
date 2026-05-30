@@ -26,7 +26,6 @@ class AppConfig {
   );
 
   /// Fallback / backup backend URL for resilience.
-  /// the candidate-list logic. Override via --dart-define=EQUINOX_BH_BACKUP_URL.
   static const String backupUrl = String.fromEnvironment(
     'EQUINOX_BH_BACKUP_URL',
     defaultValue: '',
@@ -38,9 +37,9 @@ class AppConfig {
     defaultValue: '',
   );
 
-  static bool get isProduction => environment == 'production';
+  static bool get isProduction  => environment == 'production';
   static bool get isDevelopment => environment == 'development';
-  static bool get isStaging => environment == 'staging';
+  static bool get isStaging     => environment == 'staging';
 
   static bool get isLoggingEnabled =>
       debugLogging || !isProduction || kDebugMode;
@@ -50,4 +49,20 @@ class AppConfig {
   static const int pollSeconds = int.fromEnvironment(
     'EQUINOX_BH_POLL_SECONDS', defaultValue: 0,
   );
+
+  // ── API endpoint paths ─────────────────────────────────────────────────────
+
+  /// Health-check endpoint — GET /health
+  static String get epHealth  => '$baseUrl/health';
+
+  /// ML prediction endpoint — POST /predict/v2
+  static String get epPredict => '$baseUrl/predict/v2';
+
+  // ── Timeouts ───────────────────────────────────────────────────────────────
+
+  /// Timeout for a cold-start wake-up health check (Render spins down on idle).
+  static const Duration coldStartTimeout = Duration(seconds: 45);
+
+  /// Timeout for a normal (warm) health check.
+  static const Duration healthTimeout = Duration(seconds: 10);
 }
