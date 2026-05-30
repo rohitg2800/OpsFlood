@@ -1,23 +1,11 @@
 // lib/models/river_monitoring.dart
-//
-// RiverLevelSnapshot — a single timestamped gauge reading.
-//
-// Used by:
-//   • CityDetailScreen  — List<RiverLevelSnapshot> trend (24-hr sparkline)
-//   • DashboardScreen   — RealTimeService.trendForCity() return type
-//
-// Both screens access:
-//   snapshot.level     → double  (gauge height in metres)
-//   snapshot.timestamp → DateTime
+import '../models/flood_data.dart';
 
 class RiverLevelSnapshot {
-  final double   level;     // metres above datum
+  final double   level;
   final DateTime timestamp;
 
-  const RiverLevelSnapshot({
-    required this.level,
-    required this.timestamp,
-  });
+  const RiverLevelSnapshot({required this.level, required this.timestamp});
 
   factory RiverLevelSnapshot.fromJson(Map<String, dynamic> j) {
     double d(dynamic v) {
@@ -26,7 +14,6 @@ class RiverLevelSnapshot {
       if (v is int)    return v.toDouble();
       return double.tryParse(v.toString()) ?? 0.0;
     }
-
     return RiverLevelSnapshot(
       level: d(j['level'] ?? j['river_level'] ?? j['water_level']),
       timestamp: j['timestamp'] != null
@@ -43,4 +30,21 @@ class RiverLevelSnapshot {
   @override
   String toString() =>
       'RiverLevelSnapshot(${level}m @ ${timestamp.toIso8601String()})';
+}
+
+/// Thin wrapper returned by LiveFetchEngine.monitoringData.
+class MultiLocationMonitoring {
+  final List<FloodData> locations;
+  final DateTime?       lastUpdated;
+
+  const MultiLocationMonitoring({
+    required this.locations,
+    this.lastUpdated,
+  });
+
+  int get totalLocations   => locations.length;
+  int get criticalCount    => locations.where((l) => l.riskLevel == 'CRITICAL').length;
+  int get severeCount      => locations.where((l) => l.riskLevel == 'SEVERE').length;
+  int get moderateCount    => locations.where((l) => l.riskLevel == 'MODERATE').length;
+  bool get hasCritical     => criticalCount > 0;
 }

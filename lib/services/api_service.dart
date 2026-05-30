@@ -1,5 +1,7 @@
+// lib/services/api_service.dart
+// Legacy health-check wrapper — kept for backwards compatibility.
 import 'package:http/http.dart' as http;
-import '../constants.dart';
+import '../constants/app_constants.dart';
 
 class ApiService {
   Future<bool> checkHealth() async {
