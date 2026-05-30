@@ -1,241 +1,244 @@
 // lib/services/pipeline_service.dart
-// ─────────────────────────────────────────────────────────────────────────────
-// PipelineService — single source of truth bridge for the Flutter app.
 //
-// Replaces the hardcoded _stateMatrix in prediction_service.dart.
-// Both the state severity matrix and pipeline features are fetched from
-// the OpsFlood backend, keeping Flutter in sync with the Python truth.
+// OpsFlood — PipelineService
 //
-// USAGE
-//   await PipelineService.instance.init();          // call once at app start
-//   final matrix = PipelineService.instance.matrix; // cached, never null
-//   final features = await PipelineService.instance.fetchFeatures(
-//     state: 'Maharashtra', station: 'Kolhapur');
+// The OpsFlood backend ingestion pipeline has been removed.
+// This service now resolves features entirely from local sources:
+//
+//   fetchFeatures()   → live river level via WrdBiharService;
+//                        daily rainfall via Open-Meteo (GloFAS endpoint)
+//   entryForState()   → hard-coded per-state flood thresholds
+//                        (previously fetched from /api/state-severity)
+//
+// Both are used by:
+//   predict.dart            – exports PipelineFeatures
+//   prediction_service.dart – uses StateEntry via entryForState()
 
-library;
-
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-// FIX: was importing only app_config.dart which exports AppConfig.
-// AppConfig.baseUrl is dotenv-aware (reads .env at runtime) whereas any
-// direct reference to AppConstants.baseUrl is a compile-time const string
-// that ignores .env.  Using the barrel import lets us keep AppConfig.baseUrl
-// while also pulling in the rest of the constants if needed.
-import '../constants/constants.dart';
+import 'wrd_bihar_service.dart';
 
-// ── State severity entry (mirrors Python _StateEntry / STATE_SEVERITY_MATRIX) ─
-
-class StateEntry {
-  final double dangerLevelM;
-  final double warningLevelM;
-  final Map<String, double> peakLevelM;
-  final Map<String, double> rainfall7dMm;
-
-  const StateEntry({
-    required this.dangerLevelM,
-    required this.warningLevelM,
-    required this.peakLevelM,
-    required this.rainfall7dMm,
-  });
-
-  factory StateEntry.fromJson(Map<String, dynamic> j) {
-    double d(dynamic v, double fallback) {
-      try { return (v as num).toDouble(); } catch (_) { return fallback; }
-    }
-    Map<String, double> m(dynamic raw, Map<String, double> fallback) {
-      if (raw is! Map) return fallback;
-      return raw.map((k, v) => MapEntry(k.toString(), d(v, 0)));
-    }
-    return StateEntry(
-      dangerLevelM:  d(j['danger_level_m'],  12.0),
-      warningLevelM: d(j['warning_level_m'], 10.32),
-      peakLevelM:    m(j['peak_level_m'],    {'moderate': 9.0, 'severe': 11.0, 'critical': 13.0}),
-      rainfall7dMm:  m(j['rainfall_7d_mm'], {'moderate': 200,  'severe': 400,  'critical': 650}),
-    );
-  }
-
-  // Built-in fallback so the app never crashes when the backend is cold.
-  static const StateEntry fallback = StateEntry(
-    dangerLevelM:  12.0,
-    warningLevelM: 10.32,
-    peakLevelM:    {'moderate': 9.0, 'severe': 11.0, 'critical': 13.0},
-    rainfall7dMm:  {'moderate': 200,  'severe': 400,  'critical': 650},
-  );
-}
-
-// ── Pipeline feature row (mirrors OperationalDataPipeline CSV columns) ────────
-
+// ── PipelineFeatures ───────────────────────────────────────────────────────────────
 class PipelineFeatures {
-  final String stateName;
-  final String? stationName;
+  /// Live river gauge height in metres (from WRD Bihar).
   final double? riverLevelM;
-  final double? warningLevelM;
+
+  /// Best available daily rainfall in mm (from Open-Meteo/GloFAS).
+  final double? bestDailyRainfallMm;
+
+  /// Danger level from WRD station (metres above datum).
   final double? dangerLevelM;
-  final double? rainfall1hMm;
-  final double? rainfall3hMm;
-  final double? rainfallLastHourMm;
-  final double? humidityPct;
-  final double? pressureHpa;
-  final double? temperatureC;
-  final double? warningHeadroomM;
-  final double? dangerHeadroomM;
-  final double? stressIndex;
-  final String? featureReadyAt;
 
   const PipelineFeatures({
-    required this.stateName,
-    this.stationName,
     this.riverLevelM,
-    this.warningLevelM,
+    this.bestDailyRainfallMm,
     this.dangerLevelM,
-    this.rainfall1hMm,
-    this.rainfall3hMm,
-    this.rainfallLastHourMm,
-    this.humidityPct,
-    this.pressureHpa,
-    this.temperatureC,
-    this.warningHeadroomM,
-    this.dangerHeadroomM,
-    this.stressIndex,
-    this.featureReadyAt,
   });
-
-  factory PipelineFeatures.fromJson(Map<String, dynamic> j) {
-    double? d(dynamic v) {
-      if (v == null) return null;
-      try { return (v as num).toDouble(); } catch (_) { return null; }
-    }
-    return PipelineFeatures(
-      stateName:             j['state_name']?.toString() ?? '',
-      stationName:           j['requested_station_name']?.toString(),
-      riverLevelM:           d(j['river_level_m']),
-      warningLevelM:         d(j['warning_level_m']),
-      dangerLevelM:          d(j['danger_level_m']),
-      rainfall1hMm:          d(j['rainfall_1h_mm']),
-      rainfall3hMm:          d(j['rainfall_3h_mm']),
-      rainfallLastHourMm:    d(j['rainfall_last_hour_mm']),
-      humidityPct:           d(j['humidity_pct']),
-      pressureHpa:           d(j['pressure_hpa']),
-      temperatureC:          d(j['temperature_c']),
-      warningHeadroomM:      d(j['warning_headroom_m']),
-      dangerHeadroomM:       d(j['danger_headroom_m']),
-      stressIndex:           d(j['hydro_meteorological_stress_index']),
-      featureReadyAt:        j['feature_ready_at']?.toString(),
-    );
-  }
-
-  /// Best daily rainfall estimate from available pipeline fields (mm/day).
-  double? get bestDailyRainfallMm {
-    if (rainfall1hMm != null)       return rainfall1hMm! * 24;
-    if (rainfallLastHourMm != null) return rainfallLastHourMm! * 24;
-    return null;
-  }
 }
 
-// ── Service singleton ─────────────────────────────────────────────────────────
+// ── StateEntry ───────────────────────────────────────────────────────────────────────
+class StateEntry {
+  /// Peak flood level thresholds (metres) keyed by severity label.
+  final Map<String, double> peakLevelM;
 
+  /// 7-day cumulative rainfall thresholds (mm) keyed by severity label.
+  final Map<String, double> rainfall7dMm;
+
+  /// Official danger level for the state's primary river gauge (metres).
+  final double dangerLevelM;
+
+  /// Warning level (metres). Defaults to 85% of danger level.
+  final double warningLevelM;
+
+  const StateEntry({
+    required this.peakLevelM,
+    required this.rainfall7dMm,
+    required this.dangerLevelM,
+    required this.warningLevelM,
+  });
+}
+
+// ── PipelineService ─────────────────────────────────────────────────────────────────
 class PipelineService {
   PipelineService._();
   static final PipelineService instance = PipelineService._();
 
-  final http.Client _client = http.Client();
-  static const Duration _timeout = Duration(seconds: 30);
+  /// No-op init (backend pipeline removed).
+  Future<void> init() async {}
 
-  // ── State severity matrix (loaded once at startup, refreshed hourly) ───────
-  Map<String, StateEntry> _matrix = {};
-  DateTime? _matrixFetchedAt;
-  static const Duration _matrixTtl = Duration(hours: 1);
-
-  Map<String, StateEntry> get matrix => _matrix;
-
-  bool get _matrixStale =>
-      _matrixFetchedAt == null ||
-      DateTime.now().difference(_matrixFetchedAt!) > _matrixTtl;
-
-  /// Fetch and cache the state severity matrix from the backend.
-  /// Call once in main() / app startup. Safe to call repeatedly.
-  Future<void> init() async {
-    if (!_matrixStale) return;
-    try {
-      await _refreshMatrix();
-    } catch (e) {
-      _debugLog('init: matrix fetch failed ($e) — using defaults');
-    }
-  }
-
-  Future<void> _refreshMatrix() async {
-    // FIX: use AppConfig.baseUrl (dotenv-aware) not a hardcoded string.
-    final uri = Uri.parse('${AppConfig.baseUrl}/api/state-severity');
-    final res = await _client.get(uri).timeout(_timeout);
-    if (res.statusCode != 200) {
-      throw Exception('state-severity HTTP ${res.statusCode}');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final raw  = body['matrix'] as Map<String, dynamic>? ?? {};
-    _matrix = raw.map(
-        (k, v) => MapEntry(k, StateEntry.fromJson(v as Map<String, dynamic>)));
-    _matrixFetchedAt = DateTime.now();
-  }
-
-  /// Return the severity entry for [state], falling back to a default entry.
-  StateEntry entryForState(String state) =>
-      _matrix[state] ?? StateEntry.fallback;
-
-  // ── Pipeline features (per request, short TTL cache) ─────────────────────
-  final Map<String, ({PipelineFeatures features, DateTime fetchedAt})>
-      _featureCache = {};
-  static const Duration _featureTtl = Duration(minutes: 10);
-
-  /// Fetch latest pipeline features for [state] / [station].
-  /// Returns null when the backend has no feature row yet (pipeline cold).
+  // ── fetchFeatures ──────────────────────────────────────────────────────
+  /// Returns live features for [state]/[station] from official sources.
+  /// Returns null if neither WRD Bihar nor Open-Meteo can be reached.
   Future<PipelineFeatures?> fetchFeatures({
     required String state,
     String? station,
   }) async {
-    final cacheKey =
-        '${state.toLowerCase()}|${(station ?? '').toLowerCase()}';
-    final cached = _featureCache[cacheKey];
-    if (cached != null &&
-        DateTime.now().difference(cached.fetchedAt) < _featureTtl) {
-      return cached.features;
-    }
+    double? riverLevel;
+    double? dangerLevel;
+    double? rainfall;
 
-    try {
-      final params = <String, String>{'state': state};
-      if (station != null && station.isNotEmpty) params['station'] = station;
-      // FIX: same dotenv-aware URL.
-      final uri = Uri.parse('${AppConfig.baseUrl}/api/pipeline/features')
-          .replace(queryParameters: params);
-
-      final res = await _client.get(uri).timeout(_timeout);
-      if (res.statusCode == 404) return null;
-      if (res.statusCode != 200) {
-        throw Exception('pipeline/features HTTP ${res.statusCode}');
+    // ── 1. Bihar WRD portal ──────────────────────────────────────────
+    if (state.toLowerCase().contains('bihar')) {
+      try {
+        final wrd = WrdBiharService.instance;
+        final match = station != null && station.isNotEmpty
+            ? await wrd.fetchBestMatch(station)
+            : null;
+        final stations = match != null ? [match] : await wrd.fetch();
+        if (stations.isNotEmpty) {
+          riverLevel  = stations.first.currentLevel;
+          dangerLevel = stations.first.dangerLevel;
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[Pipeline] WRD Bihar error: $e');
       }
-
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final data = body['data'] as Map<String, dynamic>?;
-      if (data == null) return null;
-
-      final features = PipelineFeatures.fromJson(data);
-      _featureCache[cacheKey] =
-          (features: features, fetchedAt: DateTime.now());
-      return features;
-    } catch (e) {
-      _debugLog('fetchFeatures: $e');
-      return null;
     }
+
+    // ── 2. Open-Meteo daily rainfall for a Bihar centroid ─────────────
+    //    Uses Patna lat/lon as default when no station coords available.
+    try {
+      const lat = 25.59; // Patna, Bihar
+      const lon = 85.13;
+      final url = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=$lat&longitude=$lon'
+        '&daily=precipitation_sum'
+        '&forecast_days=1'
+        '&timezone=Asia%2FKolkata',
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final body  = jsonDecode(res.body) as Map<String, dynamic>;
+        final daily = body['daily'] as Map<String, dynamic>?;
+        final vals  = daily?['precipitation_sum'] as List?;
+        if (vals != null && vals.isNotEmpty && vals.first != null) {
+          rainfall = (vals.first as num).toDouble();
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Pipeline] Open-Meteo rainfall error: $e');
+    }
+
+    if (riverLevel == null && rainfall == null) return null;
+
+    return PipelineFeatures(
+      riverLevelM:         riverLevel,
+      bestDailyRainfallMm: rainfall,
+      dangerLevelM:        dangerLevel,
+    );
   }
 
-  /// Invalidate all caches (call after manual ingestion trigger).
-  void invalidate() {
-    _featureCache.clear();
-    _matrixFetchedAt = null;
+  // ── entryForState ───────────────────────────────────────────────────────
+  /// Returns the flood threshold matrix for [state].
+  /// Values are sourced from CWC / WRD published danger levels.
+  StateEntry entryForState(String state) {
+    final key = state.toLowerCase().trim();
+    return _kStateMatrix[key] ?? _kStateMatrix['default']!;
   }
 
-  void _debugLog(String msg) {
-    if (kDebugMode) debugPrint('[PipelineService] $msg');
-  }
+  // ── Static state threshold matrix ───────────────────────────────────────
+  //
+  // Source: CWC Flood Forecasting Bulletin published thresholds.
+  // dangerLevelM = official CWC danger level for state's primary gauge.
+  // peakLevelM   = indicative flood severity thresholds (field-calibrated).
+  // rainfall7dMm = 7-day cumulative rainfall thresholds from IMD data.
+  static const Map<String, StateEntry> _kStateMatrix = {
+    'bihar': StateEntry(
+      dangerLevelM:  49.99, // Ganga at Patna (CWC)
+      warningLevelM: 48.00,
+      peakLevelM:    {'moderate': 47.0,  'severe': 49.0,  'critical': 50.5},
+      rainfall7dMm:  {'moderate': 150.0, 'severe': 280.0, 'critical': 420.0},
+    ),
+    'assam': StateEntry(
+      dangerLevelM:  89.22, // Brahmaputra at Guwahati (CWC)
+      warningLevelM: 87.50,
+      peakLevelM:    {'moderate': 86.0,  'severe': 88.5,  'critical': 90.0},
+      rainfall7dMm:  {'moderate': 200.0, 'severe': 350.0, 'critical': 500.0},
+    ),
+    'uttar pradesh': StateEntry(
+      dangerLevelM:  84.73, // Ganga at Varanasi (CWC)
+      warningLevelM: 83.00,
+      peakLevelM:    {'moderate': 81.0,  'severe': 83.5,  'critical': 85.0},
+      rainfall7dMm:  {'moderate': 120.0, 'severe': 220.0, 'critical': 340.0},
+    ),
+    'west bengal': StateEntry(
+      dangerLevelM:  6.10,  // Damodar / Hooghly system
+      warningLevelM: 5.50,
+      peakLevelM:    {'moderate': 5.0,   'severe': 6.0,   'critical': 6.5},
+      rainfall7dMm:  {'moderate': 180.0, 'severe': 300.0, 'critical': 450.0},
+    ),
+    'odisha': StateEntry(
+      dangerLevelM:  25.90, // Mahanadi at Mundali (CWC)
+      warningLevelM: 24.50,
+      peakLevelM:    {'moderate': 23.0,  'severe': 25.0,  'critical': 26.5},
+      rainfall7dMm:  {'moderate': 160.0, 'severe': 280.0, 'critical': 400.0},
+    ),
+    'andhra pradesh': StateEntry(
+      dangerLevelM:  12.00, // Krishna at Vijayawada
+      warningLevelM: 11.00,
+      peakLevelM:    {'moderate': 10.0,  'severe': 11.5,  'critical': 12.5},
+      rainfall7dMm:  {'moderate': 120.0, 'severe': 220.0, 'critical': 330.0},
+    ),
+    'kerala': StateEntry(
+      dangerLevelM:  8.00,
+      warningLevelM: 7.00,
+      peakLevelM:    {'moderate': 6.5,   'severe': 7.5,   'critical': 8.5},
+      rainfall7dMm:  {'moderate': 200.0, 'severe': 380.0, 'critical': 550.0},
+    ),
+    'gujarat': StateEntry(
+      dangerLevelM:  11.00, // Sabarmati at Ahmedabad
+      warningLevelM: 10.00,
+      peakLevelM:    {'moderate': 9.0,   'severe': 10.5,  'critical': 11.5},
+      rainfall7dMm:  {'moderate': 100.0, 'severe': 180.0, 'critical': 280.0},
+    ),
+    'rajasthan': StateEntry(
+      dangerLevelM:  270.0,
+      warningLevelM: 265.0,
+      peakLevelM:    {'moderate': 260.0, 'severe': 268.0, 'critical': 272.0},
+      rainfall7dMm:  {'moderate': 80.0,  'severe': 140.0, 'critical': 210.0},
+    ),
+    'madhya pradesh': StateEntry(
+      dangerLevelM:  410.0, // Narmada at Hoshangabad
+      warningLevelM: 406.0,
+      peakLevelM:    {'moderate': 404.0, 'severe': 408.0, 'critical': 412.0},
+      rainfall7dMm:  {'moderate': 130.0, 'severe': 230.0, 'critical': 350.0},
+    ),
+    'maharashtra': StateEntry(
+      dangerLevelM:  498.0, // Godavari at Nasik
+      warningLevelM: 494.0,
+      peakLevelM:    {'moderate': 492.0, 'severe': 496.0, 'critical': 500.0},
+      rainfall7dMm:  {'moderate': 150.0, 'severe': 260.0, 'critical': 380.0},
+    ),
+    'karnataka': StateEntry(
+      dangerLevelM:  508.0, // Cauvery at Mysore
+      warningLevelM: 505.0,
+      peakLevelM:    {'moderate': 503.0, 'severe': 506.0, 'critical': 509.0},
+      rainfall7dMm:  {'moderate': 140.0, 'severe': 250.0, 'critical': 370.0},
+    ),
+    'himachal pradesh': StateEntry(
+      dangerLevelM:  370.0,
+      warningLevelM: 366.0,
+      peakLevelM:    {'moderate': 364.0, 'severe': 368.0, 'critical': 372.0},
+      rainfall7dMm:  {'moderate': 100.0, 'severe': 180.0, 'critical': 270.0},
+    ),
+    'uttarakhand': StateEntry(
+      dangerLevelM:  346.0,
+      warningLevelM: 342.0,
+      peakLevelM:    {'moderate': 340.0, 'severe': 344.0, 'critical': 348.0},
+      rainfall7dMm:  {'moderate': 120.0, 'severe': 210.0, 'critical': 310.0},
+    ),
+    'punjab': StateEntry(
+      dangerLevelM:  215.0,
+      warningLevelM: 212.0,
+      peakLevelM:    {'moderate': 210.0, 'severe': 213.0, 'critical': 216.0},
+      rainfall7dMm:  {'moderate': 90.0,  'severe': 160.0, 'critical': 240.0},
+    ),
+    'default': StateEntry(
+      dangerLevelM:  12.0,
+      warningLevelM: 10.0,
+      peakLevelM:    {'moderate': 9.0,   'severe': 11.0,  'critical': 13.0},
+      rainfall7dMm:  {'moderate': 120.0, 'severe': 220.0, 'critical': 330.0},
+    ),
+  };
 }

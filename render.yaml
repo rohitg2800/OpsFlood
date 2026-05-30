@@ -1,0 +1,30 @@
+services:
+- type: web
+  name: opsflood
+  runtime: docker
+  plan: free
+  autoDeploy: true
+  rootDir: .
+  dockerContext: .
+  dockerfilePath: ./Dockerfile
+  healthCheckPath: /health
+  buildFilter:
+    paths:
+    - backend/**
+    - frontend/**
+    - Dockerfile
+    - .dockerignore
+    - render.yaml
+  envVars:
+  - key: OPENWEATHER_API_KEY
+    sync: false
+  - key: DATABASE_URL
+    sync: false
+  - key: NEON_DATABASE_API
+    sync: false
+  - key: NEON_API_KEY
+    sync: false
+  - key: FLOOD_SOURCE_POLICY
+    value: OFFICIAL_VIEW_ONLY
+  - key: ENABLE_DATA_INGESTION_SCHEDULER
+    value: "0"

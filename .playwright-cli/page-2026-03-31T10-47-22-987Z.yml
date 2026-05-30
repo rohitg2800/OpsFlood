@@ -1,0 +1,37 @@
+- generic [ref=e3]:
+  - generic:
+    - img
+    - img
+    - img
+  - generic [ref=e4]: Restricted Access // Tactical Operations Console // Encrypted Channel
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e8]:
+        - heading "INDIA_FLOODS OPS" [level=1] [ref=e9]
+        - paragraph [ref=e10]: Flood Readiness Command
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: API Status
+          - generic [ref=e16]: INITIALIZING
+        - generic [ref=e17]: Command Build 4.2
+    - generic [ref=e19]:
+      - link "Dashboard" [ref=e20] [cursor=pointer]:
+        - /url: /
+        - img [ref=e21]
+        - generic [ref=e23]: Dashboard
+      - link "Geo-Spatial" [ref=e24] [cursor=pointer]:
+        - /url: /geo
+        - img [ref=e25]
+        - generic [ref=e27]: Geo-Spatial
+      - link "Telemetry" [ref=e28] [cursor=pointer]:
+        - /url: /telemetry
+        - img [ref=e29]
+        - generic [ref=e35]: Telemetry
+      - link "Archives" [ref=e36] [cursor=pointer]:
+        - /url: /archives
+        - img [ref=e37]
+        - generic [ref=e41]: Archives
+  - main [ref=e42]:
+    - generic [ref=e44]:
+      - generic [ref=e45]: Loading Command Surface
+      - generic [ref=e46]: Hydrology modules syncing...

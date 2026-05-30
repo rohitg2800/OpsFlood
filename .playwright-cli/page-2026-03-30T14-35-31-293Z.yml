@@ -1,0 +1,75 @@
+- generic [ref=e3]:
+  - generic:
+    - img
+    - img
+    - img
+  - generic [ref=e4]: Restricted Access // Tactical Operations Console // Encrypted Channel
+  - banner [ref=e5]:
+    - generic [ref=e7]:
+      - img [ref=e9]
+      - generic [ref=e13]:
+        - heading "INDOFLOODS OPS" [level=1] [ref=e14]
+        - paragraph [ref=e15]: Flood Readiness Command
+    - generic [ref=e17]:
+      - link "Dashboard" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - img [ref=e19]
+        - generic [ref=e21]: Dashboard
+      - link "Geo-Spatial" [ref=e22] [cursor=pointer]:
+        - /url: /geo
+        - img [ref=e23]
+        - generic [ref=e25]: Geo-Spatial
+      - link "Telemetry" [active] [ref=e26] [cursor=pointer]:
+        - /url: /telemetry
+        - img [ref=e27]
+        - generic [ref=e33]: Telemetry
+      - link "Archives" [ref=e34] [cursor=pointer]:
+        - /url: /archives
+        - img [ref=e35]
+        - generic [ref=e39]: Archives
+  - main [ref=e40]:
+    - generic [ref=e361]:
+      - generic [ref=e362]:
+        - generic [ref=e363]:
+          - img [ref=e365]
+          - generic [ref=e366]:
+            - generic [ref=e367]: Live Sensor Telemetry
+            - heading "Telemetry Feed" [level=1] [ref=e368]
+            - paragraph [ref=e369]: Field nodes, river levels, and rainfall packets scoped to Kolhapur.
+        - button "Sync Nodes" [ref=e372]:
+          - img [ref=e373]
+          - text: Sync Nodes
+      - generic [ref=e378]:
+        - generic [ref=e380]:
+          - generic [ref=e381]:
+            - heading "Hardware Array" [level=2] [ref=e382]:
+              - img [ref=e383]
+              - text: Hardware Array
+            - paragraph [ref=e389]: Field_Telemetry // Live_Data_Ingestion
+          - generic [ref=e390]: "Node Count: 1"
+        - generic [ref=e393]:
+          - generic [ref=e394]:
+            - generic [ref=e395]:
+              - generic [ref=e396]:
+                - img [ref=e397]
+                - text: Station_ID
+              - generic [ref=e399]: Rajaram Barrage (Kolhapur)
+              - generic [ref=e400]:
+                - generic [ref=e401]:
+                  - img [ref=e402]
+                  - generic [ref=e406]: Panchganga
+                - generic [ref=e407]:
+                  - img [ref=e408]
+                  - generic [ref=e411]: RISING
+              - generic [ref=e412]: "Last_Sync: Invalid Date"
+            - generic [ref=e413]: ACTIVE
+          - generic [ref=e414]:
+            - generic [ref=e415]:
+              - generic [ref=e416]: Level_M
+              - generic [ref=e417]: 9.27m
+            - generic [ref=e418]:
+              - generic [ref=e419]: Precip_1H
+              - generic [ref=e420]: 8.5mm
+        - generic [ref=e421]:
+          - generic [ref=e422]: "River_Location: Kolhapur"
+          - generic [ref=e423]: "Active_Nodes: 1"

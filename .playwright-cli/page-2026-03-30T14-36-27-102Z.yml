@@ -1,0 +1,397 @@
+- generic [ref=e3]:
+  - generic:
+    - img
+    - img
+    - img
+  - generic [ref=e4]: Restricted Access // Tactical Operations Console // Encrypted Channel
+  - banner [ref=e5]:
+    - generic [ref=e7]:
+      - img [ref=e9]
+      - generic [ref=e13]:
+        - heading "INDOFLOODS OPS" [level=1] [ref=e14]
+        - paragraph [ref=e15]: Flood Readiness Command
+    - generic [ref=e17]:
+      - link "Dashboard" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - img [ref=e19]
+        - generic [ref=e21]: Dashboard
+      - link "Geo-Spatial" [ref=e22] [cursor=pointer]:
+        - /url: /geo
+        - img [ref=e23]
+        - generic [ref=e25]: Geo-Spatial
+      - link "Telemetry" [ref=e26] [cursor=pointer]:
+        - /url: /telemetry
+        - img [ref=e27]
+        - generic [ref=e33]: Telemetry
+      - link "Archives" [ref=e34] [cursor=pointer]:
+        - /url: /archives
+        - img [ref=e35]
+        - generic [ref=e39]: Archives
+  - main [ref=e40]:
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - img [ref=e45]
+          - generic [ref=e49]:
+            - generic [ref=e50]: Command Console
+            - heading "Dashboard" [level=1] [ref=e51]
+            - paragraph [ref=e52]: Live flood inference, state matrix lookup, and response intelligence from one central workspace.
+        - generic [ref=e54]:
+          - generic [ref=e55]: "API: DEGRADED"
+          - button "Refresh Matrices" [ref=e56]:
+            - img [ref=e57]
+            - text: Refresh Matrices
+      - generic [ref=e63]:
+        - generic [ref=e65]:
+          - heading "VECTOR_INPUT_ARRAY" [level=2] [ref=e66]:
+            - img [ref=e67]
+            - text: VECTOR_INPUT_ARRAY
+          - generic [ref=e71]: "Protocol: Alpha_4.2"
+        - generic [ref=e72]:
+          - generic [ref=e74]:
+            - generic [ref=e75]: Peak River Level (m)
+            - spinbutton [ref=e77]: "9.27"
+          - generic [ref=e78]:
+            - generic [ref=e79]:
+              - generic [ref=e80]:
+                - generic [ref=e81]: State Matrix Binding
+                - paragraph [ref=e82]: The dashboard uses the selected state's severity matrix for thresholds and verdicts.
+              - generic [ref=e83]:
+                - generic [ref=e84]: Indian State/UT
+                - combobox "Indian State/UT" [ref=e85]:
+                  - option "Select State..."
+                  - option "Andhra Pradesh"
+                  - option "Arunachal Pradesh"
+                  - option "Assam"
+                  - option "Bihar"
+                  - option "Chhattisgarh"
+                  - option "Goa"
+                  - option "Gujarat"
+                  - option "Haryana"
+                  - option "Himachal Pradesh"
+                  - option "Jharkhand"
+                  - option "Karnataka"
+                  - option "Kerala"
+                  - option "Madhya Pradesh"
+                  - option "Maharashtra" [selected]
+                  - option "Manipur"
+                  - option "Meghalaya"
+                  - option "Mizoram"
+                  - option "Nagaland"
+                  - option "Odisha"
+                  - option "Punjab"
+                  - option "Rajasthan"
+                  - option "Sikkim"
+                  - option "Tamil Nadu"
+                  - option "Telangana"
+                  - option "Tripura"
+                  - option "Uttar Pradesh"
+                  - option "Uttarakhand"
+                  - option "West Bengal"
+                  - option "Andaman and Nicobar Islands"
+                  - option "Chandigarh"
+                  - option "Dadra and Nagar Haveli and Daman and Diu"
+                  - option "Delhi"
+                  - option "Jammu and Kashmir"
+                  - option "Ladakh"
+                  - option "Lakshadweep"
+                  - option "Puducherry"
+                - paragraph [ref=e86]: Showing Maharashtra state matrix thresholds
+              - generic [ref=e87]:
+                - generic [ref=e88]: City / Station Input
+                - generic [ref=e89]:
+                  - textbox "Enter city or station" [ref=e90]: Kolhapur
+                  - button "Lock City" [ref=e91]
+                - paragraph [ref=e92]: "Active city: KOLHAPUR"
+            - generic [ref=e93]:
+              - generic [ref=e94]:
+                - generic [ref=e95]: Operational Timing
+                - generic [ref=e96]: Flood Event Shape
+              - generic [ref=e97]:
+                - generic [ref=e98]:
+                  - generic [ref=e99]: Event Days
+                  - spinbutton [ref=e100]: "3"
+                - generic [ref=e101]:
+                  - generic [ref=e102]: Time To Peak
+                  - spinbutton [ref=e103]: "2"
+                - generic [ref=e104]:
+                  - generic [ref=e105]: Recession Days
+                  - spinbutton [ref=e106]: "2"
+          - generic [ref=e107]:
+            - generic [ref=e108]:
+              - generic [ref=e109]: Daily Hydrology Inputs
+              - generic [ref=e110]: Neural Feature Feed
+            - generic [ref=e111]:
+              - generic [ref=e112]:
+                - generic [ref=e113]: Day 1
+                - spinbutton [ref=e114]: "156.4"
+              - generic [ref=e115]:
+                - generic [ref=e116]: Day 2
+                - spinbutton [ref=e117]: "299.2"
+              - generic [ref=e118]:
+                - generic [ref=e119]: Day 3
+                - spinbutton [ref=e120]: "384.4"
+              - generic [ref=e121]:
+                - generic [ref=e122]: Day 4
+                - spinbutton [ref=e123]: "384.4"
+              - generic [ref=e124]:
+                - generic [ref=e125]: Day 5
+                - spinbutton [ref=e126]: "384.4"
+              - generic [ref=e127]:
+                - generic [ref=e128]: Day 6
+                - spinbutton [ref=e129]: "384.4"
+              - generic [ref=e130]:
+                - generic [ref=e131]: Day 7
+                - spinbutton [ref=e132]: "455.6"
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - generic [ref=e135]: Regional Severity Matrix
+              - button "Sync_Matrix" [ref=e136]:
+                - img [ref=e137]
+                - text: Sync_Matrix
+            - textbox "Search geographic sector..." [ref=e142]
+          - generic [ref=e143]:
+            - generic [ref=e144]:
+              - generic [ref=e145]: Vector Presets
+              - generic [ref=e146]: Presets_V4.2
+            - generic [ref=e147]:
+              - button "Dry 8.5m / 80mm" [ref=e148]:
+                - generic [ref=e149]: Dry
+                - generic [ref=e150]: 8.5m / 80mm
+              - button "Monsoon 11.8m / 360mm" [ref=e151]:
+                - generic [ref=e152]: Monsoon
+                - generic [ref=e153]: 11.8m / 360mm
+              - button "Extreme 13.8m / 650mm" [ref=e154]:
+                - generic [ref=e155]: Extreme
+                - generic [ref=e156]: 13.8m / 650mm
+          - button "Execute Neural Inference" [ref=e158]:
+            - img [ref=e361]
+            - generic [ref=e167]: Execute Neural Inference
+      - generic [ref=e168]:
+        - generic [ref=e169]:
+          - img [ref=e170]
+          - generic [ref=e172]: 95.2%
+          - generic [ref=e173]: Model_Fidelity
+        - generic [ref=e174]:
+          - img [ref=e175]
+          - generic [ref=e178]: 44ms
+          - generic [ref=e179]: Inference_Latency
+      - generic [ref=e371]:
+        - img [ref=e372]
+        - generic [ref=e374]:
+          - generic [ref=e375]:
+            - heading "CRITICAL PROTOCOL" [level=3] [ref=e376]
+            - generic [ref=e377]: SEVERE
+          - paragraph [ref=e378]: Evacuate vulnerable river basins immediately.
+          - generic [ref=e379]:
+            - paragraph [ref=e380]: "Priority Zones:"
+            - generic [ref=e381]:
+              - generic [ref=e382]: Primary Catchment
+              - generic [ref=e383]: Downstream Villages
+              - generic [ref=e384]: Low-lying urban zones
+          - paragraph [ref=e386]:
+            - text: "Confidence: 89.4%"
+            - text: "Risk Score:"
+            - text: "Data Source: TACTICAL_REGISTRY"
+      - generic [ref=e180]:
+        - generic [ref=e181]:
+          - generic [ref=e182]:
+            - heading "Selected Region Water Levels" [level=3] [ref=e183]:
+              - img [ref=e184]
+              - text: Selected Region Water Levels
+            - paragraph [ref=e187]: Live gauge levels for Kolhapur and linked regional stations only.
+          - generic [ref=e188]:
+            - img [ref=e189]
+            - text: "Region Nodes: 1"
+        - generic [ref=e195]:
+          - generic [ref=e387]:
+            - generic [ref=e388]:
+              - generic [ref=e390]:
+                - img [ref=e391]
+                - generic [ref=e395]:
+                  - generic [ref=e396]: "9.3"
+                  - generic [ref=e397]: meters
+                  - generic [ref=e398]: ✓ SAFE
+                - generic:
+                  - img
+                  - img
+              - generic [ref=e401]:
+                - generic [ref=e402]: 0m
+                - generic [ref=e403]: "Danger: 13.1m"
+                - generic [ref=e404]: 18m
+            - generic [ref=e405]:
+              - generic [ref=e406]: Lead Station
+              - generic [ref=e407]: Rajaram Barrage (Kolhapur)
+              - generic [ref=e408]:
+                - generic [ref=e409]:
+                  - img [ref=e410]
+                  - generic [ref=e414]: Panchganga
+                - generic [ref=e415]:
+                  - img [ref=e416]
+                  - generic [ref=e419]: RISING
+              - generic [ref=e420]:
+                - generic [ref=e421]: Danger Level
+                - generic [ref=e422]: 13.1m
+          - generic [ref=e424]:
+            - generic [ref=e425]:
+              - generic [ref=e426]:
+                - generic [ref=e427]: Station
+                - generic [ref=e428]: Rajaram Barrage (Kolhapur)
+                - generic [ref=e429]:
+                  - generic [ref=e430]:
+                    - img [ref=e431]
+                    - generic [ref=e435]: Panchganga
+                  - generic [ref=e436]:
+                    - img [ref=e437]
+                    - generic [ref=e440]: RISING
+              - generic [ref=e441]: ACTIVE
+            - generic [ref=e442]:
+              - generic [ref=e443]:
+                - generic [ref=e444]: Water Level
+                - generic [ref=e445]: 9.27m
+              - generic [ref=e446]:
+                - generic [ref=e447]: Rain 1H
+                - generic [ref=e448]: 8.5mm
+            - generic [ref=e449]: "Last Sync: Invalid Date"
+      - generic [ref=e198]:
+        - generic [ref=e200]:
+          - generic [ref=e202]:
+            - generic [ref=e203]:
+              - heading "Synaptic Inference Matrix" [level=3] [ref=e204]:
+                - img [ref=e205]
+                - text: Synaptic Inference Matrix
+              - paragraph [ref=e210]: "Preferred state: Maharashtra"
+            - generic [ref=e211]:
+              - generic [ref=e212]: Matrix_Link_Failed
+              - generic [ref=e213]: LOW
+          - generic [ref=e214]:
+            - generic [ref=e215]:
+              - generic [ref=e216]: Preferred State
+              - generic [ref=e217]: Maharashtra
+            - generic [ref=e218]:
+              - generic [ref=e219]: Matrix Region
+              - generic [ref=e220]: Awaiting profile
+            - generic [ref=e221]:
+              - generic [ref=e222]: Current Verdict
+              - generic [ref=e223]: LOW
+          - generic [ref=e224]:
+            - heading "Synaptic Inference Matrix" [level=4] [ref=e225]:
+              - img [ref=e226]
+              - text: Synaptic Inference Matrix
+            - generic [ref=e231]: Preferred_State_Nodes
+        - generic [ref=e233]:
+          - generic [ref=e234]:
+            - generic [ref=e235]:
+              - heading "CWC Hydrology Feed" [level=3] [ref=e236]:
+                - img [ref=e238]
+                - generic [ref=e242]: CWC Hydrology Feed
+              - generic [ref=e244]: "Live Link: RAJARAM BARRAGE (KOLHAPUR)"
+            - button "Sync_CWC" [ref=e245]:
+              - img [ref=e247]
+              - generic [ref=e252]: Sync_CWC
+          - generic [ref=e253]:
+            - generic [ref=e254]:
+              - generic [ref=e255]:
+                - generic [ref=e256]: Preferred Station
+                - generic [ref=e257]: Rajaram Barrage (Kolhapur)
+                - generic [ref=e258]: "Basin: Panchganga"
+              - generic [ref=e259]:
+                - img [ref=e261]
+                - generic [ref=e264]: ACTIVE
+            - generic [ref=e265]:
+              - generic [ref=e266]:
+                - generic [ref=e267]: Current Level
+                - generic [ref=e268]: 9.27m
+              - generic [ref=e269]:
+                - generic [ref=e270]: Warning / Danger
+                - generic [ref=e271]: 11.80/13.10
+                - generic [ref=e272]: "Trend: RISING"
+          - generic [ref=e273]:
+            - generic [ref=e274]:
+              - generic [ref=e275]: Threshold Progress
+              - generic [ref=e276]: 3.8m remaining
+            - generic [ref=e277]:
+              - img [ref=e279]
+              - generic [ref=e282]: Updated 20:06:25
+          - generic [ref=e283]:
+            - generic [ref=e284]: Regional Water Nodes
+            - generic [ref=e450]:
+              - generic [ref=e451]:
+                - generic [ref=e452]:
+                  - generic [ref=e453]: Station
+                  - generic [ref=e454]: Rajaram Barrage (Kolhapur)
+                - generic [ref=e455]:
+                  - img [ref=e457]
+                  - generic [ref=e463]: ACTIVE
+              - generic [ref=e464]:
+                - generic [ref=e465]:
+                  - generic [ref=e466]: Level
+                  - generic [ref=e467]: 9.27m
+                - generic [ref=e468]:
+                  - generic [ref=e469]: Rain 1H
+                  - generic [ref=e470]: 8.5mm
+          - generic [ref=e286]:
+            - text: Data Source
+            - generic [ref=e287]: Fallback mode • using manual threshold context until CWC responds
+      - generic [ref=e471]:
+        - heading "Probability Matrix" [level=3] [ref=e473]:
+          - img [ref=e474]
+          - text: Probability Matrix
+        - generic [ref=e476]:
+          - heading "Strategic Response" [level=3] [ref=e477]:
+            - img [ref=e478]
+            - text: Strategic Response
+          - generic [ref=e480]:
+            - generic [ref=e481]:
+              - generic [ref=e482]: Shirol Sector
+              - generic [ref=e483]: EVACUATE
+            - generic [ref=e484]:
+              - generic [ref=e485]: Irwin Bridge
+              - generic [ref=e486]: CRITICAL
+            - generic [ref=e487]:
+              - generic [ref=e488]: Kagal High-Ground
+              - generic [ref=e489]: STAGING
+      - generic [ref=e288]:
+        - generic [ref=e289]:
+          - generic [ref=e291]:
+            - img [ref=e293]
+            - generic [ref=e297]:
+              - heading "City Hotspot Heatmap" [level=3] [ref=e298]
+              - paragraph [ref=e299]: Linked hotspots for Kolhapur
+          - generic [ref=e300]: 1 active nodes
+        - generic [ref=e490]:
+          - generic [ref=e491]:
+            - generic [ref=e492]:
+              - generic [ref=e493]: Rajaram Barrage (Kolhapur)
+              - generic [ref=e494]: Kolhapur
+            - generic [ref=e495]: SEVERE
+          - generic [ref=e497]:
+            - generic [ref=e498]: 66%
+            - generic [ref=e499]: Risk score
+      - generic [ref=e332]:
+        - generic [ref=e335]:
+          - heading "CWC Live Data - Rajaram Barrage (Kolhapur)" [level=3] [ref=e500]:
+            - img [ref=e337]
+            - text: CWC Live Data - Rajaram Barrage (Kolhapur)
+          - generic [ref=e501]:
+            - paragraph [ref=e502]: 9.27m
+            - paragraph [ref=e503]: "River: Panchganga • Warning: 11.80m • Danger: 13.10m"
+            - paragraph [ref=e504]: "Source: TACTICAL_REGISTRY"
+            - paragraph [ref=e505]: "Updated: 30/03/2026, 20:06:25"
+        - generic [ref=e341]:
+          - button "Kolhapur" [ref=e342]
+          - button "Pune" [ref=e343]
+          - button "Maharashtra" [ref=e344]
+        - generic [ref=e345]:
+          - generic [ref=e346]:
+            - generic [ref=e347]:
+              - heading "Historical Flood Logs (0)" [level=3] [ref=e348]:
+                - img [ref=e349]
+                - text: Historical Flood Logs (0)
+              - generic [ref=e353]:
+                - generic [ref=e354]: No Real Dataset
+                - generic [ref=e355]: Select row -> load CSV into input
+            - button "Export" [disabled] [ref=e356]:
+              - img [ref=e357]
+              - text: Export
+          - generic [ref=e360]: Unable to load historical flood logs right now.

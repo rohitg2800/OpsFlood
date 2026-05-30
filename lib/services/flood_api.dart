@@ -1,18 +1,29 @@
 // lib/services/flood_api.dart
 //
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  OpsFlood — Flood API                                                   ║
-// ║                                                                          ║
-// ║  The ONE file every screen, provider, and service imports for data.    ║
-// ║  All methods call OpsClient (which calls the OpsFlood backend).        ║
-// ║                                                                          ║
-// ║  PRINCIPLE: The app is a DISPLAY layer. The backend is the brain.      ║
-// ║  Zero business logic here — just typed wrappers around HTTP calls.     ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// OpsFlood — FloodApi
+//
+// All OpsFlood backend endpoints that returned 404 are STUBBED.
+// Active endpoints that still work:
+//   - /predict/v2              → backendPredict() in prediction_service.dart
+//   - /health                  → only called from predict path (not polling)
+//
+// Everything else returns {'status': 'ok', 'data': []} so callers
+// that haven't been updated yet never throw or 404.
+//
+// Real data comes from:
+//   WrdBiharService   → irrigation.befiqr.in / beams.fmiscwrdbihar.gov.in
+//   GloFAS            → flood-api.open-meteo.com
+//   Open-Meteo        → api.open-meteo.com
+//   CwcDirectService  → cwc.gov.in (station HTML scrape)
+//   SACHET/NDMA       → sachet.ndma.gov.in (live_fetch_engine)
 library;
 
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import 'ops_client.dart';
+
+const _kEmpty = <String, dynamic>{'status': 'ok', 'data': <dynamic>[]};
 
 class FloodApi {
   FloodApi._();
@@ -20,101 +31,115 @@ class FloodApi {
 
   final _c = OpsClient.instance;
 
-  // ── Health ────────────────────────────────────────────────────────────────
-  // Two-phase: fast probe if known warm, slow probe for cold-start.
+  // ── Health (only used by predict path, not polling) ───────────────────────
   Future<Map<String, dynamic>> healthCheck({bool coldStart = false}) =>
       _c.get(
         AppConfig.epHealth,
-        timeout: coldStart
-            ? AppConfig.coldStartTimeout
-            : AppConfig.healthTimeout,
+        timeout: coldStart ? AppConfig.coldStartTimeout : AppConfig.healthTimeout,
       );
 
   // ── Prediction (ML inference) ─────────────────────────────────────────────
-  // POST /predict — OpsFlood backend ML ensemble
   Future<Map<String, dynamic>> predict(Map<String, dynamic> payload) =>
       _c.post(AppConfig.epPredict, payload);
 
-  // ── Live telemetry (GloFAS discharge — 93 cities) ─────────────────────────
-  // Batch — ALL states in ONE call. Filter client-side.
-  Future<Map<String, dynamic>> allTelemetry({int limit = 1000}) =>
-      _c.get(AppConfig.epLiveTelemetry,
-          query: {'all_states': 'true', 'limit': '$limit'});
+  // ── STUBBED — backend endpoints that no longer exist ─────────────────────
+  // Return empty but valid payloads so callers don't crash or retry.
 
-  // Scoped — only when you genuinely need a single state.
+  Future<Map<String, dynamic>> allTelemetry({int limit = 1000}) async => _kEmpty;
+
   Future<Map<String, dynamic>> telemetryByState(
-    String state, {
-    String? station,
-    int limit = 50,
-  }) {
-    final q = <String, String>{'state': state, 'limit': '$limit'};
-    if (station != null && station.isNotEmpty) q['station'] = station;
-    return _c.get(AppConfig.epLiveTelemetry, query: q);
-  }
+    String state, {String? station, int limit = 50}) async => _kEmpty;
 
-  // ── Live levels (gauge readings) ──────────────────────────────────────────
-  Future<Map<String, dynamic>> allLevels({int limit = 200}) =>
-      _c.get(AppConfig.epLiveLevels,
-          query: {'all_states': 'true', 'limit': '$limit'});
+  Future<Map<String, dynamic>> allLevels({int limit = 200}) async => _kEmpty;
 
-  Future<Map<String, dynamic>> levelsByState(String state, {int limit = 200}) =>
-      _c.get(AppConfig.epLiveLevels,
-          query: {'state': state, 'limit': '$limit'});
+  Future<Map<String, dynamic>> levelsByState(
+    String state, {int limit = 200}) async => _kEmpty;
 
-  // ── Critical alerts ───────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> criticalAlerts() =>
-      _c.get(AppConfig.epCriticalAlerts);
+  Future<Map<String, dynamic>> criticalAlerts() async => _kEmpty;
 
-  // ── CWC FFS (flood forecast — per station) ────────────────────────────────
   Future<Map<String, dynamic>> cwcForecast({
-    required String city,
-    required String state,
-  }) =>
-      _c.get(AppConfig.epCwcFfs,
-          query: {'city': city, 'state': state});
+    required String city, required String state}) async => _kEmpty;
 
-  // ── CWC station registry ──────────────────────────────────────────────────
-  Future<Map<String, dynamic>> cwcStations() =>
-      _c.get(AppConfig.epCwcStations);
+  Future<Map<String, dynamic>> cwcStations() async => _kEmpty;
 
-  // ── Reservoir levels (data.gov.in via backend) ────────────────────────────
-  Future<Map<String, dynamic>> reservoirLevels(String state) =>
-      _c.get(AppConfig.epCwcReservoir,
-          query: {'state': state});
+  Future<Map<String, dynamic>> reservoirLevels(String state) async => _kEmpty;
 
-  // ── Weather (OpenMeteo via backend) ───────────────────────────────────────
-  Future<Map<String, dynamic>> weatherCurrent(String location) =>
-      _c.get(AppConfig.epWeatherCurrent,
-          query: {'location': location});
-
-  Future<Map<String, dynamic>> weatherForecast(String location) =>
-      _c.get(AppConfig.epWeatherForecast,
-          query: {'location': location});
-
-  // ── Pipeline (ML feature pre-fill) ────────────────────────────────────────
   Future<Map<String, dynamic>> pipelineFeatures({
-    required String state,
-    String? station,
-  }) {
-    final q = <String, String>{'state': state};
-    if (station != null && station.isNotEmpty) q['station'] = station;
-    return _c.get(AppConfig.epPipelineFeatures, query: q);
+    required String state, String? station}) async => _kEmpty;
+
+  Future<Map<String, dynamic>> pipelineManifest() async => _kEmpty;
+
+  Future<Map<String, dynamic>> stateSeverity() async => _kEmpty;
+
+  Future<Map<String, dynamic>> stateSeverityEntry(String state) async => _kEmpty;
+
+  Future<Map<String, dynamic>> triggerIngestion() async => _kEmpty;
+
+  Future<Map<String, dynamic>> modelMetrics() async => _kEmpty;
+
+  Future<Map<String, dynamic>> ndmaAdvisories(String state) async => _kEmpty;
+
+  Future<Map<String, dynamic>> ndmaContacts(String state) async => _kEmpty;
+
+  // ── Weather — direct Open-Meteo (no backend proxy) ───────────────────────
+  // Used by screens that call FloodApi.weatherCurrent/weatherForecast directly.
+  // Calls Open-Meteo free tier — no auth needed.
+  Future<Map<String, dynamic>> weatherCurrent(String location) async {
+    try {
+      // Resolve city name to lat/lon via Open-Meteo geocoding
+      final geoUri = Uri.parse(
+        'https://geocoding-api.open-meteo.com/v1/search'
+        '?name=${Uri.encodeComponent(location)}&count=1&language=en&format=json',
+      );
+      final geoRes = await http.get(geoUri).timeout(const Duration(seconds: 8));
+      if (geoRes.statusCode != 200) return _kEmpty;
+      final geoBody  = jsonDecode(geoRes.body) as Map<String, dynamic>;
+      final results  = geoBody['results'] as List?;
+      if (results == null || results.isEmpty) return _kEmpty;
+      final r   = results.first as Map<String, dynamic>;
+      final lat = r['latitude']  as num;
+      final lon = r['longitude'] as num;
+
+      final wxUri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=$lat&longitude=$lon'
+        '&current=temperature_2m,relative_humidity_2m,precipitation,weather_code'
+        '&timezone=Asia%2FKolkata',
+      );
+      final wxRes = await http.get(wxUri).timeout(const Duration(seconds: 8));
+      if (wxRes.statusCode != 200) return _kEmpty;
+      return jsonDecode(wxRes.body) as Map<String, dynamic>;
+    } catch (_) {
+      return _kEmpty;
+    }
   }
 
-  Future<Map<String, dynamic>> pipelineManifest() =>
-      _c.get(AppConfig.epPipelineManifest);
+  Future<Map<String, dynamic>> weatherForecast(String location) async {
+    try {
+      final geoUri = Uri.parse(
+        'https://geocoding-api.open-meteo.com/v1/search'
+        '?name=${Uri.encodeComponent(location)}&count=1&language=en&format=json',
+      );
+      final geoRes = await http.get(geoUri).timeout(const Duration(seconds: 8));
+      if (geoRes.statusCode != 200) return _kEmpty;
+      final geoBody = jsonDecode(geoRes.body) as Map<String, dynamic>;
+      final results = geoBody['results'] as List?;
+      if (results == null || results.isEmpty) return _kEmpty;
+      final r   = results.first as Map<String, dynamic>;
+      final lat = r['latitude']  as num;
+      final lon = r['longitude'] as num;
 
-  // ── State severity matrix ─────────────────────────────────────────────────
-  Future<Map<String, dynamic>> stateSeverity() =>
-      _c.get(AppConfig.epStateSeverity);
-
-  Future<Map<String, dynamic>> stateSeverityEntry(String state) =>
-      _c.get('${AppConfig.epStateSeverity}/$state');
-
-  // ── Operations ────────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> triggerIngestion() =>
-      _c.post(AppConfig.epIngestionRun, {});
-
-  Future<Map<String, dynamic>> modelMetrics() =>
-      _c.get(AppConfig.epModelMetrics);
+      final fxUri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=$lat&longitude=$lon'
+        '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code'
+        '&forecast_days=7&timezone=Asia%2FKolkata',
+      );
+      final fxRes = await http.get(fxUri).timeout(const Duration(seconds: 8));
+      if (fxRes.statusCode != 200) return _kEmpty;
+      return jsonDecode(fxRes.body) as Map<String, dynamic>;
+    } catch (_) {
+      return _kEmpty;
+    }
+  }
 }

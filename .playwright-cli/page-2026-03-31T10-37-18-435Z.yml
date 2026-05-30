@@ -1,0 +1,634 @@
+- generic [ref=e3]:
+  - generic:
+    - img
+    - img
+    - img
+  - generic [ref=e4]: Restricted Access // Tactical Operations Console // Encrypted Channel
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e8]:
+        - heading "INDIA_FLOODS OPS" [level=1] [ref=e9]
+        - paragraph [ref=e10]: Flood Readiness Command
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: API Status
+          - generic [ref=e16]: ONLINE
+        - generic [ref=e17]: Command Build 4.2
+    - generic [ref=e19]:
+      - link "Dashboard" [ref=e20] [cursor=pointer]:
+        - /url: /
+        - img [ref=e21]
+        - generic [ref=e23]: Dashboard
+      - link "Geo-Spatial" [ref=e24] [cursor=pointer]:
+        - /url: /geo
+        - img [ref=e25]
+        - generic [ref=e27]: Geo-Spatial
+      - link "Telemetry" [ref=e28] [cursor=pointer]:
+        - /url: /telemetry
+        - img [ref=e29]
+        - generic [ref=e35]: Telemetry
+      - link "Archives" [ref=e36] [cursor=pointer]:
+        - /url: /archives
+        - img [ref=e37]
+        - generic [ref=e41]: Archives
+  - main [ref=e42]:
+    - generic [ref=e47]:
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - img [ref=e51]
+          - generic [ref=e55]:
+            - generic [ref=e56]: Command Console
+            - heading "Dashboard" [level=1] [ref=e57]
+            - paragraph [ref=e58]: Live flood inference, state matrix lookup, and response intelligence from one central workspace.
+        - generic [ref=e60]:
+          - generic [ref=e61]: "API: ONLINE"
+          - button "Refresh Matrices" [ref=e62]:
+            - img [ref=e63]
+            - text: Refresh Matrices
+      - generic [ref=e69]:
+        - generic [ref=e71]:
+          - heading "VECTOR_INPUT_ARRAY" [level=2] [ref=e72]:
+            - img [ref=e73]
+            - text: VECTOR_INPUT_ARRAY
+          - generic [ref=e77]: "Protocol: Alpha_4.2"
+        - generic [ref=e78]:
+          - generic [ref=e80]:
+            - generic [ref=e81]: Peak River Level (m)
+            - spinbutton [ref=e83]: "12.5"
+          - generic [ref=e84]:
+            - generic [ref=e85]:
+              - generic [ref=e86]:
+                - generic [ref=e87]: State Matrix Binding
+                - paragraph [ref=e88]: The dashboard uses the selected state's severity matrix for thresholds and verdicts.
+              - generic [ref=e89]:
+                - generic [ref=e90]: Indian State/UT
+                - combobox "Indian State/UT" [ref=e91]:
+                  - option "Select State..."
+                  - option "Andhra Pradesh"
+                  - option "Arunachal Pradesh"
+                  - option "Assam"
+                  - option "Bihar"
+                  - option "Chhattisgarh"
+                  - option "Goa"
+                  - option "Gujarat"
+                  - option "Haryana"
+                  - option "Himachal Pradesh"
+                  - option "Jharkhand"
+                  - option "Karnataka"
+                  - option "Kerala"
+                  - option "Madhya Pradesh"
+                  - option "Maharashtra" [selected]
+                  - option "Manipur"
+                  - option "Meghalaya"
+                  - option "Mizoram"
+                  - option "Nagaland"
+                  - option "Odisha"
+                  - option "Punjab"
+                  - option "Rajasthan"
+                  - option "Sikkim"
+                  - option "Tamil Nadu"
+                  - option "Telangana"
+                  - option "Tripura"
+                  - option "Uttar Pradesh"
+                  - option "Uttarakhand"
+                  - option "West Bengal"
+                  - option "Andaman and Nicobar Islands"
+                  - option "Chandigarh"
+                  - option "Dadra and Nagar Haveli and Daman and Diu"
+                  - option "Delhi"
+                  - option "Jammu and Kashmir"
+                  - option "Ladakh"
+                  - option "Lakshadweep"
+                  - option "Puducherry"
+                - paragraph [ref=e92]: Showing Maharashtra state matrix thresholds
+              - generic [ref=e93]:
+                - generic [ref=e94]: City / Station Input
+                - generic [ref=e95]:
+                  - textbox "Enter city or station" [ref=e96]
+                  - button "Lock City" [ref=e97]
+                - paragraph [ref=e98]: "Active city: NONE"
+            - generic [ref=e99]:
+              - generic [ref=e100]:
+                - generic [ref=e101]: Operational Timing
+                - generic [ref=e102]: Flood Event Shape
+              - generic [ref=e103]:
+                - generic [ref=e104]:
+                  - generic [ref=e105]: Event Days
+                  - spinbutton [ref=e106]: "3"
+                - generic [ref=e107]:
+                  - generic [ref=e108]: Time To Peak
+                  - spinbutton [ref=e109]: "2"
+                - generic [ref=e110]:
+                  - generic [ref=e111]: Recession Days
+                  - spinbutton [ref=e112]: "2"
+          - generic [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e115]: Daily Hydrology Inputs
+              - generic [ref=e116]: Neural Feature Feed
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - generic [ref=e119]: Day 1
+                - spinbutton [ref=e120]: "156.4"
+              - generic [ref=e121]:
+                - generic [ref=e122]: Day 2
+                - spinbutton [ref=e123]: "299.2"
+              - generic [ref=e124]:
+                - generic [ref=e125]: Day 3
+                - spinbutton [ref=e126]: "384.4"
+              - generic [ref=e127]:
+                - generic [ref=e128]: Day 4
+                - spinbutton [ref=e129]: "384.4"
+              - generic [ref=e130]:
+                - generic [ref=e131]: Day 5
+                - spinbutton [ref=e132]: "384.4"
+              - generic [ref=e133]:
+                - generic [ref=e134]: Day 6
+                - spinbutton [ref=e135]: "384.4"
+              - generic [ref=e136]:
+                - generic [ref=e137]: Day 7
+                - spinbutton [ref=e138]: "455.6"
+          - generic [ref=e139]:
+            - generic [ref=e140]:
+              - generic [ref=e141]: Regional Severity Matrix
+              - button "Sync_Matrix" [ref=e142]:
+                - img [ref=e143]
+                - text: Sync_Matrix
+            - textbox "Search geographic sector..." [ref=e148]
+            - generic [ref=e149]:
+              - button "Andaman and Nicobar Islands" [ref=e150]
+              - button "Andhra Pradesh" [ref=e151]
+              - button "Arunachal Pradesh" [ref=e152]
+              - button "Assam" [ref=e153]
+              - button "Bihar" [ref=e154]
+              - button "Chandigarh" [ref=e155]
+              - button "Chhattisgarh" [ref=e156]
+              - button "Dadra and Nagar Haveli and Daman and Diu" [ref=e157]
+              - button "Delhi" [ref=e158]
+              - button "Goa" [ref=e159]
+              - button "Gujarat" [ref=e160]
+              - button "Haryana" [ref=e161]
+              - button "Himachal Pradesh" [ref=e162]
+              - button "Jammu and Kashmir" [ref=e163]
+              - button "Jharkhand" [ref=e164]
+              - button "Karnataka" [ref=e165]
+              - button "Kerala" [ref=e166]
+              - button "Ladakh" [ref=e167]
+              - button "Lakshadweep" [ref=e168]
+              - button "Madhya Pradesh" [ref=e169]
+              - button "Maharashtra" [ref=e170]
+              - button "Manipur" [ref=e171]
+              - button "Meghalaya" [ref=e172]
+              - button "Mizoram" [ref=e173]
+              - button "Nagaland" [ref=e174]
+              - button "Odisha" [ref=e175]
+              - button "Puducherry" [ref=e176]
+              - button "Punjab" [ref=e177]
+              - button "Rajasthan" [ref=e178]
+              - button "Sikkim" [ref=e179]
+              - button "Tamil Nadu" [ref=e180]
+              - button "Telangana" [ref=e181]
+              - button "Tripura" [ref=e182]
+              - button "Uttar Pradesh" [ref=e183]
+              - button "Uttarakhand" [ref=e184]
+              - button "West Bengal" [ref=e185]
+          - generic [ref=e186]:
+            - generic [ref=e187]:
+              - generic [ref=e188]: Vector Presets
+              - generic [ref=e189]: Presets_V4.2
+            - generic [ref=e190]:
+              - button "Dry 8.5m / 80mm" [ref=e191]:
+                - generic [ref=e193]: Dry
+                - generic [ref=e194]: 8.5m / 80mm
+              - button "Monsoon 11.8m / 360mm" [ref=e195]:
+                - generic [ref=e197]: Monsoon
+                - generic [ref=e198]: 11.8m / 360mm
+              - button "Extreme 13.8m / 650mm" [ref=e199]:
+                - generic [ref=e201]: Extreme
+                - generic [ref=e202]: 13.8m / 650mm
+          - button "Execute Neural Inference" [ref=e204]:
+            - img [ref=e205]
+            - generic [ref=e213]: Execute Neural Inference
+      - generic [ref=e214]:
+        - generic [ref=e215]:
+          - img [ref=e216]
+          - generic [ref=e218]: 95.2%
+          - generic [ref=e219]: Model_Fidelity
+        - generic [ref=e220]:
+          - img [ref=e221]
+          - generic [ref=e224]: 120ms
+          - generic [ref=e225]: Inference_Latency
+      - generic [ref=e227]:
+        - generic [ref=e228]:
+          - generic [ref=e229]:
+            - heading "Weather Console" [level=3] [ref=e230]:
+              - img [ref=e231]
+              - text: Weather Console
+            - paragraph [ref=e233]: Atmospheric conditions for Maharashtra feeding the active dashboard view.
+            - generic [ref=e234]: "Destination lock: Maharashtra"
+            - generic [ref=e235]:
+              - img [ref=e236]
+              - generic [ref=e239]: "Weather API: SECURE"
+          - generic [ref=e240]:
+            - img [ref=e241]
+            - text: Last Weather Load 16:06:56
+        - generic [ref=e247]:
+          - generic [ref=e248]:
+            - img "Weather icon" [ref=e250]
+            - generic [ref=e251]:
+              - heading "Maharashtra" [level=3] [ref=e252]:
+                - generic [ref=e253]: Maharashtra
+              - paragraph [ref=e254]: broken clouds
+              - paragraph [ref=e255]: Cloud cover drift across sector
+          - generic [ref=e256]:
+            - generic [ref=e257]:
+              - img [ref=e258]
+              - generic [ref=e263]: 35°C
+              - generic [ref=e264]: Temp
+            - generic [ref=e265]:
+              - img [ref=e266]
+              - generic [ref=e269]: 25%
+              - generic [ref=e270]: Humidity
+            - generic [ref=e271]:
+              - img [ref=e272]
+              - generic [ref=e276]: 2 km/h
+              - generic [ref=e277]: Wind
+        - generic [ref=e278]:
+          - generic [ref=e279]:
+            - generic [ref=e280]:
+              - img [ref=e281]
+              - text: Feels Like
+            - generic [ref=e283]: 34°C
+          - generic [ref=e284]:
+            - generic [ref=e285]:
+              - img [ref=e286]
+              - text: Pressure
+            - generic [ref=e289]: 1006 hPa
+          - generic [ref=e290]:
+            - generic [ref=e291]:
+              - img [ref=e292]
+              - text: Cloud Cover
+            - generic [ref=e295]: 56%
+          - generic [ref=e296]:
+            - generic [ref=e297]:
+              - img [ref=e298]
+              - text: Precip Pulse
+            - generic [ref=e301]: 0.0 mm
+      - generic [ref=e302]:
+        - generic [ref=e303]:
+          - generic [ref=e304]:
+            - heading "Selected Region Water Levels" [level=3] [ref=e305]:
+              - img [ref=e306]
+              - text: Selected Region Water Levels
+            - paragraph [ref=e309]: Live gauge levels for Maharashtra and linked regional stations only.
+          - generic [ref=e310]:
+            - img [ref=e311]
+            - text: "Region Nodes: 9"
+        - generic [ref=e317]:
+          - generic [ref=e318]:
+            - generic [ref=e319]:
+              - generic [ref=e321]:
+                - img [ref=e322]
+                - generic [ref=e326]:
+                  - generic [ref=e327]: "20.4"
+                  - generic [ref=e328]: meters
+                  - generic [ref=e329]: ✓ SAFE
+                - generic:
+                  - img
+                  - img
+              - generic [ref=e332]:
+                - generic [ref=e333]: 0m
+                - generic [ref=e334]: "Danger: 21m"
+                - generic [ref=e335]: 25m
+            - generic [ref=e336]:
+              - generic [ref=e337]: Lead Station
+              - generic [ref=e338]: Nashik
+              - generic [ref=e339]:
+                - generic [ref=e340]:
+                  - img [ref=e341]
+                  - generic [ref=e345]: Godavari
+                - generic [ref=e346]:
+                  - img [ref=e347]
+                  - generic [ref=e350]: RISING
+              - generic [ref=e351]:
+                - generic [ref=e352]: Danger Level
+                - generic [ref=e353]: 21.0m
+          - generic [ref=e354]:
+            - generic [ref=e355]:
+              - generic [ref=e356]:
+                - generic [ref=e357]:
+                  - generic [ref=e358]: Station
+                  - generic [ref=e359]: Nashik
+                  - generic [ref=e360]:
+                    - generic [ref=e361]:
+                      - img [ref=e362]
+                      - generic [ref=e366]: Godavari
+                    - generic [ref=e367]:
+                      - img [ref=e368]
+                      - generic [ref=e371]: RISING
+                - generic [ref=e372]: WARNING
+              - generic [ref=e373]:
+                - generic [ref=e374]:
+                  - generic [ref=e375]: Water Level
+                  - generic [ref=e376]: 20.43m
+                - generic [ref=e377]:
+                  - generic [ref=e378]: Rain 1H
+                  - generic [ref=e379]: 5.8mm
+              - generic [ref=e380]: "Last Sync: Invalid Date"
+            - generic [ref=e381]:
+              - generic [ref=e382]:
+                - generic [ref=e383]:
+                  - generic [ref=e384]: Station
+                  - generic [ref=e385]: Pune Bund Garden
+                  - generic [ref=e386]:
+                    - generic [ref=e387]:
+                      - img [ref=e388]
+                      - generic [ref=e392]: Mula-Mutha
+                    - generic [ref=e393]:
+                      - img [ref=e394]
+                      - generic [ref=e395]: STEADY
+                - generic [ref=e396]: CRITICAL
+              - generic [ref=e397]:
+                - generic [ref=e398]:
+                  - generic [ref=e399]: Water Level
+                  - generic [ref=e400]: 15.64m
+                - generic [ref=e401]:
+                  - generic [ref=e402]: Rain 1H
+                  - generic [ref=e403]: 1.7mm
+              - generic [ref=e404]: "Last Sync: Invalid Date"
+            - generic [ref=e405]:
+              - generic [ref=e406]:
+                - generic [ref=e407]:
+                  - generic [ref=e408]: Station
+                  - generic [ref=e409]: Kurundwad
+                  - generic [ref=e410]:
+                    - generic [ref=e411]:
+                      - img [ref=e412]
+                      - generic [ref=e416]: Krishna
+                    - generic [ref=e417]:
+                      - img [ref=e418]
+                      - generic [ref=e421]: FALLING
+                - generic [ref=e422]: ACTIVE
+              - generic [ref=e423]:
+                - generic [ref=e424]:
+                  - generic [ref=e425]: Water Level
+                  - generic [ref=e426]: 13.66m
+                - generic [ref=e427]:
+                  - generic [ref=e428]: Rain 1H
+                  - generic [ref=e429]: 12.7mm
+              - generic [ref=e430]: "Last Sync: Invalid Date"
+            - generic [ref=e431]:
+              - generic [ref=e432]:
+                - generic [ref=e433]:
+                  - generic [ref=e434]: Station
+                  - generic [ref=e435]: Pandharpur
+                  - generic [ref=e436]:
+                    - generic [ref=e437]:
+                      - img [ref=e438]
+                      - generic [ref=e442]: Bhima
+                    - generic [ref=e443]:
+                      - img [ref=e444]
+                      - generic [ref=e447]: RISING
+                - generic [ref=e448]: ACTIVE
+              - generic [ref=e449]:
+                - generic [ref=e450]:
+                  - generic [ref=e451]: Water Level
+                  - generic [ref=e452]: 12.98m
+                - generic [ref=e453]:
+                  - generic [ref=e454]: Rain 1H
+                  - generic [ref=e455]: 4.4mm
+              - generic [ref=e456]: "Last Sync: Invalid Date"
+      - generic [ref=e457]:
+        - generic [ref=e459]:
+          - generic [ref=e461]:
+            - generic [ref=e462]:
+              - heading "Synaptic Inference Matrix" [level=3] [ref=e463]:
+                - img [ref=e464]
+                - text: Synaptic Inference Matrix
+              - paragraph [ref=e469]: "Preferred state: Maharashtra | Region profile: COASTAL"
+            - generic [ref=e470]:
+              - generic [ref=e471]: State_Matrix_Linked
+              - generic [ref=e472]: "Lane_Sync: LOW"
+              - generic [ref=e473]: CRITICAL
+          - generic [ref=e474]:
+            - generic [ref=e475]:
+              - generic [ref=e476]: Preferred State
+              - generic [ref=e477]: Maharashtra
+            - generic [ref=e478]:
+              - generic [ref=e479]: Matrix Region
+              - generic [ref=e480]: COASTAL
+            - generic [ref=e481]:
+              - generic [ref=e482]: Current Verdict
+              - generic [ref=e483]: CRITICAL
+          - generic [ref=e484]:
+            - generic [ref=e486]:
+              - generic [ref=e487]: LOW
+              - generic [ref=e488]: 72.0%
+            - generic [ref=e490]:
+              - generic [ref=e491]: MODERATE
+              - generic [ref=e492]: 24.0%
+            - generic [ref=e494]:
+              - generic [ref=e495]: SEVERE
+              - generic [ref=e496]: 12.0%
+            - generic [ref=e498]:
+              - generic [ref=e499]: CRITICAL
+              - generic [ref=e500]: 6.0%
+          - generic [ref=e501]:
+            - heading "Synaptic Inference Matrix" [level=4] [ref=e502]:
+              - img [ref=e503]
+              - text: Synaptic Inference Matrix
+            - generic [ref=e508]: Preferred_State_Nodes
+        - generic [ref=e510]:
+          - generic [ref=e511]:
+            - generic [ref=e512]:
+              - heading "CWC Hydrology Feed" [level=3] [ref=e513]:
+                - img [ref=e515]
+                - generic [ref=e519]: CWC Hydrology Feed
+              - generic [ref=e521]: "Live Link: MAHARASHTRA"
+            - button "Sync_CWC" [ref=e522]:
+              - img [ref=e524]
+              - generic [ref=e529]: Sync_CWC
+          - generic [ref=e530]:
+            - generic [ref=e531]:
+              - generic [ref=e532]:
+                - generic [ref=e533]: Preferred Station
+                - generic [ref=e534]: Maharashtra
+                - generic [ref=e535]: "Basin: Maharashtra Primary Basin"
+              - generic [ref=e536]:
+                - img [ref=e538]
+                - generic [ref=e541]: ACTIVE
+            - generic [ref=e542]:
+              - generic [ref=e543]:
+                - generic [ref=e544]: Current Level
+                - generic [ref=e545]: 9.58m
+              - generic [ref=e546]:
+                - generic [ref=e547]: Warning / Danger
+                - generic [ref=e548]: 11.10/12.50
+                - generic [ref=e549]: "Trend: RISING"
+          - generic [ref=e550]:
+            - generic [ref=e551]:
+              - generic [ref=e552]: Threshold Progress
+              - generic [ref=e553]: 2.9m remaining
+            - generic [ref=e554]:
+              - img [ref=e556]
+              - generic [ref=e559]: Updated 16:06:57
+          - generic [ref=e560]:
+            - generic [ref=e561]: Regional Water Nodes
+            - generic [ref=e562]:
+              - generic [ref=e563]:
+                - generic [ref=e564]:
+                  - generic [ref=e565]: Station
+                  - generic [ref=e566]: Nashik
+                - generic [ref=e567]:
+                  - img [ref=e569]
+                  - generic [ref=e575]: WARNING
+              - generic [ref=e576]:
+                - generic [ref=e577]:
+                  - generic [ref=e578]: Level
+                  - generic [ref=e579]: 20.43m
+                - generic [ref=e580]:
+                  - generic [ref=e581]: Rain 1H
+                  - generic [ref=e582]: 5.8mm
+            - generic [ref=e583]:
+              - generic [ref=e584]:
+                - generic [ref=e585]:
+                  - generic [ref=e586]: Station
+                  - generic [ref=e587]: Pune Bund Garden
+                - generic [ref=e588]:
+                  - img [ref=e590]
+                  - generic [ref=e596]: CRITICAL
+              - generic [ref=e597]:
+                - generic [ref=e598]:
+                  - generic [ref=e599]: Level
+                  - generic [ref=e600]: 15.64m
+                - generic [ref=e601]:
+                  - generic [ref=e602]: Rain 1H
+                  - generic [ref=e603]: 1.7mm
+            - generic [ref=e604]:
+              - generic [ref=e605]:
+                - generic [ref=e606]:
+                  - generic [ref=e607]: Station
+                  - generic [ref=e608]: Kurundwad
+                - generic [ref=e609]:
+                  - img [ref=e611]
+                  - generic [ref=e617]: ACTIVE
+              - generic [ref=e618]:
+                - generic [ref=e619]:
+                  - generic [ref=e620]: Level
+                  - generic [ref=e621]: 13.66m
+                - generic [ref=e622]:
+                  - generic [ref=e623]: Rain 1H
+                  - generic [ref=e624]: 12.7mm
+          - generic [ref=e625]:
+            - text: Data Source
+            - generic [ref=e626]: Fallback mode • using manual threshold context until CWC responds
+      - generic [ref=e627]:
+        - generic [ref=e628]:
+          - generic [ref=e629]:
+            - generic [ref=e630]:
+              - img [ref=e631]
+              - text: Neural Operations Graph
+            - paragraph [ref=e639]: Dense neural thread map for Maharashtra.
+          - generic [ref=e640]:
+            - generic [ref=e641]: "Preferred: LOW"
+            - generic [ref=e642]: "Confidence: 0%"
+            - generic [ref=e643]: "Latency: 1200ms"
+        - generic [ref=e644]:
+          - generic [ref=e645]:
+            - generic [ref=e646]:
+              - img [ref=e647]
+              - text: Layered_Network
+            - generic [ref=e652]: "Preferred output: LOW"
+          - generic [ref=e653]:
+            - img [ref=e656]:
+              - generic [ref=e658]: INPUT
+              - generic [ref=e659]: HIDDEN STACK
+              - generic [ref=e660]: OUTPUT
+              - generic [ref=e662]: LOW
+              - generic [ref=e664]: MOD
+              - generic [ref=e666]: SEV
+              - generic [ref=e668]: CRT
+              - generic [ref=e810]: LOW
+              - generic [ref=e815]: MOD
+              - generic [ref=e820]: SEV
+              - generic [ref=e825]: CRT
+            - generic [ref=e826]:
+              - generic [ref=e827]:
+                - generic [ref=e828]:
+                  - generic [ref=e829]: LOW
+                  - generic [ref=e830]: 72.0%
+                - img [ref=e831]
+              - generic [ref=e835]:
+                - generic [ref=e836]:
+                  - generic [ref=e837]: MODERATE
+                  - generic [ref=e838]: 24.0%
+                - img [ref=e839]
+              - generic [ref=e843]:
+                - generic [ref=e844]:
+                  - generic [ref=e845]: SEVERE
+                  - generic [ref=e846]: 12.0%
+                - img [ref=e847]
+              - generic [ref=e851]:
+                - generic [ref=e852]:
+                  - generic [ref=e853]: CRITICAL
+                  - generic [ref=e854]: 6.0%
+                - img [ref=e855]
+      - generic [ref=e859]:
+        - generic [ref=e860]:
+          - generic [ref=e862]:
+            - img [ref=e864]
+            - generic [ref=e868]:
+              - heading "State Risk Heatmap" [level=3] [ref=e869]
+              - paragraph [ref=e870]: Sector-linked hotspots for Maharashtra
+          - generic [ref=e871]: 3 active nodes
+        - generic [ref=e872]:
+          - generic [ref=e873]:
+            - generic [ref=e874]:
+              - generic [ref=e875]:
+                - generic [ref=e876]: Shirol Sector
+                - generic [ref=e877]: Maharashtra
+              - generic [ref=e878]: LOW
+            - generic [ref=e880]:
+              - generic [ref=e881]: 26%
+              - generic [ref=e882]: Risk score
+          - generic [ref=e883]:
+            - generic [ref=e884]:
+              - generic [ref=e885]:
+                - generic [ref=e886]: Irwin Bridge
+                - generic [ref=e887]: Maharashtra
+              - generic [ref=e888]: LOW
+            - generic [ref=e890]:
+              - generic [ref=e891]: 18%
+              - generic [ref=e892]: Risk score
+          - generic [ref=e893]:
+            - generic [ref=e894]:
+              - generic [ref=e895]:
+                - generic [ref=e896]: Kagal High-Ground
+                - generic [ref=e897]: Maharashtra
+              - generic [ref=e898]: LOW
+            - generic [ref=e900]:
+              - generic [ref=e901]: 12%
+              - generic [ref=e902]: Risk score
+      - generic [ref=e903]:
+        - generic [ref=e906]:
+          - heading "CWC Live Data - Maharashtra" [level=3] [ref=e907]:
+            - img [ref=e908]
+            - text: CWC Live Data - Maharashtra
+          - generic [ref=e911]:
+            - paragraph [ref=e912]: 9.58m
+            - paragraph [ref=e913]: "River: Maharashtra Primary Basin • Warning: 11.10m • Danger: 12.50m"
+            - paragraph [ref=e914]: "Source: TACTICAL_REGISTRY"
+            - paragraph [ref=e915]: "Updated: 31/03/2026, 16:06:57"
+        - generic [ref=e917]: "State: Maharashtra"
+        - generic [ref=e918]:
+          - generic [ref=e919]:
+            - generic [ref=e920]:
+              - heading "Historical Flood Logs (0)" [level=3] [ref=e921]:
+                - img [ref=e922]
+                - text: Historical Flood Logs (0)
+              - generic [ref=e926]:
+                - generic [ref=e927]: No Real Dataset
+                - generic [ref=e928]: Select row -> load CSV into input
+            - button "Export" [disabled] [ref=e929]:
+              - img [ref=e930]
+              - text: Export
+          - generic [ref=e933]: No real historical flood dataset found for Maharashtra.

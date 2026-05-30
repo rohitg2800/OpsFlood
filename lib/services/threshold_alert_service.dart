@@ -120,7 +120,8 @@ class ThresholdAlertService {
     debugPrint('[ThresholdAlertService] poll @ ${DateTime.now()}');
     final newAlerts = <ThresholdAlert>[];
 
-    for (final city in monitoredCities) {
+    // kIndiaCities replaces the old pan-India monitoredCities list.
+    for (final city in kIndiaCities) {
       try {
         final alert = await _evaluateCity(city);
         if (alert != null) newAlerts.add(alert);
@@ -158,7 +159,6 @@ class ThresholdAlertService {
   // ── Per-city evaluation (IndiaCity) ───────────────────────────────────────
 
   Future<ThresholdAlert?> _evaluateCity(IndiaCity city) async {
-    // 1. Ensure return-period thresholds are loaded for this city.
     final rp = await _ensureThresholds(
       id:  city.id,
       lat: city.lat,
@@ -166,7 +166,6 @@ class ThresholdAlertService {
     );
     if (rp == null) return null;
 
-    // 2. Fetch latest live discharge.
     final discharge = await _fetchLatestDischarge(
         GloFasUrls.discharge(city.lat, city.lon));
     if (discharge == null) return null;
@@ -174,7 +173,6 @@ class ThresholdAlertService {
     final prev = _prevValues[city.id];
     _prevValues[city.id] = discharge;
 
-    // 3. Evaluate — all values in m³/s.
     return AlertEvaluator.fromDischarge(
       cityId:           city.id,
       cityName:         city.name,
@@ -223,8 +221,6 @@ class ThresholdAlertService {
 
   // ── Return-period loader ───────────────────────────────────────────────────
 
-  /// Returns cached thresholds or fetches them from GloFAS.
-  /// Returns null if both cache and network are unavailable.
   Future<_Rp?> _ensureThresholds({
     required String id,
     required double lat,
@@ -249,7 +245,6 @@ class ThresholdAlertService {
       final daily = body['daily'] as Map<String, dynamic>?;
       if (daily == null) return null;
 
-      // Each return-period field is a 1-element list for forecast_days=1.
       double _first(String key) {
         final list = daily[key] as List?;
         if (list == null || list.isEmpty || list.first == null) return 0.0;
@@ -260,7 +255,6 @@ class ThresholdAlertService {
       final rp5  = _first('river_discharge_return_period_5');
       final rp20 = _first('river_discharge_return_period_20');
 
-      // Validate — all three must be positive and increasing.
       if (rp2 <= 0 || rp5 <= 0 || rp20 <= 0) return null;
       if (!(rp2 <= rp5 && rp5 <= rp20)) return null;
 
@@ -290,7 +284,6 @@ class ThresholdAlertService {
       if (daily == null) return null;
       final values = daily['river_discharge'] as List?;
       if (values == null || values.isEmpty) return null;
-      // Return the most recent non-null value (latest day first from the end).
       for (int i = values.length - 1; i >= 0; i--) {
         if (values[i] != null) return (values[i] as num).toDouble();
       }
@@ -351,7 +344,7 @@ class ThresholdAlertService {
       state:        alert.state,
       river:        alert.river,
       severity:     severity,
-      currentLevel: alert.currentValue,
+      currentLevel: alert.currentValue,   // fixed: ThresholdAlert has currentValue, not currentLevel
       dangerLevel:  alert.dangerLevel,
       message:      body,
     );
@@ -375,7 +368,7 @@ class ThresholdAlertService {
         'breachMargin': a.breachMargin,
         'fillPercent':  a.fillPercent,
         'timestamp':    a.timestamp.toIso8601String(),
-        'isDischarge':  true,          // always true in Option B
+        'isDischarge':  true,
         'trend':        a.trend.name,
       }).toList();
       await prefs.setString(_kPrefAlertsJson, jsonEncode(simple));
@@ -455,7 +448,6 @@ class ThresholdAlertService {
     await _saveAlertsCache();
   }
 
-  /// Force a full refresh — clears RP cache so thresholds are re-fetched.
   Future<void> refresh() async {
     _rpCache.clear();
     await _poll();

@@ -1,0 +1,25 @@
+{
+  "run_id": "20260424T163052Z",
+  "run_started_at": "2026-04-24T16:30:52.908027+00:00",
+  "target_count": 11,
+  "targets_processed": 11,
+  "raw_records_written": {
+    "weather": 11,
+    "water_level": 11
+  },
+  "cleaned_rows": {
+    "weather": 22,
+    "water_level": 66
+  },
+  "feature_rows": 11,
+  "dataset_paths": {
+    "raw_weather": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/raw/weather",
+    "raw_water_level": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/raw/water_level",
+    "cleaned_weather": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/cleaned/weather",
+    "cleaned_water_level": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/cleaned/water_level",
+    "feature_ready": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/features/weather_water",
+    "manifest": "/Users/riteshkashyap/Desktop/indoFloods/OpsFlood/data/manifest"
+  },
+  "errors": [],
+  "run_finished_at": "2026-04-24T16:30:52.926474+00:00"
+}

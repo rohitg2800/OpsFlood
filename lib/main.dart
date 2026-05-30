@@ -12,12 +12,8 @@ import 'providers/flood_providers.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/splash_screen.dart';
-import 'services/all_india_alert_engine.dart';
-import 'services/background_service.dart';
 import 'services/fcm_service.dart';
 import 'services/local_cache_service.dart';
-import 'services/offline_rule_engine.dart';
-import 'services/pipeline_service.dart';
 import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
@@ -83,49 +79,23 @@ Future<void> main() async {
     // 5. Theme
     await ThemeProvider().init();
 
-    // 6. Background services — all fire-and-forget
+    // 6. Essential services
     if (!kIsWeb) {
-      // 6a. LocalCacheService must be ready before OfflineRuleEngine starts.
+      // LocalCacheService must be ready before ThresholdAlertService starts.
       await LocalCacheService.instance.init().catchError((e) {
         if (kDebugMode) debugPrint('\u26a0\ufe0f  LocalCacheService.init failed: $e');
       });
 
       unawaited(
-        PipelineService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  PipelineService.init failed: $e');
-        }),
-      );
-      unawaited(
         FcmService.instance.init().catchError((e) {
           if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
         }),
       );
-      unawaited(
-        BackgroundService.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
-        }),
-      );
+
+      // ThresholdAlertService calls GloFAS flood API directly (no backend).
       unawaited(
         ThresholdAlertService.instance.start().catchError((e) {
           if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
-        }),
-      );
-
-      // 6b. All-India alert engine (5-min polling for all states/cities)
-      unawaited(
-        AllIndiaAlertEngine().start().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  AllIndiaAlertEngine.start failed: $e');
-        }),
-      );
-
-      // 6c. Offline rule engine — evaluates cached data even with no network.
-      //     init() sets up local notifications, then start() runs immediately
-      //     and every 5 minutes thereafter.
-      unawaited(
-        OfflineRuleEngine.instance.init().then((_) {
-          OfflineRuleEngine.instance.start();
-        }).catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  OfflineRuleEngine init/start failed: $e');
         }),
       );
     }

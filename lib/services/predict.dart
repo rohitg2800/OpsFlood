@@ -16,7 +16,7 @@ library;
 
 import 'dart:math' as math;
 
-import 'api_service.dart';
+import 'flood_api.dart';
 import 'pipeline_service.dart';
 import 'prediction_service.dart';
 
@@ -325,7 +325,7 @@ class PredictionService {
   Future<double?> _fetchLiveLevel(String? station, String state) async {
     if (station == null || station.isEmpty) return null;
     try {
-      final response = await ApiService().getAllCwcStations();
+      final response = await FloodApi.instance.cwcStations();
       final raw = response['data'];
       if (raw is! List) return null;
       final items = raw.whereType<Map<String, dynamic>>().toList();
