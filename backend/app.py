@@ -1,6 +1,9 @@
 """
-backend/app.py  —  OpsFlood FastAPI v3.1
-All routes the Flutter app calls — every endpoint mapped correctly.
+backend/app.py  —  OpsFlood FastAPI v3.2
+All routes the Flutter app calls.
+
+Run from inside the backend/ folder:
+  uvicorn app:app --reload
 """
 import random
 from datetime import datetime
@@ -9,14 +12,20 @@ from typing import Optional
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from .wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
+# Absolute import — works when run as `uvicorn app:app` from backend/
+try:
+    from wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
+except ImportError:
+    # Fallback for when run as a package (e.g. from project root)
+    from .wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
 
-app = FastAPI(title="OpsFlood API", version="3.1.0")
+app = FastAPI(title="OpsFlood API", version="3.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 import time as _time
 _cache: dict = {"data": None, "ts": 0.0}
-_TTL = 600
+_TTL = 600  # cache for 10 minutes
+
 
 async def _get_data() -> list:
     now = _time.time()
@@ -34,12 +43,14 @@ async def _get_data() -> list:
     _cache["ts"]   = now
     return data
 
-# ── Health ──────────────────────────────────────────────────────────────
+
+# ── Health ─────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "3.1.0", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "version": "3.2.0", "timestamp": datetime.utcnow().isoformat()}
 
-# ── /api/stations  (primary — covers live-levels, cwc-stations, live-telemetry) ─
+
+# ── /api/stations ────────────────────────────────────────────────────────────
 @app.get("/api/stations")
 async def get_stations(
     state:    Optional[str] = Query(None),
@@ -54,6 +65,7 @@ async def get_stations(
     if status:   data = [d for d in data if d.get("status")  == status.lower()]
     return {"status": "success", "count": len(data), "data": data}
 
+
 @app.get("/api/stations/{station_id}")
 async def get_station(station_id: str):
     data = await _get_data()
@@ -63,14 +75,16 @@ async def get_station(station_id: str):
         raise HTTPException(status_code=404, detail="Station not found")
     return {"status": "success", "data": match}
 
-# ── Aliases so old endpoint names still work ────────────────────────────────
+
+# ── Aliases (old endpoint names still work) ──────────────────────────────
 @app.get("/api/live-levels")
 @app.get("/api/live-telemetry")
 @app.get("/api/cwc-stations")
 async def live_levels_alias(state: Optional[str] = Query(None)):
     return await get_stations(state=state)
 
-# ── /api/critical-alerts ───────────────────────────────────────────────────
+
+# ── /api/critical-alerts ─────────────────────────────────────────────────
 @app.get("/api/critical-alerts")
 @app.get("/api/alerts")
 async def critical_alerts():
@@ -85,7 +99,8 @@ async def critical_alerts():
     alerts.sort(key=lambda x: x["severity"])
     return {"status": "success", "count": len(alerts), "data": alerts}
 
-# ── /api/summary ─────────────────────────────────────────────────────────────
+
+# ── /api/summary ────────────────────────────────────────────────────────────
 @app.get("/api/summary")
 async def summary():
     data = await _get_data()
@@ -95,7 +110,8 @@ async def summary():
             "warning": sum(1 for d in data if d["status"] == "warning"),
             "danger":  sum(1 for d in data if d["status"] == "danger")}
 
-# ── /api/state-severity ───────────────────────────────────────────────────
+
+# ── /api/state-severity ───────────────────────────────────────────────────────
 @app.get("/api/state-severity")
 async def state_severity():
     data = await _get_data()
@@ -112,18 +128,21 @@ async def state_severity():
         result.append({**v, "severity": sev})
     return {"status": "success", "data": result}
 
-# ── /api/rivers & /api/districts ────────────────────────────────────────
+
+# ── /api/rivers & /api/districts ──────────────────────────────────────────────
 @app.get("/api/rivers")
 async def rivers():
     data = await _get_data()
     return {"status": "success", "data": sorted(set(d["river"] for d in data))}
+
 
 @app.get("/api/districts")
 async def districts():
     data = await _get_data()
     return {"status": "success", "data": sorted(set(d["district"] for d in data))}
 
-# ── Weather (with and without /api/ prefix) ──────────────────────────────
+
+# ── Weather ─────────────────────────────────────────────────────────────────────
 @app.get("/api/weather/current")
 @app.get("/weather/current")
 async def weather_current(lat: float = 25.61, lon: float = 85.14):
@@ -136,6 +155,7 @@ async def weather_current(lat: float = 25.61, lon: float = 85.14):
         "condition":   "Partly Cloudy",
         "description": "Pre-monsoon conditions",
     }}
+
 
 @app.get("/api/weather/forecast")
 @app.get("/weather/forecast")
@@ -150,16 +170,18 @@ async def weather_forecast(lat: float = 25.61, lon: float = 85.14):
         for _ in range(7)
     ]}
 
-# ── Pipeline ──────────────────────────────────────────────────────────────
+
+# ── Pipeline ───────────────────────────────────────────────────────────────────
 @app.get("/api/pipeline/manifest")
 async def pipeline_manifest():
     data = await _get_data()
     return {"status": "success", "data": {
-        "version": "3.1",
+        "version": "3.2",
         "states":  sorted(set(d["state"] for d in data)),
         "stations": len(data),
         "last_run": datetime.utcnow().isoformat(),
     }}
+
 
 @app.get("/api/pipeline/features")
 async def pipeline_features(city: Optional[str] = Query(None)):
@@ -172,7 +194,8 @@ async def pipeline_features(city: Optional[str] = Query(None)):
         "upstream_level": round(35  + r.random() * 30, 2),
     }}
 
-# ── Model & Predict ─────────────────────────────────────────────────────
+
+# ── Model & Predict ───────────────────────────────────────────────────────────
 @app.get("/api/model-metrics")
 @app.get("/model-metrics")
 async def model_metrics():
@@ -180,6 +203,7 @@ async def model_metrics():
         "accuracy": 0.891, "precision": 0.874, "recall": 0.903, "f1": 0.888,
         "model": "XGBoost + LSTM Ensemble",
     }}
+
 
 @app.post("/api/predict")
 @app.get("/api/predict")
@@ -193,17 +217,20 @@ async def predict():
         "recommendation": "Monitor closely" if risk > 0.5 else "No immediate action needed",
     }}
 
-# ── Ingestion ─────────────────────────────────────────────────────────────
+
+# ── Ingestion (force cache clear) ─────────────────────────────────────────────
 @app.get("/api/ingestion/run")
 @app.get("/ingestion/run")
 async def ingestion_run():
     _cache["data"] = None
     return {"status": "success", "message": "Cache cleared — re-scraping on next request"}
 
-# ── Compat stubs ────────────────────────────────────────────────────────────
+
+# ── Compat stubs ────────────────────────────────────────────────────────────────
 @app.get("/api/cwc-ffs")
 @app.get("/api/cwc-ffs/station")
 async def cwc_ffs(): return {"status": "success", "data": []}
+
 
 @app.get("/api/cwc-reservoir")
 @app.get("/api/cwc-reservoir/state")
