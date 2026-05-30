@@ -1,5 +1,4 @@
 // lib/screens/predict_screen.dart
-// Fixed: AppConfig.epPredict → inline URL string
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -62,7 +61,8 @@ class _PredictScreenState extends State<PredictScreen> {
               : level.toString();
         });
       } else {
-        setState(() => _error = 'Backend returned HTTP \${res.statusCode}');
+        // fixed: was '\${res.statusCode}' — escaped dollar sign prevented interpolation
+        setState(() => _error = 'Backend returned HTTP ${res.statusCode}\n${res.body}');
       }
     } catch (e) {
       setState(() => _error = e.toString());
@@ -137,6 +137,7 @@ class _PredictScreenState extends State<PredictScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
               isError ? Icons.error_outline : Icons.check_circle_outline,
