@@ -1,5 +1,5 @@
 // lib/screens/home_screen.dart
-// OpsFlood — HomeScreen v6  (Minimal frosted nav — premium rebuild)
+// OpsFlood — HomeScreen v7  (7-tab nav: added LiveStationsScreen as 'Stations')
 library;
 
 import 'dart:ui';
@@ -10,6 +10,7 @@ import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
+import 'live_stations_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
@@ -30,12 +31,13 @@ class _HomeScreenState extends State<HomeScreen>
   late Animation<double> _glow;
 
   static const _tabs = [
-    _Tab('Dashboard', Icons.dashboard_outlined,     Icons.dashboard_rounded),
-    _Tab('Rivers',    Icons.water_outlined,          Icons.water_rounded),
-    _Tab('Alerts',    Icons.notifications_outlined,  Icons.notifications_rounded),
-    _Tab('Weather',   Icons.cloud_outlined,          Icons.cloud_rounded),
-    _Tab('Predict',   Icons.model_training_outlined, Icons.model_training_rounded),
-    _Tab('Monitor',   Icons.monitor_heart_outlined,  Icons.monitor_heart_rounded),
+    _Tab('Dashboard', Icons.dashboard_outlined,      Icons.dashboard_rounded),
+    _Tab('Rivers',    Icons.water_outlined,           Icons.water_rounded),
+    _Tab('Alerts',    Icons.notifications_outlined,   Icons.notifications_rounded),
+    _Tab('Weather',   Icons.cloud_outlined,           Icons.cloud_rounded),
+    _Tab('Predict',   Icons.model_training_outlined,  Icons.model_training_rounded),
+    _Tab('Stations',  Icons.sensors_outlined,         Icons.sensors_rounded),
+    _Tab('Monitor',   Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
   ];
 
   Widget _screen(int i) => switch (i) {
@@ -44,7 +46,8 @@ class _HomeScreenState extends State<HomeScreen>
     2 => const AlertsScreen(),
     3 => const WeatherScreen(),
     4 => const PredictScreen(),
-    5 => const MonitorsScreen(),
+    5 => const LiveStationsScreen(),
+    6 => const MonitorsScreen(),
     _ => const DashboardScreen(),
   };
 
@@ -151,7 +154,7 @@ class _NavItem extends StatelessWidget {
       children: [
         AnimatedContainer(
           duration: const Duration(milliseconds: 220),
-          width: 40, height: 28,
+          width: 36, height: 26,
           decoration: active
               ? BoxDecoration(
                   color: AppPalette.cyan.withValues(alpha: 0.08 * glowVal),
@@ -165,15 +168,15 @@ class _NavItem extends StatelessWidget {
                 )
               : null,
           child: Icon(active ? tab.activeIcon : tab.icon,
-              size: active ? 20 : 18, color: c),
+              size: active ? 18 : 16, color: c),
         ),
         const SizedBox(height: 2),
         AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 180),
           style: TextStyle(
-            fontSize: active ? 9.5 : 9,
+            fontSize: active ? 8.5 : 8,
             fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-            color: c, letterSpacing: 0.3,
+            color: c, letterSpacing: 0.2,
           ),
           child: Text(tab.label),
         ),
