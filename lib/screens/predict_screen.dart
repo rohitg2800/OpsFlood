@@ -1,72 +1,80 @@
 // lib/screens/predict_screen.dart
-// EQUINOX-BH — ML flood prediction via backend /predict endpoint.
-library;
-
+// Fixed: AppConfig.epPredict → inline URL string
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
-import '../services/ops_client.dart';
-import '../theme/river_theme.dart';
 
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
+
   @override
   State<PredictScreen> createState() => _PredictScreenState();
 }
 
 class _PredictScreenState extends State<PredictScreen> {
-  final _formKey   = GlobalKey<FormState>();
-  final _levelCtrl = TextEditingController(text: '12.5');
-  final _rainCtrl  = TextEditingController(text: '300');
+  final _formKey = GlobalKey<FormState>();
 
-  bool    _loading  = false;
+  final _peakLevelCtrl   = TextEditingController();
+  final _rainfallCtrl    = TextEditingController();
+  final _dischargeCtrl   = TextEditingController();
+  final _stateCtrl       = TextEditingController(text: 'Bihar');
+
+  bool   _loading = false;
   String? _result;
   String? _error;
+
+  @override
+  void dispose() {
+    _peakLevelCtrl.dispose();
+    _rainfallCtrl.dispose();
+    _dischargeCtrl.dispose();
+    _stateCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _predict() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _loading = true; _result = null; _error = null; });
+
+    final payload = {
+      'state':            _stateCtrl.value.text.trim(),
+      'peak_level_m':     double.parse(_peakLevelCtrl.value.text.trim()),
+      'rainfall_7d_mm':   double.parse(_rainfallCtrl.value.text.trim()),
+      'discharge_m3s':    double.tryParse(_dischargeCtrl.value.text.trim()) ?? 0.0,
+    };
+
     try {
-      final level = double.parse(_levelCtrl.text.trim());
-      final rain  = double.parse(_rainCtrl.text.trim());
-      final res   = await OpsClient.instance.post(
-        AppConfig.epPredict,
-        {
-          'peak_level_m':    level,
-          'rainfall_7d_mm':  rain,
-          'state':           'Bihar',
-        },
-      );
-      final risk = res['risk_level'] ?? res['prediction'] ?? res['severity'] ?? 'UNKNOWN';
-      setState(() { _result = risk as String; });
+      final uri = Uri.parse(AppConfig.epPredict);
+      final res = await http
+          .post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(payload))
+          .timeout(AppConfig.coldStartTimeout);
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final level = body['risk_level'] ?? body['riskLevel'] ?? 'UNKNOWN';
+        final prob  = body['probability'] ?? body['confidence'];
+        setState(() {
+          _result = prob != null
+              ? '$level  (confidence: ${(prob * 100).toStringAsFixed(1)}%)'
+              : level.toString();
+        });
+      } else {
+        setState(() => _error = 'Backend returned HTTP \${res.statusCode}');
+      }
     } catch (e) {
-      setState(() { _error = e.toString(); });
+      setState(() => _error = e.toString());
     } finally {
-      setState(() { _loading = false; });
+      setState(() => _loading = false);
     }
   }
 
   @override
-  void dispose() {
-    _levelCtrl.dispose();
-    _rainCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final resultColor = {
-      'CRITICAL': Colors.red,
-      'SEVERE':   Colors.orange,
-      'MODERATE': Colors.yellow,
-      'LOW':      Colors.green,
-    }[_result] ?? Colors.blueGrey;
-
     return Scaffold(
-      backgroundColor: AppPalette.navy0,
-      appBar: AppBar(
-        title: const Text('Flood Prediction'),
-        backgroundColor: AppPalette.navy1,
-      ),
+      appBar: AppBar(title: const Text('Flood Risk Predictor'), centerTitle: true),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
@@ -74,57 +82,46 @@ class _PredictScreenState extends State<PredictScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Enter river conditions to get an ML-powered flood risk prediction.',
-                style: TextStyle(color: Colors.white70),
-              ),
+              _Field(
+                  ctrl: _stateCtrl,
+                  label: 'State',
+                  hint: 'e.g. Bihar'),
+              const SizedBox(height: 14),
+              _Field(
+                  ctrl: _peakLevelCtrl,
+                  label: 'Peak Level (m)',
+                  hint: 'e.g. 12.5',
+                  numeric: true),
+              const SizedBox(height: 14),
+              _Field(
+                  ctrl: _rainfallCtrl,
+                  label: '7-day Rainfall (mm)',
+                  hint: 'e.g. 450',
+                  numeric: true),
+              const SizedBox(height: 14),
+              _Field(
+                  ctrl: _dischargeCtrl,
+                  label: 'Discharge (m³/s)  — optional',
+                  hint: 'e.g. 8500',
+                  numeric: true,
+                  required: false),
               const SizedBox(height: 24),
-              _field(_levelCtrl, 'Peak Water Level (m)', 'e.g. 12.5'),
-              const SizedBox(height: 16),
-              _field(_rainCtrl, '7-day Rainfall (mm)', 'e.g. 300'),
-              const SizedBox(height: 28),
               ElevatedButton.icon(
                 onPressed: _loading ? null : _predict,
                 icon: _loading
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.model_training),
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.analytics_outlined),
                 label: Text(_loading ? 'Predicting…' : 'Predict Risk'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF01696F),
                   padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
-              if (_error != null) ...
-                [
-                  const SizedBox(height: 16),
-                  Text('Error: $_error', style: const TextStyle(color: Colors.red)),
-                ],
-              if (_result != null) ...
-                [
-                  const SizedBox(height: 24),
-                  Card(
-                    color: AppPalette.navy1,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          const Text('Predicted Risk Level',
-                              style: TextStyle(color: Colors.white54, fontSize: 13)),
-                          const SizedBox(height: 12),
-                          Text(
-                            _result!,
-                            style: TextStyle(
-                              color:      resultColor,
-                              fontSize:   36,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+              if (_result != null) ..._resultCard(_result!, isError: false),
+              if (_error  != null) ..._resultCard(_error!,  isError: true),
             ],
           ),
         ),
@@ -132,25 +129,69 @@ class _PredictScreenState extends State<PredictScreen> {
     );
   }
 
-  Widget _field(TextEditingController ctrl, String label, String hint) =>
-      TextFormField(
-        controller:  ctrl,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        style: const TextStyle(color: Colors.white),
-        decoration: InputDecoration(
-          labelText:       label,
-          hintText:        hint,
-          labelStyle:      const TextStyle(color: Colors.white54),
-          hintStyle:       const TextStyle(color: Colors.white30),
-          enabledBorder:   const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-          focusedBorder:   const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF4F98A3))),
-          errorBorder:     const OutlineInputBorder(borderSide: BorderSide(color: Colors.red)),
-          focusedErrorBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.red)),
+  List<Widget> _resultCard(String text, {required bool isError}) => [
+    const SizedBox(height: 20),
+    Card(
+      color: isError ? Colors.red.shade50 : Colors.green.shade50,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline : Icons.check_circle_outline,
+              color: isError ? Colors.red : Colors.green,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                isError ? 'Error: $text' : 'Risk Level: $text',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: isError ? Colors.red.shade800 : Colors.green.shade800,
+                ),
+              ),
+            ),
+          ],
         ),
-        validator: (v) {
-          if (v == null || v.trim().isEmpty) return 'Required';
-          if (double.tryParse(v.trim()) == null) return 'Enter a number';
-          return null;
-        },
-      );
+      ),
+    ),
+  ];
+}
+
+class _Field extends StatelessWidget {
+  final TextEditingController ctrl;
+  final String  label;
+  final String  hint;
+  final bool    numeric;
+  final bool    required;
+
+  const _Field({
+    required this.ctrl,
+    required this.label,
+    required this.hint,
+    this.numeric  = false,
+    this.required = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller:  ctrl,
+      keyboardType: numeric
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : TextInputType.text,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText:  hint,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+      validator: required
+          ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null
+          : null,
+    );
+  }
 }

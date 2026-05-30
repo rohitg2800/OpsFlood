@@ -1,94 +1,96 @@
 // lib/screens/alerts_screen.dart
-// EQUINOX-BH — AlertsScreen
-library;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/flood_providers.dart';
-import '../theme/river_theme.dart';
 
-class AlertsScreen extends ConsumerStatefulWidget {
-  static const route = '/alerts';
-
+class AlertsScreen extends ConsumerWidget {
   const AlertsScreen({super.key});
 
-  @override
-  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
-}
-
-class _AlertsScreenState extends ConsumerState<AlertsScreen> {
-  static const _order = ['CRITICAL', 'SEVERE', 'MODERATE', 'LOW'];
+  /// Named route used in main.dart route table.
+  static const String route = '/alerts';
 
   @override
-  Widget build(BuildContext context) {
-    final svc    = ref.watch(realTimeProvider);
-    final levels = svc.liveLevels;
-
-    final sorted = [...levels]
-      ..sort((a, b) {
-        final ai = _order.indexOf(a.riskLevel ?? 'LOW');
-        final bi = _order.indexOf(b.riskLevel ?? 'LOW');
-        return ai.compareTo(bi);
-      });
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rt = ref.watch(realTimeServiceProvider);
+    final alerts = rt.criticalAlerts;
 
     return Scaffold(
-      backgroundColor: AppPalette.navy0,
       appBar: AppBar(
-        title: const Text('Alerts'),
-        backgroundColor: AppPalette.navy1,
-        actions: [
-          if (svc.isLoading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 18, height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-              ),
-            ),
-        ],
+        title: const Text('Flood Alerts'),
+        centerTitle: true,
       ),
-      body: sorted.isEmpty
+      body: alerts.isEmpty
           ? const Center(
-              child: Text('No active alerts', style: TextStyle(color: Colors.white54)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
+                  SizedBox(height: 16),
+                  Text(
+                    'No active alerts',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'All monitored stations are within safe levels.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: sorted.length,
+              padding: const EdgeInsets.all(16),
+              itemCount: alerts.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (_, i) {
-                final fd   = sorted[i];
-                final risk = fd.riskLevel ?? 'LOW';
-                final color = {
-                  'CRITICAL': Colors.red,
-                  'SEVERE':   Colors.orange,
-                  'MODERATE': Colors.yellow,
-                  'LOW':      Colors.green,
-                }[risk] ?? Colors.grey;
+              itemBuilder: (context, index) {
+                final alert = alerts[index] as Map<String, dynamic>;
+                final city      = alert['city']      as String? ?? 'Unknown';
+                final riskLevel = alert['riskLevel'] as String? ?? 'UNKNOWN';
+                final level     = alert['level']     as double?;
+
+                final isCritical = riskLevel == 'CRITICAL';
+                final color      = isCritical ? Colors.red : Colors.orange;
 
                 return Card(
-                  color: AppPalette.navy1,
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: color.withOpacity(0.2),
-                      child: Icon(Icons.water, color: color),
+                    leading: Icon(
+                      isCritical ? Icons.warning_amber_rounded : Icons.info_outline,
+                      color: color,
+                      size: 32,
                     ),
                     title: Text(
-                      fd.city,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      city,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
                     ),
                     subtitle: Text(
-                      '${fd.state} • ${fd.river}  |  ${fd.currentLevel.toStringAsFixed(1)} m',
-                      style: const TextStyle(color: Colors.white60),
+                      level != null
+                          ? '$riskLevel  •  ${level.toStringAsFixed(2)} m'
+                          : riskLevel,
                     ),
                     trailing: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.15),
-                        border: Border.all(color: color),
-                        borderRadius: BorderRadius.circular(6),
+                        color: color.withAlpha(30),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: color, width: 1),
                       ),
-                      child: Text(risk,
-                          style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+                      child: Text(
+                        riskLevel,
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                   ),
                 );
