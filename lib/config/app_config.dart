@@ -43,7 +43,8 @@ class AppConfig {
   );
 
   // ── Timeouts ──────────────────────────────────────────────────────────────────
-  static const Duration requestTimeout   = Duration(seconds: 65);
+  // requestTimeout must be ≤60s (test: 5–60s) and strictly < coldStartTimeout.
+  static const Duration requestTimeout   = Duration(seconds: 30);
   static const Duration healthTimeout    = Duration(seconds: 10);
   static const Duration coldStartTimeout = Duration(seconds: 65);
 

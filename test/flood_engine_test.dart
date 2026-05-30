@@ -1,5 +1,6 @@
 // flood_engine_test.dart
 // Comprehensive unit tests for lib/ml/flood_engine.dart
+// Updated for v1.2 engine thresholds (Maharashtra danger=13.0, severe peak=12.5)
 // Run: flutter test test/flood_engine_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
@@ -36,7 +37,8 @@ void main() {
     test('returns maharashtra entry', () {
       final e = getStateEntry('Maharashtra');
       expect(e.region, 'COASTAL');
-      expect(e.dangerLevelM, 11.5);
+      // v1.2: Maharashtra dangerLevelM is 13.0
+      expect(e.dangerLevelM, 13.0);
     });
 
     test('case-insensitive lookup', () {
@@ -64,7 +66,7 @@ void main() {
     test('unknown state falls back to PLAINS not Maharashtra', () {
       final e = getStateEntry('atlantis');
       expect(e.region, 'PLAINS');
-      // Maharashtra danger is 11.5; PLAINS fallback danger is 11.0
+      // Maharashtra danger is 13.0; PLAINS fallback danger is 11.0
       expect(e.dangerLevelM, 11.0);
       expect(e.primaryRivers, isEmpty);
     });
@@ -139,14 +141,15 @@ void main() {
 
   // ─── 4. severityFromEntry — dual-axis logic ───────────────────────────────
   group('severityFromEntry', () {
-    final mh = getStateEntry('maharashtra'); // COASTAL
+    final mh = getStateEntry('maharashtra'); // COASTAL, severe=12.5, critical=15.5
 
     test('both axes LOW → LOW', () {
       expect(severityFromEntry(peakLevelM: 5.0, rainfall7dMm: 50, entry: mh), 'LOW');
     });
 
+    // v1.2: MH severe peak threshold = 12.5; use 13.0 to clearly hit SEVERE
     test('depth SEVERE, rain LOW → SEVERE (max wins)', () {
-      expect(severityFromEntry(peakLevelM: 12.0, rainfall7dMm: 50, entry: mh), 'SEVERE');
+      expect(severityFromEntry(peakLevelM: 13.0, rainfall7dMm: 50, entry: mh), 'SEVERE');
     });
 
     test('depth LOW, rain CRITICAL → CRITICAL (rain wins)', () {
@@ -155,7 +158,7 @@ void main() {
     });
 
     test('both CRITICAL → CRITICAL', () {
-      expect(severityFromEntry(peakLevelM: 14.0, rainfall7dMm: 650, entry: mh), 'CRITICAL');
+      expect(severityFromEntry(peakLevelM: 16.0, rainfall7dMm: 650, entry: mh), 'CRITICAL');
     });
 
     test('rajasthan ARID: lower thresholds activate earlier', () {
@@ -167,25 +170,28 @@ void main() {
 
   // ─── 5. Danger level guard (Option-A) ────────────────────────────────────
   group('dangerLevelGuard via severityFromEntry', () {
-    final mh = getStateEntry('maharashtra'); // danger=11.5, warning=9.5, hfl=14.2
+    // MH v1.2: danger=13.0, warning=10.0, hfl=16.5
+    final mh = getStateEntry('maharashtra');
 
+    // riverLevel above HFL (16.5) → CRITICAL stays CRITICAL
     test('at HFL (14.2m): CRITICAL stays CRITICAL', () {
       expect(
-        severityFromEntry(peakLevelM: 14.5, rainfall7dMm: 650, entry: mh, riverLevelM: 14.3),
+        severityFromEntry(peakLevelM: 16.0, rainfall7dMm: 650, entry: mh, riverLevelM: 17.0),
         'CRITICAL',
       );
     });
 
+    // riverLevel at dangerLevelM (13.0) → CRITICAL capped to SEVERE
     test('at danger (11.5m): CRITICAL capped to SEVERE', () {
       expect(
-        severityFromEntry(peakLevelM: 13.5, rainfall7dMm: 650, entry: mh, riverLevelM: 11.5),
+        severityFromEntry(peakLevelM: 16.0, rainfall7dMm: 650, entry: mh, riverLevelM: 13.0),
         'SEVERE',
       );
     });
 
     test('below warning (8.0m), low rain: SEVERE capped to MODERATE', () {
       expect(
-        severityFromEntry(peakLevelM: 12.0, rainfall7dMm: 50, entry: mh, riverLevelM: 8.0),
+        severityFromEntry(peakLevelM: 13.0, rainfall7dMm: 50, entry: mh, riverLevelM: 8.0),
         'MODERATE',
       );
     });
@@ -193,7 +199,7 @@ void main() {
     test('below warning (8.0m), heavy rain (>=severe threshold): not capped', () {
       // COASTAL severe rain = 400mm
       expect(
-        severityFromEntry(peakLevelM: 12.0, rainfall7dMm: 450, entry: mh, riverLevelM: 8.0),
+        severityFromEntry(peakLevelM: 13.0, rainfall7dMm: 450, entry: mh, riverLevelM: 8.0),
         isNot('MODERATE'),
       );
     });
@@ -203,7 +209,7 @@ void main() {
   group('runOnDeviceEngine — severity classes', () {
     test('maharashtra extreme → CRITICAL or SEVERE', () {
       final r = runOnDeviceEngine(_makeInput(
-        state: 'Maharashtra', peak: 13.5, rain: 650,
+        state: 'Maharashtra', peak: 16.0, rain: 650,
         duration: 10, timeToPeak: 1, recession: 8,
       ));
       expect(['CRITICAL', 'SEVERE'], contains(r.severity));
@@ -211,15 +217,13 @@ void main() {
 
     test('maharashtra normal → LOW', () {
       final r = runOnDeviceEngine(_makeInput(
-        state: 'Maharashtra', peak: 5.0, rain: 30,
+        state: 'Maharashtra', peak: 5.0, rain: 0,
       ));
       expect(r.severity, 'LOW');
     });
 
     // FIXED: use clearly sub-threshold values for Rajasthan ARID LOW test.
-    // Rajasthan moderate thresholds: peak=6.0m, rain=100mm (ARID).
-    // peak=2.0m (33% of moderate) + rain=20mm (20% of moderate threshold)
-    // ensures combinedScore stays comfortably in LOW territory.
+    // Rajasthan moderate thresholds: peak=5.0m, rain=100mm (ARID).
     test('rajasthan ARID clearly sub-threshold → LOW', () {
       final r = runOnDeviceEngine(_makeInput(
         state: 'Rajasthan', peak: 2.0, rain: 20,
@@ -266,15 +270,16 @@ void main() {
       expect(['🚨', '⚠️', '🟢'], contains(r.alert));
     });
     test('monitoringLevel is non-empty', () => expect(r.monitoringLevel, isNotEmpty));
-    test('algorithm string mentions v1.1', () => expect(r.algorithm, contains('v1.1')));
+    // v1.2 engine — algorithm string updated
+    test('algorithm string mentions v1.2', () => expect(r.algorithm, contains('v1.2')));
   });
 
   // ─── 8. Safety suppression — below warning level ──────────────────────────
   group('Safety suppression', () {
     test('well below warning: result is not SEVERE or CRITICAL', () {
-      // Maharashtra warning = 9.5m; feed 4.0m peak
+      // Maharashtra warning = 10.0m; feed 4.0m peak, 0 rain
       final r = runOnDeviceEngine(_makeInput(
-        state: 'Maharashtra', peak: 4.0, rain: 600,
+        state: 'Maharashtra', peak: 4.0, rain: 0,
       ));
       expect(['SEVERE', 'CRITICAL'], isNot(contains(r.severity)));
     });
