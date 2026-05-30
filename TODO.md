@@ -55,8 +55,13 @@
 - `_sorted` uses `priorityOrder`; city chips + trend chart use `priorityColor`.
 - No inline colour switch blocks anywhere in the file.
 
+### ✅ HomeScreen nav — DONE
+- `LiveStationsScreen` added as tab 5 ('Stations', sensors icon).
+- `MonitorsScreen` retained as tab 6 ('Monitor').
+- Icon + label sizes tightened (icon 16/18px, label 8/8.5px) for 7-tab fit.
+- Nav now: Dashboard • Rivers • Alerts • Weather • Predict • Stations • Monitor
+
 ---
 
 ## Remaining
 - [ ] Step 3–5 above: run backend tests → retrain → manual verify.
-- [ ] Wire `LiveStationsScreen` into `home_screen.dart` nav if not already present.
