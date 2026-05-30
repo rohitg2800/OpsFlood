@@ -143,6 +143,12 @@ class FloodData {
   final DateTime? expectedPeakTime;
   final double? expectedPeakLevel;
 
+  // Backend prediction metadata
+  final int? riskScore;
+  final double? confidencePercent;
+  final String? monitoringLevel;
+  final String? monitoringAction;
+
   // ── IMD enrichment fields (Pass 4) ─────────────────────────────────
   // imdRainfallMm: authoritative 24-hr IMD rainfall for this city's district.
   //   When present, flood_engine.dart should prefer this over any backend
@@ -170,6 +176,10 @@ class FloodData {
     this.rainfall24h,
     this.expectedPeakTime,
     this.expectedPeakLevel,
+    this.riskScore,
+    this.confidencePercent,
+    this.monitoringLevel,
+    this.monitoringAction,
     this.imdRainfallMm,
     this.imdSeverity,
   });
@@ -183,6 +193,24 @@ class FloodData {
 
   bool get isCritical => capacityPercent >= AppConstants.criticalThreshold;
   bool get isHigh => capacityPercent >= AppConstants.highThreshold;
+
+  /// UI-derived priority tier for chips/badges/list emphasis.
+  String get priorityTier => switch (riskLevel.toUpperCase()) {
+    'CRITICAL' => 'P1',
+    'SEVERE' => 'P1',
+    'HIGH' => 'P2',
+    'MODERATE' => 'P3',
+    _ => 'P4',
+  };
+
+  /// UI-derived semantic color token name.
+  String get priorityColor => switch (riskLevel.toUpperCase()) {
+    'CRITICAL' => 'red',
+    'SEVERE' => 'red',
+    'HIGH' => 'orange',
+    'MODERATE' => 'yellow',
+    _ => 'green',
+  };
 
   /// Whether this data point has been enriched with authoritative IMD data.
   bool get hasImdData => imdRainfallMm != null && imdRainfallMm! > 0;
@@ -209,11 +237,15 @@ class FloodData {
     String? status,
     DateTime? expectedPeakTime,
     double? expectedPeakLevel,
+    int? riskScore,
+    double? confidencePercent,
+    String? monitoringLevel,
+    String? monitoringAction,
     double? imdRainfallMm,
     String? imdSeverity,
   }) {
     return FloodData(
-      id:                id              ?? this.id,
+      id:                id               ?? this.id,
       city:              city             ?? this.city,
       state:             state            ?? this.state,
       latitude:          latitude         ?? this.latitude,
@@ -229,7 +261,11 @@ class FloodData {
       rainfall24h:       rainfall24h      ?? this.rainfall24h,
       status:            status           ?? this.status,
       expectedPeakTime:  expectedPeakTime ?? this.expectedPeakTime,
-      expectedPeakLevel: expectedPeakLevel?? this.expectedPeakLevel,
+      expectedPeakLevel: expectedPeakLevel ?? this.expectedPeakLevel,
+      riskScore:         riskScore        ?? this.riskScore,
+      confidencePercent: confidencePercent ?? this.confidencePercent,
+      monitoringLevel:   monitoringLevel  ?? this.monitoringLevel,
+      monitoringAction:  monitoringAction ?? this.monitoringAction,
       imdRainfallMm:     imdRainfallMm    ?? this.imdRainfallMm,
       imdSeverity:       imdSeverity      ?? this.imdSeverity,
     );
@@ -241,6 +277,14 @@ class FloodData {
     return fallback;
   }
 
+  static int? _asIntOrNull(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
   static DateTime _asDateTime(dynamic value) {
     if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
     return DateTime.now();
@@ -249,6 +293,7 @@ class FloodData {
   static String _normalizeRisk(String? raw, double capacityPercent) {
     final value = (raw ?? '').trim().toUpperCase();
     if (AppConstants.riskColors.containsKey(value)) return value;
+    if (value == 'SEVERE') return 'CRITICAL';
     if (capacityPercent >= AppConstants.criticalThreshold) return 'CRITICAL';
     if (capacityPercent >= AppConstants.highThreshold) return 'HIGH';
     if (capacityPercent >= AppConstants.moderateThreshold) return 'MODERATE';
@@ -301,6 +346,12 @@ class FloodData {
       expectedPeakLevel: json['expected_peak_level'] == null
           ? null
           : _asDouble(json['expected_peak_level'], 0),
+      riskScore: _asIntOrNull(json['risk_score']),
+      confidencePercent: json['confidence_percent'] == null
+          ? null
+          : _asDouble(json['confidence_percent'], 0),
+      monitoringLevel: (json['monitoring_level'] ?? json['monitoring']?['level'])?.toString(),
+      monitoringAction: (json['monitoring_action'] ?? json['monitoring']?['action'])?.toString(),
       // IMD fields: only present after Pass 4 enrichment (null safe)
       imdRainfallMm: json['imd_rainfall_mm'] == null
           ? null
@@ -341,6 +392,10 @@ class FloodData {
       flowRate:     null,
       rainfall24h:  null,
       status:       'Estimated',
+      riskScore:    null,
+      confidencePercent: null,
+      monitoringLevel: null,
+      monitoringAction: null,
       // IMD fields not available at fallback construction time;
       // enriched later by RealTimeService._enrichWithImd()
       imdRainfallMm: null,
@@ -373,6 +428,12 @@ class FloodData {
         'status':               status,
         'expected_peak_time':   expectedPeakTime?.toIso8601String(),
         'expected_peak_level':  expectedPeakLevel,
+        'risk_score':           riskScore,
+        'confidence_percent':   confidencePercent,
+        'monitoring_level':     monitoringLevel,
+        'monitoring_action':    monitoringAction,
+        'priority_tier':        priorityTier,
+        'priority_color':       priorityColor,
         // IMD fields — null if not yet enriched
         'imd_rainfall_mm':      imdRainfallMm,
         'imd_severity':         imdSeverity,
