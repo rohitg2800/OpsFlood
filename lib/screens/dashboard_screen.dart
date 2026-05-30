@@ -1,5 +1,13 @@
 // lib/screens/dashboard_screen.dart
-// OpsFlood — DashboardScreen v16 (compile-fixed)
+// OpsFlood — DashboardScreen v15 (Abyss Ops premium rebuild)
+// ─────────────────────────────────────────────────────────────────────────────
+// Layout:
+//   1. AppBar strip          — logo + live pill + refresh
+//   2. KPI row               — 4 PremiumStatCards in horizontal scroll
+//   3. National risk OpsBarChart — top 8 cities by capacity
+//   4. River trend OpsAreaChart  — selected city level history
+//   5. CWC station row       — compact shimmer cards
+//   6. State risk heatmap    — inline
 library;
 
 import 'dart:math' as math;
@@ -55,21 +63,18 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  // ── Data helpers ────────────────────────────────────────────────────
+  // ── Data helpers ───────────────────────────────────────────────────────────
   List<FloodData> get _sorted {
-    // liveLevels is the correct getter on RealTimeService
     final list = List<FloodData>.from(_service.liveLevels);
     list.sort((a, b) => b.capacityPercent.compareTo(a.capacityPercent));
     return list;
   }
 
-  int get _criticalCount => _sorted
-      .where((d) => d.capacityPercent >= 70)
-      .length;
+  int get _criticalCount =>
+      _sorted.where((d) => d.capacityPercent >= 85).length;
 
-  int get _alertCount => _sorted
-      .where((d) => d.capacityPercent >= 45)
-      .length;
+  int get _alertCount =>
+      _sorted.where((d) => d.capacityPercent >= 45).length;
 
   FloodData? get _selectedData {
     if (_selectedCity == null) return null;
@@ -80,37 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  // Build RiskHeatmapEntry list from FloodData list
-  List<RiskHeatmapEntry> _buildHeatmapEntries(List<FloodData> data) {
-    final map = <String, Map<String, int>>{};
-    for (final d in data) {
-      map.putIfAbsent(d.state, () => {});
-      map[d.state]![d.riskLevel] =
-          (map[d.state]![d.riskLevel] ?? 0) + 1;
-    }
-    final entries = <RiskHeatmapEntry>[];
-    map.forEach((state, levels) {
-      // Pick worst risk level for the state
-      const order = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'];
-      String worst = 'LOW';
-      int count = 0;
-      levels.forEach((lvl, cnt) {
-        count += cnt;
-        if (order.indexOf(lvl) > order.indexOf(worst)) worst = lvl;
-      });
-      entries.add(RiskHeatmapEntry(
-        state: state,
-        level: worst == 'LOW'      ? 'SAFE'
-             : worst == 'MODERATE' ? 'WARNING'
-             : worst == 'HIGH'     ? 'DANGER'
-             :                       'CRITICAL',
-        count: count,
-      ));
-    });
-    entries.sort((a, b) => a.state.compareTo(b.state));
-    return entries;
-  }
-
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final data = _sorted;
@@ -127,14 +102,15 @@ class _DashboardScreenState extends State<DashboardScreen>
               if (data.isNotEmpty) ...[
                 SliverToBoxAdapter(child: _sectionTitle(
                   'National Risk Overview',
-                  sub: 'Top cities by composite flood risk score',
+                  sub: 'Top cities by flood capacity',
                   icon: Icons.bar_chart_rounded,
                   color: AppPalette.amber,
                 )),
                 SliverToBoxAdapter(child: _nationalBarChart(data)),
                 SliverToBoxAdapter(child: _sectionTitle(
                   'River Level Trend',
-                  sub: _selectedCity ?? (data.isNotEmpty ? data.first.city : 'Select city'),
+                  sub: _selectedCity ??
+                      (data.isNotEmpty ? data.first.city : 'Select city'),
                   icon: Icons.show_chart_rounded,
                   color: AppPalette.cyan,
                 )),
@@ -160,7 +136,39 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ── Header ────────────────────────────────────────────────────────────
+  // ── Heatmap entry builder ──────────────────────────────────────────────────
+  List<RiskHeatmapEntry> _buildHeatmapEntries(List<FloodData> data) {
+    final stateMap = <String, Map<String, int>>{};
+    for (final d in data) {
+      stateMap.putIfAbsent(d.state, () => {});
+      final level = _capacityToLevel(d.capacityPercent);
+      stateMap[d.state]![level] = (stateMap[d.state]![level] ?? 0) + 1;
+    }
+    final entries = <RiskHeatmapEntry>[];
+    stateMap.forEach((state, levelMap) {
+      final dominant = levelMap.entries
+          .reduce((a, b) => a.value >= b.value ? a : b);
+      entries.add(RiskHeatmapEntry(
+        state: state,
+        level: dominant.key,
+        count: levelMap.values.fold(0, (s, v) => s + v),
+      ));
+    });
+    entries.sort((a, b) {
+      const order = ['CRITICAL', 'DANGER', 'WARNING', 'SAFE'];
+      return order.indexOf(a.level).compareTo(order.indexOf(b.level));
+    });
+    return entries;
+  }
+
+  String _capacityToLevel(double pct) {
+    if (pct >= 85) return 'CRITICAL';
+    if (pct >= 60) return 'DANGER';
+    if (pct >= 35) return 'WARNING';
+    return 'SAFE';
+  }
+
+  // ── Header ─────────────────────────────────────────────────────────────────
   Widget _header() => Container(
     padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
     decoration: BoxDecoration(
@@ -213,9 +221,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ShaderMask(
-                // cyanBright does not exist — use textWhite → cyan gradient
                 shaderCallback: (b) => const LinearGradient(
-                  colors: [AppPalette.textWhite, AppPalette.cyan],
+                  colors: [AppPalette.cyan, AppPalette.cyanDark],
                 ).createShader(b),
                 child: const Text(
                   'OpsFlood',
@@ -236,6 +243,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ],
           ),
         ),
+        // Live pill
         AnimatedBuilder(
           animation: _pulseAnim,
           builder: (_, __) => Container(
@@ -277,7 +285,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         GestureDetector(
           onTap: () {
             HapticFeedback.lightImpact();
-            // refreshData() is the correct method name
             _service.refreshData();
           },
           child: Container(
@@ -285,8 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             decoration: BoxDecoration(
               color: AppPalette.abyss2,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: AppPalette.abyssStroke),
+              border: Border.all(color: AppPalette.abyssStroke),
             ),
             child: const Icon(Icons.refresh_rounded,
                 color: AppPalette.textGrey, size: 18),
@@ -296,13 +302,14 @@ class _DashboardScreenState extends State<DashboardScreen>
     ),
   );
 
-  // ── KPI Row ────────────────────────────────────────────────────────────
+  // ── KPI Row ────────────────────────────────────────────────────────────────
   Widget _kpiRow(List<FloodData> data) {
     final critical  = _criticalCount;
     final alerting  = _alertCount;
     final monitored = data.length;
-    final avgRisk   = monitored > 0
-        ? data.map((d) => d.capacityPercent).reduce((a, b) => a + b) / monitored
+    final avgCap    = monitored > 0
+        ? data.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
+            monitored
         : 0.0;
 
     return SingleChildScrollView(
@@ -313,20 +320,20 @@ class _DashboardScreenState extends State<DashboardScreen>
           SizedBox(
             width: 130,
             child: PremiumStatCard(
-              label: 'CRITICAL',         // was sub:
-              value: '$critical',
-              icon: Icons.crisis_alert_rounded,
-              color: critical > 0 ? AppPalette.critical : AppPalette.safe,
-              isAlert: critical > 0,    // was pulse:
+              icon:    Icons.crisis_alert_rounded,
+              value:   '$critical',
+              label:   'CRITICAL',
+              color:   critical > 0 ? AppPalette.critical : AppPalette.safe,
+              isAlert: critical > 0,
             ),
           ),
           const SizedBox(width: 10),
           SizedBox(
             width: 130,
             child: PremiumStatCard(
-              label: 'ALERTING',
+              icon:  Icons.warning_amber_rounded,
               value: '$alerting',
-              icon: Icons.warning_amber_rounded,
+              label: 'ALERTING',
               color: alerting > 0 ? AppPalette.warning : AppPalette.textGrey,
             ),
           ),
@@ -334,10 +341,10 @@ class _DashboardScreenState extends State<DashboardScreen>
           SizedBox(
             width: 130,
             child: PremiumStatCard(
-              label: 'MONITORED',
-              value: '$monitored',
-              icon: Icons.sensors_rounded,
-              color: AppPalette.cyan,
+              icon:    Icons.sensors_rounded,
+              value:   '$monitored',
+              label:   'MONITORED',
+              color:   AppPalette.cyan,
               isAlert: true,
             ),
           ),
@@ -345,9 +352,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           SizedBox(
             width: 130,
             child: PremiumStatCard(
-              label: 'AVG RISK',
-              value: avgRisk.toStringAsFixed(0),
-              icon: Icons.analytics_rounded,
+              icon:  Icons.analytics_rounded,
+              value: avgCap.toStringAsFixed(0),
+              label: 'AVG CAPACITY',
               color: AppPalette.amber,
             ),
           ),
@@ -356,7 +363,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ── Section Title ──────────────────────────────────────────────────────
+  // ── Section Title ──────────────────────────────────────────────────────────
   Widget _sectionTitle(String title, {
     String? sub,
     required IconData icon,
@@ -406,7 +413,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       );
 
-  // ── National bar chart ──────────────────────────────────────────────────
+  // ── National bar chart ─────────────────────────────────────────────────────
   Widget _nationalBarChart(List<FloodData> data) {
     final top = data.take(8).toList();
     return Container(
@@ -417,36 +424,38 @@ class _DashboardScreenState extends State<DashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           OpsBarChart(
-            // cast to List<double> so type is unambiguous
-            values: top.map((d) => d.capacityPercent.clamp(0.0, 100.0)).toList().cast<double>(),
-            labels: top.map((d) => d.city).toList(),
-            maxY:   100,
-            yUnit:  '',
+            values:   top
+                .map((d) => d.capacityPercent.clamp(0.0, 100.0))
+                .toList(),
+            labels:   top.map((d) => d.city).toList(),
+            maxY:     100,
+            yUnit:    '%',
             barWidth: 18,
-            height: 160,
+            height:   160,
           ),
           const SizedBox(height: 4),
           Row(children: [
-            _legendDot(AppPalette.safe,     'Safe (<25)'),
+            _legendDot(AppPalette.safe,     'Safe (<35)'),
             const SizedBox(width: 12),
-            _legendDot(AppPalette.warning,  'Alert (25-45)'),
+            _legendDot(AppPalette.warning,  'Alert (35-60)'),
             const SizedBox(width: 12),
-            _legendDot(AppPalette.danger,   'High (45-70)'),
+            _legendDot(AppPalette.danger,   'High (60-85)'),
             const SizedBox(width: 12),
-            _legendDot(AppPalette.critical, 'Critical (≥70)'),
+            _legendDot(AppPalette.critical, 'Critical (≥85)'),
           ]),
         ],
       ),
     );
   }
 
-  // ── River trend area chart ────────────────────────────────────────────────
+  // ── River trend area chart ─────────────────────────────────────────────────
   Widget _riverTrendChart(List<FloodData> data) {
-    final selected = _selectedData ?? (data.isNotEmpty ? data.first : null);
+    final selected =
+        _selectedData ?? (data.isNotEmpty ? data.first : null);
     if (selected == null) return const SizedBox.shrink();
 
-    // levelHistory does not exist on FloodData — use trendForCity from service
-    final history = _service.trendForCity(selected.city);
+    final snapshots = _service.trendForCity(selected.city);
+    final history   = snapshots.map((s) => s.level).toList();
 
     if (history.isEmpty) {
       return Container(
@@ -464,7 +473,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     }
 
-    final statusColor = _riskColor(selected.capacityPercent);
+    final statusColor = _riskColor(selected.riskLevel);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
@@ -485,7 +494,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
             const SizedBox(width: 8),
             _statusChip(
-              '${selected.capacityPercent.toStringAsFixed(0)} / 100',
+              '${selected.capacityPercent.toStringAsFixed(0)}%',
               statusColor,
             ),
             const Spacer(),
@@ -499,10 +508,10 @@ class _DashboardScreenState extends State<DashboardScreen>
           ]),
           const SizedBox(height: 12),
           OpsAreaChart(
-            values:    history.map((h) => h.level).toList(),
-            labels:    history.asMap().entries
+            values:   history,
+            labels:   snapshots.asMap().entries
                 .map((e) => e.key % 4 == 0
-                    ? _shortTime(h: history[e.key])
+                    ? _shortTime(snapshots[e.key].timestamp)
                     : '')
                 .toList(),
             lineColor: statusColor,
@@ -515,10 +524,15 @@ class _DashboardScreenState extends State<DashboardScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _mini('Warning', '${selected.warningLevel.toStringAsFixed(1)} m', AppPalette.amber),
-              _mini('Danger',  '${selected.dangerLevel.toStringAsFixed(1)} m', AppPalette.critical),
-              // hfl does not exist — show safeLevel instead
-              _mini('Safe',    '${selected.safeLevel.toStringAsFixed(1)} m', AppPalette.textGrey),
+              _mini('Warning',
+                  '${selected.warningLevel.toStringAsFixed(1)} m',
+                  AppPalette.amber),
+              _mini('Danger',
+                  '${selected.dangerLevel.toStringAsFixed(1)} m',
+                  AppPalette.critical),
+              _mini('Safe',
+                  '${selected.safeLevel.toStringAsFixed(1)} m',
+                  AppPalette.textGrey),
             ],
           ),
         ],
@@ -526,7 +540,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ── City selector chips ──────────────────────────────────────────────────
+  // ── City selector chips ────────────────────────────────────────────────────
   Widget _citySelector(List<FloodData> data) {
     if (data.isEmpty) return const SizedBox.shrink();
     final top = data.take(10).toList();
@@ -536,7 +550,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Row(
         children: top.map((d) {
           final active = (_selectedCity ?? top.first.city) == d.city;
-          final color  = _riskColor(d.capacityPercent);
+          final color  = _riskColor(d.riskLevel);
           return GestureDetector(
             onTap: () => setState(() => _selectedCity = d.city),
             child: AnimatedContainer(
@@ -555,7 +569,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                       : AppPalette.abyssStroke,
                   width: active ? 1.5 : 1,
                 ),
-                // singular boxShadow
                 boxShadow: active
                     ? [
                         BoxShadow(
@@ -583,7 +596,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   d.city,
                   style: TextStyle(
                     fontSize: 11,
-                    fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+                    fontWeight:
+                        active ? FontWeight.w800 : FontWeight.w500,
                     color: active ? color : AppPalette.textGrey,
                   ),
                 ),
@@ -595,7 +609,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ── Empty state ───────────────────────────────────────────────────────────
+  // ── Empty state ────────────────────────────────────────────────────────────
   Widget _emptyState() => SizedBox(
     height: 300,
     child: Center(
@@ -630,7 +644,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     ),
   );
 
-  // ── Atoms ────────────────────────────────────────────────────────────────
+  // ── Atoms ──────────────────────────────────────────────────────────────────
   Widget _mini(String label, String val, Color c) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -660,7 +674,8 @@ class _DashboardScreenState extends State<DashboardScreen>
           decoration: BoxDecoration(
             shape: BoxShape.circle, color: c,
             boxShadow: [
-              BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 4)
+              BoxShadow(
+                  color: c.withValues(alpha: 0.5), blurRadius: 4)
             ],
           ),
         ),
@@ -670,20 +685,18 @@ class _DashboardScreenState extends State<DashboardScreen>
               fontSize: 9, color: AppPalette.textGrey)),
       ]);
 
-  Color _riskColor(double score) {
-    if (score >= 70) return AppPalette.critical;
-    if (score >= 45) return AppPalette.danger;
-    if (score >= 25) return AppPalette.warning;
-    return AppPalette.safe;
+  Color _riskColor(String level) {
+    switch (level.toUpperCase()) {
+      case 'CRITICAL': return AppPalette.critical;
+      case 'HIGH':     return AppPalette.danger;
+      case 'MODERATE': return AppPalette.warning;
+      default:         return AppPalette.safe;
+    }
   }
 
-  String _shortTime({required dynamic h}) {
+  String _shortTime(DateTime ts) {
     try {
-      final ts = h.timestamp as String?;
-      if (ts == null) return '';
-      final dt = DateTime.tryParse(ts);
-      if (dt == null) return '';
-      return DateFormat('HH:mm').format(dt.toLocal());
+      return DateFormat('HH:mm').format(ts.toLocal());
     } catch (_) {
       return '';
     }

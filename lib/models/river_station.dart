@@ -1,7 +1,12 @@
 // lib/models/river_station.dart
 // Extended model — carries both static CWC thresholds AND live API fields.
-// FIXED: copyWith now accepts warning/danger/hfl overrides so live API
-//        thresholds can replace static seed values.
+// FIXED: export directive moved to top; copyWith now accepts warning/danger/hfl overrides.
+
+// ── Convenience extension on LiveRiverResult ──────────────────────────────────
+// These getters delegate to the embedded RiverStation so call-sites that
+// reference  result.currentLevel  and  result.trend  compile without change.
+// Import real_time_river_service.dart to get LiveRiverResult.
+export 'live_river_result_ext.dart';
 
 class RiverStation {
   final String city;

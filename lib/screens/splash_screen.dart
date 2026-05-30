@@ -1,5 +1,5 @@
 // lib/screens/splash_screen.dart
-// OpsFlood — SplashScreen v5  (Abyss Ops — cyan accent, minimal grid)
+// OpsFlood — SplashScreen v6  (Deep Space — ultra-minimal premium)
 library;
 
 import 'dart:async';
@@ -7,9 +7,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../config/app_config.dart';
 import '../providers/flood_providers.dart';
-import '../services/ops_client.dart';
+import '../services/api_service.dart';
 import '../theme/river_theme.dart';
 import 'home_screen.dart';
 
@@ -21,254 +20,143 @@ class SplashScreen extends ConsumerStatefulWidget {
 
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
-  // ── Controllers ──────────────────────────────────────────────────────────
-  late AnimationController _entranceCtrl;
+  final ApiService _apiService = ApiService();
+
+  late AnimationController _ringCtrl;
+  late AnimationController _fadeCtrl;
+  late Animation<double>   _ringRot;
+  late Animation<double>   _logoFade;
   late Animation<double>   _logoScale;
-  late Animation<double>   _logoOpacity;
-  late Animation<double>   _titleOpacity;
-  late Animation<Offset>   _titleSlide;
+  late Animation<double>   _textFade;
+  late Animation<Offset>   _textSlide;
+  late Animation<double>   _barProgress;
 
-  late AnimationController _pulseCtrl;
-  late Animation<double>   _pulseScale;
-  late Animation<double>   _pulseOpacity;
-
-  late AnimationController _sweepCtrl;
-  late Animation<double>   _sweepPos;
-
-  late AnimationController _statusCtrl;
-  late Animation<double>   _statusOpacity;
-
-  late AnimationController _dotCtrl;
-  int _dotFrame = 0;
-
-  String _statusText    = 'Initializing...';
-  bool   _backendOnline = false;
-
-  static const _statusMessages = [
-    'Connecting to backend',
-    'Loading flood data',
-    'Syncing river sensors',
-    'Almost ready',
-  ];
-  int    _msgIndex = 0;
+  String _status = 'Initializing system…';
+  bool   _online = false;
   Timer? _msgTimer;
+  int    _msgIdx = 0;
+
+  static const _msgs = [
+    'Connecting to backend…',
+    'Loading river data…',
+    'Syncing flood sensors…',
+    'Almost ready…',
+  ];
 
   @override
   void initState() {
     super.initState();
 
-    _entranceCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1400));
-    _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
-        CurvedAnimation(parent: _entranceCtrl, curve: Curves.elasticOut));
-    _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: _entranceCtrl,
-            curve: const Interval(0.0, 0.4)));
-    _titleOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: _entranceCtrl,
-            curve: const Interval(0.4, 0.8)));
-    _titleSlide = Tween<Offset>(
-            begin: const Offset(0, 0.4), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _entranceCtrl,
-            curve: const Interval(0.4, 0.9, curve: Curves.easeOutCubic)));
-
-    _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1800))
-      ..repeat(reverse: true);
-    _pulseScale   = Tween<double>(begin: 1.0, end: 1.55).animate(
-        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _pulseOpacity = Tween<double>(begin: 0.4, end: 0.0).animate(
-        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeIn));
-
-    _sweepCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1100));
-    _sweepPos = Tween<double>(begin: -1.0, end: 1.0).animate(
-        CurvedAnimation(parent: _sweepCtrl, curve: Curves.easeInOut));
-
-    _statusCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 400));
-    _statusOpacity =
-        CurvedAnimation(parent: _statusCtrl, curve: Curves.easeIn);
-
-    _dotCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500))
-      ..addListener(() {
-        if (!mounted) return;
-        setState(() => _dotFrame = (_dotFrame + 1) % 4);
-      })
+    _ringCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 2200))
       ..repeat();
+    _ringRot = Tween<double>(begin: 0, end: 2 * math.pi)
+        .animate(CurvedAnimation(parent: _ringCtrl, curve: Curves.linear));
 
-    _entranceCtrl.forward().then((_) {
-      _sweepCtrl.forward();
-      _statusCtrl.forward();
-    });
+    _fadeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1600));
+    _logoFade  = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _fadeCtrl, curve: const Interval(0, 0.5)));
+    _logoScale = Tween<double>(begin: 0.7, end: 1).animate(
+        CurvedAnimation(parent: _fadeCtrl, curve: const Interval(0, 0.6, curve: Curves.easeOutCubic)));
+    _textFade  = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _fadeCtrl, curve: const Interval(0.4, 0.85)));
+    _textSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _fadeCtrl,
+            curve: const Interval(0.4, 0.9, curve: Curves.easeOutCubic)));
+    _barProgress = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _fadeCtrl, curve: const Interval(0.3, 1.0)));
 
-    _msgTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
-      if (!mounted) return;
-      setState(() {
-        _msgIndex = (_msgIndex + 1) % _statusMessages.length;
-        if (!_backendOnline) _statusText = _statusMessages[_msgIndex];
+    _fadeCtrl.forward();
+
+    _msgTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      if (mounted) setState(() {
+        _msgIdx = (_msgIdx + 1) % _msgs.length;
+        _status = _msgs[_msgIdx];
       });
     });
 
-    _bootServices();
-  }
-
-  Future<void> _bootServices() async {
-    ref.read(realTimeProvider).startPolling();
-    _checkBackend();
+    Future.delayed(const Duration(milliseconds: 600), _checkBackend);
   }
 
   Future<void> _checkBackend() async {
     try {
-      final health = await OpsClient.instance
-          .get(AppConfig.epHealth)
-          .timeout(AppConfig.healthTimeout);
-      _backendOnline =
-          health['status'] != 'offline' && health['status'] != 'error';
-    } catch (_) {
-      _backendOnline = false;
-    }
-    if (!mounted) return;
-    setState(() {
-      _statusText = _backendOnline
-          ? 'Systems online  \u2705'
-          : 'Loading cached data  \u23f3';
-    });
-    await Future.delayed(const Duration(milliseconds: 800));
-    _navigate();
-  }
+      final h = await _apiService.checkHealth();
+      if (mounted) setState(() { _online = h; });
+    } catch (_) {}
 
-  void _navigate() {
+    await Future.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
+    _msgTimer?.cancel();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder:        (_, __, ___) => const HomeScreen(),
-        transitionsBuilder: (_, anim, __, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
+        transitionDuration: const Duration(milliseconds: 700),
+        pageBuilder: (_, a, __) => const HomeScreen(),
+        transitionsBuilder: (_, a, __, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: a, curve: Curves.easeInOut),
           child: child,
         ),
-        transitionDuration: const Duration(milliseconds: 700),
       ),
     );
   }
 
   @override
   void dispose() {
-    _entranceCtrl.dispose();
-    _pulseCtrl.dispose();
-    _sweepCtrl.dispose();
-    _statusCtrl.dispose();
-    _dotCtrl.dispose();
+    _ringCtrl.dispose();
+    _fadeCtrl.dispose();
     _msgTimer?.cancel();
     super.dispose();
   }
 
-  String get _dots => '.' * (_dotFrame % 4);
-
-  // ── Palette ───────────────────────────────────────────────────────────────
-  static const _bg     = AppPalette.abyss0;
-  static const _accent = AppPalette.cyan;
-  static const _gold   = AppPalette.amber;
-
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: AppPalette.abyss0,
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          Container(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(0, -0.25),
-                radius: 0.85,
-                colors: [
-                  _accent.withValues(alpha: 0.07),
-                  _bg,
-                ],
-              ),
-            ),
-          ),
-          CustomPaint(size: size, painter: _DotGridPainter()),
-          AnimatedBuilder(
-            animation: _sweepCtrl,
-            builder: (_, __) {
-              final x = _sweepPos.value * size.width;
-              return Positioned(
-                left: x, top: 0, bottom: 0, width: 1.5,
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end:   Alignment.bottomCenter,
-                      colors: [
-                        _accent.withValues(alpha: 0.0),
-                        _accent.withValues(alpha: 0.5),
-                        _accent.withValues(alpha: 0.0),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+          Positioned.fill(
+            child: CustomPaint(painter: _RadialGlowPainter()),
           ),
           Center(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 AnimatedBuilder(
-                  animation: Listenable.merge([_entranceCtrl, _pulseCtrl]),
-                  builder: (_, __) => Opacity(
-                    opacity: _logoOpacity.value,
-                    child: Transform.scale(
-                      scale: _logoScale.value,
+                  animation: Listenable.merge([_ringCtrl, _fadeCtrl]),
+                  builder: (_, __) => FadeTransition(
+                    opacity: _logoFade,
+                    child: ScaleTransition(
+                      scale: _logoScale,
                       child: SizedBox(
-                        width: 128, height: 128,
+                        width: 120, height: 120,
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            Transform.scale(
-                              scale: _pulseScale.value,
-                              child: Container(
-                                width: 112, height: 112,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: _accent.withValues(
-                                        alpha: _pulseOpacity.value),
-                                    width: 2,
-                                  ),
-                                ),
+                            Transform.rotate(
+                              angle: _ringRot.value,
+                              child: CustomPaint(
+                                size: const Size(120, 120),
+                                painter: _ArcRingPainter(),
                               ),
                             ),
                             Container(
-                              width: 96, height: 96,
+                              width: 72, height: 72,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFF0A2A3A),
-                                    Color(0xFF003D55),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end:   Alignment.bottomRight,
-                                ),
+                                color: AppPalette.abyss2,
                                 border: Border.all(
-                                    color: _accent.withValues(alpha: 0.55),
-                                    width: 1.5),
+                                    color: AppPalette.cyan.withValues(alpha: 0.25),
+                                    width: 1),
                                 boxShadow: [
                                   BoxShadow(
-                                    color:      _accent.withValues(alpha: 0.40),
-                                    blurRadius: 36,
-                                    spreadRadius: 4,
+                                    color: AppPalette.cyan.withValues(alpha: 0.18),
+                                    blurRadius: 24,
                                   ),
                                 ],
                               ),
-                              child: const Icon(
-                                Icons.water_drop_rounded,
-                                size: 48, color: AppPalette.cyan,
-                              ),
+                              child: const Icon(Icons.water_drop_rounded,
+                                  color: AppPalette.cyan, size: 32),
                             ),
                           ],
                         ),
@@ -276,97 +164,94 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
-                SlideTransition(
-                  position: _titleSlide,
-                  child: FadeTransition(
-                    opacity: _titleOpacity,
-                    child: Column(
+                const SizedBox(height: 36),
+                FadeTransition(
+                  opacity: _textFade,
+                  child: SlideTransition(
+                    position: _textSlide,
+                    child: const Column(
                       children: [
-                        ShaderMask(
-                          shaderCallback: (b) => const LinearGradient(
-                            colors: [AppPalette.cyan, AppPalette.textWhite],
-                            stops: [0.0, 0.6],
-                          ).createShader(b),
-                          child: const Text(
-                            'OpsFlood',
+                        Text('OpsFlood',
                             style: TextStyle(
-                              fontSize:   46,
-                              fontWeight: FontWeight.w900,
-                              color:      Colors.white,
-                              letterSpacing: -1.5,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'AI-POWERED FLOOD INTELLIGENCE',
-                          style: TextStyle(
-                            fontSize: 10, fontWeight: FontWeight.w700,
-                            color: _gold, letterSpacing: 3.2,
-                          ),
-                        ),
+                              fontSize: 32,
+                              fontWeight: FontWeight.w700,
+                              color: AppPalette.textWhite,
+                              letterSpacing: 1.5,
+                            )),
+                        SizedBox(height: 6),
+                        Text('Real-time flood intelligence',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppPalette.textGrey,
+                              letterSpacing: 0.8,
+                            )),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 72),
-                FadeTransition(
-                  opacity: _statusOpacity,
-                  child: Column(
-                    children: [
-                      if (!_backendOnline)
-                        SizedBox(
-                          width: 180, height: 2,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(2),
-                            child: LinearProgressIndicator(
-                              backgroundColor:
-                                  _accent.withValues(alpha: 0.12),
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                  _accent.withValues(alpha: 0.75)),
-                            ),
-                          ),
-                        )
-                      else
-                        const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                                AppPalette.safe),
-                          ),
-                        ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _backendOnline
-                            ? _statusText
-                            : '$_statusText$_dots',
-                        style: const TextStyle(
-                          color: AppPalette.textGrey,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.3,
+                const SizedBox(height: 48),
+                AnimatedBuilder(
+                  animation: _barProgress,
+                  builder: (_, __) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 60),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: SizedBox(
+                        height: 2,
+                        child: LinearProgressIndicator(
+                          value: _barProgress.value,
+                          backgroundColor: AppPalette.abyssStroke,
+                          valueColor: const AlwaysStoppedAnimation(AppPalette.cyan),
                         ),
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(_status,
+                      key: ValueKey(_status),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: AppPalette.textGrey,
+                          letterSpacing: 0.6)),
+                ),
+                const SizedBox(height: 8),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (_online ? AppPalette.safe : AppPalette.textGrey)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: (_online ? AppPalette.safe : AppPalette.textGrey)
+                          .withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6, height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _online ? AppPalette.safe : AppPalette.textGrey,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(_online ? 'Backend online' : 'Connecting…',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: _online ? AppPalette.safe : AppPalette.textGrey,
+                            letterSpacing: 0.5,
+                          )),
                     ],
                   ),
                 ),
               ],
-            ),
-          ),
-          Positioned(
-            bottom: 32, left: 0, right: 0,
-            child: Center(
-              child: Text(
-                'v2.2  \u2022  ABYSS OPS BUILD',
-                style: TextStyle(
-                  color: _accent.withValues(alpha: 0.38),
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2.5,
-                ),
-              ),
             ),
           ),
         ],
@@ -375,21 +260,44 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   }
 }
 
-// ── Minimal dot grid painter ──────────────────────────────────────────────────
-class _DotGridPainter extends CustomPainter {
+class _RadialGlowPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0x0C00C6FF)
-      ..style = PaintingStyle.fill;
-    const step = 32.0;
-    for (double x = 0; x < size.width; x += step) {
-      for (double y = 0; y < size.height; y += step) {
-        canvas.drawCircle(Offset(x, y), 1.2, paint);
-      }
-    }
+      ..shader = RadialGradient(colors: [
+        const Color(0xFF00C6FF).withValues(alpha: 0.07),
+        Colors.transparent,
+      ]).createShader(Rect.fromCircle(
+          center: Offset(size.width / 2, size.height * 0.4),
+          radius: size.width * 0.6));
+    canvas.drawRect(Offset.zero & size, paint);
   }
+  @override bool shouldRepaint(_) => false;
+}
 
+class _ArcRingPainter extends CustomPainter {
   @override
-  bool shouldRepaint(_DotGridPainter old) => false;
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final r  = size.width / 2 - 4;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+
+    paint.color = const Color(0xFF00C6FF).withValues(alpha: 0.12);
+    canvas.drawCircle(Offset(cx, cy), r, paint);
+
+    paint.shader = SweepGradient(colors: [
+      Colors.transparent,
+      const Color(0xFF00C6FF).withValues(alpha: 0.9),
+      Colors.transparent,
+    ]).createShader(Rect.fromCircle(center: Offset(cx, cy), radius: r));
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset(cx, cy), radius: r),
+      0, math.pi * 1.5, false, paint,
+    );
+  }
+  @override bool shouldRepaint(_) => false;
 }

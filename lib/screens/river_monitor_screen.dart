@@ -1,18 +1,17 @@
 // lib/screens/river_monitor_screen.dart
-// OpsFlood — River Monitor v6.1  (atRisk + ELEVATED threshold fix)
+// OpsFlood — River Monitor v6.2  (Bihar WRD tab added)
+//
+// CHANGES v6.2:
+//   + Added 'Bihar WRD' tab (index 3): BiharRiverMapScreen
+//     Shows all 31 WRD Bihar stations grouped by river basin.
+//     Alias-resolved, NA stations explained, pull-to-refresh.
+//   + Tab bar length 4 → 5; Map tab shifted to index 4.
+//   = All other logic unchanged from v6.1.
 //
 // MATHS CHANGES v6.1:
 //   _atRisk: only severe/extreme count (not aboveNormal)
 //   RiskBand.elevated threshold: 20 → 35 (avoids false positives from
 //     baseline GloFAS satellite discharge values)
-//
-// MATHS CHANGES v6:
-//   progressPct = current / danger  (CWC standard, not current/hfl)
-//   Risk band:   elevated≥35, high≥45, critical≥70
-//   SourceBadge: all 6 sources mapped (no more ???)
-//
-// PUBLIC DISPLAY v6 — removed:
-//   conf%, CWC%/GloFAS%/AI% breakdown, 🤖 AI row, formula banner
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -29,6 +28,7 @@ import '../services/real_time_river_service.dart';
 import '../services/threshold_alert_service.dart';
 import '../widgets/cwc_gated_wrapper.dart';
 import '../widgets/source_policy_banner.dart';
+import 'bihar_river_map_screen.dart';
 import 'india_river_explorer_screen.dart';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ extension RiskBandX on RiskBand {
 }
 
 /// Composite risk score (0–100) and band.
-/// Weights: CWC gauge 45 %, GloFAS discharge 35 %, ML flood prob 20 %.
+/// Weights: CWC gauge 45%, GloFAS discharge 35%, ML flood prob 20%.
 class RiskCompute {
   final double score;
   final RiskBand band;
@@ -97,17 +97,11 @@ class RiskCompute {
     } else if (cwcHfl > 0) {
       cwcPct = (cwcCurrent / cwcHfl * 100).clamp(0.0, 100.0);
     }
-
     final gloFasPct =
         alert != null ? alert.fillPercent.clamp(0.0, 100.0) : 0.0;
     final mlPct = ((mlFloodProb ?? 0) * 100).clamp(0.0, 100.0);
-
     final score =
         (0.45 * cwcPct + 0.35 * gloFasPct + 0.20 * mlPct).clamp(0.0, 100.0);
-
-    // FIX v6.1: raised ELEVATED threshold 20→35 to prevent baseline
-    // GloFAS satellite discharge values from triggering false positives.
-    // Thresholds: ≥70 → CRITICAL, ≥45 → HIGH, ≥35 → ELEVATED, else SAFE
     final band = score >= 70
         ? RiskBand.critical
         : score >= 45
@@ -115,13 +109,12 @@ class RiskCompute {
             : score >= 35
                 ? RiskBand.elevated
                 : RiskBand.safe;
-
     return RiskCompute(
-      score: score,
-      band: band,
-      cwcPct: cwcPct,
+      score:     score,
+      band:      band,
+      cwcPct:    cwcPct,
       gloFasPct: gloFasPct,
-      mlPct: mlPct,
+      mlPct:     mlPct,
     );
   }
 }
@@ -135,6 +128,7 @@ class RiverMonitorScreen extends ConsumerStatefulWidget {
 
 class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
     with TickerProviderStateMixin {
+  // v6.2: length 4 → 5  (added Bihar WRD at index 3, Map shifted to 4)
   late final TabController      _tab;
   late final AnimationController _pulseCtrl;
   late final Animation<double>   _pulse;
@@ -157,7 +151,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 4, vsync: this);
+    _tab = TabController(length: 5, vsync: this);   // v6.2: 5 tabs
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
@@ -242,16 +236,11 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
   }
 
   int get _liveCount => _results.where((r) => r.source != 'NO_DATA').length;
-
-  // FIX v6.1: only severe/extreme DangerClass counts as "at risk".
-  // aboveNormal is a routine CWC classification and should NOT
-  // inflate the at-risk counter on the header chip.
-  int get _atRisk => _results.where((r) =>
+  int get _atRisk    => _results.where((r) =>
       (r.station.dangerClass == DangerClass.severe ||
        r.station.dangerClass == DangerClass.extreme) &&
       r.source != 'NO_DATA').length;
-
-  int get _noData => _results.where((r) => r.source == 'NO_DATA').length;
+  int get _noData    => _results.where((r) => r.source == 'NO_DATA').length;
 
   List<String> get _stateList {
     final seen = <String>{};
@@ -355,9 +344,15 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
             Expanded(child: TabBarView(
               controller: _tab,
               children: [
+                // 0: Stations
                 CwcGatedWrapper(child: _stationsTab()),
+                // 1: Alerts
                 _alertsTab(),
+                // 2: Add City
                 _addCityTab(),
+                // 3: Bihar WRD — NEW in v6.2
+                const BiharRiverMapScreen(),
+                // 4: India River Map (explorer)
                 const IndiaRiverExplorerScreen(),
               ],
             )),
@@ -479,7 +474,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
     ]),
   );
 
-  // ── Tab bar ───────────────────────────────────────────────────────────────
+  // ── Tab bar (v6.2: 5 tabs, scrollable) ───────────────────────────────────
   Widget _tabBar(int alertsBadge) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
     child: Container(
@@ -491,6 +486,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
       ),
       child: TabBar(
         controller: _tab,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,   // fix: .fill is invalid for scrollable bars
         dividerColor: Colors.transparent,
         indicator: BoxDecoration(
           gradient: const LinearGradient(
@@ -507,7 +504,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
         labelStyle:
             const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
         tabs: [
+          // 0: Stations
           const Tab(text: 'Stations'),
+          // 1: Alerts (badge)
           Tab(
             child: Stack(
               clipBehavior: Clip.none,
@@ -517,8 +516,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
                         fontSize: 11, fontWeight: FontWeight.w800)),
                 if (alertsBadge > 0)
                   Positioned(
-                    right: -10,
-                    top: -4,
+                    right: -10, top: -4,
                     child: Container(
                       padding: const EdgeInsets.all(3),
                       decoration: const BoxDecoration(
@@ -534,7 +532,22 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
               ],
             ),
           ),
+          // 2: Add City
           const Tab(text: 'Add City'),
+          // 3: Bihar WRD — NEW v6.2
+          Tab(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.location_on_rounded, size: 13),
+                SizedBox(width: 4),
+                Text('Bihar WRD',
+                    style: TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+          // 4: India River Map (explorer)
           const Tab(text: 'Map'),
         ],
       ),
@@ -1106,7 +1119,6 @@ class _LiveCardState extends State<_LiveCard>
       mlFloodProb: r.mlFloodProb,
     );
 
-    // ── NO DATA card ─────────────────────────────────────────────────
     if (r.source == 'NO_DATA') {
       return FadeTransition(
         opacity: _anim,
@@ -1175,9 +1187,7 @@ class _LiveCardState extends State<_LiveCard>
       );
     }
 
-    // ── LIVE DATA card ────────────────────────────────────────────────
     final cwcCol = _dcColors[dc]!;
-
     final pct = s.danger > 0
         ? (s.current / s.danger).clamp(0.0, 1.2)
         : s.hfl > 0
@@ -1272,8 +1282,6 @@ class _LiveCardState extends State<_LiveCard>
                 ]),
               ]),
             ),
-
-            // ── Gauge bar ─────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: AnimatedBuilder(
@@ -1359,8 +1367,6 @@ class _LiveCardState extends State<_LiveCard>
                 ]),
               ),
             ),
-
-            // ── GloFAS satellite section (if breach) ──────────────────
             if (a != null) ...[
               const SizedBox(height: 8),
               Divider(
@@ -1430,8 +1436,6 @@ class _LiveCardState extends State<_LiveCard>
                 ]),
               ),
             ],
-
-            // ── Composite risk bar ────────────────────────────────────
             Padding(
               padding:
                   const EdgeInsets.fromLTRB(14, 6, 14, 4),
@@ -1478,8 +1482,6 @@ class _LiveCardState extends State<_LiveCard>
                 ),
               ]),
             ),
-
-            // ── Pills: trend, rainfall, flow, timestamp ───────────────
             const SizedBox(height: 4),
             Divider(
                 height: 1,
@@ -1691,7 +1693,7 @@ class _RiskBandBadge extends StatelessWidget {
       );
 }
 
-// ── Live/Estimated source badge (public-friendly) ─────────────────────────────
+// ── Live/Estimated source badge ───────────────────────────────────────────────
 class _LiveBadge extends StatelessWidget {
   final String source;
   const _LiveBadge({required this.source});

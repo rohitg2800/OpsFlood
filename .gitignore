@@ -51,4 +51,4 @@ ios/Runner/GoogleService-Info.plist
 .env
 .env.*
 secrets.dart
-*.tsbuildinfo
+analyze_output.txt

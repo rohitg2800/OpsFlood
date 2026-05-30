@@ -7,12 +7,12 @@ import 'package:flutter/material.dart';
 import '../theme/river_theme.dart';
 
 class OpsAreaChart extends StatelessWidget {
-  final List<double> values;
-  final List<String> labels;
+  final List<double> values;        // y data
+  final List<String> labels;        // x axis labels (sparse, max 6 shown)
   final Color        lineColor;
   final double?      warningY;
   final double?      dangerY;
-  final String       yUnit;
+  final String       yUnit;         // e.g. 'm', 'm³/s', '%'
   final double       minY;
   final double?      maxY;
   final double       height;
@@ -106,6 +106,7 @@ class OpsAreaChart extends StatelessWidget {
               ),
             ),
           ),
+          // Threshold lines
           extraLinesData: ExtraLinesData(
             horizontalLines: [
               if (warnLine != null)
@@ -175,7 +176,8 @@ class OpsAreaChart extends StatelessWidget {
           lineTouchData: LineTouchData(
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => AppPalette.abyss3,
-              // tooltipRoundedRadius removed — not in fl_chart 1.2.0
+              // tooltipRoundedRadius was removed in fl_chart ≥0.68; use tooltipBorderRadius.
+              tooltipBorderRadius: BorderRadius.circular(10),
               getTooltipItems: (touchedSpots) => touchedSpots
                   .map((s) => LineTooltipItem(
                         '${s.y.toStringAsFixed(2)}$yUnit',

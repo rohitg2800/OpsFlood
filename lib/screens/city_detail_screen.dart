@@ -60,7 +60,8 @@ class CityDetailScreen extends ConsumerWidget {
     final trend        = ref.watch(cityTrendProvider(cityName)).cast<RiverLevelSnapshot>();
     final imdAlerts    = ref.watch(stateImdAlertsProvider(data?.state ?? ''));
     final advisories   = ref.watch(stateNdmaAdvisoriesProvider(data?.state ?? ''));
-    final contacts     = ref.watch(stateEmergencyContactsProvider(data?.state ?? ''));
+    // FIX: cast<EmergencyContact>() to convert List<dynamic> → List<EmergencyContact>
+    final contacts     = ref.watch(stateEmergencyContactsProvider(data?.state ?? '')).cast<EmergencyContact>();
 
     return Scaffold(
       backgroundColor: _kBg,

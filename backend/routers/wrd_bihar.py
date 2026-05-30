@@ -1,283 +1,299 @@
 """
-backend/routers/wrd_bihar.py
------------------------------
-Live scraper for WRD Bihar flood monitoring portal.
-Source: http://fldcontrolbihar.org/
-
-Scrapes the real-time flood table published by the
-Water Resources Department, Government of Bihar.
-
-Endpoints
----------
-GET /api/wrd-bihar                 - all Bihar stations (live data)
-GET /api/wrd-bihar/state           - alias, always Bihar
-GET /api/wrd-bihar/station         - ?name=Patna  (fuzzy match)
-GET /api/wrd-bihar/danger          - stations currently above danger level
-GET /api/wrd-bihar/refresh         - force-bust cache and re-fetch
-
-TODO: Add to backend/app.py:
-    from backend.routers.wrd_bihar import router as wrd_bihar_router
-    app.include_router(wrd_bihar_router)
+WRD Bihar Live Data Router
+Scrapes fldcontrolbihar.org flood monitoring table and exposes
+GET /api/wrd-bihar/stations  — live station data for Bihar rivers
 """
-import time
-import logging
-from difflib import get_close_matches
-from typing import Optional, List, Dict, Any
 
-import httpx
+from __future__ import annotations
+
+import datetime
+import os
+from typing import Any, Dict, List
+
+import requests
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, Query, HTTPException
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException
+from cachetools import TTLCache
 
 router = APIRouter(prefix="/api/wrd-bihar", tags=["WRD Bihar"])
 
-# ── Cache ──────────────────────────────────────────────────────────────────────
-WRD_CACHE_SECONDS = 900          # 15 minutes
-_wrd_cache: List[Dict[str, Any]] = []
-_wrd_cache_ts: float = 0.0
+# ---------------------------------------------------------------------------
+# Cache — 10-minute TTL (WRD Bihar updates ~every 15 min)
+# ---------------------------------------------------------------------------
+_CACHE: TTLCache = TTLCache(maxsize=64, ttl=600)
 
-# ── WRD Bihar URLs ─────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Known Bihar WRD station metadata (lat/lon for map pins)
+# ---------------------------------------------------------------------------
+_STATION_META: Dict[str, Dict[str, Any]] = {
+    "gandhi setu": {"district": "Patna", "river": "Ganga", "lat": 25.736, "lon": 85.004},
+    "patna": {"district": "Patna", "river": "Ganga", "lat": 25.594, "lon": 85.138},
+    "hajipur": {"district": "Vaishali", "river": "Ganga", "lat": 25.686, "lon": 85.208},
+    "dumariaghat": {"district": "Sitamarhi", "river": "Bagmati", "lat": 26.804, "lon": 85.513},
+    "raxaul": {"district": "East Champaran", "river": "Gandak", "lat": 26.986, "lon": 84.850},
+    "muzaffarpur": {"district": "Muzaffarpur", "river": "Burhi Gandak", "lat": 26.121, "lon": 85.391},
+    "darbhanga": {"district": "Darbhanga", "river": "Kamla Balan", "lat": 26.152, "lon": 85.901},
+    "bhagalpur": {"district": "Bhagalpur", "river": "Ganga", "lat": 25.244, "lon": 86.972},
+    "munger": {"district": "Munger", "river": "Ganga", "lat": 25.375, "lon": 86.473},
+    "araria": {"district": "Araria", "river": "Kosi", "lat": 26.147, "lon": 87.471},
+    "supaul": {"district": "Supaul", "river": "Kosi", "lat": 26.124, "lon": 86.604},
+    "saharsa": {"district": "Saharsa", "river": "Kosi", "lat": 25.877, "lon": 86.594},
+    "gopalganj": {"district": "Gopalganj", "river": "Gandak", "lat": 26.469, "lon": 84.436},
+    "saran": {"district": "Saran", "river": "Ghaghara", "lat": 25.919, "lon": 84.733},
+    "siwan": {"district": "Siwan", "river": "Ghaghara", "lat": 26.219, "lon": 84.358},
+}
+
+# ---------------------------------------------------------------------------
+# Scraper targets (in priority order)
+# ---------------------------------------------------------------------------
 _WRD_URLS = [
     "http://fldcontrolbihar.org/",
-    "http://fldcontrolbihar.org/flood_situation.php",
-    "http://fldcontrolbihar.org/flood_report.php",
-    "https://state.bihar.gov.in/wrd/CitizenHome.html",
+    "http://fldcontrolbihar.org/flood-monitoring",
+    "http://fldcontrolbihar.org/river-data",
 ]
 
-# ── Known Bihar stations (coordinate lookup seed) ────────────────────────────────
-_BIHAR_STATIONS_SEED: List[Dict[str, Any]] = [
-    {"station": "Gandhi Setu / Patna", "river": "Ganga",        "lat": 25.736, "lon": 85.004},
-    {"station": "Hajipur",             "river": "Gandak",       "lat": 25.686, "lon": 85.208},
-    {"station": "Darbhanga",           "river": "Bagmati",      "lat": 26.152, "lon": 85.901},
-    {"station": "Muzaffarpur",         "river": "Burhi Gandak", "lat": 26.121, "lon": 85.391},
-    {"station": "Supaul",              "river": "Kosi",         "lat": 26.123, "lon": 86.604},
-    {"station": "Bhagalpur",           "river": "Ganga",        "lat": 25.244, "lon": 87.000},
-    {"station": "Sonepur",             "river": "Sone",         "lat": 25.710, "lon": 85.178},
-    {"station": "Sitamarhi",           "river": "Lakhandei",    "lat": 26.592, "lon": 85.491},
-    {"station": "Motihari",            "river": "Burhi Gandak", "lat": 26.649, "lon": 84.916},
-    {"station": "Samastipur",          "river": "Bagmati",      "lat": 25.864, "lon": 85.781},
-]
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Referer": "http://fldcontrolbihar.org/",
+}
 
 
-def _coord_for(station_name: str) -> Dict[str, Optional[float]]:
-    name_lower = station_name.lower()
-    for seed in _BIHAR_STATIONS_SEED:
-        if seed["station"].lower().split("/")[0].strip() in name_lower or \
-           name_lower in seed["station"].lower():
-            return {"lat": seed["lat"], "lon": seed["lon"]}
-    return {"lat": None, "lon": None}
+def _normalize(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
 
 
-def _parse_status(obs: Optional[float], danger: Optional[float], warning: Optional[float]) -> str:
-    if obs is None:
-        return "unknown"
-    if danger is not None and obs >= danger:
-        return "danger"
-    if warning is not None and obs >= warning:
-        return "warning"
-    return "normal"
-
-
-def _safe_float(text: str) -> Optional[float]:
-    if not text:
-        return None
-    cleaned = text.strip().replace(",", "").split()[0]
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        return float(cleaned)
-    except (ValueError, IndexError):
-        return None
+        return float(str(value).strip().replace(",", "")) if value not in (None, "", "--", "N/A") else default
+    except (ValueError, TypeError):
+        return default
 
 
-def _parse_wrd_table(html: str) -> List[Dict[str, Any]]:
-    soup = BeautifulSoup(html, "html.parser")
+def _enrich_station(name: str) -> Dict[str, Any]:
+    """Return lat/lon/district/river for a station name via fuzzy key match."""
+    key = _normalize(name)
+    for meta_key, meta in _STATION_META.items():
+        if meta_key in key or key in meta_key:
+            return meta
+    # Unknown station — synthetic coords near Bihar centre
+    return {"district": "Bihar", "river": "Unknown", "lat": 25.8 + hash(key) % 100 / 500, "lon": 85.4}
+
+
+def _status_label(current: float, warning: float, danger: float) -> str:
+    if danger > 0 and current >= danger:
+        return "CRITICAL"
+    if warning > 0 and current >= warning:
+        return "WARNING"
+    if current > 0:
+        return "NORMAL"
+    return "UNKNOWN"
+
+
+def _parse_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    """
+    Try to extract station rows from any HTML table on the WRD Bihar page.
+    Handles both named-column headers and positional fallback.
+    """
     stations: List[Dict[str, Any]] = []
 
-    tables = soup.find_all("table")
-    target_table = None
-    for tbl in tables:
-        text = tbl.get_text(" ").lower()
-        if any(k in text for k in ["danger", "flood", "level", "station", "river"]):
-            target_table = tbl
-            break
+    for table in soup.find_all("table"):
+        headers_raw = [th.get_text(strip=True).lower() for th in table.find_all("th")]
 
-    if target_table is None:
-        logger.warning("WRD Bihar: no flood table found in HTML")
-        return []
+        # Detect column positions
+        def col(keywords: list[str]) -> int:
+            for kw in keywords:
+                for i, h in enumerate(headers_raw):
+                    if kw in h:
+                        return i
+            return -1
 
-    rows = target_table.find_all("tr")
-    if not rows:
-        return []
+        idx_station = col(["station", "gauge", "site", "location"])
+        idx_river = col(["river", "nadi"])
+        idx_current = col(["current", "observed", "water level", "wl", "level (m)", "gauge reading"])
+        idx_warning = col(["warning", "warn"])
+        idx_danger = col(["danger", "hfl", "flood level"])
+        idx_status = col(["status", "remark", "flood situation"])
 
-    headers: List[str] = []
-    data_rows: List[Any] = []
-
-    for row in rows:
-        cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
-        if not cells:
-            continue
-        if not headers:
-            lower_cells = [c.lower() for c in cells]
-            if any(k in " ".join(lower_cells) for k in ["station", "river", "level", "danger"]):
-                headers = lower_cells
+        for row in table.find_all("tr"):
+            cells = [td.get_text(strip=True) for td in row.find_all("td")]
+            if len(cells) < 3:
                 continue
-        if headers:
-            data_rows.append(cells)
 
-    if not headers or not data_rows:
-        logger.warning("WRD Bihar: table found but no parseable headers/rows")
-        return []
+            def cell(idx: int, fallback: str = "") -> str:
+                return cells[idx] if 0 <= idx < len(cells) else fallback
 
-    def col(keywords: List[str]) -> int:
-        for kw in keywords:
-            for i, h in enumerate(headers):
-                if kw in h:
-                    return i
-        return -1
+            station_name = cell(idx_station, cell(0))
+            if not station_name or station_name.lower() in ("station", "s.no", "#", ""):
+                continue
 
-    idx_station = col(["station", "site", "location", "gauge"])
-    idx_river   = col(["river", "stream", "nadi"])
-    idx_obs     = col(["observed", "current", "obs.", "water level", "w.l", "wl"])
-    idx_danger  = col(["danger", "dgl", "d.l"])
-    idx_warning = col(["warning", "wgl", "w.l", "alert level"])
-    idx_time    = col(["time", "date", "timestamp", "reported"])
+            river_name = cell(idx_river, "")
+            current_level = _safe_float(cell(idx_current, cell(2)))
+            warning_level = _safe_float(cell(idx_warning, cell(3) if len(cells) > 3 else ""))
+            danger_level = _safe_float(cell(idx_danger, cell(4) if len(cells) > 4 else ""))
+            raw_status = cell(idx_status, "")
 
-    for row_cells in data_rows:
-        if len(row_cells) < 2:
-            continue
+            meta = _enrich_station(station_name)
+            if not river_name:
+                river_name = meta.get("river", "Unknown")
 
-        def safe_get(idx: int) -> str:
-            return row_cells[idx].strip() if 0 <= idx < len(row_cells) else ""
+            status = (
+                raw_status.upper()
+                if raw_status.upper() in ("CRITICAL", "WARNING", "NORMAL", "SAFE")
+                else _status_label(current_level, warning_level, danger_level)
+            )
 
-        station_name = safe_get(idx_station) or safe_get(0)
-        if not station_name or station_name.lower() in ("", "-", "n/a", "na"):
-            continue
-
-        obs_level     = _safe_float(safe_get(idx_obs))
-        danger_level  = _safe_float(safe_get(idx_danger))
-        warning_level = _safe_float(safe_get(idx_warning))
-        status        = _parse_status(obs_level, danger_level, warning_level)
-        coords        = _coord_for(station_name)
-
-        stations.append({
-            "station":          station_name,
-            "river":            safe_get(idx_river) or "—",
-            "state":            "Bihar",
-            "obs_level_m":      obs_level,
-            "danger_level_m":   danger_level,
-            "warning_level_m":  warning_level,
-            "status":           status,
-            "reported_at":      safe_get(idx_time) or None,
-            "lat":              coords["lat"],
-            "lon":              coords["lon"],
-            "source":           "WRD Bihar",
-        })
+            stations.append({
+                "station": station_name,
+                "river": river_name,
+                "district": meta["district"],
+                "lat": meta["lat"],
+                "lon": meta["lon"],
+                "current_level_m": round(current_level, 3),
+                "warning_level_m": round(warning_level, 3),
+                "danger_level_m": round(danger_level, 3),
+                "below_danger_m": round(max(danger_level - current_level, 0.0), 3) if danger_level > 0 else None,
+                "status": status,
+                "source": "WRD_BIHAR",
+                "last_update": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            })
 
     return stations
 
 
-async def _fetch_wrd_stations(force: bool = False) -> List[Dict[str, Any]]:
-    global _wrd_cache, _wrd_cache_ts
+def _fetch_wrd_bihar_live() -> Dict[str, Any]:
+    """Attempt each WRD Bihar URL in order; return parsed stations or raise."""
+    errors: list[str] = []
+    timeout = (
+        max(1.0, float(os.getenv("WRD_BIHAR_CONNECT_TIMEOUT", "4"))),
+        max(1.0, float(os.getenv("WRD_BIHAR_READ_TIMEOUT", "10"))),
+    )
 
-    now = time.time()
-    if not force and _wrd_cache and (now - _wrd_cache_ts) < WRD_CACHE_SECONDS:
-        return _wrd_cache
-
-    last_exc: Optional[Exception] = None
     for url in _WRD_URLS:
         try:
-            async with httpx.AsyncClient(
-                timeout=25,
-                follow_redirects=True,
-                verify=False,
-            ) as client:
-                resp = await client.get(
-                    url,
-                    headers={"User-Agent": "OpsFlood/2.0 (flood monitoring research)"},
-                )
-                resp.raise_for_status()
+            resp = requests.get(url, headers=_HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            stations = _parse_table(soup)
+            if stations:
+                return {
+                    "status": "LIVE",
+                    "data_source": "WRD_BIHAR",
+                    "source_url": url,
+                    "station_count": len(stations),
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "stations": stations,
+                }
+            errors.append(f"{url}: page loaded but no table rows found")
+        except requests.Timeout:
+            errors.append(f"{url}: timeout")
+        except requests.RequestException as exc:
+            errors.append(f"{url}: {exc.__class__.__name__} — {str(exc)[:120]}")
 
-            parsed = _parse_wrd_table(resp.text)
-            if parsed:
-                _wrd_cache    = parsed
-                _wrd_cache_ts = now
-                logger.info("WRD Bihar: fetched %d stations from %s", len(parsed), url)
-                return parsed
-
-        except Exception as exc:
-            last_exc = exc
-            logger.warning("WRD Bihar: failed URL %s — %s", url, exc)
-            continue
-
-    if _wrd_cache:
-        logger.warning("WRD Bihar: all URLs failed, serving stale cache (%d records)", len(_wrd_cache))
-        return _wrd_cache
-
-    logger.error("WRD Bihar: no live data and no cache. Last error: %s", last_exc)
-    return []
+    raise RuntimeError(" | ".join(errors))
 
 
-@router.get("", summary="All Bihar flood monitoring stations")
-async def get_all_wrd_bihar():
-    """Returns all stations tracked by WRD Bihar. Cached 15 min."""
-    data = await _fetch_wrd_stations()
-    if not data:
-        raise HTTPException(
-            status_code=503,
-            detail="WRD Bihar live data unavailable. Portal may be down.",
-        )
+def _tactical_fallback() -> Dict[str, Any]:
+    """Return known-static Bihar station data when live scrape fails."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    stations = []
+    for name, meta in _STATION_META.items():
+        stations.append({
+            "station": name.title(),
+            "river": meta["river"],
+            "district": meta["district"],
+            "lat": meta["lat"],
+            "lon": meta["lon"],
+            "current_level_m": None,
+            "warning_level_m": None,
+            "danger_level_m": None,
+            "below_danger_m": None,
+            "status": "UNKNOWN",
+            "source": "WRD_BIHAR_FALLBACK",
+            "last_update": now,
+        })
     return {
-        "source":    "WRD Bihar",
-        "state":     "Bihar",
-        "count":     len(data),
-        "stations":  data,
-        "cached_at": _wrd_cache_ts,
+        "status": "FALLBACK",
+        "data_source": "WRD_BIHAR_FALLBACK",
+        "source_url": None,
+        "station_count": len(stations),
+        "timestamp": now,
+        "stations": stations,
     }
 
 
-@router.get("/state", summary="Bihar station list (alias)")
-async def get_wrd_bihar_by_state(state: str = Query("Bihar")):
-    return await get_all_wrd_bihar()
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/stations")
+async def get_wrd_bihar_stations(force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Fetch live WRD Bihar flood station data.
+
+    - Returns scraped table from fldcontrolbihar.org
+    - Cached for 10 minutes to avoid hammering the government portal
+    - Falls back to known static station list if portal is unreachable
+    - Pass ?force_refresh=true to bypass cache
+    """
+    cache_key = "wrd_bihar_stations"
+
+    if not force_refresh and cache_key in _CACHE:
+        cached = _CACHE[cache_key]
+        cached["_cache_hit"] = True
+        return cached
+
+    try:
+        result = _fetch_wrd_bihar_live()
+        _CACHE[cache_key] = result
+        result["_cache_hit"] = False
+        return result
+    except RuntimeError as exc:
+        fallback = _tactical_fallback()
+        fallback["_scrape_error"] = str(exc)
+        fallback["_cache_hit"] = False
+        return fallback
 
 
-@router.get("/station", summary="Find a specific Bihar station by name")
-async def get_wrd_bihar_station(name: str = Query(..., description="Station name (fuzzy match)")):
-    data = await _fetch_wrd_stations()
-    if not data:
-        raise HTTPException(status_code=503, detail="WRD Bihar data unavailable.")
-
-    names = [s["station"] for s in data]
-    matches = get_close_matches(name, names, n=5, cutoff=0.4)
+@router.get("/stations/{station_name}")
+async def get_wrd_bihar_station(station_name: str) -> Dict[str, Any]:
+    """Get data for a single WRD Bihar station by name (case-insensitive partial match)."""
+    all_data = await get_wrd_bihar_stations()
+    key = _normalize(station_name)
+    matches = [
+        s for s in all_data.get("stations", [])
+        if key in _normalize(s.get("station", "")) or _normalize(s.get("station", "")) in key
+    ]
     if not matches:
-        matches = [n for n in names if name.lower() in n.lower() or n.lower() in name.lower()]
-    if not matches:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No Bihar station matching '{name}'. Available: {names[:10]}",
-        )
-    result = [s for s in data if s["station"] in matches]
-    return {"query": name, "matches": result}
-
-
-@router.get("/danger", summary="Bihar stations currently above danger level")
-async def get_wrd_bihar_danger():
-    data = await _fetch_wrd_stations()
-    danger_stations  = [s for s in data if s.get("status") == "danger"]
-    warning_stations = [s for s in data if s.get("status") == "warning"]
+        raise HTTPException(status_code=404, detail=f"No WRD Bihar station found matching '{station_name}'")
     return {
-        "source":           "WRD Bihar",
-        "danger_count":     len(danger_stations),
-        "warning_count":    len(warning_stations),
-        "danger_stations":  danger_stations,
-        "warning_stations": warning_stations,
+        "status": all_data["status"],
+        "data_source": all_data["data_source"],
+        "timestamp": all_data["timestamp"],
+        "station": matches[0],
     }
 
 
-@router.get("/refresh", summary="Force-refresh WRD Bihar cache")
-async def refresh_wrd_bihar_cache():
-    data = await _fetch_wrd_stations(force=True)
-    return {
-        "message":   "Cache refreshed",
-        "count":     len(data),
-        "cached_at": _wrd_cache_ts,
-    }
+@router.get("/health")
+async def wrd_bihar_health() -> Dict[str, Any]:
+    """Quick health check — does WRD Bihar portal respond?"""
+    try:
+        resp = requests.get(_WRD_URLS[0], headers=_HEADERS, timeout=(3, 6))
+        return {
+            "reachable": resp.ok,
+            "status_code": resp.status_code,
+            "url": _WRD_URLS[0],
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+    except requests.RequestException as exc:
+        return {
+            "reachable": False,
+            "error": str(exc)[:200],
+            "url": _WRD_URLS[0],
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }

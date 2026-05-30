@@ -20,7 +20,8 @@ import 'app_config.dart';
 class AppEnvironment {
   AppEnvironment._();
 
-  static const bool isProduction = AppConfig.isProduction as bool? ?? true;
+  // AppConfig.isProduction is a getter (not const) — cannot use const here.
+  static bool get isProduction => AppConfig.isProduction;
 
   // Never show synthetic / mock data in any build
   static const bool useMockData = false;

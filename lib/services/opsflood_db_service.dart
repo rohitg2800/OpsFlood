@@ -1,6 +1,6 @@
 // lib/services/opsflood_db_service.dart
 //
-// OpsFlood — Database Service v1.0
+// OpsFlood — Database Service v2.0
 //
 // WHAT THIS DOES:
 //   1. Fetches live data from the OpsFlood backend (opsflood.onrender.com)
@@ -33,6 +33,25 @@ import '../config/app_config.dart';
 import 'local_cache_service.dart';
 import 'ops_client.dart';
 
+// ── Top-level private helpers used by DTO factory constructors ────────────────
+
+String _str(dynamic v) => (v?.toString() ?? '').trim();
+
+double _dbl(dynamic v) {
+  if (v == null) return 0.0;
+  if (v is num)  return v.toDouble();
+  return double.tryParse(v.toString().trim()) ?? 0.0;
+}
+
+double? _dblOpt(dynamic v) => v == null ? null : _dbl(v);
+
+DateTime _dt(dynamic v) {
+  if (v == null) return DateTime.now();
+  if (v is Timestamp) return v.toDate();
+  if (v is DateTime)  return v;
+  return DateTime.tryParse(v.toString()) ?? DateTime.now();
+}
+
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
 class DbStation {
@@ -41,9 +60,9 @@ class DbStation {
   final String river;
   final double lat;
   final double lon;
-  final double warningLevel;  // metres MSL
-  final double dangerLevel;   // metres MSL
-  final double hfl;           // Historical Flood Level metres MSL
+  final double warningLevel;
+  final double dangerLevel;
+  final double hfl;
   final String cwcStationId;
 
   const DbStation({
@@ -85,12 +104,12 @@ class DbStation {
 
 class DbReading {
   final String   city;
-  final double   level;        // metres MSL — real gauge reading
-  final double?  discharge;    // m³/s from GloFAS or CWC
-  final double?  rainfall;     // mm/hr last hour
-  final String   source;       // TELEMETRY | LIVE_LEVELS | CWC_FFS | GLOFAS
+  final double   level;
+  final double?  discharge;
+  final double?  rainfall;
+  final String   source;
   final DateTime timestamp;
-  final bool     isStale;      // true if from cache, not live
+  final bool     isStale;
 
   const DbReading({
     required this.city,
@@ -127,10 +146,10 @@ class DbAlert {
   final String   city;
   final String   state;
   final String   river;
-  final String   level;        // WARNING | DANGER | EXTREME
-  final double   currentValue; // m³/s discharge
-  final double   threshold;    // the breached threshold value
-  final String   trend;        // RISING | FALLING | STEADY
+  final String   level;
+  final double   currentValue;
+  final double   threshold;
+  final String   trend;
   final DateTime timestamp;
   final bool     isNew;
 
@@ -173,10 +192,10 @@ class DbAlert {
 
 class DbPrediction {
   final String   city;
-  final double   floodProbability;  // 0.0–1.0
-  final String   riskLevel;         // SAFE | MODERATE | SEVERE | CRITICAL
-  final String   forecastHorizon;   // '24h' | '48h' | '72h'
-  final double   confidence;        // 0.0–1.0
+  final double   floodProbability;
+  final String   riskLevel;
+  final String   forecastHorizon;
+  final double   confidence;
   final DateTime generatedAt;
 
   const DbPrediction({
@@ -211,8 +230,8 @@ class DbPrediction {
 
 class DbResult<T> {
   final List<T> data;
-  final bool    fromCache;    // true = data is from local cache / Firestore
-  final bool    isStale;      // true = cache older than TTL
+  final bool    fromCache;
+  final bool    isStale;
   final String? error;
 
   const DbResult({
@@ -243,7 +262,6 @@ class OpsFloodDbService {
     }
   }
 
-  // Firestore collection prefix (empty string = production)
   static const String _prefix =
       String.fromEnvironment('DB_COLLECTION_PREFIX', defaultValue: '');
 
@@ -255,8 +273,7 @@ class OpsFloodDbService {
   // ────────────────────────────────────────────────────────────────────────────
 
   /// Fetch all CWC station registry entries.
-  /// Mirrors to Firestore collection `station_registry`.
-  Future<DbResult<DbStation>> fetchStations() async {
+  Future<DbResult<DbStation>> getStations() async {
     const path = AppConfig.epCwcStations;
     final raw  = await _client.get(path);
 
@@ -264,14 +281,15 @@ class OpsFloodDbService {
       final list   = _asList(raw);
       final result = list.map((e) => DbStation.fromMap(e)).toList();
       await _cache.write(path, jsonEncode(list));
-      _mirrorStations(result); // fire-and-forget
+      _mirrorStations(result);
       return DbResult(data: result);
     }
 
     // Fallback 1: local cache
     final cached = await _cache.read(path);
     if (cached.value != null) {
-      final list   = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
+      final list = (jsonDecode(cached.value!) as List)
+          .cast<Map<String, dynamic>>();
       return DbResult(
         data:      list.map((e) => DbStation.fromMap(e)).toList(),
         fromCache: true,
@@ -302,26 +320,26 @@ class OpsFloodDbService {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // LIVE TELEMETRY READINGS
+  // LIVE READINGS
   // ────────────────────────────────────────────────────────────────────────────
 
   /// Fetch live telemetry for all monitored stations.
-  /// Mirrors each reading to Firestore `flood_readings`.
-  Future<DbResult<DbReading>> fetchLiveTelemetry() async {
+  Future<DbResult<DbReading>> getAllReadings() async {
     const path = AppConfig.epLiveTelemetry;
     final raw  = await _client.get(path);
 
     if (_isOk(raw)) {
-      final list    = _asList(raw);
-      final result  = list.map((e) => DbReading.fromMap(e)).toList();
+      final list   = _asList(raw);
+      final result = list.map((e) => DbReading.fromMap(e)).toList();
       await _cache.write(path, jsonEncode(list));
-      _mirrorReadings(result); // fire-and-forget
+      _mirrorReadings(result);
       return DbResult(data: result);
     }
 
     final cached = await _cache.read(path);
     if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
+      final list = (jsonDecode(cached.value!) as List)
+          .cast<Map<String, dynamic>>();
       return DbResult(
         data:      list.map((e) => DbReading.fromMap(e)).toList(),
         fromCache: true,
@@ -333,30 +351,27 @@ class OpsFloodDbService {
   }
 
   /// Fetch live reading for a single city.
-  Future<DbResult<DbReading>> fetchCityReading({
-    required String city,
-    required String state,
-    required String river,
-  }) async {
-    final path = '${AppConfig.epLiveTelemetry}?city=${Uri.encodeComponent(city)}';
+  Future<DbResult<DbReading>> getCityReadings(String city) async {
+    final path = AppConfig.epLiveTelemetry;
     final raw  = await _client.get(
-      AppConfig.epLiveTelemetry,
-      query: {'city': city, 'state': state, 'river': river},
+      path,
+      query: {'city': city},
     );
 
     if (_isOk(raw)) {
       final list   = _asList(raw);
       final result = list.map((e) => DbReading.fromMap(e)).toList();
-      if (result.isNotEmpty) {
-        await _cache.write(path, jsonEncode(list));
-        _mirrorReadings(result);
-      }
+      final cacheKey = '$path?city=${Uri.encodeComponent(city)}';
+      await _cache.write(cacheKey, jsonEncode(list));
+      _mirrorReadings(result);
       return DbResult(data: result);
     }
 
-    final cached = await _cache.read(path);
+    final cacheKey = '$path?city=${Uri.encodeComponent(city)}';
+    final cached   = await _cache.read(cacheKey);
     if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
+      final list = (jsonDecode(cached.value!) as List)
+          .cast<Map<String, dynamic>>();
       return DbResult(
         data:      list.map((e) => DbReading.fromMap(e)).toList(),
         fromCache: true,
@@ -372,8 +387,7 @@ class OpsFloodDbService {
   // ────────────────────────────────────────────────────────────────────────────
 
   /// Fetch active threshold breach alerts.
-  /// Mirrors new alerts to Firestore `alert_events`.
-  Future<DbResult<DbAlert>> fetchAlerts() async {
+  Future<DbResult<DbAlert>> getCriticalAlerts() async {
     const path = AppConfig.epCriticalAlerts;
     final raw  = await _client.get(path);
 
@@ -387,7 +401,8 @@ class OpsFloodDbService {
 
     final cached = await _cache.read(path);
     if (cached.value != null) {
-      final list = (jsonDecode(cached.value!) as List).cast<Map<String, dynamic>>();
+      final list = (jsonDecode(cached.value!) as List)
+          .cast<Map<String, dynamic>>();
       return DbResult(
         data:      list.map((e) => DbAlert.fromMap(e)).toList(),
         fromCache: true,
@@ -402,29 +417,26 @@ class OpsFloodDbService {
   // ML PREDICTIONS
   // ────────────────────────────────────────────────────────────────────────────
 
-  /// Fetch ML flood predictions for a given city from the /predict endpoint.
-  Future<DbResult<DbPrediction>> fetchPrediction({
-    required String city,
-    required double gaugeLevel,
-    required double rainfall,
-    required double discharge,
-  }) async {
+  /// Fetch ML flood predictions from the /predict endpoint.
+  Future<DbResult<DbPrediction>> getPredictions({String? city}) async {
     const path = AppConfig.epPredict;
-    final raw  = await _client.post(path, {
-      'city':        city,
-      'gauge_level': gaugeLevel,
-      'rainfall':    rainfall,
-      'discharge':   discharge,
-    });
+    final Map<String, dynamic> body = {
+      if (city != null) 'city': city,
+    };
+    final raw = await _client.post(path, body);
 
     if (_isOk(raw)) {
-      // /predict returns a single prediction object, not a list
-      final obj    = raw.containsKey('data') && raw['data'] is Map
+      final obj = raw.containsKey('data') && raw['data'] is Map
           ? raw['data'] as Map<String, dynamic>
           : raw;
-      final result = DbPrediction.fromMap({...obj, 'city': city});
-      final cacheKey = '$path?city=$city';
-      await _cache.write(cacheKey, jsonEncode([obj]));
+      final result = DbPrediction.fromMap({
+        ...obj,
+        if (city != null) 'city': city,
+      });
+      if (city != null) {
+        final cacheKey = '$path?city=${Uri.encodeComponent(city)}';
+        await _cache.write(cacheKey, jsonEncode([obj]));
+      }
       _mirrorPrediction(result);
       return DbResult(data: [result]);
     }
@@ -432,9 +444,7 @@ class OpsFloodDbService {
     return DbResult(data: const [], error: raw['error']?.toString());
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // PIPELINE FEATURES (for admin / debugging)
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Pipeline / admin helpers ─────────────────────────────────────────────
 
   Future<Map<String, dynamic>> fetchPipelineManifest() async {
     final raw = await _client.get(AppConfig.epPipelineManifest);
@@ -455,9 +465,7 @@ class OpsFloodDbService {
     return {};
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // FIRESTORE MIRROR (fire-and-forget helpers)
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Firestore mirror helpers (fire-and-forget) ────────────────────────────
 
   void _mirrorStations(List<DbStation> stations) {
     final fs = _fs;
@@ -465,7 +473,8 @@ class OpsFloodDbService {
     final col = fs.collection(_col('station_registry'));
     for (final s in stations) {
       if (s.city.isEmpty) continue;
-      col.doc(s.city.toLowerCase().replaceAll(' ', '_'))
+      col
+          .doc(s.city.toLowerCase().replaceAll(' ', '_'))
           .set(s.toMap(), SetOptions(merge: true))
           .catchError((e) => _log('Firestore station write failed: $e'));
     }
@@ -480,7 +489,8 @@ class OpsFloodDbService {
       final docId =
           '${r.city.toLowerCase().replaceAll(' ', '_')}_'
           '${r.timestamp.toUtc().toIso8601String().replaceAll(':', '').replaceAll('.', '_').substring(0, 15)}';
-      col.doc(docId)
+      col
+          .doc(docId)
           .set(r.toFirestore(), SetOptions(merge: true))
           .catchError((e) => _log('Firestore reading write failed: $e'));
     }
@@ -495,7 +505,8 @@ class OpsFloodDbService {
       final docId =
           '${a.city.toLowerCase().replaceAll(' ', '_')}_'
           '${a.timestamp.millisecondsSinceEpoch}';
-      col.doc(docId)
+      col
+          .doc(docId)
           .set(a.toFirestore(), SetOptions(merge: true))
           .catchError((e) => _log('Firestore alert write failed: $e'));
     }
@@ -508,14 +519,13 @@ class OpsFloodDbService {
     final docId =
         '${p.city.toLowerCase().replaceAll(' ', '_')}_'
         '${p.generatedAt.toUtc().toIso8601String().substring(0, 10)}';
-    col.doc(docId)
+    col
+        .doc(docId)
         .set(p.toFirestore(), SetOptions(merge: true))
         .catchError((e) => _log('Firestore prediction write failed: $e'));
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   bool _isOk(Map<String, dynamic> raw) =>
       raw['status'] != 'error' && raw['error'] == null;
@@ -525,15 +535,6 @@ class OpsFloodDbService {
     if (d is List) return d.whereType<Map<String, dynamic>>().toList();
     if (d is Map<String, dynamic>) return [d];
     return [];
-  }
-
-  static String _str(dynamic v) => v?.toString() ?? '';
-  static double _dbl(dynamic v) => (v is num) ? v.toDouble() : double.tryParse(v?.toString() ?? '') ?? 0.0;
-  static double? _dblOpt(dynamic v) => v == null ? null : _dbl(v);
-  static DateTime _dt(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is Timestamp) return v.toDate();
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   void _log(String msg) => debugPrint('[OpsFloodDb] $msg');

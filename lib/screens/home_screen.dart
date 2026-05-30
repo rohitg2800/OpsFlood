@@ -1,6 +1,5 @@
 // lib/screens/home_screen.dart
-// OpsFlood — HomeScreen v5  (Abyss Ops Premium Nav)
-// Custom frosted-glass bottom nav with animated glow indicator.
+// OpsFlood — HomeScreen v6  (Minimal frosted nav — premium rebuild)
 library;
 
 import 'dart:ui';
@@ -25,42 +24,39 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final RealTimeService _svc = RealTimeService();
-  int _currentIndex = 0;
+  int _idx = 0;
 
-  // Glow animation for selected tab
   late AnimationController _glowCtrl;
-  late Animation<double>   _glowAnim;
+  late Animation<double> _glow;
 
-  static const _destinations = [
-    _NavEntry(label: 'Home',    icon: Icons.dashboard_rounded,      activeIcon: Icons.dashboard_rounded),
-    _NavEntry(label: 'Rivers',  icon: Icons.water_outlined,          activeIcon: Icons.water_rounded),
-    _NavEntry(label: 'Alerts',  icon: Icons.notifications_outlined,  activeIcon: Icons.notifications_rounded),
-    _NavEntry(label: 'Weather', icon: Icons.cloud_outlined,          activeIcon: Icons.cloud_rounded),
-    _NavEntry(label: 'Predict', icon: Icons.model_training_outlined, activeIcon: Icons.model_training_rounded),
-    _NavEntry(label: 'Monitor', icon: Icons.monitor_heart_outlined,  activeIcon: Icons.monitor_heart_rounded),
+  static const _tabs = [
+    _Tab('Dashboard', Icons.dashboard_outlined,     Icons.dashboard_rounded),
+    _Tab('Rivers',    Icons.water_outlined,          Icons.water_rounded),
+    _Tab('Alerts',    Icons.notifications_outlined,  Icons.notifications_rounded),
+    _Tab('Weather',   Icons.cloud_outlined,          Icons.cloud_rounded),
+    _Tab('Predict',   Icons.model_training_outlined, Icons.model_training_rounded),
+    _Tab('Monitor',   Icons.monitor_heart_outlined,  Icons.monitor_heart_rounded),
   ];
 
-  Widget _buildScreen(int index) {
-    switch (index) {
-      case 0: return const DashboardScreen();
-      case 1: return const RiverMonitorScreen();
-      case 2: return const AlertsScreen();
-      case 3: return const WeatherScreen();
-      case 4: return const PredictScreen();
-      case 5: return const MonitorsScreen();
-      default: return const DashboardScreen();
-    }
-  }
+  Widget _screen(int i) => switch (i) {
+    0 => const DashboardScreen(),
+    1 => const RiverMonitorScreen(),
+    2 => const AlertsScreen(),
+    3 => const WeatherScreen(),
+    4 => const PredictScreen(),
+    5 => const MonitorsScreen(),
+    _ => const DashboardScreen(),
+  };
 
   @override
   void initState() {
     super.initState();
-    _svc.startPolling();
+    Future.microtask(_svc.startPolling);
     _glowCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1400))
+        vsync: this, duration: const Duration(milliseconds: 1600))
       ..repeat(reverse: true);
-    _glowAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
-        CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
+    _glow = Tween<double>(begin: 0.3, end: 1.0)
+        .animate(CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -70,78 +66,64 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  void _onTap(int i) {
-    if (i == _currentIndex) return;
+  void _go(int i) {
+    if (i == _idx) return;
     HapticFeedback.selectionClick();
-    setState(() => _currentIndex = i);
+    setState(() => _idx = i);
   }
 
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light.copyWith(
-        systemNavigationBarColor: AppPalette.abyss0,
-      ),
+      value: SystemUiOverlayStyle.light
+          .copyWith(systemNavigationBarColor: AppPalette.abyss0),
       child: Scaffold(
         backgroundColor: AppPalette.abyss0,
-        body: _buildScreen(_currentIndex),
-        bottomNavigationBar: _PremiumNavBar(
-          currentIndex: _currentIndex,
-          destinations: _destinations,
-          glowAnim:     _glowAnim,
-          onTap:        _onTap,
+        body: _screen(_idx),
+        bottomNavigationBar: _NavBar(
+          current: _idx, tabs: _tabs, glow: _glow, onTap: _go,
         ),
       ),
     );
   }
 }
 
-// ── Premium frosted glass nav bar ─────────────────────────────────────────────
-class _PremiumNavBar extends StatelessWidget {
-  final int                  currentIndex;
-  final List<_NavEntry>      destinations;
-  final Animation<double>    glowAnim;
-  final ValueChanged<int>    onTap;
-
-  const _PremiumNavBar({
-    required this.currentIndex,
-    required this.destinations,
-    required this.glowAnim,
-    required this.onTap,
+class _NavBar extends StatelessWidget {
+  const _NavBar({
+    required this.current, required this.tabs,
+    required this.glow,   required this.onTap,
   });
+  final int current;
+  final List<_Tab> tabs;
+  final Animation<double> glow;
+  final ValueChanged<int> onTap;
 
   @override
   Widget build(BuildContext context) {
-    final bottomPad = MediaQuery.of(context).padding.bottom;
+    final pad = MediaQuery.of(context).padding.bottom;
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
-          height: 62 + bottomPad,
-          decoration: BoxDecoration(
-            color: AppPalette.abyss0.withValues(alpha: 0.85),
-            border: const Border(
-              top: BorderSide(
-                color: Color(0x2200C6FF),
-                width: 1,
-              ),
-            ),
+          height: 58 + pad,
+          decoration: const BoxDecoration(
+            color: Color(0xCC010810),
+            border: Border(top: BorderSide(color: Color(0x1800C6FF), width: 1)),
           ),
           child: Padding(
-            padding: EdgeInsets.only(bottom: bottomPad),
+            padding: EdgeInsets.only(bottom: pad),
             child: Row(
-              children: List.generate(destinations.length, (i) {
-                final isActive = i == currentIndex;
+              children: List.generate(tabs.length, (i) {
+                final active = i == current;
                 return Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => onTap(i),
                     child: AnimatedBuilder(
-                      animation: glowAnim,
+                      animation: glow,
                       builder: (_, __) => _NavItem(
-                        entry:     destinations[i],
-                        isActive:  isActive,
-                        glowValue: isActive ? glowAnim.value : 0.0,
+                        tab: tabs[i], active: active,
+                        glowVal: active ? glow.value : 0,
                       ),
                     ),
                   ),
@@ -156,68 +138,52 @@ class _PremiumNavBar extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
-  final _NavEntry entry;
-  final bool      isActive;
-  final double    glowValue;
-
-  const _NavItem({
-    required this.entry,
-    required this.isActive,
-    required this.glowValue,
-  });
+  const _NavItem({required this.tab, required this.active, required this.glowVal});
+  final _Tab tab;
+  final bool active;
+  final double glowVal;
 
   @override
   Widget build(BuildContext context) {
-    final color = isActive ? AppPalette.cyan : AppPalette.textDim;
+    final c = active ? AppPalette.cyan : const Color(0xFF2E3E55);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Icon with optional glow container
         AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          width:  isActive ? 44 : 36,
-          height: isActive ? 30 : 26,
-          decoration: isActive
+          duration: const Duration(milliseconds: 220),
+          width: 40, height: 28,
+          decoration: active
               ? BoxDecoration(
-                  color:        AppPalette.cyan.withValues(alpha: 0.10 * glowValue),
+                  color: AppPalette.cyan.withValues(alpha: 0.08 * glowVal),
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: [
                     BoxShadow(
-                      color:      AppPalette.cyan.withValues(alpha: 0.25 * glowValue),
-                      blurRadius: 12,
+                      color: AppPalette.cyan.withValues(alpha: 0.20 * glowVal),
+                      blurRadius: 14,
                     ),
                   ],
                 )
               : null,
-          child: Icon(
-            isActive ? entry.activeIcon : entry.icon,
-            size:  isActive ? 22 : 20,
-            color: color,
-          ),
+          child: Icon(active ? tab.activeIcon : tab.icon,
+              size: active ? 20 : 18, color: c),
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 2),
         AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 180),
           style: TextStyle(
-            fontSize:   isActive ? 10.0 : 9.5,
-            fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-            color:      color,
-            letterSpacing: 0.2,
+            fontSize: active ? 9.5 : 9,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+            color: c, letterSpacing: 0.3,
           ),
-          child: Text(entry.label),
+          child: Text(tab.label),
         ),
       ],
     );
   }
 }
 
-class _NavEntry {
-  const _NavEntry({
-    required this.label,
-    required this.icon,
-    required this.activeIcon,
-  });
-  final String   label;
-  final IconData icon;
-  final IconData activeIcon;
+class _Tab {
+  const _Tab(this.label, this.icon, this.activeIcon);
+  final String label;
+  final IconData icon, activeIcon;
 }
