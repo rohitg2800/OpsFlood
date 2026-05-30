@@ -1,6 +1,6 @@
 import unittest
 
-from backend.app import health
+from backend.routers.core import health
 
 
 class BackendHealthTests(unittest.TestCase):
