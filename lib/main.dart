@@ -103,18 +103,18 @@ Future<void> main() async {
     WidgetsBinding.instance.allowFirstFrame();
   }
 
-  runApp(const ProviderScope(child: OpsFloodApp()));
+  runApp(const ProviderScope(child: EquinoxBHApp()));
 }
 
-class OpsFloodApp extends ConsumerWidget {
-  const OpsFloodApp({super.key});
+class EquinoxBHApp extends ConsumerWidget {
+  const EquinoxBHApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp(
-      title:                      'OpsFlood',
+      title: 'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
       themeMode:                  themeMode,
       theme:                      RiverColors.lightTheme(),
