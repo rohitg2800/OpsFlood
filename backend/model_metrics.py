@@ -138,12 +138,23 @@ def evaluate_and_log_metrics(
         print(f"[WARN] Metrics JSON persistence failed (non-fatal): {e}")
 
     # ── Optional Postgres persistence (non-fatal) ────────────────────────────
+    # FIX: PostgresOperationalStore has no .execute() method.
+    # Use store.connection() context manager to get a raw psycopg cursor,
+    # exactly the same pattern as save_prediction() / save_audit_log().
     try:
+        import json as _json
         from backend.postgres_store import PostgresOperationalStore
 
         store = PostgresOperationalStore()
-        store.execute(
-            """
+        # initialize() creates the core schema and sets store.ready = True
+        store.initialize()
+
+        if not store.ready:
+            raise RuntimeError("Postgres not ready: " + (store.last_error or "unknown"))
+
+        n_test = int(len(y_test)) if y_test is not None else None
+
+        CREATE_TABLE_SQL = """
             CREATE TABLE IF NOT EXISTS model_metrics (
                 id           SERIAL PRIMARY KEY,
                 model_name   TEXT NOT NULL,
@@ -155,32 +166,31 @@ def evaluate_and_log_metrics(
                 n_test       INT,
                 raw_json     JSONB
             );
-            """
-        )
+        """
 
-        # infer n_train/n_test not always known in this helper
-        n_train = None
-        n_test = int(len(y_test)) if y_test is not None else None
-
-        store.execute(
-            """
+        INSERT_SQL = """
             INSERT INTO model_metrics
                 (model_name, weighted_f1, macro_f1, macro_auroc, n_train, n_test, raw_json)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                model_name,
-                metrics.get("weighted_f1"),
-                metrics.get("macro_f1"),
-                metrics.get("macro_auroc"),
-                n_train,
-                n_test,
-                json.dumps(metrics),
-            ),
-        )
+        """
+
+        with store.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(CREATE_TABLE_SQL)
+                cur.execute(
+                    INSERT_SQL,
+                    (
+                        model_name,
+                        metrics.get("weighted_f1"),
+                        metrics.get("macro_f1"),
+                        metrics.get("macro_auroc"),
+                        None,   # n_train not known here
+                        n_test,
+                        _json.dumps(metrics),
+                    ),
+                )
         print("[METRICS] Persisted to Postgres model_metrics table")
     except Exception as e:
         print(f"[WARN] DB persistence failed (non-fatal): {e}")
 
     return metrics
-
