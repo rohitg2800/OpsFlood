@@ -1,5 +1,5 @@
 // lib/screens/monitors_screen.dart
-// Fixed: FloodData.river → riverName, FloodData.rainfall24h → effectiveRainfallMm
+// Fixed: floodDataForCity → dataForCity, realTimeServiceProvider alias resolved
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/flood_providers.dart';
@@ -24,7 +24,7 @@ class MonitorsScreen extends ConsumerWidget {
               itemCount: monitors.length,
               itemBuilder: (context, index) {
                 final city = monitors[index];
-                final fd   = rt.floodDataForCity(city);
+                final fd   = rt.dataForCity(city);  // was: floodDataForCity
 
                 if (fd == null) {
                   return Card(

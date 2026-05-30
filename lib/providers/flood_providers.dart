@@ -13,6 +13,9 @@ final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
   return service;
 });
 
+/// Alias kept for backward compatibility with screens using the old name.
+final realTimeServiceProvider = realTimeProvider;
+
 final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
 
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
@@ -49,4 +52,13 @@ final liveLevelsProvider = Provider<List<FloodData>>((ref) {
 
 final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
   return ref.watch(realTimeProvider).monitoringData;
+});
+
+/// List of city names that currently have live FloodData.
+final monitoredCitiesProvider = Provider<List<String>>((ref) {
+  return ref
+      .watch(realTimeProvider)
+      .liveLevels
+      .map((fd) => fd.city)
+      .toList();
 });
