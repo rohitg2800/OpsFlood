@@ -1,6 +1,5 @@
 // lib/widgets/station_card.dart
-// OpsFlood — StationCard v3  (Abyss Ops)
-// Compact premium station card — no circular gauge, clean bar + chips.
+// OpsFlood — StationCard v4  (district / zila added)
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import '../theme/river_theme.dart';
 
 class StationCard extends StatelessWidget {
   final String city;
+  final String district;   // ← zila
   final String river;
   final String state;
   final double current;
@@ -22,6 +22,7 @@ class StationCard extends StatelessWidget {
   const StationCard({
     super.key,
     required this.city,
+    this.district = '',
     required this.river,
     required this.state,
     required this.current,
@@ -39,6 +40,15 @@ class StationCard extends StatelessWidget {
   double get _fillPct => danger > 0
       ? (current / danger).clamp(0.0, 1.2)
       : 0.0;
+
+  /// Sub-label under city: "Kosi · Supaul · Bihar"
+  String get _subLabel {
+    final parts = <String>[];
+    if (river.isNotEmpty)    parts.add(river);
+    if (district.isNotEmpty) parts.add(district);
+    if (state.isNotEmpty)    parts.add(state);
+    return parts.join('  ·  ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,10 +72,9 @@ class StationCard extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // ── Top row ───────────────────────────────────────────
+            // ── Top row ──────────────────────────────────────────
             Row(
               children: [
-                // Status dot + icon
                 Container(
                   width: 42, height: 42,
                   decoration: BoxDecoration(
@@ -97,14 +106,20 @@ class StationCard extends StatelessWidget {
                         _SourceBadge(source: source),
                       ]),
                       const SizedBox(height: 2),
+                      // River · District · State
                       Text(
-                        '$river  ·  $state',
+                        _subLabel,
                         style: const TextStyle(
                           color:    AppPalette.textGrey,
                           fontSize: 11,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
+                      // district chip only if non-empty
+                      if (district.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        _DistrictChip(district: district),
+                      ],
                     ],
                   ),
                 ),
@@ -136,7 +151,7 @@ class StationCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            // ── Fill bar ──────────────────────────────────────────
+            // ── Fill bar ─────────────────────────────────────────
             Stack(children: [
               Container(
                 height: 7,
@@ -213,7 +228,31 @@ class StationCard extends StatelessWidget {
   );
 }
 
-// ── Sub-widgets ───────────────────────────────────────────────────────────────
+// ── District chip ─────────────────────────────────────────────────────────────
+class _DistrictChip extends StatelessWidget {
+  final String district;
+  const _DistrictChip({required this.district});
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.location_city_outlined,
+              size: 9, color: AppPalette.textDim),
+          const SizedBox(width: 3),
+          Text(
+            district,
+            style: const TextStyle(
+              color:      AppPalette.textDim,
+              fontSize:   9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      );
+}
+
+// ── Source badge ──────────────────────────────────────────────────────────────
 class _SourceBadge extends StatelessWidget {
   final String source;
   const _SourceBadge({required this.source});
@@ -246,6 +285,7 @@ class _SourceBadge extends StatelessWidget {
   }
 }
 
+// ── Status chip ───────────────────────────────────────────────────────────────
 class _StatusChip extends StatelessWidget {
   final String status;
   final Color  color;
@@ -270,6 +310,7 @@ class _StatusChip extends StatelessWidget {
       );
 }
 
+// ── Trend chip ────────────────────────────────────────────────────────────────
 class _TrendChip extends StatelessWidget {
   final String trend;
   const _TrendChip({required this.trend});
