@@ -3,23 +3,17 @@ import 'package:flutter/material.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'live_fetch_engine.dart';
-import 'ml_inference.dart';
+import 'ml_inference.dart'; // kept for backwards compat — is an empty library
 
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
   factory RealTimeService() => _instance;
 
-  final LiveFetchEngine   _fetchEngine = LiveFetchEngine();
-  final MlInferenceEngine _mlEngine    = MlInferenceEngine();
-
-  // Guard flag — prevents notifyListeners() being called on a disposed
-  // ChangeNotifier. In-flight timer callbacks from LiveFetchEngine check
-  // this before notifying so tests (and hot-restarts) don't crash.
+  final LiveFetchEngine _fetchEngine = LiveFetchEngine();
   bool _disposed = false;
 
   RealTimeService._internal() {
     _fetchEngine.onStateChanged = () {
-      // FIX: only notify if still alive.
       if (!_disposed) notifyListeners();
     };
   }
@@ -28,14 +22,12 @@ class RealTimeService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    // Stop the polling timer and clear the callback so no timer closure
-    // can call back into this (now-disposed) ChangeNotifier.
     _fetchEngine.stopPolling();
     _fetchEngine.onStateChanged = null;
     super.dispose();
   }
 
-  // ── Engine passthrough getters ────────────────────────────────────────
+  // ── Status passthrough ────────────────────────────────────────────────
   bool      get isLoading           => _fetchEngine.isLoading;
   bool      get isOnline            => _fetchEngine.isOnline;
   bool      get isUsingFallback     => _fetchEngine.isUsingFallback;
@@ -45,28 +37,31 @@ class RealTimeService extends ChangeNotifier {
   String?   get error               => _fetchEngine.error;
   int       get queuedOfflineCycles => _fetchEngine.queuedOfflineCycles;
 
-  List<FloodData>          get liveLevels           => _fetchEngine.liveLevels;
-  List<dynamic>            get activeCriticalAlerts  => _fetchEngine.activeCriticalAlerts;
-  List<dynamic>            get criticalAlerts        => _fetchEngine.criticalAlerts;
-  int                      get criticalCount         => _fetchEngine.criticalCount;
-  List<dynamic>            get cwcStations           => _fetchEngine.cwcStations;
-  bool                     get hasCwcLiveData        => _fetchEngine.hasCwcLiveData;
-  MultiLocationMonitoring  get monitoringData        => _fetchEngine.monitoringData;
+  // ── Data passthrough ──────────────────────────────────────────────────
+  List<FloodData> get liveLevels    => _fetchEngine.liveFloodData;
 
-  List<dynamic> get imdAlerts        => _fetchEngine.imdAlerts;
-  List<dynamic> get ndmaAdvisories   => _fetchEngine.ndmaAdvisories;
+  List<dynamic>            get activeCriticalAlerts => _fetchEngine.activeCriticalAlerts;
+  List<dynamic>            get criticalAlerts       => _fetchEngine.criticalAlerts;
+  int                      get criticalCount        => _fetchEngine.criticalCount;
+  List<dynamic>            get cwcStations          => _fetchEngine.cwcStations;
+  bool                     get hasCwcLiveData       => _fetchEngine.hasCwcLiveData;
+  MultiLocationMonitoring  get monitoringData       => _fetchEngine.monitoringData;
+
+  List<dynamic> get imdAlerts         => _fetchEngine.imdAlerts;
+  List<dynamic> get ndmaAdvisories    => _fetchEngine.ndmaAdvisories;
   List<dynamic> get emergencyContacts => _fetchEngine.emergencyContacts;
 
-  Map<String, dynamic> get debugLevelsRaw  => _fetchEngine.debugLevelsRaw;
-  Map<String, dynamic> get debugCwcRaw     => _fetchEngine.debugCwcRaw;
+  Map<String, dynamic> get debugLevelsRaw   => _fetchEngine.debugLevelsRaw;
+  Map<String, dynamic> get debugCwcRaw      => _fetchEngine.debugCwcRaw;
   int                  get debugRetryCount  => _fetchEngine.debugRetryCount;
   int                  get debugWakeAttempts => _fetchEngine.debugWakeAttempts;
 
+  // ── Per-city ──────────────────────────────────────────────────────────
   List<RiverLevelSnapshot> trendForCity(String city) =>
       _fetchEngine.trendForCity(city);
 
   FloodData? dataForCity(String city) =>
-      _fetchEngine.dataForCity(city);
+      _fetchEngine.floodDataForCity(city);
 
   List<dynamic> imdAlertsForState(String state)       => _fetchEngine.imdAlertsForState(state);
   List<dynamic> ndmaAdvisoriesForState(String state)  => _fetchEngine.ndmaAdvisoriesForState(state);

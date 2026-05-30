@@ -20,7 +20,6 @@ import 'theme/river_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Defer first frame so splash renders before heavy init.
   WidgetsBinding.instance.deferFirstFrame();
 
   try {
@@ -28,7 +27,7 @@ Future<void> main() async {
     try {
       await dotenv.load(fileName: '.env', mergeWith: {});
     } catch (e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
+      if (kDebugMode) debugPrint('⚠️  .env not found — running with defaults: $e');
     }
 
     // 2. Firebase
@@ -40,13 +39,13 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out — continuing without Firebase');
+              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
               throw TimeoutException('Firebase init timeout');
             },
           );
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase init failed (non-fatal): $e');
+        if (kDebugMode) debugPrint('⚠️  Firebase init failed (non-fatal): $e');
       }
     }
 
@@ -68,11 +67,11 @@ Future<void> main() async {
     FlutterError.onError = (FlutterErrorDetails details) {
       if (kDebugMode) {
         FlutterError.presentError(details);
-        debugPrint('\u274c FlutterError: ${details.summary}');
+        debugPrint('❌ FlutterError: ${details.summary}');
       }
     };
     PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-      if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
+      if (kDebugMode) debugPrint('❌ PlatformDispatcher: $error\n$stack');
       return true;
     };
 
@@ -81,21 +80,19 @@ Future<void> main() async {
 
     // 6. Essential services
     if (!kIsWeb) {
-      // LocalCacheService must be ready before ThresholdAlertService starts.
       await LocalCacheService.instance.init().catchError((e) {
-        if (kDebugMode) debugPrint('\u26a0\ufe0f  LocalCacheService.init failed: $e');
+        if (kDebugMode) debugPrint('⚠️  LocalCacheService.init failed: $e');
       });
 
       unawaited(
         FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
+          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
         }),
       );
 
-      // ThresholdAlertService calls GloFAS flood API directly (no backend).
       unawaited(
         ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
+          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
         }),
       );
     }
@@ -121,7 +118,7 @@ class EquinoxBHApp extends ConsumerWidget {
       darkTheme:                  RiverColors.darkTheme(),
       home:                       const SplashScreen(),
       routes: {
-        AlertsScreen.route: (_) => const AlertsScreen(),
+        AlertsScreen.route: (_) => const AlertsScreen(),   // '/alerts'
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
