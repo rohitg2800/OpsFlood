@@ -49,9 +49,14 @@
 - Two empty states: fetching vs. no search results.
 - Pull-to-refresh.
 
+### ✅ DashboardScreen — DONE
+- Dead import (`india_river_explorer_screen.dart`) removed.
+- KPI row now shows all 4 severity tiers: CRITICAL / SEVERE / MODERATE / MONITORED.
+- `_sorted` uses `priorityOrder`; city chips + trend chart use `priorityColor`.
+- No inline colour switch blocks anywhere in the file.
+
 ---
 
-## Next up
+## Remaining
 - [ ] Step 3–5 above: run backend tests → retrain → manual verify.
-- [ ] `dashboard_screen.dart` — add summary counts by severity level (CRITICAL / SEVERE / MODERATE / LOW).
 - [ ] Wire `LiveStationsScreen` into `home_screen.dart` nav if not already present.
