@@ -1195,7 +1195,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
                     const Spacer(),
                     Text(
                       '${a.currentValue.toStringAsFixed(1)} ${a.unitLabel}  '
-                      '(${a.breachMargin >= 0 ? '+' : ''}'  
+                      '(${a.breachMargin >= 0 ? '+' : ''}'
                       '${a.breachMargin.toStringAsFixed(1)} vs ${a.level.label})',
                       style: const TextStyle(
                           color: Color(0xFF7B8A99), fontSize: 9),
@@ -1374,7 +1374,7 @@ class _LiveCardState extends State<_LiveCard> with SingleTickerProviderStateMixi
       t == 'RISING' ? '↑' : t == 'FALLING' ? '↓' : '→';
   Color  _tc(String t) => t == 'RISING'
       ? const Color(0xFFEF4444)
-      : t == 'FALLING' ? const Color(0xFF22C55E) : const Color(0xFFF59E0B);
+      : t == 'FALLING' ? const Color(0xFF22C55E) : const Color(0xFF7B8A99);
   Color  _sc(String s) => s == 'CRITICAL'
       ? const Color(0xFFEF4444)
       : s == 'WARNING' ? const Color(0xFFF59E0B) : const Color(0xFF22C55E);
@@ -1513,7 +1513,7 @@ class _AlertFilterMenu extends StatelessWidget {
   const _AlertFilterMenu({required this.provider});
   @override
   Widget build(BuildContext context) {
-    final hasFilter = provider.filterLevel != null || provider.filterState != null;
+    final hasFilter = provider.filterLevel != null || provider.filterDistrict != null;
     return PopupMenuButton<String>(
       icon: Icon(Icons.filter_list_rounded,
           size: 18,
@@ -1605,96 +1605,98 @@ class _ShimmerCardState extends State<_ShimmerCard>
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       height: 120,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
-          begin: Alignment(_anim.value - 1, 0),
-          end:   Alignment(_anim.value + 1, 0),
-          colors: [_kSurface, _kGold.withOpacity(0.07), _kSurface],
+          colors: [
+            const Color(0xFF0C1520),
+            Color.lerp(const Color(0xFF0C1520), const Color(0xFF1A2A3A),
+                (_anim.value + 2) / 4)!,
+            const Color(0xFF0C1520),
+          ],
+          stops: const [0.0, 0.5, 1.0],
         ),
-        border: Border.all(color: _kBorder),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF1A2A3A)),
       ),
     ),
   );
 }
 
-// ── Atoms ─────────────────────────────────────────────────────────────────────
+// ── Small reusable widgets ────────────────────────────────────────────────────
+
+class _GoldChip extends StatelessWidget {
+  final String label;
+  final String sublabel;
+  final Color? color;
+  const _GoldChip({required this.label, required this.sublabel, this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    decoration: BoxDecoration(
+      color: (color ?? _kGold).withOpacity(0.08),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: (color ?? _kGold).withOpacity(0.25))),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Text(label, style: TextStyle(
+          color: color ?? _kGold, fontSize: 13, fontWeight: FontWeight.w900)),
+      Text(sublabel, style: const TextStyle(
+          color: Color(0xFF3A4A58), fontSize: 8)),
+    ]),
+  );
+}
+
 class _FilterPill extends StatelessWidget {
   final IconData icon;
   final String   label;
   final bool     active;
   const _FilterPill({required this.icon, required this.label, required this.active});
-  @override Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: active ? _kGold.withOpacity(0.12) : Colors.transparent,
-      borderRadius: BorderRadius.circular(20),
+      color: active ? _kGold.withOpacity(0.15) : _kSurface2,
+      borderRadius: BorderRadius.circular(10),
       border: Border.all(
-          color: active ? _kGold.withOpacity(0.4) : const Color(0xFF2A3A4A)),
-    ),
+          color: active ? _kGold.withOpacity(0.5) : const Color(0xFF1A2A3A))),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 13,
-          color: active ? _kGold : const Color(0xFF7B8A99)),
+      Icon(icon, size: 13, color: active ? _kGold : const Color(0xFF7B8A99)),
       const SizedBox(width: 4),
       Text(label, style: TextStyle(
-          fontSize: 11, fontWeight: FontWeight.w600,
-          color: active ? _kGold : const Color(0xFF7B8A99))),
+          color: active ? _kGold : const Color(0xFF7B8A99),
+          fontSize: 11, fontWeight: FontWeight.w700)),
     ]),
   );
-}
-
-class _Pill extends StatelessWidget {
-  final String icon, label;
-  final Color  color;
-  const _Pill({required this.icon, required this.label, required this.color});
-  @override Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: color.withOpacity(0.3))),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Text(icon, style: const TextStyle(fontSize: 10)),
-      const SizedBox(width: 4),
-      Text(label,
-          style: TextStyle(
-              color: color, fontSize: 10, fontWeight: FontWeight.w700)),
-    ]),
-  );
-}
-
-class _GoldChip extends StatelessWidget {
-  final String label, sublabel;
-  final Color? color;
-  const _GoldChip({required this.label, required this.sublabel, this.color});
-  @override Widget build(BuildContext context) {
-    final c = color ?? _kGold;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: c.withOpacity(0.10), borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: c.withOpacity(0.3))),
-      child: Column(children: [
-        Text(label, style: TextStyle(
-            color: c, fontSize: 14, fontWeight: FontWeight.w900, height: 1.1)),
-        Text(sublabel, style: const TextStyle(
-            color: Color(0xFF7B8A99), fontSize: 8, fontWeight: FontWeight.w500)),
-      ]),
-    );
-  }
 }
 
 class _LegendDot extends StatelessWidget {
-  final Color color; final String label;
+  final Color  color;
+  final String label;
   const _LegendDot({required this.color, required this.label});
-  @override Widget build(BuildContext context) =>
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(
-            color: color, shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 4)]),
-        ),
-        const SizedBox(width: 4),
-        Text(label,
-            style: const TextStyle(fontSize: 10, color: Color(0xFF7B8A99))),
-      ]);
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+    Container(width: 7, height: 7,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+    const SizedBox(width: 4),
+    Text(label, style: const TextStyle(color: Color(0xFF7B8A99), fontSize: 9)),
+  ]);
+}
+
+class _Pill extends StatelessWidget {
+  final String icon;
+  final String label;
+  final Color  color;
+  const _Pill({required this.icon, required this.label, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: color.withOpacity(0.2))),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(icon, style: const TextStyle(fontSize: 10)),
+      const SizedBox(width: 4),
+      Text(label, style: TextStyle(
+          color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+    ]),
+  );
 }
