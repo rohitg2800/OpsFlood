@@ -1,16 +1,14 @@
 // lib/services/real_time_river_service.dart
 //
-// OpsFlood — RealTimeRiverService v3
+// OpsFlood — RealTimeRiverService v4
 //
-// Previously embedded a full hardcoded Bihar station list and computed
-// synthetic levels locally.  Now it:
-//   1. Calls GET /api/stations on startup and every _pollInterval.
-//   2. Emits RiverStation objects parsed from the API response.
-//   3. Falls back to the last successful response if the backend is
-//      unreachable (no more hardcoded data).
+// Exposes both:
+//   • RiverStation  — raw model from /api/stations (used by new stream-based widgets)
+//   • LiveRiverResult — compatibility wrapper expected by river_monitor_screen
+//                       and india_rivers_screen (fetchAll / fetchCity API)
 //
-// The backend at /api/stations already scrapes wrdb.bih.nic.in and
-// falls back to deterministic synthetic levels automatically.
+// The backend at /api/stations scrapes wrdb.bih.nic.in and falls back to
+// deterministic synthetic levels automatically.
 library;
 
 import 'dart:async';
@@ -19,9 +17,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../models/river_station.dart' show DangerClass;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Model
+// RiverStation  (used by stream-based providers)
 // ─────────────────────────────────────────────────────────────────────────────
 class RiverStation {
   final String id;
@@ -107,7 +106,136 @@ class RiverStation {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Service
+// CwcStation  — subset used by LiveRiverResult (mirrors old river_station model)
+// ─────────────────────────────────────────────────────────────────────────────
+class CwcStation {
+  final String city;
+  final String river;
+  final String state;
+  final double current;   // current gauge height (m)
+  final double warning;   // warning level (m)
+  final double danger;    // danger level (m)
+  final double hfl;       // highest flood level (m)
+  final String? trend;
+  final String? liveStatus;
+  final double? rainfallLastHour;
+  final double? flowRate;
+  final DateTime? lastUpdated;
+
+  const CwcStation({
+    required this.city,
+    required this.river,
+    required this.state,
+    required this.current,
+    required this.warning,
+    required this.danger,
+    required this.hfl,
+    this.trend,
+    this.liveStatus,
+    this.rainfallLastHour,
+    this.flowRate,
+    this.lastUpdated,
+  });
+
+  /// Fraction of HFL reached (0–1).
+  double get progressPct => hfl > 0 ? (current / hfl).clamp(0.0, 1.0) : 0.0;
+
+  /// Danger class derived from gauge levels.
+  DangerClass get dangerClass {
+    if (current <= 0)       return DangerClass.normal;
+    if (hfl > 0 && current >= hfl)     return DangerClass.extreme;
+    if (danger > 0 && current >= danger) return DangerClass.severe;
+    if (warning > 0 && current >= warning) return DangerClass.aboveNormal;
+    return DangerClass.normal;
+  }
+
+  /// Risk score (0–100) purely from CWC levels.
+  double get riskScore {
+    if (hfl <= 0) return 0;
+    if (warning > 0 && hfl > warning) {
+      return ((current - warning) / (hfl - warning) * 100).clamp(0.0, 100.0);
+    }
+    return (current / hfl * 100).clamp(0.0, 100.0);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LiveRiverResult  — result object expected by river_monitor_screen /
+//                    india_rivers_screen
+// ─────────────────────────────────────────────────────────────────────────────
+class LiveRiverResult {
+  final CwcStation station;
+  final String     source;      // data source label, 'NO_DATA' if unavailable
+  final double     confidence;  // 0–1
+  final bool       isStale;
+  final String?    mlRiskLevel;  // 'LOW' | 'MODERATE' | 'SEVERE' | 'CRITICAL'
+  final double?    mlFloodProb;  // 0–1
+
+  const LiveRiverResult({
+    required this.station,
+    required this.source,
+    this.confidence = 1.0,
+    this.isStale    = false,
+    this.mlRiskLevel,
+    this.mlFloodProb,
+  });
+
+  /// Build a LiveRiverResult from the /api/stations JSON object.
+  factory LiveRiverResult.fromApiJson(Map<String, dynamic> j) {
+    final currentLevel  = (j['current_level']  as num?)?.toDouble() ?? 0.0;
+    final dangerLevel   = (j['danger_level']   as num?)?.toDouble() ?? 0.0;
+    final warningLevel  = (j['warning_level']  as num?)?.toDouble() ?? 0.0;
+    // Use danger level as HFL if no explicit hfl key
+    final hfl           = (j['hfl']            as num?)?.toDouble() ??
+                          (j['high_flood_level'] as num?)?.toDouble() ??
+                          dangerLevel * 1.15;
+
+    final dataSource    = j['data_source']  as String? ?? 'UNKNOWN';
+    final isNoData      = currentLevel <= 0 || dataSource == 'NO_DATA';
+
+    final lastUpdatedRaw = j['last_updated'] as String?;
+    final lastUpdated    = lastUpdatedRaw != null
+        ? DateTime.tryParse(lastUpdatedRaw)
+        : null;
+    final isStale = lastUpdated != null
+        ? DateTime.now().difference(lastUpdated).inHours > 6
+        : false;
+
+    // Derive ML prob from pct_to_danger (simple heuristic when no ML endpoint)
+    final pctToDanger = (j['pct_to_danger'] as num?)?.toDouble() ?? 0.0;
+    final mlFloodProb = (pctToDanger / 100).clamp(0.0, 1.0);
+    final mlRiskLevel = pctToDanger >= 90 ? 'CRITICAL'
+                      : pctToDanger >= 70 ? 'SEVERE'
+                      : pctToDanger >= 40 ? 'MODERATE'
+                      : 'LOW';
+
+    final station = CwcStation(
+      city:    j['city']   as String? ?? j['name'] as String? ?? '',
+      river:   j['river']  as String? ?? '',
+      state:   j['state']  as String? ?? 'Bihar',
+      current: currentLevel,
+      warning: warningLevel,
+      danger:  dangerLevel,
+      hfl:     hfl,
+      trend:   j['trend']  as String?,
+      liveStatus: isNoData ? null : (j['status'] as String?),
+      flowRate:   (j['flow_rate'] as num?)?.toDouble(),
+      lastUpdated: lastUpdated,
+    );
+
+    return LiveRiverResult(
+      station:     station,
+      source:      isNoData ? 'NO_DATA' : dataSource,
+      confidence:  isNoData ? 0.0 : 0.9,
+      isStale:     isStale,
+      mlRiskLevel: mlRiskLevel,
+      mlFloodProb: mlFloodProb,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RealTimeRiverService
 // ─────────────────────────────────────────────────────────────────────────────
 class RealTimeRiverService {
   static final RealTimeRiverService _instance = RealTimeRiverService._internal();
@@ -116,7 +244,7 @@ class RealTimeRiverService {
 
   final http.Client _client = http.Client();
 
-  // Stream controller — UI subscribes to this
+  // Stream controller — used by stream-based providers
   final _controller = StreamController<List<RiverStation>>.broadcast();
   Stream<List<RiverStation>> get stream => _controller.stream;
 
@@ -126,7 +254,6 @@ class RealTimeRiverService {
   DateTime?            _lastFetch;
   String?              _lastError;
 
-  // Poll interval — matches AppConfig but can be overridden for testing
   Duration _pollInterval = AppConfig.realtimeInterval;
 
   List<RiverStation> get stations  => _lastStations;
@@ -134,7 +261,6 @@ class RealTimeRiverService {
   DateTime?          get lastFetch => _lastFetch;
   String?            get lastError => _lastError;
 
-  // Filtered views
   List<RiverStation> get biharStations =>
       _lastStations.where((s) => s.state == 'Bihar').toList();
 
@@ -163,7 +289,7 @@ class RealTimeRiverService {
         .firstOrNull;
   }
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────────
+  // ── Lifecycle ────────────────────────────────────────────────────────────
   Future<void> start({Duration? pollInterval}) async {
     if (pollInterval != null) _pollInterval = pollInterval;
     _timer?.cancel();
@@ -181,7 +307,7 @@ class RealTimeRiverService {
     _controller.close();
   }
 
-  // ── Fetch from /api/stations ──────────────────────────────────────────────────
+  // ── Low-level fetch → List<RiverStation> (stream-based path) ────────────
   Future<List<RiverStation>> fetch({
     String? state,
     String? river,
@@ -192,7 +318,6 @@ class RealTimeRiverService {
     _loading = true;
 
     try {
-      // Build URL — /api/stations maps to AppConfig.epLiveTelemetry
       final params = <String, String>{};
       if (state    != null) params['state']    = state;
       if (river    != null) params['river']    = river;
@@ -240,19 +365,92 @@ class RealTimeRiverService {
       _loading = false;
     }
 
-    // Return last known good data on failure (no synthetic fallback here —
-    // the backend already has its own deterministic fallback).
-    if (_lastStations.isNotEmpty) {
-      _controller.add(_lastStations);
-    }
+    if (_lastStations.isNotEmpty) _controller.add(_lastStations);
     return _lastStations;
   }
 
-  // ── Fetch Bihar WRD only ──────────────────────────────────────────────────────
-  Future<List<RiverStation>> fetchBiharOnly() =>
-      fetch(state: 'Bihar');
+  Future<List<RiverStation>> fetchBiharOnly() => fetch(state: 'Bihar');
 
-  // ── Summary stats ─────────────────────────────────────────────────────────────
+  // ── fetchAll — used by river_monitor_screen & india_rivers_screen ────────
+  /// Fetches all stations and returns them as [LiveRiverResult] objects.
+  Future<List<LiveRiverResult>> fetchAll() async {
+    try {
+      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}');
+      if (kDebugMode) debugPrint('[RiverService] fetchAll → $uri');
+
+      final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
+
+      if (res.statusCode == 200) {
+        final j   = jsonDecode(res.body) as Map<String, dynamic>;
+        final raw = j['data'];
+        if (raw is List) {
+          return raw
+              .cast<Map<String, dynamic>>()
+              .map(LiveRiverResult.fromApiJson)
+              .toList();
+        }
+      }
+      throw Exception('fetchAll: HTTP ${res.statusCode}');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[RiverService] fetchAll error: $e');
+      rethrow;
+    }
+  }
+
+  // ── fetchCity — used by river_monitor_screen & india_rivers_screen ───────
+  /// Fetches a single city by name and returns a [LiveRiverResult].
+  Future<LiveRiverResult> fetchCity({
+    required String city,
+    required String state,
+    required String river,
+  }) async {
+    try {
+      final params = {'city': city, 'state': state};
+      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}')
+          .replace(queryParameters: params);
+
+      if (kDebugMode) debugPrint('[RiverService] fetchCity → $uri');
+
+      final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
+
+      if (res.statusCode == 200) {
+        final j   = jsonDecode(res.body) as Map<String, dynamic>;
+        final raw = j['data'];
+        if (raw is List && raw.isNotEmpty) {
+          return LiveRiverResult.fromApiJson(
+              raw.cast<Map<String, dynamic>>().first);
+        }
+        // API returned empty list → treat as NO_DATA
+        return _noDataResult(city: city, state: state, river: river);
+      }
+      throw Exception('fetchCity: HTTP ${res.statusCode}');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[RiverService] fetchCity error: $e');
+      // Return a NO_DATA sentinel so the screen can still display something
+      return _noDataResult(city: city, state: state, river: river);
+    }
+  }
+
+  LiveRiverResult _noDataResult({
+    required String city,
+    required String state,
+    required String river,
+  }) =>
+      LiveRiverResult(
+        station: CwcStation(
+          city:    city,
+          river:   river,
+          state:   state,
+          current: 0,
+          warning: 0,
+          danger:  0,
+          hfl:     0,
+        ),
+        source:     'NO_DATA',
+        confidence: 0.0,
+      );
+
+  // ── Summary stats ────────────────────────────────────────────────────────
   Map<String, int> get summary => {
     'total':   _lastStations.length,
     'normal':  _lastStations.where((s) => s.isNormal).length,
