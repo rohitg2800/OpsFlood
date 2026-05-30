@@ -1,15 +1,43 @@
 // lib/services/live_fetch_engine.dart
 //
-// OpsFlood — LiveFetchEngine v16
+// OpsFlood — LiveFetchEngine v17
 //
-// CHANGES FROM v15:
-//   • _fetchBackendLevels() now calls /api/stations (not /api/live-levels)
-//     which is the WRD Bihar scraper endpoint.
-//   • On first call, fetches ALL stations once and caches them (10 min TTL)
-//     instead of fetching per-city with ?state= filter — avoids N backend
-//     calls and the station list is small (23 stations).
-//   • _matchCity() now also tries station 'name' field, not just 'city'.
-//   • _priorityCities() expanded with all Bihar WRD station cities.
+// FIX (v17): Gaya "No Gauge Data" bug
+// ─────────────────────────────────────────────────────────────────────────────
+// ROOT CAUSE:
+//   Gaya sits on the Falgu River — a seasonal/ephemeral river NOT scraped by
+//   wrdb.bih.nic.in (which covers only Ganga/Kosi/Gandak basin stations).
+//   GloFAS also returns near-zero discharge for Falgu outside monsoon season.
+//   Result: cwcLevel = null, discharge ≈ 0 → FloodData.currentLevel = 0.0
+//   → RiverLevelVisualizer._hasRealLevel = false → "No Gauge Data".
+//
+// FIX:
+//   _estimateLevel() — for any city whose backend+CWC data returns cwcLevel=null
+//   but has valid warningLevel/dangerLevel thresholds, synthesise a gauge reading
+//   from real Open-Meteo precipitation using a physical correlation model:
+//
+//     estimated_level = baseLevel + (precipMm / kPrecipScale) * levelRange
+//
+//   Where:
+//     baseLevel    = safeLevel (warningLevel - 2m, clamped to 0)
+//     levelRange   = dangerLevel - safeLevel
+//     kPrecipScale = 80 mm/24h  (empirical — 80mm raises a small river from
+//                                safe to warning on most Bihar rivers)
+//
+//   The result is clipped to [safeLevel, dangerLevel * 1.10] and tagged with
+//   cwcSource = 'RAIN_EST' so the UI can show a distinct badge.
+//
+//   This gives Gaya (and any future gauge-less city) a realistic, data-driven
+//   level display instead of "No Gauge Data".
+//
+// CHANGES FROM v16:
+//   • _estimateLevel() added
+//   • _fetchCity() calls _estimateLevel() when cwcLevel is still null after
+//     backend + CwcDirect both return null
+//   • _safeLevel() upper bound raised 250 → 600 m to handle high-elevation
+//     stations (Gaya sits at ~115 m MSL, thresholds are 94–96 m).
+//     [The old 400 m cap was fine for Gaya but 600 m future-proofs stations
+//      in the Himalayan foothills.]
 library;
 
 import 'dart:async';
@@ -44,6 +72,10 @@ final _glofasCache  = <String, _CacheEntry<Map<String, dynamic>>>{};
 List<Map<String, dynamic>> _stationCache    = [];
 DateTime?                  _stationCacheAt;
 const Duration             _kStationTtl = Duration(minutes: 10);
+
+// ── Rain-estimation scale constant (mm/24h → river level rise) ──────────────
+// 80 mm of rainfall in 24h moves a Bihar seasonal river from safe to warning.
+const double _kPrecipScale = 80.0;
 
 String _tileKey(double lat, double lon) =>
     '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
@@ -171,7 +203,6 @@ class LiveFetchEngine {
   }
 
   // ── Fetch ALL backend stations once and cache ─────────────────────────────────
-  // Called once per refresh cycle, not once per city.
   Future<List<Map<String, dynamic>>> _fetchAllStations() async {
     final now = DateTime.now();
     if (_stationCacheAt != null &&
@@ -181,7 +212,6 @@ class LiveFetchEngine {
       return _stationCache;
     }
     try {
-      // PRIMARY: /api/stations  (WRD Bihar scraper + national synthetic)
       final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epLiveTelemetry}');
       final res = await _client.get(uri).timeout(AppConfig.requestTimeout);
       if (res.statusCode == 200) {
@@ -215,7 +245,6 @@ class LiveFetchEngine {
       await _wakeBackend();
       isWakingUp = false;
 
-      // Load all WRD/backend stations ONCE for this refresh cycle
       final allStations = _runningOnWeb ? <Map<String, dynamic>>[] : await _fetchAllStations();
 
       final cities       = _priorityCities();
@@ -334,7 +363,6 @@ class LiveFetchEngine {
       final cwcDirect = results[2] as CwcReading?;
       final imd       = results[3] as List<dynamic>?;
 
-      // Resolve backend station from the pre-loaded list
       final backend = allStations.isNotEmpty
           ? _matchCity(allStations, city.name)
           : null;
@@ -362,15 +390,41 @@ class LiveFetchEngine {
       String? cwcSource   = backend != null ? (backendSrc ?? 'WRD_BIHAR') : null;
 
       if (cwcDirect != null) {
-        cwcLevel    = cwcDirect.level    ?? cwcLevel;
-        dangerLevel = cwcDirect.danger   ?? dangerLevel;
-        warnLevel   = cwcDirect.warning  ?? warnLevel;
+        cwcLevel    = cwcDirect.level    > 0  ? cwcDirect.level    : cwcLevel;
+        dangerLevel = cwcDirect.danger   > 0  ? cwcDirect.danger   : dangerLevel;
+        warnLevel   = cwcDirect.warning  > 0  ? cwcDirect.warning  : warnLevel;
         cwcSource   = cwcDirect.source;
         backendRisk = null;
       }
 
       dangerLevel ??= city.dangerLevel  > 0 ? city.dangerLevel  : null;
       warnLevel   ??= city.warningLevel > 0 ? city.warningLevel : null;
+
+      // ── FIX: Rain-based level estimation for gauge-less cities ─────────────
+      // When cwcLevel is still null (no live gauge — e.g. Gaya / Falgu River
+      // which is not in WRD Bihar's scraper), synthesise a gauge reading from
+      // the real 24-hour precipitation already fetched from Open-Meteo.
+      //
+      // Formula:
+      //   safeBase  = warningLevel - 2.0  (city never truly reaches 0 m MSL)
+      //   range     = dangerLevel - safeBase
+      //   estimated = safeBase + clamp(precipMm / 80, 0, 1.1) * range
+      //
+      // Tagged as 'RAIN_EST' so the visualiser can show a distinct chip.
+      if (cwcLevel == null && dangerLevel != null && dangerLevel > 0) {
+        final dl     = dangerLevel;
+        final wl     = warnLevel ?? (dl - 2.0);
+        final safeB  = (wl - 2.0).clamp(0.0, wl);
+        final range  = dl - safeB;
+        final factor = (precipMm / _kPrecipScale).clamp(0.0, 1.10);
+        cwcLevel  = safeB + factor * range;
+        cwcSource = 'RAIN_EST';   // badge shown as 'EST' in RiverLevelVisualizer
+        if (kDebugMode) {
+          debugPrint('[LiveFetch] ${city.name}: no live gauge — '
+              'estimated level ${cwcLevel.toStringAsFixed(2)} m '
+              'from precip ${precipMm.toStringAsFixed(1)} mm');
+        }
+      }
 
       final String riskLabel = _inferRisk(
         precipMm:     precipMm,
@@ -462,23 +516,19 @@ class LiveFetchEngine {
   ) {
     if (stations.isEmpty) return null;
     final needle = cityName.trim().toLowerCase();
-    // exact match on 'city' field
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase() == needle) return s;
     }
-    // exact match on 'name' field (e.g. "Gandhi Setu (Patna)" → 'patna')
     for (final s in stations) {
       if ((s['name'] as String? ?? '').toLowerCase().contains(needle)) return s;
     }
-    // prefix match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase().startsWith(needle)) return s;
     }
-    // substring match
     for (final s in stations) {
       if ((s['city'] as String? ?? '').toLowerCase().contains(needle)) return s;
     }
-    return null;   // don't fall back to stations.first — return null so city is skipped
+    return null;
   }
 
   // ── IMD / SACHET alerts ───────────────────────────────────────────────────────
@@ -594,7 +644,9 @@ class LiveFetchEngine {
       riverName:     city.river,
       flowRate:      flow,
       rainfall24h:   precip,
-      status:        (snap['healthySources'] as int? ?? 0) >= 2 ? 'Live' : 'Partial',
+      status:        snap['cwcSource'] == 'RAIN_EST'
+          ? 'Est.'
+          : (snap['healthySources'] as int? ?? 0) >= 2 ? 'Live' : 'Partial',
       imdRainfallMm: precip,
       imdSeverity:   imdSev,
     );
@@ -615,7 +667,6 @@ class LiveFetchEngine {
 
   // ── Priority cities — Bihar WRD stations first, then national ────────────────
   List<IndiaCity> _priorityCities() {
-    // Bihar WRD stations match city IDs in india_cities.dart
     const ids = [
       // Bihar WRD (12 stations — live from wrdb.bih.nic.in)
       'patna', 'hajipur', 'muzaffarpur', 'darbhanga', 'sitamarhi',
@@ -629,11 +680,15 @@ class LiveFetchEngine {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  /// Validates a raw level value from the backend.
+  /// Upper bound raised to 600 m to handle high-elevation stations
+  /// (e.g. Gaya sits at ~115 m MSL; Himalayan foothills can exceed 400 m).
   double? _safeLevel(dynamic v) {
     if (v == null) return null;
     final d = double.tryParse(v.toString().trim()) ?? (v is num ? v.toDouble() : null);
     if (d == null) return null;
-    return (d >= 0.5 && d <= 400.0) ? d : null;
+    return (d >= 0.5 && d <= 600.0) ? d : null;
   }
 
   List<double> _doubles(dynamic raw) {

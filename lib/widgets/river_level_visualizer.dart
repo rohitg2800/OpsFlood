@@ -1,14 +1,12 @@
 // lib/widgets/river_level_visualizer.dart
 //
-// OpsFlood — RiverLevelVisualizer
+// OpsFlood — RiverLevelVisualizer  (v2 — RAIN_EST badge support)
 //
-// Redesigned card matching the screenshot style:
-//   • Dark glass card with risk-coloured left border glow
-//   • Horizontal gauge bar with gradient fill
-//   • Danger (red) + Warning (orange dashed) lines on bar
-//   • Percentage arc badge (top-right)
-//   • Live dot with source label
-//   • Discharge m³/s chip when gauge is unavailable
+// Changes from v1:
+//   • _LiveChip._label now maps 'RAIN_EST' → 'EST' chip (amber colour)
+//     so Gaya and other estimated-level cities show a distinct badge
+//     instead of 'LIVE', making it clear the reading is precipitation-based.
+//   • No other logic changes.
 library;
 
 import 'dart:math' as math;
@@ -24,7 +22,7 @@ class RiverLevelVisualizer extends StatelessWidget {
   final double  dangerLevel;
   final String  trend;          // 'Live', 'Partial', 'RISING', 'FALLING', etc.
   final double? flowRateM3s;    // GloFAS discharge, shown as fallback chip
-  final String? cwcSource;      // 'CWC_FFEM', 'WRD_BIHAR', etc.
+  final String? cwcSource;      // 'CWC_FFEM', 'WRD_BIHAR', 'RAIN_EST', etc.
 
   const RiverLevelVisualizer({
     super.key,
@@ -64,7 +62,11 @@ class RiverLevelVisualizer extends StatelessWidget {
     }
   }
 
-  bool get _hasRealLevel => currentLevel > 0.5 && dangerLevel > 0;
+  // A city has real data if its currentLevel is above a plausible floor.
+  // RAIN_EST values are always valid (they are derived from real precipitation)
+  // so we also accept them — the chip will show 'EST' to signal the source.
+  bool get _hasRealLevel =>
+      currentLevel > 0.5 && dangerLevel > 0;
 
   @override
   Widget build(BuildContext context) {
@@ -139,21 +141,17 @@ class RiverLevelVisualizer extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // Arc % badge — fixed 68×68, never expands
                       _ArcBadge(pct: pct, color: color, riskLabel: _riskLabel),
                     ],
                   ),
 
                   const SizedBox(height: 14),
 
-                  // Row 2: level value + live chip
-                  // FIX: wrap children in Flexible so the Row never overflows
-                  // on narrow cards (~217px in a 2-column grid).
+                  // Row 2: level value + source chip
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       if (_hasRealLevel) ...[
-                        // The big level number can shrink/ellipsis if needed
                         Flexible(
                           child: Text(
                             '${currentLevel.toStringAsFixed(2)} m',
@@ -166,7 +164,6 @@ class RiverLevelVisualizer extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // Chip is intrinsic-width but won't push beyond remaining space
                         Flexible(
                           flex: 0,
                           child: _LiveChip(source: cwcSource ?? trend),
@@ -214,7 +211,6 @@ class RiverLevelVisualizer extends StatelessWidget {
                   const SizedBox(height: 8),
 
                   // Row 3: DL + WL threshold chips
-                  // Use Expanded so each chip shares space equally and never overflows
                   Row(
                     children: [
                       Expanded(
@@ -250,7 +246,7 @@ class RiverLevelVisualizer extends StatelessWidget {
   }
 }
 
-// ── Gauge bar ────────────────────────────────────────────────────────────────────────────────
+// ── Gauge bar ────────────────────────────────────────────────────────────────
 class _GaugeBar extends StatelessWidget {
   final double pct;
   final double warnFrac;
@@ -265,7 +261,6 @@ class _GaugeBar extends StatelessWidget {
       final w = box.maxWidth;
       return Stack(
         children: [
-          // Track
           Container(
             height: 10,
             decoration: BoxDecoration(
@@ -273,7 +268,6 @@ class _GaugeBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          // Fill
           if (hasData && pct > 0)
             Container(
               height: 10,
@@ -290,7 +284,6 @@ class _GaugeBar extends StatelessWidget {
                 ),
               ),
             ),
-          // Warning marker
           if (warnFrac > 0)
             Positioned(
               left: w * warnFrac - 1,
@@ -303,7 +296,6 @@ class _GaugeBar extends StatelessWidget {
                 ),
               ),
             ),
-          // Danger marker (at 1.0)
           Positioned(
             right: 0, top: 0, bottom: 0,
             child: Container(
@@ -320,7 +312,7 @@ class _GaugeBar extends StatelessWidget {
   }
 }
 
-// ── Arc percentage badge ─────────────────────────────────────────────────────────────────
+// ── Arc percentage badge ─────────────────────────────────────────────────────
 class _ArcBadge extends StatelessWidget {
   final double pct;
   final Color  color;
@@ -366,8 +358,6 @@ class _ArcPainter extends CustomPainter {
     final cy = size.height / 2;
     final r  = (size.width - 8) / 2;
     final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
-
-    // Track
     canvas.drawArc(
       rect, math.pi * 0.75, math.pi * 1.5, false,
       Paint()
@@ -375,7 +365,6 @@ class _ArcPainter extends CustomPainter {
         ..strokeWidth = 5
         ..color       = Colors.white.withValues(alpha: 0.08),
     );
-    // Fill
     if (pct > 0) {
       canvas.drawArc(
         rect, math.pi * 0.75, math.pi * 1.5 * pct, false,
@@ -392,25 +381,33 @@ class _ArcPainter extends CustomPainter {
   bool shouldRepaint(_ArcPainter old) => old.pct != pct || old.color != color;
 }
 
-// ── Live chip ─────────────────────────────────────────────────────────────────────────────
+// ── Live/source chip ─────────────────────────────────────────────────────────
 class _LiveChip extends StatelessWidget {
   final String source;
   const _LiveChip({required this.source});
 
-  String get _label {
-    if (source.contains('FFEM'))    return 'CWC';
-    if (source.contains('BEAMS'))   return 'CWC';
-    if (source.contains('WRD'))     return 'WRD';
-    if (source.contains('BACKEND')) return 'LIVE';
-    return 'LIVE';
+  // Returns (label, color) for the source badge.
+  // RAIN_EST → amber 'EST' chip so users know it's a rain-derived estimate.
+  (String, Color) get _labelAndColor {
+    if (source.contains('RAIN_EST') || source == 'EST') {
+      return ('EST', const Color(0xFFF59E0B));  // amber — estimated
+    }
+    if (source.contains('FFEM'))    return ('CWC',  const Color(0xFF34C759));
+    if (source.contains('BEAMS'))   return ('CWC',  const Color(0xFF34C759));
+    if (source.contains('WRD'))     return ('WRD',  const Color(0xFF34C759));
+    if (source.contains('BACKEND')) return ('LIVE', const Color(0xFF34C759));
+    return ('LIVE', const Color(0xFF34C759));
   }
 
   @override
-  Widget build(BuildContext context) => _Chip(
-    label: _label,
-    color: const Color(0xFF34C759),
-    dot: true,
-  );
+  Widget build(BuildContext context) {
+    final (label, color) = _labelAndColor;
+    return _Chip(
+      label: label,
+      color: color,
+      dot: label != 'EST',   // no pulsing dot for estimated readings
+    );
+  }
 }
 
 class _Chip extends StatelessWidget {
@@ -451,7 +448,7 @@ class _Chip extends StatelessWidget {
   }
 }
 
-// ── Threshold chip ────────────────────────────────────────────────────────────────────────────
+// ── Threshold chip ────────────────────────────────────────────────────────────
 class _ThresholdChip extends StatelessWidget {
   final IconData icon;
   final String   label;
