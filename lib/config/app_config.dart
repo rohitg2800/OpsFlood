@@ -36,6 +36,12 @@ class AppConfig {
     defaultValue: '',
   );
 
+  // ── API Token (optional — empty means no auth header is sent) ─────────────────
+  static const String apiToken = String.fromEnvironment(
+    'OPSFLOOD_API_TOKEN',
+    defaultValue: '',
+  );
+
   // ── Timeouts ──────────────────────────────────────────────────────────────────
   static const Duration requestTimeout   = Duration(seconds: 65);
   static const Duration healthTimeout    = Duration(seconds: 10);
@@ -84,6 +90,8 @@ class AppConfig {
   static const String epStateSeverity    = '/api/state-severity';
   static const String epIngestionRun     = '/ingestion/run';
   static const String epModelMetrics     = '/model-metrics';
+  static const String epNdmaAdvisories   = '/api/ndma/advisories';
+  static const String epNdmaContacts     = '/api/ndma/contacts';
 
   // ── Endpoint aliases (used by tests) ────────────────────────────────────────────
   static String get healthEndpoint           => epHealth;
@@ -93,4 +101,6 @@ class AppConfig {
   static String get predictLegacyEndpoint    => epPredict;
   static String get weatherCurrentEndpoint   => epWeatherCurrent;
   static String get weatherForecastEndpoint  => epWeatherForecast;
+  static String get ndmaAdvisoriesEndpoint   => epNdmaAdvisories;
+  static String get ndmaContactsEndpoint     => epNdmaContacts;
 }
