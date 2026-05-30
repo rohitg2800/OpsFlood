@@ -1,49 +1,43 @@
-// lib/services/api_service.dart
-//
-// LEGACY COMPATIBILITY SHIM — do not add new methods here.
-//
-// All screens that still import ApiService will continue to work.
-// New code should import FloodApi directly:
-//   import 'flood_api.dart';
-//   final data = await FloodApi.instance.allTelemetry();
-
-library;
-
-import 'flood_api.dart';
-export 'flood_api.dart' show FloodApi;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../models/station.dart';
 
 class ApiService {
-  static final ApiService _instance = ApiService._internal();
-  factory ApiService() => _instance;
-  ApiService._internal();
+  // Change to your Render URL when deployed
+  static const String _base = 'http://localhost:8000';
 
-  final _api = FloodApi.instance;
+  static Future<List<Station>> getBiharStations() async {
+    final uri = Uri.parse('$_base/api/stations?state=Bihar');
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final body = jsonDecode(res.body);
+    final list = body['data'] as List;
+    return list.map((e) => Station.fromJson(e as Map<String, dynamic>)).toList();
+  }
 
-  Future<Map<String, dynamic>> checkHealth()          => _api.healthCheck(coldStart: true);
-  Future<Map<String, dynamic>> getAllLiveTelemetry({int limit = 1000}) => _api.allTelemetry(limit: limit);
-  Future<Map<String, dynamic>> getAllLiveLevels({int limit = 200})     => _api.allLevels(limit: limit);
-  Future<Map<String, dynamic>> getLiveTelemetry({String? state, String? station, int limit = 10}) =>
-      _api.telemetryByState(state ?? 'Maharashtra', station: station, limit: limit);
-  Future<Map<String, dynamic>> getLiveLevels({String? state, int limit = 200}) =>
-      state != null ? _api.levelsByState(state, limit: limit) : _api.allLevels(limit: limit);
-  Future<Map<String, dynamic>> getDashboardData({String? state, int limit = 10}) =>
-      _api.telemetryByState(state ?? 'Maharashtra', limit: limit);
-  Future<Map<String, dynamic>> getCriticalAlerts()    => _api.criticalAlerts();
-  Future<Map<String, dynamic>> predict(Map<String, dynamic> input) => _api.predict(input);
-  Future<Map<String, dynamic>> predictFlood(Map<String, dynamic> input) => _api.predict(input);
-  Future<Map<String, dynamic>> getFloodForecast({required String city, required String state}) =>
-      _api.cwcForecast(city: city, state: state);
-  Future<Map<String, dynamic>> getReservoirLevels({required String state}) => _api.reservoirLevels(state);
-  Future<Map<String, dynamic>> getWeatherCurrent({required String location})  => _api.weatherCurrent(location);
-  Future<Map<String, dynamic>> getWeatherForecast({required String location}) => _api.weatherForecast(location);
-  Future<Map<String, dynamic>> getPipelineFeatures({required String state, String? station}) =>
-      _api.pipelineFeatures(state: state, station: station);
-  Future<Map<String, dynamic>> getStateSeverityMatrix()         => _api.stateSeverity();
-  Future<Map<String, dynamic>> getStateSeverityEntry(String s)  => _api.stateSeverityEntry(s);
-  Future<Map<String, dynamic>> getPipelineManifest()            => _api.pipelineManifest();
-  Future<Map<String, dynamic>> triggerIngestion()               => _api.triggerIngestion();
-  Future<Map<String, dynamic>> getAllCwcStations()              => _api.cwcStations();
-  Future<Map<String, dynamic>> getModelMetrics()                => _api.modelMetrics();
-  Future<Map<String, dynamic>> getCwcProxiedTelemetry({required String state, required String station, int limit = 6}) =>
-      _api.telemetryByState(state, station: station, limit: limit);
+  static Future<Summary> getSummary() async {
+    final uri = Uri.parse('$_base/api/summary');
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final body = jsonDecode(res.body);
+    return Summary.fromJson(body);
+  }
+
+  static Future<List<Station>> getDangerAlerts() async {
+    final uri = Uri.parse('$_base/api/alerts/danger');
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final body = jsonDecode(res.body);
+    final list = body['data'] as List;
+    return list.map((e) => Station.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static Future<List<Station>> getCriticalAlerts() async {
+    final uri = Uri.parse('$_base/api/alerts');
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final body = jsonDecode(res.body);
+    final list = body['data'] as List;
+    return list.map((e) => Station.fromJson(e as Map<String, dynamic>)).toList();
+  }
 }

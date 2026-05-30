@@ -1,153 +1,128 @@
-import 'dart:async';
-
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'firebase_options.dart';
-import 'providers/flood_providers.dart';
-import 'providers/theme_provider.dart';
+import 'package:provider/provider.dart';
+import 'providers/station_provider.dart';
+import 'screens/home_screen.dart';
 import 'screens/alerts_screen.dart';
-import 'screens/splash_screen.dart';
-import 'services/background_service.dart';
-import 'services/fcm_service.dart';
-import 'services/pipeline_service.dart';
-import 'services/threshold_alert_service.dart';
-import 'theme/river_theme.dart';
+import 'screens/rivers_screen.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Defer first frame. IMPORTANT: allowFirstFrame() is called in a finally
-  // block below so it is ALWAYS reached — even if any init step throws/hangs.
-  WidgetsBinding.instance.deferFirstFrame();
-
-  try {
-    // 1. Load .env — gracefully handles missing file in production.
-    try {
-      await dotenv.load(fileName: '.env', mergeWith: {});
-    } catch (e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
-    }
-
-    // 2. Firebase — skip on web; guard with 5-second timeout so a slow
-    //    Google-Play-Services response never freezes the splash screen.
-    if (!kIsWeb) {
-      try {
-        if (Firebase.apps.isEmpty) {
-          await Firebase.initializeApp(
-            options: DefaultFirebaseOptions.currentPlatform,
-          ).timeout(
-            const Duration(seconds: 5),
-            onTimeout: () {
-              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out — continuing without Firebase');
-              // Return a dummy app instance or just swallow; the app works
-              // without Firebase on first cold start.
-              throw TimeoutException('Firebase init timeout');
-            },
-          );
-        }
-      } catch (e) {
-        // Firebase failure is non-fatal — FCM / Firestore features degrade
-        // gracefully; GloFAS flood data still loads.
-        if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase init failed (non-fatal): $e');
-      }
-    }
-
-    // 3. System chrome — nav bar matches Midnight Ops background.
-    if (!kIsWeb) {
-      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-        statusBarColor:                    Colors.transparent,
-        statusBarIconBrightness:           Brightness.light,
-        systemNavigationBarColor:          AppPalette.navy0,
-        systemNavigationBarIconBrightness: Brightness.light,
-      ));
-
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
-    }
-
-    // 4. Global error handlers.
-    FlutterError.onError = (FlutterErrorDetails details) {
-      if (kDebugMode) {
-        FlutterError.presentError(details);
-        debugPrint('\u274c FlutterError: ${details.summary}');
-      }
-    };
-
-    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-      if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
-      return true;
-    };
-
-    // 5. Theme — load persisted light/dark preference from SharedPreferences.
-    await ThemeProvider().init();
-
-    // 6. Background services — all fire-and-forget; never block the UI.
-    if (!kIsWeb) {
-      unawaited(
-        PipelineService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  PipelineService.init failed: $e');
-        }),
-      );
-      unawaited(
-        FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
-        }),
-      );
-      unawaited(
-        BackgroundService.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  BackgroundService.init failed: $e');
-        }),
-      );
-      unawaited(
-        ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
-        }),
-      );
-    }
-  } finally {
-    // ALWAYS unblock the Flutter engine — even if something above threw.
-    WidgetsBinding.instance.allowFirstFrame();
-  }
-
-  runApp(const ProviderScope(child: OpsFloodApp()));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
+  runApp(const OpsFloodApp());
 }
 
-class OpsFloodApp extends ConsumerWidget {
+class OpsFloodApp extends StatelessWidget {
   const OpsFloodApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final themeMode = ref.watch(themeModeProvider);
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => StationProvider()..loadAll(),
+      child: MaterialApp(
+        title: 'WRD Bihar Flood Monitor',
+        debugShowCheckedModeBanner: false,
+        theme: _buildTheme(),
+        home: const MainShell(),
+      ),
+    );
+  }
 
-    return MaterialApp(
-      title:                      'OpsFlood',
-      debugShowCheckedModeBanner: false,
-      themeMode:                  themeMode,
-      theme:                      RiverColors.lightTheme(),
-      darkTheme:                  RiverColors.darkTheme(),
-      home:                       const SplashScreen(),
-      routes: {
-        AlertsScreen.route: (_) => const AlertsScreen(),
-      },
-      // Clamp text scale — prevents overflow on accessibility large-text settings.
-      builder: (context, child) {
-        final mq = MediaQuery.of(context);
-        return MediaQuery(
-          data: mq.copyWith(
-            textScaler: TextScaler.linear(
-              mq.textScaler.scale(1.0).clamp(0.8, 1.2),
-            ),
+  ThemeData _buildTheme() {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: const Color(0xFF0A0E1A),
+      colorScheme: const ColorScheme.dark(
+        primary: Color(0xFF00D4FF),
+        secondary: Color(0xFF00FF88),
+        error: Color(0xFFFF4757),
+        surface: Color(0xFF141928),
+      ),
+      cardTheme: CardTheme(
+        color: const Color(0xFF141928),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF0A0E1A),
+        elevation: 0,
+        foregroundColor: Colors.white,
+      ),
+      fontFamily: 'SF Pro Display',
+    );
+  }
+}
+
+class MainShell extends StatefulWidget {
+  const MainShell({super.key});
+  @override
+  State<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<MainShell> {
+  int _index = 0;
+  final _pages = const [HomeScreen(), AlertsScreen(), RiversScreen()];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(index: _index, children: _pages),
+      bottomNavigationBar: _buildNav(),
+    );
+  }
+
+  Widget _buildNav() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF141928),
+        border: Border(top: BorderSide(color: Color(0xFF1E2840), width: 1)),
+      ),
+      child: SafeArea(
+        child: SizedBox(
+          height: 60,
+          child: Row(
+            children: [
+              _navItem(0, Icons.water_outlined, Icons.water, 'Stations'),
+              _navItem(1, Icons.notifications_outlined, Icons.notifications, 'Alerts'),
+              _navItem(2, Icons.waves_outlined, Icons.waves, 'Rivers'),
+            ],
           ),
-          child: child!,
-        );
-      },
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(int idx, IconData icon, IconData activeIcon, String label) {
+    final active = _index == idx;
+    return Expanded(
+      child: InkWell(
+        onTap: () => setState(() => _index = idx),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              active ? activeIcon : icon,
+              color: active ? const Color(0xFF00D4FF) : const Color(0xFF4A5568),
+              size: 22,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: active ? const Color(0xFF00D4FF) : const Color(0xFF4A5568),
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
