@@ -1,7 +1,6 @@
 // lib/screens/dashboard_screen.dart
-// OpsFlood — DashboardScreen v16
-// Phase 3 fix: _riskColor 'HIGH' → 'SEVERE', severity sort uses priorityOrder,
-// KPI counts use riskLevel string (not raw capacity thresholds).
+// OpsFlood — DashboardScreen v17
+// Phase 3 complete: dead import removed, KPI row now shows all 4 severity tiers.
 library;
 
 import 'dart:math' as math;
@@ -12,7 +11,6 @@ import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-import '../screens/india_river_explorer_screen.dart';
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/animated_alert_badge.dart';
@@ -59,7 +57,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // ── Data helpers ───────────────────────────────────────────────────────────
 
-  // Sort: highest severity first, then highest capacity within same tier.
   List<FloodData> get _sorted {
     final list = List<FloodData>.from(_service.liveLevels);
     list.sort((a, b) {
@@ -70,9 +67,14 @@ class _DashboardScreenState extends State<DashboardScreen>
     return list;
   }
 
-  // Use riskLevel string so these counts agree with backend severity labels.
   int get _criticalCount =>
       _sorted.where((d) => d.riskLevel == 'CRITICAL').length;
+
+  int get _severeCount =>
+      _sorted.where((d) => d.riskLevel == 'SEVERE').length;
+
+  int get _moderateCount =>
+      _sorted.where((d) => d.riskLevel == 'MODERATE').length;
 
   int get _alertCount =>
       _sorted.where((d) =>
@@ -303,15 +305,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     ),
   );
 
-  // ── KPI Row ────────────────────────────────────────────────────────────────
+  // ── KPI Row — all 4 severity tiers ────────────────────────────────────────
   Widget _kpiRow(List<FloodData> data) {
     final critical  = _criticalCount;
-    final alerting  = _alertCount;
+    final severe    = _severeCount;
+    final moderate  = _moderateCount;
     final monitored = data.length;
-    final avgCap    = monitored > 0
-        ? data.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
-            monitored
-        : 0.0;
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -319,7 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Row(
         children: [
           SizedBox(
-            width: 130,
+            width: 120,
             child: PremiumStatCard(
               icon:    Icons.crisis_alert_rounded,
               value:   '$critical',
@@ -330,33 +329,33 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 130,
+            width: 120,
             child: PremiumStatCard(
-              icon:  Icons.warning_amber_rounded,
-              value: '$alerting',
-              label: 'ALERTING',
-              color: alerting > 0 ? AppPalette.warning : AppPalette.textGrey,
+              icon:  Icons.warning_rounded,
+              value: '$severe',
+              label: 'SEVERE',
+              color: severe > 0 ? AppPalette.danger : AppPalette.textGrey,
             ),
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 130,
+            width: 120,
+            child: PremiumStatCard(
+              icon:  Icons.warning_amber_rounded,
+              value: '$moderate',
+              label: 'MODERATE',
+              color: moderate > 0 ? AppPalette.warning : AppPalette.textGrey,
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 120,
             child: PremiumStatCard(
               icon:    Icons.sensors_rounded,
               value:   '$monitored',
               label:   'MONITORED',
               color:   AppPalette.cyan,
               isAlert: true,
-            ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 130,
-            child: PremiumStatCard(
-              icon:  Icons.analytics_rounded,
-              value: avgCap.toStringAsFixed(0),
-              label: 'AVG CAPACITY',
-              color: AppPalette.amber,
             ),
           ),
         ],
@@ -474,7 +473,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     }
 
-    // Use model getter — single source of truth.
     final statusColor = selected.priorityColor;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
@@ -552,7 +550,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Row(
         children: top.map((d) {
           final active = (_selectedCity ?? top.first.city) == d.city;
-          // Use model getter — no inline switch.
           final color  = d.priorityColor;
           return GestureDetector(
             onTap: () => setState(() => _selectedCity = d.city),
@@ -687,8 +684,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             style: const TextStyle(
               fontSize: 9, color: AppPalette.textGrey)),
       ]);
-
-  // _riskColor removed — use data.priorityColor instead.
 
   String _shortTime(DateTime ts) {
     try {
