@@ -69,6 +69,10 @@ List<LiveAlert> _buildAlerts(List<FloodData> all) {
 
 class AlertsScreen extends ConsumerStatefulWidget {
   const AlertsScreen({super.key});
+
+  /// Named route — used in main.dart routes table.
+  static const String route = '/alerts';
+
   @override
   ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
 }
@@ -94,7 +98,13 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final dataAsync = ref.watch(liveLevelsProvider);
+    // liveLevelsProvider is a synchronous Provider<List<FloodData>> —
+    // use the data directly instead of .when() which is for AsyncValue.
+    final allData   = ref.watch(liveLevelsProvider);
+    final isOffline = ref.watch(isOfflineProvider);
+    final isWaking  = ref.watch(isWakingUpProvider);
+    final error     = ref.watch(errorMessageProvider);
+
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
       body: SafeArea(
@@ -103,42 +113,34 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
           children: [
             _Header(pulse: _pulse),
             const SizedBox(height: 4),
-            dataAsync.when(
-              loading: () => const Expanded(child: Center(
-                  child: CircularProgressIndicator(
-                      color: AppPalette.cyan, strokeWidth: 1.5))),
-              error:   (e, _) => Expanded(child: _ErrorState(msg: '$e')),
-              data: (all) {
-                final alerts = _buildAlerts(all);
-                final counts = {
-                  for (final lv in LiveAlertLevel.values)
-                    lv: alerts.where((a) => a.level == lv).length,
-                };
-                final shown = _filter == null
-                    ? alerts
-                    : alerts.where((a) => a.level == _filter).toList();
-
-                return Expanded(
-                  child: Column(
-                    children: [
-                      _SummaryRow(counts: counts, filter: _filter,
-                          onFilter: (lv) => setState(() =>
-                              _filter = _filter == lv ? null : lv)),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: shown.isEmpty
-                            ? _EmptyState(active: _filter != null)
-                            : ListView.builder(
-                                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                                itemCount: shown.length,
-                                itemBuilder: (_, i) => _AlertCard(
-                                    alert: shown[i], pulse: _pulse),
-                              ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+            // ── Loading / error banner ──────────────────────────────────
+            if (isWaking)
+              const _BannerTile(
+                icon: Icons.cloud_sync_rounded,
+                message: 'Backend warming up…',
+                color: Color(0xFFD4A843),
+              )
+            else if (isOffline)
+              const _BannerTile(
+                icon: Icons.wifi_off_rounded,
+                message: 'Offline — showing cached data',
+                color: Color(0xFF94A3B8),
+              )
+            else if (error != null)
+              _BannerTile(
+                icon: Icons.error_outline_rounded,
+                message: error,
+                color: AppPalette.critical,
+              ),
+            // ── Main content ────────────────────────────────────────────
+            Expanded(
+              child: _AlertsBody(
+                allData: allData,
+                filter: _filter,
+                pulse: _pulse,
+                onFilter: (lv) => setState(() =>
+                    _filter = _filter == lv ? null : lv),
+              ),
             ),
           ],
         ),
@@ -146,6 +148,97 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     );
   }
 }
+
+// ── Extracted body widget so build stays clean ─────────────────────────────
+
+class _AlertsBody extends StatelessWidget {
+  const _AlertsBody({
+    required this.allData,
+    required this.filter,
+    required this.pulse,
+    required this.onFilter,
+  });
+
+  final List<FloodData> allData;
+  final LiveAlertLevel? filter;
+  final Animation<double> pulse;
+  final ValueChanged<LiveAlertLevel> onFilter;
+
+  @override
+  Widget build(BuildContext context) {
+    if (allData.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(
+            color: AppPalette.cyan, strokeWidth: 1.5),
+      );
+    }
+
+    final alerts = _buildAlerts(allData);
+    final counts = {
+      for (final lv in LiveAlertLevel.values)
+        lv: alerts.where((a) => a.level == lv).length,
+    };
+    final shown = filter == null
+        ? alerts
+        : alerts.where((a) => a.level == filter).toList();
+
+    return Column(
+      children: [
+        _SummaryRow(counts: counts, filter: filter, onFilter: onFilter),
+        const SizedBox(height: 8),
+        Expanded(
+          child: shown.isEmpty
+              ? _EmptyState(active: filter != null)
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  itemCount: shown.length,
+                  itemBuilder: (_, i) =>
+                      _AlertCard(alert: shown[i], pulse: pulse),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Banner tile (offline / waking / error) ──────────────────────────────────
+
+class _BannerTile extends StatelessWidget {
+  const _BannerTile({
+    required this.icon,
+    required this.message,
+    required this.color,
+  });
+  final IconData icon;
+  final String message;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(message,
+                style: TextStyle(
+                    fontSize: 12, color: color, letterSpacing: 0.3)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Remaining widgets (unchanged from v7) ───────────────────────────────────
 
 class _Header extends StatelessWidget {
   const _Header({required this.pulse});
