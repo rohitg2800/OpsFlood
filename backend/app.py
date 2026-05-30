@@ -1,5 +1,5 @@
 """
-backend/app.py  —  OpsFlood FastAPI v3.3
+backend/app.py  —  OpsFlood FastAPI v3.4
 All routes the Flutter app calls.
 
 Run from inside the backend/ folder:
@@ -12,13 +12,16 @@ from typing import Optional
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-# Absolute import — works when run as `uvicorn app:app` from backend/
 try:
-    from wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
+    from wrd_bihar_scraper import (
+        scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level, build_danger_alerts
+    )
 except ImportError:
-    from .wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
+    from .wrd_bihar_scraper import (
+        scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level, build_danger_alerts
+    )
 
-app = FastAPI(title="OpsFlood API", version="3.3.0")
+app = FastAPI(title="OpsFlood API", version="3.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 import time as _time
@@ -44,53 +47,36 @@ async def _get_data() -> list:
 
 
 def _find_station(data: list, key: str) -> Optional[dict]:
-    """
-    Match a station by any of:
-      • exact station id          (e.g. "GN01")
-      • name / city               (e.g. "Gandhighat", "Patna")
-      • district                  (e.g. "Patna")
-      • any alias from the master (e.g. "PATNA", "DIGHAGHAT")
-    Case-insensitive.
-    """
     needle = key.strip().lower()
-
-    # Build an alias map from ALL_STATIONS once
-    alias_map: dict[str, str] = {}  # alias → station id
+    alias_map: dict[str, str] = {}
     for st in ALL_STATIONS:
         for alias in st.get("aliases", []):
             alias_map[alias.lower()] = st["id"]
 
     for d in data:
-        if d["id"].lower() == needle:
-            return d
-        if d.get("name", "").lower() == needle:
-            return d
-        if d.get("city", "").lower() == needle:
-            return d
-        if d.get("district", "").lower() == needle:
-            return d
+        if d["id"].lower() == needle:             return d
+        if d.get("name", "").lower() == needle:   return d
+        if d.get("city", "").lower() == needle:   return d
+        if d.get("district", "").lower() == needle: return d
 
-    # Check alias map
     if needle in alias_map:
         target_id = alias_map[needle]
         for d in data:
             if d["id"] == target_id:
                 return d
 
-    # Partial / contains fallback
     for d in data:
         if (needle in d.get("name", "").lower()
                 or needle in d.get("district", "").lower()
                 or needle in d.get("city", "").lower()):
             return d
-
     return None
 
 
 # ── Health ─────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "3.3.0", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "version": "3.4.0", "timestamp": datetime.utcnow().isoformat()}
 
 
 # ── /api/stations ────────────────────────────────────────────────────────────
@@ -127,6 +113,21 @@ async def live_levels_alias(state: Optional[str] = Query(None)):
     return await get_stations(state=state)
 
 
+# ── /api/alerts/danger — stations above danger level ──────────────────────────
+@app.get("/api/alerts/danger")
+async def danger_alerts():
+    """Returns only stations where current_level >= danger_level.
+    Sorted most-above-danger first. Includes action=EVACUATE/WARN/MONITOR."""
+    data   = await _get_data()
+    alerts = build_danger_alerts(data)
+    return {
+        "status":  "success",
+        "count":   len(alerts),
+        "has_danger": len(alerts) > 0,
+        "data":    alerts,
+    }
+
+
 # ── /api/critical-alerts ─────────────────────────────────────────────────
 @app.get("/api/critical-alerts")
 @app.get("/api/alerts")
@@ -147,11 +148,16 @@ async def critical_alerts():
 @app.get("/api/summary")
 async def summary():
     data = await _get_data()
-    return {"status": "success",
-            "total":   len(data),
-            "normal":  sum(1 for d in data if d["status"] == "normal"),
-            "warning": sum(1 for d in data if d["status"] == "warning"),
-            "danger":  sum(1 for d in data if d["status"] == "danger")}
+    bihar = [d for d in data if d.get("state") == "Bihar"]
+    return {
+        "status":  "success",
+        "total":   len(data),
+        "bihar_total": len(bihar),
+        "normal":  sum(1 for d in data if d["status"] == "normal"),
+        "warning": sum(1 for d in data if d["status"] == "warning"),
+        "danger":  sum(1 for d in data if d["status"] == "danger"),
+        "danger_stations": [d["name"] for d in data if d["status"] == "danger"],
+    }
 
 
 # ── /api/state-severity ───────────────────────────────────────────────────────
@@ -219,9 +225,10 @@ async def weather_forecast(lat: float = 25.61, lon: float = 85.14):
 async def pipeline_manifest():
     data = await _get_data()
     return {"status": "success", "data": {
-        "version": "3.3",
+        "version": "3.4",
         "states":  sorted(set(d["state"] for d in data)),
         "stations": len(data),
+        "bihar_stations": sum(1 for d in data if d.get("state") == "Bihar"),
         "last_run": datetime.utcnow().isoformat(),
     }}
 
