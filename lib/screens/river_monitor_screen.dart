@@ -1,26 +1,66 @@
 // lib/screens/river_monitor_screen.dart
-// Fixed: FloodData.river → riverName
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/flood_providers.dart';
+import '../models/flood_data.dart';
 
-class RiverMonitorScreen extends ConsumerWidget {
+class RiverMonitorScreen extends ConsumerStatefulWidget {
   const RiverMonitorScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RiverMonitorScreen> createState() => _RiverMonitorScreenState();
+}
+
+class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
+  String _query = '';
+
+  List<FloodData> _filtered(List<FloodData> levels) {
+    if (_query.isEmpty) return levels;
+    final q = _query.toLowerCase();
+    return levels.where((fd) =>
+        fd.city.toLowerCase().contains(q) ||
+        fd.state.toLowerCase().contains(q) ||
+        (fd.riverName?.toLowerCase().contains(q) ?? false)).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final rt     = ref.watch(realTimeServiceProvider);
-    final levels = rt.liveLevels;
+    final levels = _filtered(rt.liveLevels);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('River Monitor'),
+        title: const Text('Rivers'),
         centerTitle: true,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: 'Search city, state or river…',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surface,
+                contentPadding: EdgeInsets.zero,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+        ),
       ),
       body: rt.isLoading && levels.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : levels.isEmpty
-              ? const Center(child: Text('No live data available.'))
+              ? Center(
+                  child: Text(
+                    _query.isEmpty ? 'No live data available.' : 'No results for "$_query".',
+                  ),
+                )
               : ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: levels.length,
