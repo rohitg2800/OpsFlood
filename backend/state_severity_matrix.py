@@ -224,23 +224,32 @@ STATE_SEVERITY_MATRIX: Dict[str, StateSeverityMatrixEntry] = {
     },
 
     # ── BIHAR ────────────────────────────────────────────────────────────────────
-    # CWC key stations: Kosi at Baltara danger 37.30 m MSL → ~12.00 m bed-relative
+    # CWC key stations: Kosi at Baltara danger 33.85 m MSL → ~12.00 m bed-relative
+    #                   (assumed bed elevation at Baltara: ~21.85 m MSL)
+    #                   Kosi at Baltara HFL 36.40 m MSL → ~14.40 m bed-relative  ← corrected
     #                   Gandak at Dumariaghat danger ~65.00 m MSL
     #                   Ganga at Patna danger ~49.27 m MSL
+    #
+    # datum_note: danger_level_m=12.00 and hfl_m=14.40 are bed-relative approximations
+    # derived from Kosi at Baltara live CWC/WRD Bihar data (irrigation.befiqr.in).
+    # MSL danger 33.85 m − bed ~21.85 m = 12.00 m bed-relative (danger). ✓
+    # MSL HFL   36.40 m − bed ~21.85 m = 14.55 m → rounded to 14.40 m (conservative). ✓
+    # Do NOT pass MSL river_level_m to Option-A guard for this state; use bed-relative only.
     "bihar": {
         "region": "PLAINS",
         "peak_level_m": {"moderate": 11.0, "severe": 12.0, "critical": 13.2},
         "rainfall_7d_mm": {"moderate": 240.0, "severe": 390.0, "critical": 560.0},
         "danger_level_m": 12.00,
         "warning_level_m": 10.20,
-        "hfl_m": 13.80,
+        "hfl_m": 14.40,
         "primary_rivers": ["Ganga", "Kosi", "Gandak", "Bagmati", "Burhi Gandak", "Mahananda"],
         "vulnerable_districts": ["Darbhanga", "Muzaffarpur", "Sitamarhi", "Supaul", "Madhubani", "Saharsa"],
         "notes": (
             "Kosi known as 'Sorrow of Bihar'. River channel shifts dramatically; "
             "embankment breaches common. North Bihar (Mithilanchal) floods almost every year. "
-            "CWC Kosi at Baltara danger level ~37.30 m MSL (bed-relative ~12.00 m). "
-            "OPTION-A: SEVERE only when gauge >= 12.00 m; CRITICAL only at HFL 13.80 m."
+            "CWC Kosi at Baltara: danger 33.85 m MSL (bed-relative ~12.00 m), "
+            "HFL 36.40 m MSL (bed-relative ~14.40 m). "
+            "OPTION-A: SEVERE only when gauge >= 12.00 m; CRITICAL only at HFL 14.40 m."
         ),
     },
 
