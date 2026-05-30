@@ -1,5 +1,5 @@
 """
-backend/app.py  —  OpsFlood FastAPI v3.2
+backend/app.py  —  OpsFlood FastAPI v3.3
 All routes the Flutter app calls.
 
 Run from inside the backend/ folder:
@@ -16,10 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 try:
     from wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
 except ImportError:
-    # Fallback for when run as a package (e.g. from project root)
     from .wrd_bihar_scraper import scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level
 
-app = FastAPI(title="OpsFlood API", version="3.2.0")
+app = FastAPI(title="OpsFlood API", version="3.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 import time as _time
@@ -44,10 +43,54 @@ async def _get_data() -> list:
     return data
 
 
+def _find_station(data: list, key: str) -> Optional[dict]:
+    """
+    Match a station by any of:
+      • exact station id          (e.g. "GN01")
+      • name / city               (e.g. "Gandhighat", "Patna")
+      • district                  (e.g. "Patna")
+      • any alias from the master (e.g. "PATNA", "DIGHAGHAT")
+    Case-insensitive.
+    """
+    needle = key.strip().lower()
+
+    # Build an alias map from ALL_STATIONS once
+    alias_map: dict[str, str] = {}  # alias → station id
+    for st in ALL_STATIONS:
+        for alias in st.get("aliases", []):
+            alias_map[alias.lower()] = st["id"]
+
+    for d in data:
+        if d["id"].lower() == needle:
+            return d
+        if d.get("name", "").lower() == needle:
+            return d
+        if d.get("city", "").lower() == needle:
+            return d
+        if d.get("district", "").lower() == needle:
+            return d
+
+    # Check alias map
+    if needle in alias_map:
+        target_id = alias_map[needle]
+        for d in data:
+            if d["id"] == target_id:
+                return d
+
+    # Partial / contains fallback
+    for d in data:
+        if (needle in d.get("name", "").lower()
+                or needle in d.get("district", "").lower()
+                or needle in d.get("city", "").lower()):
+            return d
+
+    return None
+
+
 # ── Health ─────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "3.2.0", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "version": "3.3.0", "timestamp": datetime.utcnow().isoformat()}
 
 
 # ── /api/stations ────────────────────────────────────────────────────────────
@@ -69,10 +112,10 @@ async def get_stations(
 @app.get("/api/stations/{station_id}")
 async def get_station(station_id: str):
     data = await _get_data()
-    match = next((d for d in data if d["id"].upper() == station_id.upper()), None)
+    match = _find_station(data, station_id)
     if not match:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Station not found")
+        raise HTTPException(status_code=404, detail=f"Station not found: {station_id}")
     return {"status": "success", "data": match}
 
 
@@ -176,7 +219,7 @@ async def weather_forecast(lat: float = 25.61, lon: float = 85.14):
 async def pipeline_manifest():
     data = await _get_data()
     return {"status": "success", "data": {
-        "version": "3.2",
+        "version": "3.3",
         "states":  sorted(set(d["state"] for d in data)),
         "stations": len(data),
         "last_run": datetime.utcnow().isoformat(),
