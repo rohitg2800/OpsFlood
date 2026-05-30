@@ -52,3 +52,10 @@ ios/Runner/GoogleService-Info.plist
 .env.*
 secrets.dart
 analyze_output.txt
+
+# Flutter generated plugin registrants (auto-generated, do not commit)
+**/GeneratedPluginRegistrant.java
+**/GeneratedPluginRegistrant.m
+
+# Local data files
+bihar_live_data.json

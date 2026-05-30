@@ -37,7 +37,7 @@ void main() {
     //    timer (_checkBackend) fires and completes naturally.
     //    All HTTP calls inside it return 400 in test environment — that
     //    is expected and handled; no exception is thrown.
-    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump(const Duration(milliseconds: 2600));
 
     // 4. Tear down the tree. Every State.dispose() fires in order:
     //      SplashScreen → IndiaRiversScreen → LiveFetchEngine._timer.cancel()

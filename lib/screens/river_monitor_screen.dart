@@ -353,7 +353,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen>
                 // 3: Bihar WRD — NEW in v6.2
                 const BiharRiverMapScreen(),
                 // 4: India River Map (explorer)
-                const IndiaRiverExplorerScreen(),
+                IndiaRiverExplorerScreen(),
               ],
             )),
           ]),

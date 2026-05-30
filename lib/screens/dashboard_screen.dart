@@ -18,7 +18,7 @@ import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-import '../screens/india_rivers_screen.dart';
+import '../screens/india_river_explorer_screen.dart';
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/animated_alert_badge.dart';
