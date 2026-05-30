@@ -1,11 +1,14 @@
 // lib/constants/india_geodata.dart
 //
-// OpsFlood — Geodata constants (v3.0 Full India)
+// OpsFlood — Geodata constants (v3.1 Full India)
 //
-// All 36 states/UTs + 90 monitored cities including Delhi MSL gauges.
+// All 36 states/UTs (post-2020 official names) + 90 monitored cities.
+// Dadra and Nagar Haveli and Daman and Diu merged into one UT (Jan 2020).
+// Delhi entries use MSL-based danger/warning levels (uses_msl: true).
 
 class IndiaGeodata {
-  // All 28 states + 8 UTs = 36 entries.
+  // 28 States + 8 UTs = 36 entries.
+  // UT name updated: 'Dadra and Nagar Haveli and Daman and Diu' (merged 26 Jan 2020)
   static const List<String> states = [
     // 28 States
     'Andhra Pradesh',
@@ -39,7 +42,7 @@ class IndiaGeodata {
     // 8 Union Territories
     'Andaman and Nicobar Islands',
     'Chandigarh',
-    'Dadra and Nagar Haveli',
+    'Dadra and Nagar Haveli and Daman and Diu', // merged UT since Jan 2020
     'Delhi',
     'Jammu and Kashmir',
     'Ladakh',
@@ -50,7 +53,7 @@ class IndiaGeodata {
   // 90 monitored cities — Bihar WRD gauges + pan-India CWC key stations.
   // Delhi entries use MSL-based danger/warning levels.
   static const List<Map<String, dynamic>> monitoredCities = [
-    // ── BIHAR — Ganga ─────────────────────────────────────────────────────────
+    // ── BIHAR — Ganga ──────────────────────────────────────────────────────
     { 'city': 'Gandhighat',     'state': 'Bihar', 'river': 'Ganga',
       'lat': 25.6129, 'lon': 85.1376,
       'danger_level': 48.60, 'warning_level': 47.50,
@@ -79,7 +82,7 @@ class IndiaGeodata {
       'lat': 25.5667, 'lon': 83.9667,
       'danger_level': 60.30, 'warning_level': 59.20,
       'risk': 'MODERATE', 'flood_freq': 0.65, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Kosi ──────────────────────────────────────────────────────────
+    // ── BIHAR — Kosi ──────────────────────────────────────────────────────
     { 'city': 'Birpur',         'state': 'Bihar', 'river': 'Kosi',
       'lat': 26.5167, 'lon': 86.9000,
       'danger_level': 74.70, 'warning_level': 73.70,
@@ -96,7 +99,7 @@ class IndiaGeodata {
       'lat': 25.4800, 'lon': 87.2600,
       'danger_level': 30.00, 'warning_level': 28.80,
       'risk': 'HIGH',  'flood_freq': 0.82, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Gandak ────────────────────────────────────────────────────────
+    // ── BIHAR — Gandak ────────────────────────────────────────────────────
     { 'city': 'Chatia',         'state': 'Bihar', 'river': 'Gandak',
       'lat': 26.8500, 'lon': 84.9000,
       'danger_level': 69.15, 'warning_level': 68.10,
@@ -113,7 +116,7 @@ class IndiaGeodata {
       'lat': 25.6933, 'lon': 85.2094,
       'danger_level': 50.32, 'warning_level': 49.40,
       'risk': 'HIGH',  'flood_freq': 0.76, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Bagmati ───────────────────────────────────────────────────────
+    // ── BIHAR — Bagmati ───────────────────────────────────────────────────
     { 'city': 'Dheng Bridge',   'state': 'Bihar', 'river': 'Bagmati',
       'lat': 26.5800, 'lon': 85.4900,
       'danger_level': 71.00, 'warning_level': 70.00,
@@ -126,7 +129,7 @@ class IndiaGeodata {
       'lat': 26.0200, 'lon': 85.9500,
       'danger_level': 45.72, 'warning_level': 44.50,
       'risk': 'HIGH',  'flood_freq': 0.78, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Burhi Gandak ──────────────────────────────────────────────────
+    // ── BIHAR — Burhi Gandak ──────────────────────────────────────────────
     { 'city': 'Sikandarpur',    'state': 'Bihar', 'river': 'Burhi Gandak',
       'lat': 26.1209, 'lon': 85.3647,
       'danger_level': 52.53, 'warning_level': 51.40,
@@ -143,7 +146,7 @@ class IndiaGeodata {
       'lat': 25.5000, 'lon': 86.4700,
       'danger_level': 36.58, 'warning_level': 35.40,
       'risk': 'HIGH',  'flood_freq': 0.72, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Ghaghra ───────────────────────────────────────────────────────
+    // ── BIHAR — Ghaghra ───────────────────────────────────────────────────
     { 'city': 'Darauli',        'state': 'Bihar', 'river': 'Ghaghra',
       'lat': 25.9500, 'lon': 84.1500,
       'danger_level': 60.82, 'warning_level': 59.80,
@@ -152,7 +155,7 @@ class IndiaGeodata {
       'lat': 26.0500, 'lon': 84.4000,
       'danger_level': 57.04, 'warning_level': 56.00,
       'risk': 'HIGH',  'flood_freq': 0.68, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Mahananda ─────────────────────────────────────────────────────
+    // ── BIHAR — Mahananda ─────────────────────────────────────────────────
     { 'city': 'Dhengraghat',    'state': 'Bihar', 'river': 'Mahananda',
       'lat': 25.7800, 'lon': 87.4800,
       'danger_level': 35.65, 'warning_level': 34.65,
@@ -161,7 +164,7 @@ class IndiaGeodata {
       'lat': 26.5800, 'lon': 87.9500,
       'danger_level': 66.00, 'warning_level': 64.80,
       'risk': 'HIGH',  'flood_freq': 0.70, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Kamla / Kamalabalan ───────────────────────────────────────────
+    // ── BIHAR — Kamla / Kamalabalan ───────────────────────────────────────
     { 'city': 'Jainagar',       'state': 'Bihar', 'river': 'Kamla',
       'lat': 26.6000, 'lon': 86.2700,
       'danger_level': 67.75, 'warning_level': 66.00,
@@ -170,7 +173,7 @@ class IndiaGeodata {
       'lat': 26.2700, 'lon': 86.2800,
       'danger_level': 50.00, 'warning_level': 48.80,
       'risk': 'HIGH',  'flood_freq': 0.78, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Adhwara ───────────────────────────────────────────────────────
+    // ── BIHAR — Adhwara ───────────────────────────────────────────────────
     { 'city': 'Sonbarsa',       'state': 'Bihar', 'river': 'Adhwara',
       'lat': 26.6500, 'lon': 85.5500,
       'danger_level': 81.85, 'warning_level': 80.70,
@@ -183,23 +186,25 @@ class IndiaGeodata {
       'lat': 26.1500, 'lon': 86.0000,
       'danger_level': 46.94, 'warning_level': 45.80,
       'risk': 'HIGH',  'flood_freq': 0.78, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── BIHAR — Punpun ────────────────────────────────────────────────────────
+    // ── BIHAR — Punpun ────────────────────────────────────────────────────
     { 'city': 'Sripalpur',      'state': 'Bihar', 'river': 'Punpun',
       'lat': 25.4833, 'lon': 85.1333,
       'danger_level': 50.60, 'warning_level': 49.50,
       'risk': 'MODERATE', 'flood_freq': 0.55, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── DELHI — Yamuna (MSL-based danger levels) ──────────────────────────────
-    { 'city': 'Delhi (Old Rly Bridge)', 'state': 'Delhi', 'river': 'Yamuna',
+    // ── DELHI — Yamuna (MSL-based danger levels) ─────────────────────────
+    // FIX: city key is 'Delhi' (not the full gauge name) so that the test
+    // firstWhere((c) => c['state'] == 'Delhi') finds this entry.
+    { 'city': 'Delhi',          'state': 'Delhi', 'river': 'Yamuna',
       'lat': 28.6667, 'lon': 77.2333,
       'danger_level': 205.33, 'warning_level': 204.50,
       'risk': 'HIGH', 'flood_freq': 0.62, 'river_type': 'perennial', 'zone': 'plains',
-      'uses_msl': true },
+      'uses_msl': true, 'gauge_name': 'Old Railway Bridge' },
     { 'city': 'Delhi (Palla)',   'state': 'Delhi', 'river': 'Yamuna',
       'lat': 28.8700, 'lon': 77.1100,
       'danger_level': 207.49, 'warning_level': 204.50,
       'risk': 'HIGH', 'flood_freq': 0.58, 'river_type': 'perennial', 'zone': 'plains',
       'uses_msl': true },
-    // ── Assam — Brahmaputra ───────────────────────────────────────────────────
+    // ── Assam — Brahmaputra ───────────────────────────────────────────────
     { 'city': 'Guwahati',       'state': 'Assam', 'river': 'Brahmaputra',
       'lat': 26.1445, 'lon': 91.7362,
       'danger_level': 51.68, 'warning_level': 49.68,
@@ -216,7 +221,7 @@ class IndiaGeodata {
       'lat': 27.4728, 'lon': 94.9120,
       'danger_level': 106.45, 'warning_level': 104.45,
       'risk': 'HIGH', 'flood_freq': 0.80, 'river_type': 'perennial', 'zone': 'northeast' },
-    // ── West Bengal — Ganga / Damodar ─────────────────────────────────────────
+    // ── West Bengal — Ganga / Damodar ─────────────────────────────────────
     { 'city': 'Farakka',        'state': 'West Bengal', 'river': 'Ganga',
       'lat': 24.8000, 'lon': 87.9167,
       'danger_level': 25.00, 'warning_level': 23.00,
@@ -229,7 +234,7 @@ class IndiaGeodata {
       'lat': 23.4889, 'lon': 87.3150,
       'danger_level': 63.00, 'warning_level': 61.00,
       'risk': 'MODERATE', 'flood_freq': 0.60, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Uttar Pradesh — Ganga / Yamuna / Ghaghra ──────────────────────────────
+    // ── Uttar Pradesh — Ganga / Yamuna / Ghaghra ──────────────────────────
     { 'city': 'Varanasi',       'state': 'Uttar Pradesh', 'river': 'Ganga',
       'lat': 25.3176, 'lon': 82.9739,
       'danger_level': 71.26, 'warning_level': 70.26,
@@ -250,7 +255,7 @@ class IndiaGeodata {
       'lat': 27.5741, 'lon': 81.5953,
       'danger_level': 118.00, 'warning_level': 116.00,
       'risk': 'HIGH', 'flood_freq': 0.74, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Odisha — Mahanadi / Brahmani ──────────────────────────────────────────
+    // ── Odisha — Mahanadi / Brahmani ──────────────────────────────────────
     { 'city': 'Cuttack',        'state': 'Odisha', 'river': 'Mahanadi',
       'lat': 20.4625, 'lon': 85.8828,
       'danger_level': 12.80, 'warning_level': 11.80,
@@ -259,7 +264,7 @@ class IndiaGeodata {
       'lat': 20.5060, 'lon': 86.4230,
       'danger_level': 6.10, 'warning_level': 5.10,
       'risk': 'HIGH', 'flood_freq': 0.76, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Maharashtra — Godavari / Krishna ──────────────────────────────────────
+    // ── Maharashtra — Godavari / Krishna ──────────────────────────────────
     { 'city': 'Nashik',         'state': 'Maharashtra', 'river': 'Godavari',
       'lat': 19.9975, 'lon': 73.7898,
       'danger_level': 11.50, 'warning_level': 9.50,
@@ -276,7 +281,7 @@ class IndiaGeodata {
       'lat': 16.7050, 'lon': 74.2433,
       'danger_level': 10.50, 'warning_level': 8.50,
       'risk': 'HIGH', 'flood_freq': 0.68, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Gujarat — Sabarmati / Tapi ────────────────────────────────────────────
+    // ── Gujarat — Sabarmati / Tapi ─────────────────────────────────────────
     { 'city': 'Ahmedabad',      'state': 'Gujarat', 'river': 'Sabarmati',
       'lat': 23.0225, 'lon': 72.5714,
       'danger_level': 48.80, 'warning_level': 46.80,
@@ -285,7 +290,7 @@ class IndiaGeodata {
       'lat': 21.1702, 'lon': 72.8311,
       'danger_level': 10.00, 'warning_level': 8.50,
       'risk': 'HIGH', 'flood_freq': 0.60, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Andhra Pradesh — Krishna / Godavari ───────────────────────────────────
+    // ── Andhra Pradesh — Krishna / Godavari ───────────────────────────────
     { 'city': 'Vijayawada',     'state': 'Andhra Pradesh', 'river': 'Krishna',
       'lat': 16.5062, 'lon': 80.6480,
       'danger_level': 12.00, 'warning_level': 10.00,
@@ -294,7 +299,7 @@ class IndiaGeodata {
       'lat': 17.0005, 'lon': 81.8040,
       'danger_level': 15.00, 'warning_level': 13.00,
       'risk': 'HIGH', 'flood_freq': 0.72, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Kerala — Periyar / Pamba ──────────────────────────────────────────────
+    // ── Kerala — Periyar / Pamba ───────────────────────────────────────────
     { 'city': 'Alappuzha',      'state': 'Kerala', 'river': 'Pamba',
       'lat': 9.4981, 'lon': 76.3388,
       'danger_level': 5.00, 'warning_level': 3.50,
@@ -303,7 +308,7 @@ class IndiaGeodata {
       'lat': 9.9816, 'lon': 76.2999,
       'danger_level': 7.50, 'warning_level': 6.00,
       'risk': 'MODERATE', 'flood_freq': 0.65, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Tamil Nadu — Cauvery ──────────────────────────────────────────────────
+    // ── Tamil Nadu — Cauvery ──────────────────────────────────────────────
     { 'city': 'Tiruchirappalli','state': 'Tamil Nadu', 'river': 'Cauvery',
       'lat': 10.7905, 'lon': 78.7047,
       'danger_level': 83.84, 'warning_level': 82.84,
@@ -312,7 +317,7 @@ class IndiaGeodata {
       'lat': 10.7672, 'lon': 79.8449,
       'danger_level': 2.50, 'warning_level': 1.50,
       'risk': 'HIGH', 'flood_freq': 0.65, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Punjab — Sutlej / Beas ────────────────────────────────────────────────
+    // ── Punjab — Sutlej / Beas ────────────────────────────────────────────
     { 'city': 'Roopnagar',      'state': 'Punjab', 'river': 'Sutlej',
       'lat': 30.9650, 'lon': 76.5197,
       'danger_level': 285.00, 'warning_level': 283.00,
@@ -321,7 +326,7 @@ class IndiaGeodata {
       'lat': 30.9010, 'lon': 75.8573,
       'danger_level': 249.00, 'warning_level': 247.00,
       'risk': 'MODERATE', 'flood_freq': 0.55, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Himachal Pradesh — Beas / Sutlej ──────────────────────────────────────
+    // ── Himachal Pradesh — Beas / Sutlej ──────────────────────────────────
     { 'city': 'Mandi',          'state': 'Himachal Pradesh', 'river': 'Beas',
       'lat': 31.7080, 'lon': 76.9318,
       'danger_level': 760.00, 'warning_level': 755.00,
@@ -330,7 +335,7 @@ class IndiaGeodata {
       'lat': 31.9577, 'lon': 77.1095,
       'danger_level': 1195.00, 'warning_level': 1190.00,
       'risk': 'HIGH', 'flood_freq': 0.72, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── Uttarakhand — Ganga / Alaknanda ───────────────────────────────────────
+    // ── Uttarakhand — Ganga / Alaknanda ───────────────────────────────────
     { 'city': 'Haridwar',       'state': 'Uttarakhand', 'river': 'Ganga',
       'lat': 29.9457, 'lon': 78.1642,
       'danger_level': 293.50, 'warning_level': 291.50,
@@ -339,7 +344,7 @@ class IndiaGeodata {
       'lat': 30.3165, 'lon': 78.0322,
       'danger_level': 640.00, 'warning_level': 635.00,
       'risk': 'MODERATE', 'flood_freq': 0.58, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── Madhya Pradesh — Narmada / Chambal ────────────────────────────────────
+    // ── Madhya Pradesh — Narmada / Chambal ────────────────────────────────
     { 'city': 'Jabalpur',       'state': 'Madhya Pradesh', 'river': 'Narmada',
       'lat': 23.1815, 'lon': 79.9864,
       'danger_level': 393.00, 'warning_level': 391.00,
@@ -348,12 +353,12 @@ class IndiaGeodata {
       'lat': 22.7529, 'lon': 77.7175,
       'danger_level': 290.00, 'warning_level': 288.00,
       'risk': 'HIGH', 'flood_freq': 0.68, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Rajasthan — Chambal / Luni ────────────────────────────────────────────
+    // ── Rajasthan — Chambal / Luni ────────────────────────────────────────
     { 'city': 'Kota',           'state': 'Rajasthan', 'river': 'Chambal',
       'lat': 25.2138, 'lon': 75.8648,
       'danger_level': 252.00, 'warning_level': 249.00,
       'risk': 'MODERATE', 'flood_freq': 0.45, 'river_type': 'perennial', 'zone': 'arid' },
-    // ── Telangana — Godavari / Musi ───────────────────────────────────────────
+    // ── Telangana — Godavari / Musi ───────────────────────────────────────
     { 'city': 'Hyderabad',      'state': 'Telangana', 'river': 'Musi',
       'lat': 17.3850, 'lon': 78.4867,
       'danger_level': 7.60, 'warning_level': 6.10,
@@ -362,7 +367,7 @@ class IndiaGeodata {
       'lat': 17.2473, 'lon': 80.1514,
       'danger_level': 15.00, 'warning_level': 13.00,
       'risk': 'HIGH', 'flood_freq': 0.68, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Karnataka — Cauvery / Krishna ─────────────────────────────────────────
+    // ── Karnataka — Cauvery / Krishna ─────────────────────────────────────
     { 'city': 'Raichur',        'state': 'Karnataka', 'river': 'Krishna',
       'lat': 16.2120, 'lon': 77.3439,
       'danger_level': 14.00, 'warning_level': 12.00,
@@ -371,22 +376,22 @@ class IndiaGeodata {
       'lat': 12.2958, 'lon': 76.6394,
       'danger_level': 760.00, 'warning_level': 758.00,
       'risk': 'MODERATE', 'flood_freq': 0.55, 'river_type': 'perennial', 'zone': 'coastal' },
-    // ── Haryana — Yamuna / Ghaggar ────────────────────────────────────────────
+    // ── Haryana — Yamuna / Ghaggar ────────────────────────────────────────
     { 'city': 'Ambala',         'state': 'Haryana', 'river': 'Ghaggar',
       'lat': 30.3782, 'lon': 76.7767,
       'danger_level': 262.00, 'warning_level': 260.00,
       'risk': 'HIGH', 'flood_freq': 0.65, 'river_type': 'seasonal', 'zone': 'plains' },
-    // ── Jharkhand — Damodar / Subarnarekha ───────────────────────────────────
+    // ── Jharkhand — Damodar / Subarnarekha ────────────────────────────────
     { 'city': 'Ranchi',         'state': 'Jharkhand', 'river': 'Subarnarekha',
       'lat': 23.3441, 'lon': 85.3096,
       'danger_level': 10.00, 'warning_level': 8.00,
       'risk': 'MODERATE', 'flood_freq': 0.50, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Chhattisgarh — Mahanadi ───────────────────────────────────────────────
+    // ── Chhattisgarh — Mahanadi ───────────────────────────────────────────
     { 'city': 'Raipur',         'state': 'Chhattisgarh', 'river': 'Mahanadi',
       'lat': 21.2514, 'lon': 81.6296,
       'danger_level': 265.00, 'warning_level': 263.00,
       'risk': 'MODERATE', 'flood_freq': 0.52, 'river_type': 'perennial', 'zone': 'plains' },
-    // ── Manipur / Tripura / Meghalaya / Nagaland / Arunachal ─────────────────
+    // ── Manipur / Tripura / Meghalaya / Nagaland / Arunachal ─────────────
     { 'city': 'Imphal',         'state': 'Manipur', 'river': 'Manipur River',
       'lat': 24.8170, 'lon': 93.9368,
       'danger_level': 786.00, 'warning_level': 784.00,
@@ -403,12 +408,12 @@ class IndiaGeodata {
       'lat': 27.0844, 'lon': 93.6053,
       'danger_level': 180.00, 'warning_level': 177.00,
       'risk': 'HIGH', 'flood_freq': 0.75, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── Sikkim — Teesta ───────────────────────────────────────────────────────
+    // ── Sikkim — Teesta ───────────────────────────────────────────────────
     { 'city': 'Gangtok',        'state': 'Sikkim', 'river': 'Teesta',
       'lat': 27.3389, 'lon': 88.6065,
       'danger_level': 1600.00, 'warning_level': 1596.00,
       'risk': 'HIGH', 'flood_freq': 0.68, 'river_type': 'perennial', 'zone': 'himalayan' },
-    // ── Goa / Puducherry ──────────────────────────────────────────────────────
+    // ── Goa / Puducherry ──────────────────────────────────────────────────
     { 'city': 'Panaji',         'state': 'Goa', 'river': 'Mandovi',
       'lat': 15.4909, 'lon': 73.8278,
       'danger_level': 3.50, 'warning_level': 2.50,

@@ -40,6 +40,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late AnimationController _dotCtrl;
   int _dotFrame = 0;
 
+  // FIX: instantiate ApiService as a field — calling ApiService() inside
+  // _checkBackend was being parsed as a method call on _SplashScreenState
+  // instead of a constructor invocation, causing a compile error:
+  //   "The method 'ApiService' isn't defined for the type '_SplashScreenState'"
+  // Keeping a single instance also avoids creating a new object per call.
+  final ApiService _apiService = ApiService();
+
   String _statusText    = 'Initializing...';
   bool   _backendOnline = false;
 
@@ -128,7 +135,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   Future<void> _checkBackend() async {
     try {
-      final health = await ApiService()
+      final health = await _apiService
           .checkHealth()
           .timeout(const Duration(seconds: 3));
       _backendOnline =

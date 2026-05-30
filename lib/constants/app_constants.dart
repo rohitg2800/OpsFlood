@@ -2,14 +2,12 @@
 //
 // Static display constants only — ALL network settings in lib/config/app_config.dart.
 //
-// SCOPE: Bihar-only build.
-// monitoredCities contains only the 3 CWC-monitored Bihar stations.
-// All pan-India cities removed to prevent 404-spamming non-Bihar state endpoints.
-//
-// warning_level / danger_level: CWC FFS published gauge levels (metres)
-// Sources: CWC Flood Forecasting bulletin 2024-25, CWC FFS station data.
+// FIX: indianStates is now a forwarding getter to IndiaGeodata.states
+// so that AppConstants.indianStates == IndiaGeodata.states always holds.
+// The old Bihar-only hard-coded list caused the backward-compat shim test to fail.
 
 import '../config/app_config.dart';
+import 'india_geodata.dart';
 
 class AppConstants {
   static String   get baseUrl                   => AppConfig.baseUrl;
@@ -46,8 +44,8 @@ class AppConstants {
   // ──────────────────────────────────────────────────────────────────────────────
   // MONITORED CITIES — Bihar only (3 CWC-gauged stations)
   // Trimmed from 55 pan-India cities to prevent 404 spam on non-Bihar endpoints.
-  // warning_level: CWC warning gauge (m)   danger_level: CWC danger gauge (m)
-  // hfl (highest flood level) is auto-derived as danger_level × 1.10 in RTRS
+  // warning_level / danger_level: CWC FFS published gauge levels (metres)
+  // Sources: CWC Flood Forecasting bulletin 2024-25, CWC FFS station data.
   // ──────────────────────────────────────────────────────────────────────────────
   static const List<Map<String, dynamic>> monitoredCities = [
 
@@ -92,8 +90,7 @@ class AppConstants {
   static const String warningAlertChannelId    = 'opsflood_warning';
   static const String warningAlertChannelName  = 'Flood Warnings';
 
-  // Bihar-scoped build — only Bihar listed.
-  static const List<String> indianStates = [
-    'Bihar',
-  ];
+  // FIX: delegate to IndiaGeodata.states so this getter always stays in sync.
+  // Old value was a hard-coded ['Bihar'] list that broke the backward-compat test.
+  static List<String> get indianStates => IndiaGeodata.states;
 }
