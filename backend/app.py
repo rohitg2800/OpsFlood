@@ -1,9 +1,11 @@
 """
-backend/app.py  —  OpsFlood FastAPI v3.4
+backend/app.py  —  OpsFlood FastAPI v4.0 — BIHAR ONLY
 All routes the Flutter app calls.
 
 Run from inside the backend/ folder:
   uvicorn app:app --reload
+
+BIHAR ONLY — No national / other-state data anywhere.
 """
 import random
 from datetime import datetime
@@ -14,33 +16,28 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from wrd_bihar_scraper import (
-        scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level, build_danger_alerts
+        scrape_wrd_bihar, BIHAR_STATIONS, build_record, _synthetic_level, build_danger_alerts
     )
 except ImportError:
-    from .wrd_bihar_scraper import (
-        scrape_wrd_bihar, ALL_STATIONS, build_record, _synthetic_level, build_danger_alerts
+    from backend.wrd_bihar_scraper import (
+        scrape_wrd_bihar, BIHAR_STATIONS, build_record, _synthetic_level, build_danger_alerts
     )
 
-app = FastAPI(title="OpsFlood API", version="3.4.0")
+app = FastAPI(title="OpsFlood Bihar API", version="4.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 import time as _time
 _cache: dict = {"data": None, "ts": 0.0}
-_TTL = 600  # cache for 10 minutes
+_TTL = 600  # 10-minute cache
 
 
 async def _get_data() -> list:
+    """Returns ONLY Bihar stations — no other states ever."""
     now = _time.time()
     if _cache["data"] and now - _cache["ts"] < _TTL:
         return _cache["data"]
-    bihar = await scrape_wrd_bihar()
-    national_now = datetime.utcnow()
-    national = [
-        build_record(st, _synthetic_level(st, national_now), "SYNTHETIC", national_now)
-        for st in ALL_STATIONS
-        if st.get("state", "Bihar") != "Bihar"
-    ]
-    data = bihar + national
+    # scrape_wrd_bihar already returns Bihar-only records
+    data = await scrape_wrd_bihar()
     _cache["data"] = data
     _cache["ts"]   = now
     return data
@@ -49,14 +46,14 @@ async def _get_data() -> list:
 def _find_station(data: list, key: str) -> Optional[dict]:
     needle = key.strip().lower()
     alias_map: dict[str, str] = {}
-    for st in ALL_STATIONS:
+    for st in BIHAR_STATIONS:
         for alias in st.get("aliases", []):
             alias_map[alias.lower()] = st["id"]
 
     for d in data:
-        if d["id"].lower() == needle:             return d
-        if d.get("name", "").lower() == needle:   return d
-        if d.get("city", "").lower() == needle:   return d
+        if d["id"].lower() == needle:               return d
+        if d.get("name", "").lower() == needle:     return d
+        if d.get("city", "").lower() == needle:     return d
         if d.get("district", "").lower() == needle: return d
 
     if needle in alias_map:
@@ -73,26 +70,29 @@ def _find_station(data: list, key: str) -> Optional[dict]:
     return None
 
 
-# ── Health ─────────────────────────────────────────────────────────────
+# ── Health ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "3.4.0", "timestamp": datetime.utcnow().isoformat()}
+    return {
+        "status": "ok",
+        "version": "4.0.0",
+        "scope": "Bihar",
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 # ── /api/stations ────────────────────────────────────────────────────────────
 @app.get("/api/stations")
 async def get_stations(
-    state:    Optional[str] = Query(None),
     river:    Optional[str] = Query(None),
     district: Optional[str] = Query(None),
     status:   Optional[str] = Query(None),
 ):
-    data = await _get_data()
-    if state:    data = [d for d in data if state.lower()    in d.get("state",    "").lower()]
+    data = await _get_data()  # always Bihar only
     if river:    data = [d for d in data if river.lower()    in d.get("river",    "").lower()]
     if district: data = [d for d in data if district.lower() in d.get("district", "").lower()]
     if status:   data = [d for d in data if d.get("status")  == status.lower()]
-    return {"status": "success", "count": len(data), "data": data}
+    return {"status": "success", "count": len(data), "state": "Bihar", "data": data}
 
 
 @app.get("/api/stations/{station_id}")
@@ -101,116 +101,165 @@ async def get_station(station_id: str):
     match = _find_station(data, station_id)
     if not match:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"Station not found: {station_id}")
+        raise HTTPException(status_code=404, detail=f"Station not found in Bihar: {station_id}")
     return {"status": "success", "data": match}
 
 
-# ── Aliases (old endpoint names still work) ──────────────────────────────
+# ── Aliases — old endpoint names still work ──────────────────────────────────
 @app.get("/api/live-levels")
 @app.get("/api/live-telemetry")
 @app.get("/api/cwc-stations")
-async def live_levels_alias(state: Optional[str] = Query(None)):
-    return await get_stations(state=state)
-
-
-# ── /api/alerts/danger — stations above danger level ──────────────────────────
-@app.get("/api/alerts/danger")
-async def danger_alerts():
-    """Returns only stations where current_level >= danger_level.
-    Sorted most-above-danger first. Includes action=EVACUATE/WARN/MONITOR."""
-    data   = await _get_data()
-    alerts = build_danger_alerts(data)
+async def live_levels_alias(
+    river:    Optional[str] = Query(None),
+    district: Optional[str] = Query(None),
+    limit:    Optional[int] = Query(None),
+):
+    data = await _get_data()
+    if river:    data = [d for d in data if river.lower()    in d.get("river",    "").lower()]
+    if district: data = [d for d in data if district.lower() in d.get("district", "").lower()]
+    if limit:    data = data[:limit]
     return {
-        "status":  "success",
-        "count":   len(alerts),
-        "has_danger": len(alerts) > 0,
-        "data":    alerts,
+        "status": "success",
+        "count":  len(data),
+        "total":  len(data),
+        "state":  "Bihar",
+        "glofas_count":   sum(1 for d in data if d.get("quality_flag") == "LIVE"),
+        "tactical_count": sum(1 for d in data if d.get("quality_flag") == "SYNTHETIC"),
+        "timestamp": datetime.utcnow().isoformat(),
+        "data": [
+            {
+                "station":              d["name"],
+                "district":             d["district"],
+                "river_name":           d["river"],
+                "current_level_m":      d["current_level"],
+                "danger_level_m":       d["danger_level"],
+                "warning_level_m":      d["warning_level"],
+                "capacity_percent":     d["capacity_percent"],
+                "risk_level":           d["risk_level"],
+                "proximity_to_danger_m": round(d["danger_level"] - d["current_level"], 2),
+                "river_discharge_m3s":  0,
+                "data_source":          d["data_source"],
+                "timestamp":            d["last_updated"],
+                "lat":                  d["lat"],
+                "lon":                  d["lon"],
+                # also include original keys for backward compat
+                **d,
+            }
+            for d in data
+        ],
     }
 
 
-# ── /api/critical-alerts ─────────────────────────────────────────────────
+# ── /api/alerts/danger ───────────────────────────────────────────────────────
+@app.get("/api/alerts/danger")
+async def danger_alerts():
+    data   = await _get_data()
+    alerts = build_danger_alerts(data)
+    return {
+        "status":     "success",
+        "count":      len(alerts),
+        "has_danger": len(alerts) > 0,
+        "state":      "Bihar",
+        "data":       alerts,
+    }
+
+
+# ── /api/critical-alerts ─────────────────────────────────────────────────────
 @app.get("/api/critical-alerts")
 @app.get("/api/alerts")
 async def critical_alerts():
     data = await _get_data()
-    alerts = [
-        {**d,
-         "alert_type": d["status"].upper(),
-         "message":    f"{d['name']} ({d['river']}) is at {d['status']} level",
-         "severity":   1 if d["status"] == "danger" else 2}
-        for d in data if d["status"] != "normal"
-    ]
-    alerts.sort(key=lambda x: x["severity"])
-    return {"status": "success", "count": len(alerts), "data": alerts}
+    alerts = []
+    for d in data:
+        if d["status"] != "normal":
+            severity = "CRITICAL" if d["status"] == "danger" else "HIGH"
+            cap = d["capacity_percent"]
+            alerts.append({
+                **d,
+                "station":   d["name"],
+                "river_name": d["river"],
+                "severity":  severity,
+                "capacity_percent": cap,
+                "alert_type": d["status"].upper(),
+                "message":   (
+                    f"{d['name']} ({d['river']}, {d['district']}) is at "
+                    f"{d['current_level']:.2f}m — {d['status'].upper()} level."
+                ),
+                "recommendation": (
+                    "Immediate evacuation advised" if d["status"] == "danger"
+                    else "Stay alert, avoid river banks"
+                ),
+            })
+    alerts.sort(key=lambda x: (0 if x["severity"] == "CRITICAL" else 1, -x["capacity_percent"]))
+    return {"status": "success", "total": len(alerts), "state": "Bihar", "data": alerts}
 
 
-# ── /api/summary ────────────────────────────────────────────────────────────
+# ── /api/summary ──────────────────────────────────────────────────────────────
 @app.get("/api/summary")
 async def summary():
     data = await _get_data()
-    bihar = [d for d in data if d.get("state") == "Bihar"]
     return {
         "status":  "success",
+        "state":   "Bihar",
         "total":   len(data),
-        "bihar_total": len(bihar),
         "normal":  sum(1 for d in data if d["status"] == "normal"),
         "warning": sum(1 for d in data if d["status"] == "warning"),
         "danger":  sum(1 for d in data if d["status"] == "danger"),
         "danger_stations": [d["name"] for d in data if d["status"] == "danger"],
+        "warning_stations": [d["name"] for d in data if d["status"] == "warning"],
+        "live_count": sum(1 for d in data if d.get("quality_flag") == "LIVE"),
+        "synthetic_count": sum(1 for d in data if d.get("quality_flag") == "SYNTHETIC"),
     }
 
 
-# ── /api/state-severity ───────────────────────────────────────────────────────
-@app.get("/api/state-severity")
-async def state_severity():
-    data = await _get_data()
-    states: dict = {}
-    for d in data:
-        st = d.get("state", "Unknown")
-        if st not in states:
-            states[st] = {"state": st, "total": 0, "danger": 0, "warning": 0, "normal": 0}
-        states[st]["total"]     += 1
-        states[st][d["status"]] += 1
-    result = []
-    for v in states.values():
-        sev = "danger" if v["danger"] > 0 else ("warning" if v["warning"] > 0 else "normal")
-        result.append({**v, "severity": sev})
-    return {"status": "success", "data": result}
-
-
-# ── /api/rivers & /api/districts ──────────────────────────────────────────────
+# ── /api/rivers ───────────────────────────────────────────────────────────────
 @app.get("/api/rivers")
 async def rivers():
     data = await _get_data()
-    return {"status": "success", "data": sorted(set(d["river"] for d in data))}
+    return {
+        "status": "success",
+        "state":  "Bihar",
+        "data":   sorted(set(d["river"] for d in data))
+    }
 
 
+# ── /api/districts ────────────────────────────────────────────────────────────
 @app.get("/api/districts")
 async def districts():
     data = await _get_data()
-    return {"status": "success", "data": sorted(set(d["district"] for d in data))}
+    return {
+        "status": "success",
+        "state":  "Bihar",
+        "data":   sorted(set(d["district"] for d in data))
+    }
 
 
-# ── Weather ─────────────────────────────────────────────────────────────────────
+# ── /api/weather — Bihar-centred defaults ─────────────────────────────────────
 @app.get("/api/weather/current")
 @app.get("/weather/current")
-async def weather_current(lat: float = 25.61, lon: float = 85.14):
+async def weather_current(
+    lat: float = 25.61,  # Patna default
+    lon: float = 85.14,
+):
     r = random.Random(f"{lat:.1f}{lon:.1f}")
-    return {"status": "success", "data": {
+    return {"status": "success", "state": "Bihar", "data": {
         "temperature": round(28 + r.random() * 8, 1),
         "humidity":    round(60 + r.random() * 25, 1),
         "rainfall_mm": round(r.random() * 15, 1),
         "wind_speed":  round(5  + r.random() * 20, 1),
         "condition":   "Partly Cloudy",
-        "description": "Pre-monsoon conditions",
+        "description": "Bihar pre-monsoon conditions",
     }}
 
 
 @app.get("/api/weather/forecast")
 @app.get("/weather/forecast")
-async def weather_forecast(lat: float = 25.61, lon: float = 85.14):
+async def weather_forecast(
+    lat: float = 25.61,
+    lon: float = 85.14,
+):
     r = random.Random(f"{lat:.1f}{lon:.1f}")
-    return {"status": "success", "data": [
+    return {"status": "success", "state": "Bihar", "data": [
         {"date": datetime.utcnow().date().isoformat(),
          "max_temp": round(32 + r.random() * 8, 1),
          "min_temp": round(24 + r.random() * 6, 1),
@@ -220,22 +269,23 @@ async def weather_forecast(lat: float = 25.61, lon: float = 85.14):
     ]}
 
 
-# ── Pipeline ───────────────────────────────────────────────────────────────────
+# ── /api/pipeline ─────────────────────────────────────────────────────────────
 @app.get("/api/pipeline/manifest")
 async def pipeline_manifest():
     data = await _get_data()
     return {"status": "success", "data": {
-        "version": "3.4",
-        "states":  sorted(set(d["state"] for d in data)),
+        "version": "4.0",
+        "state":   "Bihar",
         "stations": len(data),
-        "bihar_stations": sum(1 for d in data if d.get("state") == "Bihar"),
+        "rivers":   sorted(set(d["river"] for d in data)),
+        "districts": sorted(set(d["district"] for d in data)),
         "last_run": datetime.utcnow().isoformat(),
     }}
 
 
 @app.get("/api/pipeline/features")
 async def pipeline_features(city: Optional[str] = Query(None)):
-    r = random.Random(city or "default")
+    r = random.Random(city or "patna")
     return {"status": "success", "data": {
         "rainfall_3d":    round(r.random() * 50, 1),
         "discharge":      round(500 + r.random() * 7500, 0),
@@ -252,6 +302,7 @@ async def model_metrics():
     return {"status": "success", "data": {
         "accuracy": 0.891, "precision": 0.874, "recall": 0.903, "f1": 0.888,
         "model": "XGBoost + LSTM Ensemble",
+        "trained_on": "Bihar WRD historical 2000–2024",
     }}
 
 
@@ -264,24 +315,27 @@ async def predict():
         "flood_probability": round(risk, 3),
         "risk_level": "High" if risk > 0.7 else ("Medium" if risk > 0.4 else "Low"),
         "confidence": round(0.80 + random.random() * 0.15, 3),
+        "state":      "Bihar",
         "recommendation": "Monitor closely" if risk > 0.5 else "No immediate action needed",
     }}
 
 
-# ── Ingestion (force cache clear) ─────────────────────────────────────────────
+# ── Ingestion ─────────────────────────────────────────────────────────────────
 @app.get("/api/ingestion/run")
 @app.get("/ingestion/run")
 async def ingestion_run():
     _cache["data"] = None
-    return {"status": "success", "message": "Cache cleared — re-scraping on next request"}
+    _cache["ts"]   = 0.0
+    return {"status": "success", "message": "Bihar cache cleared — re-scraping on next request"}
 
 
-# ── Compat stubs ────────────────────────────────────────────────────────────────
+# ── Compat stubs ──────────────────────────────────────────────────────────────
 @app.get("/api/cwc-ffs")
 @app.get("/api/cwc-ffs/station")
-async def cwc_ffs(): return {"status": "success", "data": []}
-
+async def cwc_ffs(): return {"status": "success", "state": "Bihar", "data": []}
 
 @app.get("/api/cwc-reservoir")
 @app.get("/api/cwc-reservoir/state")
-async def cwc_reservoir(): return {"status": "success", "data": []}
+async def cwc_reservoir(): return {"status": "success", "state": "Bihar", "data": []}
+
+# NOTE: /api/state-severity removed — app is Bihar-only, one state.

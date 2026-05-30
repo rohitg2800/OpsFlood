@@ -1,23 +1,15 @@
 """
 backend/wrd_bihar_scraper.py
-OpsFlood — Live Gauge Scraper v6.1
+OpsFlood — Bihar-Only Live Gauge Scraper v7.0
 
-Fixes in v6.1:
- - pct_to_danger clamped to 0–100 (no more negatives)
- - Scraped current_level validated: must be within ±30% of station's
-   operating range — catches Dheng Bridge / BG01 unit-mismatch from befiqr
- - discharge / flow_rate removed (were fake); replaced with quality_flag
- - pct_to_warning added (also clamped 0–100)
+BIHAR ONLY. No national / other-state station list anywhere.
 
-Primary sources (Bihar):
-  1. irrigation.befiqr.in/state/table/rivers
-     → WRD Bihar Central Flood Control Cell — 31 sites, updated hourly
-  2. irrigation.fmiscwrdbihar.gov.in/state/table/rtdas-stations
-     → WRD Bihar RTDAS telemetry — 25 sites, updated every 15 min
+Primary live sources:
+  1. irrigation.befiqr.in/state/table/rivers         (WRD Bihar CFCC, 31 sites, hourly)
+  2. irrigation.fmiscwrdbihar.gov.in/state/table/...  (WRD RTDAS, 25 sites, 15-min)
 
-31 Bihar gauges across 10 rivers (matches lib/data/bihar_rivers.dart exactly).
-National synthetic fallback for non-Bihar stations.
-Full synthetic fallback for Bihar when both live sources are unreachable.
+Full synthetic fallback when both sources are unreachable.
+All 31 Bihar gauges across 10 rivers.
 """
 
 import hashlib
@@ -34,7 +26,7 @@ except ImportError:
     _DEPS_OK = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Bihar station master — 31 gauges across 10 rivers
+# Bihar station master — 31 gauges, 10 rivers, Bihar ONLY
 # ─────────────────────────────────────────────────────────────────────────────
 BIHAR_STATIONS = [
     # ── 1. GANGA (7 stations) ─────────────────────────────────────────────────
@@ -113,7 +105,7 @@ BIHAR_STATIONS = [
      "river":"Burhi Gandak","district":"Khagaria","state":"Bihar",
      "lat":25.5000,"lon":86.4700,"danger":36.58,"warning":35.40,"low":29.0,"hfl":39.22},
 
-    # ── 6. GHAGHRA / SARYU (2 stations) ──────────────────────────────────────
+    # ── 6. GHAGHRA (2 stations) ───────────────────────────────────────────────
     {"id":"GH01","name":"Darauli","aliases":["darauli","siwan","ghaghra siwan"],
      "river":"Ghaghra","district":"Siwan","state":"Bihar",
      "lat":25.9500,"lon":84.1500,"danger":60.82,"warning":59.80,"low":54.0,"hfl":61.82},
@@ -137,7 +129,7 @@ BIHAR_STATIONS = [
      "river":"Kamla Balan","district":"Madhubani","state":"Bihar",
      "lat":26.2700,"lon":86.2800,"danger":50.00,"warning":48.80,"low":43.0,"hfl":53.11},
 
-    # ── 9. ADHWARA GROUP (3 stations) ─────────────────────────────────────────
+    # ── 9. ADHWARA (3 stations) ───────────────────────────────────────────────
     {"id":"AW01","name":"Sonbarsa","aliases":["sonbarsa","sitamarhi adhwara"],
      "river":"Adhwara","district":"Sitamarhi","state":"Bihar",
      "lat":26.6500,"lon":85.5500,"danger":81.85,"warning":80.70,"low":75.0,"hfl":83.20},
@@ -154,34 +146,19 @@ BIHAR_STATIONS = [
      "lat":25.4833,"lon":85.1333,"danger":50.60,"warning":49.50,"low":43.0,"hfl":53.91},
 ]
 
-NATIONAL_STATIONS = [
-    {"id":"MH_PUN","name":"Pune",      "aliases":["pune"],"river":"Mula-Mutha",  "district":"Pune",       "state":"Maharashtra",   "lat":18.52,"lon":73.86,"danger":25.0, "warning":23.0, "low":18.0,"hfl":28.0},
-    {"id":"MH_MUM","name":"Mumbai",    "aliases":["mumbai"],"river":"Mithi",    "district":"Mumbai",     "state":"Maharashtra",   "lat":19.08,"lon":72.88,"danger":5.0,  "warning":4.0,  "low":2.0,"hfl":6.5},
-    {"id":"UP_VAR","name":"Varanasi",  "aliases":["varanasi"],"river":"Ganga",  "district":"Varanasi",  "state":"Uttar Pradesh", "lat":25.32,"lon":82.97,"danger":71.26,"warning":70.26,"low":66.0,"hfl":73.0},
-    {"id":"AS_GUW","name":"Guwahati",  "aliases":["guwahati"],"river":"Brahmaputra","district":"Kamrup","state":"Assam",         "lat":26.14,"lon":91.74,"danger":49.68,"warning":48.68,"low":44.0,"hfl":51.0},
-    {"id":"KE_KOC","name":"Kochi",     "aliases":["kochi"],"river":"Periyar",  "district":"Ernakulam", "state":"Kerala",        "lat":9.93, "lon":76.27,"danger":7.0,  "warning":6.0,  "low":3.0,"hfl":8.5},
-    {"id":"WB_KOL","name":"Kolkata",   "aliases":["kolkata"],"river":"Hooghly", "district":"Kolkata",  "state":"West Bengal",   "lat":22.57,"lon":88.36,"danger":5.5,  "warning":4.5,  "low":2.0,"hfl":7.0},
-    {"id":"OD_CUT","name":"Cuttack",   "aliases":["cuttack"],"river":"Mahanadi","district":"Cuttack",  "state":"Odisha",        "lat":20.46,"lon":85.88,"danger":22.0, "warning":20.5, "low":16.0,"hfl":25.0},
-    {"id":"HP_HAR","name":"Haridwar",  "aliases":["haridwar"],"river":"Ganga",  "district":"Haridwar",  "state":"Uttarakhand",   "lat":29.94,"lon":78.16,"danger":294.0,"warning":293.0,"low":289.0,"hfl":296.0},
-    {"id":"UP_GOR","name":"Gorakhpur", "aliases":["gorakhpur"],"river":"Rapti", "district":"Gorakhpur","state":"Uttar Pradesh", "lat":26.76,"lon":83.37,"danger":84.0, "warning":83.0, "low":79.0,"hfl":86.0},
-    {"id":"AS_DHU","name":"Dhubri",    "aliases":["dhubri"],"river":"Brahmaputra","district":"Dhubri",  "state":"Assam",         "lat":26.02,"lon":89.98,"danger":30.30,"warning":29.30,"low":25.0,"hfl":32.0},
-    {"id":"WB_JAL","name":"Jalpaiguri","aliases":["jalpaiguri"],"river":"Teesta","district":"Jalpaiguri","state":"West Bengal", "lat":26.54,"lon":88.72,"danger":82.60,"warning":81.60,"low":77.0,"hfl":85.0},
-]
-
-ALL_STATIONS = BIHAR_STATIONS + NATIONAL_STATIONS
+# BIHAR ONLY — ALL_STATIONS = BIHAR_STATIONS (no national list)
+ALL_STATIONS = BIHAR_STATIONS
 
 BEFIQR_URL  = "https://irrigation.befiqr.in/state/table/rivers"
 RTDAS_URL   = "https://irrigation.fmiscwrdbihar.gov.in/state/table/rtdas-stations?platform=mobileapp&hide=hamburger"
 HTTP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; OpsFlood/3.1; flood monitoring)",
+    "User-Agent": "Mozilla/5.0 (compatible; OpsFlood/4.0; +https://opsflood.onrender.com)",
     "Accept": "text/html,application/xhtml+xml",
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# v6.1: Plausibility guard — rejects scraped levels outside station's
-# operating range (catches unit mismatches like BG01 returning ~33m for a
-# 65–73m MSL gauge).
+# Plausibility guard — rejects scraped levels outside operating range
 # ─────────────────────────────────────────────────────────────────────────────
 def _is_plausible(current: float, station: dict) -> bool:
     span = station["danger"] - station["low"]
@@ -223,28 +200,23 @@ def _trend_synthetic(current: float, station: dict, now: datetime) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Record builder  (v6.1)
-#  • pct_to_danger  clamped 0–100
-#  • pct_to_warning clamped 0–100
-#  • discharge / flow_rate removed (were non-real)
-#  • quality_flag: LIVE | SYNTHETIC
+# Record builder
 # ─────────────────────────────────────────────────────────────────────────────
 def build_record(
-    station: dict,
-    current: float,
-    source: str,
-    now: datetime,
-    trend: Optional[str] = None,
-    hfl: Optional[float] = None,
-    obs_time: Optional[str] = None,
+    station:   dict,
+    current:   float,
+    source:    str,
+    now:       datetime,
+    trend:     Optional[str] = None,
+    hfl:       Optional[float] = None,
+    obs_time:  Optional[str] = None,
 ) -> dict:
-    status      = _status(current, station)
-    danger      = station["danger"]
-    warning     = station["warning"]
-    low         = station["low"]
-    span        = max(danger - low, 0.01)
+    status  = _status(current, station)
+    danger  = station["danger"]
+    warning = station["warning"]
+    low     = station["low"]
+    span    = max(danger - low, 0.01)
 
-    # clamp pct 0–100 (fixes negative values when river is below safe_level)
     pct_raw     = (current - low) / span * 100
     pct         = round(max(0.0, min(100.0, pct_raw)), 1)
 
@@ -263,7 +235,7 @@ def build_record(
         "city":              station["name"].split("(")[0].strip(),
         "river":             station["river"],
         "district":          station["district"],
-        "state":             station.get("state", "Bihar"),
+        "state":             "Bihar",
         "lat":               station["lat"],
         "lon":               station["lon"],
         "current_level":     current,
@@ -312,7 +284,7 @@ def _parse_float(s: str) -> Optional[float]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Parser 1 — befiqr.in
+# Parser 1 — befiqr.in (WRD Bihar Central Flood Control Cell)
 # ─────────────────────────────────────────────────────────────────────────────
 def _parse_befiqr(html: str, now: datetime):
     soup = BeautifulSoup(html, "html.parser")
@@ -338,7 +310,6 @@ def _parse_befiqr(html: str, now: datetime):
         if current is None or current <= 0:
             continue
 
-        # v6.1: reject implausible levels (unit mismatch guard)
         if not _is_plausible(current, station):
             continue
 
@@ -384,7 +355,6 @@ def _parse_rtdas(html: str, now: datetime, skip_ids: set) -> list:
         if current is None or current <= 0:
             continue
 
-        # v6.1: reject implausible levels
         if not _is_plausible(current, station):
             continue
 
@@ -412,6 +382,8 @@ def _parse_rtdas(html: str, now: datetime, skip_ids: set) -> list:
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 async def scrape_wrd_bihar() -> list:
+    """Returns Bihar-only station records. Falls back to synthetic if both
+    live sources are unreachable."""
     now = datetime.utcnow()
 
     if not _DEPS_OK:
@@ -446,6 +418,7 @@ async def scrape_wrd_bihar() -> list:
     all_records = befiqr_records + rtdas_records
     covered_ids = {r["id"] for r in all_records}
 
+    # Synthetic fallback for any Bihar station not covered by live data
     for st in BIHAR_STATIONS:
         if st["id"] not in covered_ids:
             all_records.append(
@@ -453,14 +426,6 @@ async def scrape_wrd_bihar() -> list:
             )
 
     return all_records
-
-
-def get_all_synthetic() -> list:
-    now = datetime.utcnow()
-    return [
-        build_record(st, _synthetic_level(st, now), "SYNTHETIC", now)
-        for st in ALL_STATIONS
-    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
