@@ -83,16 +83,15 @@ class StationCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (onDelete != null) ...
-                  [
-                    const SizedBox(width: 6),
-                    IconButton(
-                      icon: Icon(Icons.close_rounded, size: 18, color: Colors.white.withOpacity(0.35)),
-                      onPressed: onDelete,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ]
+                if (onDelete != null) ...[
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, size: 18, color: Colors.white.withOpacity(0.35)),
+                    onPressed: onDelete,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ]
               ],
             ),
           ),
@@ -157,15 +156,43 @@ class StationCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
+                // FIX: wrap each label in Expanded so the Row never overflows
+                // on narrow screens. FittedBox lets text shrink if needed.
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('0 m', style: _scaleStyle),
-                    Text('Warning', style: _scaleStyle),
-                    Text('Danger', style: _scaleStyle),
-                    Text('HFL ${station.hfl.toStringAsFixed(1)} m', style: _scaleStyle),
+                    Expanded(
+                      child: FittedBox(
+                        alignment: Alignment.centerLeft,
+                        fit: BoxFit.scaleDown,
+                        child: Text('0 m', style: _scaleStyle),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        alignment: Alignment.center,
+                        fit: BoxFit.scaleDown,
+                        child: Text('Warning', style: _scaleStyle),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        alignment: Alignment.center,
+                        fit: BoxFit.scaleDown,
+                        child: Text('Danger', style: _scaleStyle),
+                      ),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        alignment: Alignment.centerRight,
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'HFL ${station.hfl.toStringAsFixed(1)} m',
+                          style: _scaleStyle,
+                        ),
+                      ),
+                    ),
                   ],
-                )
+                ),
               ],
             ),
           ),

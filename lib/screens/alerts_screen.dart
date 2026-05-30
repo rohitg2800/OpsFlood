@@ -305,19 +305,27 @@ class _ImdCard extends StatelessWidget {
                   Icon(Icons.schedule_outlined, size: 12,
                       color: theme.colorScheme.onSurface.withValues(alpha: 0.45)),
                   const SizedBox(width: 4),
-                  DefaultTextStyle(
-                    style: theme.textTheme.labelSmall!.copyWith(
-                        color: theme.colorScheme.onSurface
-                            .withValues(alpha: 0.5)),
-                    child: Row(
-                      children: [
-                        if (alert.effective != null)
-                          Text('From: ${_fmt(alert.effective!)}'),
-                        if (alert.effective != null && alert.expires != null)
-                          const Text('  —  '),
-                        if (alert.expires != null)
-                          Text('Until: ${_fmt(alert.expires!)}'),
-                      ],
+                  // FIX: Flexible prevents this nested Row from overflowing
+                  Flexible(
+                    child: DefaultTextStyle(
+                      style: theme.textTheme.labelSmall!.copyWith(
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.5)),
+                      child: Row(
+                        children: [
+                          if (alert.effective != null)
+                            Text('From: ${_fmt(alert.effective!)}'),
+                          if (alert.effective != null && alert.expires != null)
+                            const Text('  —  '),
+                          if (alert.expires != null)
+                            Flexible(
+                              child: Text(
+                                'Until: ${_fmt(alert.expires!)}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -369,10 +377,14 @@ class _CriticalBanner extends StatelessWidget {
         children: [
           const Icon(Icons.crisis_alert, color: Colors.white, size: 20),
           const SizedBox(width: 8),
-          Text(
-            '$count station${count > 1 ? 's' : ''} at or above Danger level',
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
+          // FIX: Expanded prevents the banner text from overflowing on small screens
+          Expanded(
+            child: Text(
+              '$count station${count > 1 ? 's' : ''} at or above Danger level',
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -439,25 +451,32 @@ class _AlertCard extends StatelessWidget {
               color:   levelColor,
             ),
             const SizedBox(height: 10),
+            // FIX: each _MetricChip wrapped in Expanded so they share space
+            // equally and the trailing Icon never gets pushed off screen.
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _MetricChip(
-                  label: 'Current',
-                  value: '${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}',
-                  color: levelColor,
+                Expanded(
+                  child: _MetricChip(
+                    label: 'Current',
+                    value: '${alert.currentValue.toStringAsFixed(1)} ${alert.unitLabel}',
+                    color: levelColor,
+                  ),
                 ),
-                _MetricChip(
-                  label: 'Danger',
-                  value: '${alert.dangerLevel.toStringAsFixed(1)} ${alert.unitLabel}',
-                  color: AlertLevel.danger.color,
+                Expanded(
+                  child: _MetricChip(
+                    label: 'Danger',
+                    value: '${alert.dangerLevel.toStringAsFixed(1)} ${alert.unitLabel}',
+                    color: AlertLevel.danger.color,
+                  ),
                 ),
-                _MetricChip(
-                  label: 'HFL',
-                  value: alert.hfl > 0
-                      ? '${alert.hfl.toStringAsFixed(1)} ${alert.unitLabel}'
-                      : 'N/A',
-                  color: AlertLevel.extreme.color,
+                Expanded(
+                  child: _MetricChip(
+                    label: 'HFL',
+                    value: alert.hfl > 0
+                        ? '${alert.hfl.toStringAsFixed(1)} ${alert.unitLabel}'
+                        : 'N/A',
+                    color: AlertLevel.extreme.color,
+                  ),
                 ),
                 Icon(alert.trend.icon, color: alert.trend.color, size: 20),
               ],
@@ -528,7 +547,12 @@ class _MetricChip extends StatelessWidget {
         Text(label,
             style: TextStyle(
                 fontSize: 10, color: color, fontWeight: FontWeight.bold)),
-        Text(value, style: const TextStyle(fontSize: 11)),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }
