@@ -59,3 +59,5 @@ analyze_output.txt
 
 # Local data files
 bihar_live_data.json
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+ios/Runner/GeneratedPluginRegistrant.m
