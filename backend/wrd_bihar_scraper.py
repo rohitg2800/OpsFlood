@@ -1,6 +1,13 @@
 """
 backend/wrd_bihar_scraper.py
-OpsFlood — Live Gauge Scraper v6
+OpsFlood — Live Gauge Scraper v6.1
+
+Fixes in v6.1:
+ - pct_to_danger clamped to 0–100 (no more negatives)
+ - Scraped current_level validated: must be within ±30% of station's
+   operating range — catches Dheng Bridge / BG01 unit-mismatch from befiqr
+ - discharge / flow_rate removed (were fake); replaced with quality_flag
+ - pct_to_warning added (also clamped 0–100)
 
 Primary sources (Bihar):
   1. irrigation.befiqr.in/state/table/rivers
@@ -11,9 +18,6 @@ Primary sources (Bihar):
 31 Bihar gauges across 10 rivers (matches lib/data/bihar_rivers.dart exactly).
 National synthetic fallback for non-Bihar stations.
 Full synthetic fallback for Bihar when both live sources are unreachable.
-
-Alert generation: any station with current_level >= danger_level emits
-  status='danger', risk_level='CRITICAL', and appears in /api/alerts/danger.
 """
 
 import hashlib
@@ -31,8 +35,6 @@ except ImportError:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bihar station master — 31 gauges across 10 rivers
-# Sources: WRD Bihar Central Flood Control Cell + CWC FFS (2024-25)
-# All levels in metres above mean sea level (m MSL)
 # ─────────────────────────────────────────────────────────────────────────────
 BIHAR_STATIONS = [
     # ── 1. GANGA (7 stations) ─────────────────────────────────────────────────
@@ -152,9 +154,6 @@ BIHAR_STATIONS = [
      "lat":25.4833,"lon":85.1333,"danger":50.60,"warning":49.50,"low":43.0,"hfl":53.91},
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# National stations (synthetic only — no live source yet)
-# ─────────────────────────────────────────────────────────────────────────────
 NATIONAL_STATIONS = [
     {"id":"MH_PUN","name":"Pune",      "aliases":["pune"],"river":"Mula-Mutha",  "district":"Pune",       "state":"Maharashtra",   "lat":18.52,"lon":73.86,"danger":25.0, "warning":23.0, "low":18.0,"hfl":28.0},
     {"id":"MH_MUM","name":"Mumbai",    "aliases":["mumbai"],"river":"Mithi",    "district":"Mumbai",     "state":"Maharashtra",   "lat":19.08,"lon":72.88,"danger":5.0,  "warning":4.0,  "low":2.0,"hfl":6.5},
@@ -171,13 +170,24 @@ NATIONAL_STATIONS = [
 
 ALL_STATIONS = BIHAR_STATIONS + NATIONAL_STATIONS
 
-# Live source URLs
 BEFIQR_URL  = "https://irrigation.befiqr.in/state/table/rivers"
 RTDAS_URL   = "https://irrigation.fmiscwrdbihar.gov.in/state/table/rtdas-stations?platform=mobileapp&hide=hamburger"
 HTTP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; OpsFlood/3.0; flood monitoring)",
+    "User-Agent": "Mozilla/5.0 (compatible; OpsFlood/3.1; flood monitoring)",
     "Accept": "text/html,application/xhtml+xml",
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v6.1: Plausibility guard — rejects scraped levels outside station's
+# operating range (catches unit mismatches like BG01 returning ~33m for a
+# 65–73m MSL gauge).
+# ─────────────────────────────────────────────────────────────────────────────
+def _is_plausible(current: float, station: dict) -> bool:
+    span = station["danger"] - station["low"]
+    lo   = station["low"]    - span * 0.30
+    hi   = station["hfl"]    + span * 0.20
+    return lo <= current <= hi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,7 +223,11 @@ def _trend_synthetic(current: float, station: dict, now: datetime) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Record builder
+# Record builder  (v6.1)
+#  • pct_to_danger  clamped 0–100
+#  • pct_to_warning clamped 0–100
+#  • discharge / flow_rate removed (were non-real)
+#  • quality_flag: LIVE | SYNTHETIC
 # ─────────────────────────────────────────────────────────────────────────────
 def build_record(
     station: dict,
@@ -224,49 +238,56 @@ def build_record(
     hfl: Optional[float] = None,
     obs_time: Optional[str] = None,
 ) -> dict:
-    status   = _status(current, station)
-    danger   = station["danger"]
-    low      = station["low"]
-    pct      = round((current - low) / max(danger - low, 1) * 100, 1)
-    risk     = "CRITICAL" if status == "danger" else ("HIGH" if status == "warning" else "LOW")
-    hfl_val  = hfl or station.get("hfl") or round(danger * 1.12, 2)
-    resolved_trend = trend or _trend_synthetic(current, station, now)
+    status      = _status(current, station)
+    danger      = station["danger"]
+    warning     = station["warning"]
+    low         = station["low"]
+    span        = max(danger - low, 0.01)
 
-    # Danger alert fields
-    above_danger = round(current - danger, 2) if status == "danger" else 0.0
+    # clamp pct 0–100 (fixes negative values when river is below safe_level)
+    pct_raw     = (current - low) / span * 100
+    pct         = round(max(0.0, min(100.0, pct_raw)), 1)
+
+    pct_warn_raw = (current - low) / max(warning - low, 0.01) * 100
+    pct_warning  = round(max(0.0, min(100.0, pct_warn_raw)), 1)
+
+    risk         = "CRITICAL" if status == "danger" else ("HIGH" if status == "warning" else "LOW")
+    hfl_val      = hfl or station.get("hfl") or round(danger * 1.12, 2)
+    resolved_trend = trend or _trend_synthetic(current, station, now)
+    above_danger   = round(current - danger, 2) if status == "danger" else 0.0
+    quality_flag   = "LIVE" if "SYNTHETIC" not in source else "SYNTHETIC"
 
     return {
-        "id":               station["id"],
-        "name":             station["name"],
-        "city":             station["name"].split("(")[0].strip(),
-        "river":            station["river"],
-        "district":         station["district"],
-        "state":            station.get("state", "Bihar"),
-        "lat":              station["lat"],
-        "lon":              station["lon"],
-        "current_level":    current,
-        "danger_level":     danger,
-        "warning_level":    station["warning"],
-        "safe_level":       low,
-        "hfl":              hfl_val,
-        "status":           status,
-        "trend":            resolved_trend,
-        "pct_to_danger":    pct,
-        "risk_level":       risk,
-        "data_source":      source,
-        "last_updated":     (obs_time or now.isoformat()),
-        "observation_time": (obs_time or now.strftime("%Y-%m-%d %H:%M")),
-        "discharge":        round(500 + (current / max(danger, 1)) * 7500, 0),
-        "capacity_percent": pct,
-        "flow_rate":        round(500 + (current / max(danger, 1)) * 7500, 0),
-        # alert fields
-        "above_danger_m":   above_danger,
-        "alert_active":     status == "danger",
+        "id":                station["id"],
+        "name":              station["name"],
+        "city":              station["name"].split("(")[0].strip(),
+        "river":             station["river"],
+        "district":          station["district"],
+        "state":             station.get("state", "Bihar"),
+        "lat":               station["lat"],
+        "lon":               station["lon"],
+        "current_level":     current,
+        "danger_level":      danger,
+        "warning_level":     warning,
+        "safe_level":        low,
+        "hfl":               hfl_val,
+        "status":            status,
+        "trend":             resolved_trend,
+        "pct_to_danger":     pct,
+        "pct_to_warning":    pct_warning,
+        "capacity_percent":  pct,
+        "risk_level":        risk,
+        "quality_flag":      quality_flag,
+        "data_source":       source,
+        "last_updated":      (obs_time or now.isoformat()),
+        "observation_time":  (obs_time or now.strftime("%Y-%m-%d %H:%M")),
+        "above_danger_m":    above_danger,
+        "alert_active":      status == "danger",
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Station matcher — fuzzy match site name → BIHAR_STATIONS entry
+# Station matcher
 # ─────────────────────────────────────────────────────────────────────────────
 def _match_station(site_name: str) -> Optional[dict]:
     needle = site_name.lower().strip()
@@ -291,12 +312,12 @@ def _parse_float(s: str) -> Optional[float]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Parser 1 — befiqr.in  (WRD Bihar Central Flood Control Cell)
+# Parser 1 — befiqr.in
 # ─────────────────────────────────────────────────────────────────────────────
-def _parse_befiqr(html: str, now: datetime) -> list:
+def _parse_befiqr(html: str, now: datetime):
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.select("table tr")
-    results = []
+    results  = []
     seen_ids = set()
 
     for row in rows[1:]:
@@ -317,12 +338,16 @@ def _parse_befiqr(html: str, now: datetime) -> list:
         if current is None or current <= 0:
             continue
 
-        hfl_val  = _parse_float(cols[3]) if len(cols) > 3 else None
-        diff24h  = _parse_float(cols[7]) if len(cols) > 7 else None
+        # v6.1: reject implausible levels (unit mismatch guard)
+        if not _is_plausible(current, station):
+            continue
+
+        hfl_val   = _parse_float(cols[3]) if len(cols) > 3 else None
+        diff24h   = _parse_float(cols[7]) if len(cols) > 7 else None
         trend_raw = cols[9].lower() if len(cols) > 9 else ""
-        trend = "rising" if "ris" in trend_raw or (diff24h is not None and diff24h > 0.1) \
-               else "falling" if "fall" in trend_raw or (diff24h is not None and diff24h < -0.1) \
-               else "stable"
+        trend = ("rising"  if "ris"  in trend_raw or (diff24h is not None and diff24h >  0.1) else
+                 "falling" if "fall" in trend_raw or (diff24h is not None and diff24h < -0.1) else
+                 "stable")
 
         seen_ids.add(station["id"])
         results.append(build_record(
@@ -335,12 +360,12 @@ def _parse_befiqr(html: str, now: datetime) -> list:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Parser 2 — fmiscwrdbihar.gov.in  (RTDAS telemetry, 15-min update)
+# Parser 2 — fmiscwrdbihar RTDAS
 # ─────────────────────────────────────────────────────────────────────────────
 def _parse_rtdas(html: str, now: datetime, skip_ids: set) -> list:
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.select("table tr")
-    results = []
+    results  = []
     seen_ids = set(skip_ids)
 
     for row in rows[1:]:
@@ -359,13 +384,17 @@ def _parse_rtdas(html: str, now: datetime, skip_ids: set) -> list:
         if current is None or current <= 0:
             continue
 
+        # v6.1: reject implausible levels
+        if not _is_plausible(current, station):
+            continue
+
         hfl_val  = _parse_float(cols[2]) if len(cols) > 2 else None
         diff_raw = _parse_float(cols[6]) if len(cols) > 6 else None
         trend    = _trend_from_diff(diff_raw)
 
         obs_time_raw = cols[9].strip() if len(cols) > 9 else ""
         try:
-            obs_dt = datetime.strptime(obs_time_raw, "%d %b %Y %I:%M %p")
+            obs_dt  = datetime.strptime(obs_time_raw, "%d %b %Y %I:%M %p")
             obs_str = obs_dt.isoformat()
         except Exception:
             obs_str = now.isoformat()
@@ -383,7 +412,6 @@ def _parse_rtdas(html: str, now: datetime, skip_ids: set) -> list:
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 async def scrape_wrd_bihar() -> list:
-    """Try befiqr.in + RTDAS; fall back to synthetic per station."""
     now = datetime.utcnow()
 
     if not _DEPS_OK:
@@ -406,7 +434,6 @@ async def scrape_wrd_bihar() -> list:
                     befiqr_records, befiqr_seen_ids = _parse_befiqr(resp.text, now)
             except Exception:
                 pass
-
             try:
                 resp2 = await client.get(RTDAS_URL)
                 if resp2.status_code == 200 and "<table" in resp2.text.lower():
@@ -419,7 +446,6 @@ async def scrape_wrd_bihar() -> list:
     all_records = befiqr_records + rtdas_records
     covered_ids = {r["id"] for r in all_records}
 
-    # Fill any missing Bihar stations with synthetic data
     for st in BIHAR_STATIONS:
         if st["id"] not in covered_ids:
             all_records.append(
@@ -430,7 +456,6 @@ async def scrape_wrd_bihar() -> list:
 
 
 def get_all_synthetic() -> list:
-    """Return synthetic data for all stations (Bihar + national)."""
     now = datetime.utcnow()
     return [
         build_record(st, _synthetic_level(st, now), "SYNTHETIC", now)
@@ -442,10 +467,6 @@ def get_all_synthetic() -> list:
 # Alert helpers
 # ─────────────────────────────────────────────────────────────────────────────
 def build_danger_alerts(data: list) -> list:
-    """
-    From a list of station records, return only those at danger level
-    with enriched alert metadata, sorted by severity (most above danger first).
-    """
     alerts = []
     for d in data:
         if d.get("status") == "danger":
@@ -455,12 +476,12 @@ def build_danger_alerts(data: list) -> list:
                 "alert_type":     "DANGER",
                 "alert_level":    "CRITICAL" if above >= 1.0 else "HIGH",
                 "severity_score": round(above / max(d.get("hfl", d["danger_level"]) - d["danger_level"], 0.01) * 100, 1),
-                "message":        (
+                "message": (
                     f"{d['name']} ({d['river']}, {d['district']}) is {above:.2f}m "
                     f"ABOVE danger level {d['danger_level']}m. "
                     f"Current: {d['current_level']}m. Trend: {d.get('trend','stable')}."
                 ),
-                "action":         "EVACUATE" if above >= 1.5 else ("WARN" if above >= 0.5 else "MONITOR"),
+                "action": "EVACUATE" if above >= 1.5 else ("WARN" if above >= 0.5 else "MONITOR"),
             })
     alerts.sort(key=lambda x: x["above_danger_m"], reverse=True)
     return alerts
