@@ -1,24 +1,31 @@
 // lib/screens/india_river_explorer_screen.dart
-//
-// ── REDIRECT SHIM ─────────────────────────────────────────────────────────────
-// The original IndiaRiverExplorerScreen (17k) was a superseded version of the
-// India river explorer UI. The canonical, full-featured version is:
-//   lib/screens/india_rivers_screen.dart  (IndiaRiversScreen, 68k)
-//
-// river_monitor_screen.dart uses `const IndiaRiverExplorerScreen()` as the
-// 'Map' tab widget, so this class must remain a valid const-constructable
-// widget. It simply delegates to IndiaRiversScreen.
-//
-// DO NOT add screen logic here. Develop in india_rivers_screen.dart.
-// ─────────────────────────────────────────────────────────────────────────────
-import 'package:flutter/widgets.dart';
+// OpsFlood — IndiaRiverExplorerScreen v3  (Premium minimal)
+library;
+
+import 'package:flutter/material.dart';
+import '../theme/river_theme.dart';
 import 'india_rivers_screen.dart';
 
-/// Thin redirect — delegates to the canonical [IndiaRiversScreen].
-/// Kept to satisfy `const IndiaRiverExplorerScreen()` in river_monitor_screen.dart.
 class IndiaRiverExplorerScreen extends StatelessWidget {
   const IndiaRiverExplorerScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => const IndiaRiversScreen();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppPalette.abyss0,
+      appBar: AppBar(
+        backgroundColor: AppPalette.abyss1,
+        elevation: 0,
+        title: const Text('India River Explorer',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700,
+                color: AppPalette.textWhite)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 18, color: AppPalette.textGrey),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: const IndiaRiversScreen(),
+    );
+  }
 }
