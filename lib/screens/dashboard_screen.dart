@@ -1,7 +1,6 @@
 // lib/screens/dashboard_screen.dart
-// OpsFlood — DashboardScreen v20  "Command Centre"
-// Full redesign: hero arc gauge · bento KPI grid · live river pulse list
-// · animated alert ticker · gradient section headers · micro-interactions
+// OpsFlood — DashboardScreen v21  "Command Centre"
+// Added: ThemeCycleButton in CommandHeader
 library;
 
 import 'dart:math' as math;
@@ -10,12 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
+import '../models/river_monitoring.dart';
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/ops_area_chart.dart';
 import '../widgets/ops_bar_chart.dart';
+import '../widgets/premium_theme_sheet.dart';
 import '../widgets/risk_heatmap.dart';
-import '../models/river_monitoring.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -160,7 +160,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               if (data.isEmpty) ...
                 [SliverToBoxAdapter(child: _EmptyState())]
               else ...[
-                // ── Live river pulse cards
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Live River Status',
                   sub:   '${data.length} stations monitored',
@@ -174,7 +173,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   pulseAnim: _pulseAnim,
                 )),
 
-                // ── Area trend chart
                 SliverToBoxAdapter(child: _SectionHeader(
                   title:    'River Level Trend',
                   sub:      _selectedCity ?? (data.isNotEmpty ? data.first.city : ''),
@@ -186,7 +184,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   selected: _selectedData ?? (data.isNotEmpty ? data.first : null),
                 )),
 
-                // ── Capacity bar chart
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Capacity Overview',
                   sub:   'Top 8 by flood fill %',
@@ -195,7 +192,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 )),
                 SliverToBoxAdapter(child: _CapacityChart(data: data.take(8).toList())),
 
-                // ── State heatmap
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'State Risk Heatmap',
                   sub:   'Region-level flood index',
@@ -245,7 +241,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// COMMAND HEADER
+// COMMAND HEADER  (with ThemeCycleButton)
 // ═══════════════════════════════════════════════════════════════════════
 class _CommandHeader extends StatelessWidget {
   final Animation<double> pulseAnim;
@@ -342,6 +338,7 @@ class _CommandHeader extends StatelessWidget {
               ],
             ),
           ),
+
           // Live badge
           AnimatedBuilder(
             animation: pulseAnim,
@@ -383,6 +380,26 @@ class _CommandHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+
+          // ── Theme cycle icon (tap = cycle, long-press = full sheet)
+          Tooltip(
+            message: 'Hold for theme picker',
+            child: GestureDetector(
+              onTap:       () => showPremiumThemeSheet(context),
+              child: Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color:        AppPalette.abyss2,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppPalette.abyssStroke),
+                ),
+                child: const Icon(Icons.palette_outlined,
+                    color: AppPalette.cyan, size: 18),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
           // Refresh button
           GestureDetector(
             onTap: onRefresh,
@@ -434,41 +451,28 @@ class _HeroSection extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
         children: [
-          // ── Arc gauge row
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Arc gauge
-              _ArcGauge(
-                anim:    arcAnim,
-                percent: overallRisk,
-                total:   total,
-              ),
+              _ArcGauge(anim: arcAnim, percent: overallRisk, total: total),
               const SizedBox(width: 12),
-              // Right side: 2×2 bento grid
               Expanded(
                 child: Column(
                   children: [
                     Row(
                       children: [
                         Expanded(child: _BentoKPI(
-                          label: 'CRITICAL',
-                          value: '$critical',
-                          icon:  Icons.crisis_alert_rounded,
-                          color: critical > 0
-                              ? AppPalette.critical
-                              : AppPalette.textDim,
-                          glow:  critical > 0,
+                          label: 'CRITICAL', value: '$critical',
+                          icon: Icons.crisis_alert_rounded,
+                          color: critical > 0 ? AppPalette.critical : AppPalette.textDim,
+                          glow: critical > 0,
                         )),
                         const SizedBox(width: 8),
                         Expanded(child: _BentoKPI(
-                          label: 'SEVERE',
-                          value: '$severe',
-                          icon:  Icons.warning_rounded,
-                          color: severe > 0
-                              ? AppPalette.danger
-                              : AppPalette.textDim,
-                          glow:  severe > 0,
+                          label: 'SEVERE', value: '$severe',
+                          icon: Icons.warning_rounded,
+                          color: severe > 0 ? AppPalette.danger : AppPalette.textDim,
+                          glow: severe > 0,
                         )),
                       ],
                     ),
@@ -476,18 +480,14 @@ class _HeroSection extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(child: _BentoKPI(
-                          label: 'MODERATE',
-                          value: '$moderate',
-                          icon:  Icons.warning_amber_rounded,
-                          color: moderate > 0
-                              ? AppPalette.warning
-                              : AppPalette.textDim,
+                          label: 'MODERATE', value: '$moderate',
+                          icon: Icons.warning_amber_rounded,
+                          color: moderate > 0 ? AppPalette.warning : AppPalette.textDim,
                         )),
                         const SizedBox(width: 8),
                         Expanded(child: _BentoKPI(
-                          label: 'SAFE',
-                          value: '$safe',
-                          icon:  Icons.check_circle_rounded,
+                          label: 'SAFE', value: '$safe',
+                          icon: Icons.check_circle_rounded,
                           color: AppPalette.safe,
                         )),
                       ],
@@ -498,13 +498,8 @@ class _HeroSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // ── Alert ticker
           if (alertCities.isNotEmpty)
-            _AlertTicker(
-              alerts:    alertCities,
-              idx:       tickerIdx,
-              pulseAnim: pulseAnim,
-            )
+            _AlertTicker(alerts: alertCities, idx: tickerIdx, pulseAnim: pulseAnim)
           else
             _AllClearBanner(),
         ],
@@ -513,13 +508,12 @@ class _HeroSection extends StatelessWidget {
   }
 }
 
-// ── Arc gauge custom painter ─────────────────────────────────────────────────
+// ── Below: all inner widget classes unchanged from v20 ──────────────────────
 class _ArcGauge extends StatelessWidget {
   final Animation<double> anim;
   final double percent;
   final int    total;
-  const _ArcGauge({
-    required this.anim, required this.percent, required this.total});
+  const _ArcGauge({required this.anim, required this.percent, required this.total});
 
   Color get _arcColor {
     if (percent >= 85) return AppPalette.critical;
@@ -535,10 +529,7 @@ class _ArcGauge extends StatelessWidget {
       child: AnimatedBuilder(
         animation: anim,
         builder: (_, __) => CustomPaint(
-          painter: _ArcPainter(
-            progress: (percent / 100) * anim.value,
-            color:    _arcColor,
-          ),
+          painter: _ArcPainter(progress: (percent / 100) * anim.value, color: _arcColor),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -550,41 +541,28 @@ class _ArcGauge extends StatelessWidget {
                   child: Text(
                     '${(percent * anim.value).toStringAsFixed(0)}%',
                     style: const TextStyle(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: -1.5,
-                      height: 1,
+                      fontSize: 30, fontWeight: FontWeight.w900,
+                      color: Colors.white, letterSpacing: -1.5, height: 1,
                     ),
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  'RISK INDEX',
-                  style: TextStyle(
-                    fontSize: 7.5,
-                    color: AppPalette.textGrey.withValues(alpha: 0.65),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.5,
-                  ),
-                ),
+                Text('RISK INDEX', style: TextStyle(
+                  fontSize: 7.5,
+                  color: AppPalette.textGrey.withValues(alpha: 0.65),
+                  fontWeight: FontWeight.w700, letterSpacing: 1.5,
+                )),
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: _arcColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: _arcColor.withValues(alpha: 0.30)),
+                    border: Border.all(color: _arcColor.withValues(alpha: 0.30)),
                   ),
-                  child: Text(
-                    '$total stations',
-                    style: TextStyle(
-                      fontSize: 8,
-                      color: _arcColor,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                  child: Text('$total stations', style: TextStyle(
+                    fontSize: 8, color: _arcColor, fontWeight: FontWeight.w800,
+                  )),
                 ),
               ],
             ),
@@ -602,53 +580,42 @@ class _ArcPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cx = size.width  / 2;
+    final cx = size.width / 2;
     final cy = size.height / 2;
-    final r  = (size.width * 0.44);
+    final r  = size.width * 0.44;
     const startAngle = math.pi * 0.75;
     const sweepMax   = math.pi * 1.5;
 
-    // Track
-    final trackPaint = Paint()
-      ..color   = AppPalette.abyss4
-      ..style   = PaintingStyle.stroke
-      ..strokeWidth  = 9
-      ..strokeCap = StrokeCap.round;
     canvas.drawArc(
       Rect.fromCircle(center: Offset(cx, cy), radius: r),
-      startAngle, sweepMax, false, trackPaint,
+      startAngle, sweepMax, false,
+      Paint()..color = AppPalette.abyss4
+             ..style = PaintingStyle.stroke
+             ..strokeWidth = 9
+             ..strokeCap = StrokeCap.round,
     );
 
     if (progress > 0) {
-      // Shadow glow
-      final glowPaint = Paint()
-        ..color  = color.withValues(alpha: 0.25)
-        ..style  = PaintingStyle.stroke
-        ..strokeWidth = 16
-        ..strokeCap   = StrokeCap.round
-        ..maskFilter  = const MaskFilter.blur(BlurStyle.normal, 8);
       canvas.drawArc(
         Rect.fromCircle(center: Offset(cx, cy), radius: r),
-        startAngle, sweepMax * progress, false, glowPaint,
+        startAngle, sweepMax * progress, false,
+        Paint()..color = color.withValues(alpha: 0.25)
+               ..style = PaintingStyle.stroke
+               ..strokeWidth = 16
+               ..strokeCap = StrokeCap.round
+               ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
       );
-
-      // Arc fill with gradient
       final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
-      final grad = SweepGradient(
-        startAngle: startAngle,
-        endAngle:   startAngle + sweepMax * progress,
-        colors: [
-          color.withValues(alpha: 0.5),
-          color,
-        ],
-      );
-      final arcPaint = Paint()
-        ..shader     = grad.createShader(rect)
-        ..style      = PaintingStyle.stroke
-        ..strokeWidth = 9
-        ..strokeCap  = StrokeCap.round;
       canvas.drawArc(
-        rect, startAngle, sweepMax * progress, false, arcPaint,
+        rect, startAngle, sweepMax * progress, false,
+        Paint()..shader = SweepGradient(
+                    startAngle: startAngle,
+                    endAngle:   startAngle + sweepMax * progress,
+                    colors: [color.withValues(alpha: 0.5), color],
+                  ).createShader(rect)
+               ..style = PaintingStyle.stroke
+               ..strokeWidth = 9
+               ..strokeCap = StrokeCap.round,
       );
     }
   }
@@ -658,97 +625,65 @@ class _ArcPainter extends CustomPainter {
       old.progress != progress || old.color != color;
 }
 
-// ── Bento KPI card ───────────────────────────────────────────────────────────
 class _BentoKPI extends StatelessWidget {
-  final String   label;
-  final String   value;
+  final String label, value;
   final IconData icon;
-  final Color    color;
-  final bool     glow;
+  final Color color;
+  final bool glow;
   const _BentoKPI({
     required this.label, required this.value,
-    required this.icon,  required this.color, this.glow = false,
+    required this.icon, required this.color, this.glow = false,
   });
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-      decoration: BoxDecoration(
-        color: AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: glow
-              ? color.withValues(alpha: 0.35)
-              : AppPalette.abyssStroke,
-          width: glow ? 1.5 : 1,
-        ),
-        boxShadow: glow
-            ? [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.18),
-                  blurRadius: 12, spreadRadius: 1,
-                ),
-              ]
-            : null,
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+    decoration: BoxDecoration(
+      color: AppPalette.abyss2,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: glow ? color.withValues(alpha: 0.35) : AppPalette.abyssStroke,
+        width: glow ? 1.5 : 1,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Icon(icon, color: color, size: 14),
-            const Spacer(),
-            if (glow)
-              Container(
-                width: 6, height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                  boxShadow: [
-                    BoxShadow(
-                        color: color.withValues(alpha: 0.7),
-                        blurRadius: 6),
-                  ],
-                ),
-              ),
-          ]),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: glow ? color : AppPalette.textWhite,
-              letterSpacing: -1,
-              height: 1,
+      boxShadow: glow ? [
+        BoxShadow(color: color.withValues(alpha: 0.18), blurRadius: 12, spreadRadius: 1),
+      ] : null,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, color: color, size: 14),
+          const Spacer(),
+          if (glow) Container(
+            width: 6, height: 6,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle, color: color,
+              boxShadow: [BoxShadow(color: color.withValues(alpha: 0.7), blurRadius: 6)],
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 8,
-              color: glow
-                  ? color.withValues(alpha: 0.75)
-                  : AppPalette.textDim,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ]),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(
+          fontSize: 24, fontWeight: FontWeight.w900,
+          color: glow ? color : AppPalette.textWhite,
+          letterSpacing: -1, height: 1,
+        )),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(
+          fontSize: 8,
+          color: glow ? color.withValues(alpha: 0.75) : AppPalette.textDim,
+          fontWeight: FontWeight.w700, letterSpacing: 0.8,
+        )),
+      ],
+    ),
+  );
 }
 
-// ── Alert ticker ─────────────────────────────────────────────────────────────
 class _AlertTicker extends StatelessWidget {
-  final List<FloodData>   alerts;
-  final int               idx;
+  final List<FloodData> alerts;
+  final int idx;
   final Animation<double> pulseAnim;
-  const _AlertTicker({
-    required this.alerts, required this.idx, required this.pulseAnim});
-
+  const _AlertTicker({required this.alerts, required this.idx, required this.pulseAnim});
   @override
   Widget build(BuildContext context) {
     final d   = alerts[idx.clamp(0, alerts.length - 1)];
@@ -762,18 +697,16 @@ class _AlertTicker extends StatelessWidget {
           color: col.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-              color: col.withValues(
-                  alpha: 0.20 + 0.15 * pulseAnim.value),
-              width: 1.5),
+            color: col.withValues(alpha: 0.20 + 0.15 * pulseAnim.value),
+            width: 1.5,
+          ),
         ),
         child: Row(children: [
-          // Pulsing dot
           Container(
             width: 8, height: 8,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: col.withValues(
-                  alpha: 0.5 + 0.5 * pulseAnim.value),
+              color: col.withValues(alpha: 0.5 + 0.5 * pulseAnim.value),
               boxShadow: [
                 BoxShadow(
                   color: col.withValues(alpha: 0.7 * pulseAnim.value),
@@ -793,43 +726,27 @@ class _AlertTicker extends StatelessWidget {
                 children: [
                   TextSpan(
                     text: '${d.riskLevel}  ',
-                    style: TextStyle(
-                      color: col,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                    ),
+                    style: TextStyle(color: col, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                   ),
                   TextSpan(
                     text: d.city,
-                    style: const TextStyle(
-                      color: AppPalette.textWhite,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: const TextStyle(color: AppPalette.textWhite, fontWeight: FontWeight.w700),
                   ),
                   if (d.district.isNotEmpty)
                     TextSpan(
                       text: '  ·  ${d.district}',
-                      style: const TextStyle(
-                        color: AppPalette.textGrey,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: const TextStyle(color: AppPalette.textGrey, fontWeight: FontWeight.w500),
                     ),
                 ],
               ),
             ),
           ),
-          Text(
-            '${d.currentLevel.toStringAsFixed(1)} m',
-            style: TextStyle(
-              color: col, fontSize: 11, fontWeight: FontWeight.w900),
-          ),
+          Text('${d.currentLevel.toStringAsFixed(1)} m',
+              style: TextStyle(color: col, fontSize: 11, fontWeight: FontWeight.w900)),
           const SizedBox(width: 6),
           if (alerts.length > 1)
-            Text(
-              '${idx + 1}/${alerts.length}',
-              style: TextStyle(
-                color: AppPalette.textDim, fontSize: 9),
-            ),
+            Text('${idx + 1}/${alerts.length}',
+                style: const TextStyle(color: AppPalette.textDim, fontSize: 9)),
         ]),
       ),
     );
@@ -839,292 +756,217 @@ class _AlertTicker extends StatelessWidget {
 class _AllClearBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppPalette.safe.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: AppPalette.safe.withValues(alpha: 0.20)),
-        ),
-        child: const Row(children: [
-          Icon(Icons.verified_rounded,
-              color: AppPalette.safe, size: 14),
-          SizedBox(width: 8),
-          Text(
-            'All stations within safe levels',
-            style: TextStyle(
-              color: AppPalette.safe,
-              fontSize: 11, fontWeight: FontWeight.w700,
-            ),
-          ),
-        ]),
-      );
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: AppPalette.safe.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppPalette.safe.withValues(alpha: 0.20)),
+    ),
+    child: const Row(children: [
+      Icon(Icons.verified_rounded, color: AppPalette.safe, size: 14),
+      SizedBox(width: 8),
+      Text('All stations within safe levels',
+          style: TextStyle(color: AppPalette.safe, fontSize: 11, fontWeight: FontWeight.w700)),
+    ]),
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// SECTION HEADER
-// ═══════════════════════════════════════════════════════════════════════
 class _SectionHeader extends StatelessWidget {
-  final String   title;
-  final String   sub;
+  final String title, sub;
   final IconData icon;
-  final Color    color;
-  const _SectionHeader({
-    required this.title, required this.sub,
-    required this.icon,  required this.color,
-  });
-
+  final Color color;
+  const _SectionHeader({required this.title, required this.sub, required this.icon, required this.color});
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
-        child: Row(
+    padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
+    child: Row(
+      children: [
+        Container(
+          width: 3, height: 22,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [color, color.withValues(alpha: 0.2)],
+            ),
+            borderRadius: BorderRadius.circular(2),
+            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8)],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 14),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 3, height: 22,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end:   Alignment.bottomCenter,
-                  colors: [color, color.withValues(alpha: 0.2)],
-                ),
-                borderRadius: BorderRadius.circular(2),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.5),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 14),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w800,
-                  color: AppPalette.textWhite, letterSpacing: -0.3,
-                )),
-                Text(sub, style: TextStyle(
-                  fontSize: 9.5,
-                  color: AppPalette.textGrey.withValues(alpha: 0.7),
-                )),
-              ],
-            ),
+            Text(title, style: const TextStyle(
+              fontSize: 13, fontWeight: FontWeight.w800,
+              color: AppPalette.textWhite, letterSpacing: -0.3,
+            )),
+            Text(sub, style: TextStyle(
+              fontSize: 9.5, color: AppPalette.textGrey.withValues(alpha: 0.7),
+            )),
           ],
         ),
-      );
+      ],
+    ),
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// LIVE RIVER PULSE LIST
-// ═══════════════════════════════════════════════════════════════════════
 class _RiverPulseList extends StatelessWidget {
-  final List<FloodData>   data;
-  final String?           selected;
+  final List<FloodData> data;
+  final String? selected;
   final ValueChanged<String> onSelect;
   final Animation<double> pulseAnim;
   const _RiverPulseList({
     required this.data, required this.selected,
     required this.onSelect, required this.pulseAnim,
   });
-
   @override
-  Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: data.length,
-      itemBuilder: (_, i) => _RiverPulseCard(
-        data:      data[i],
-        isActive:  selected == data[i].city,
-        onTap:     () => onSelect(data[i].city),
-        pulseAnim: pulseAnim,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ListView.builder(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    itemCount: data.length,
+    itemBuilder: (_, i) => _RiverPulseCard(
+      data: data[i], isActive: selected == data[i].city,
+      onTap: () => onSelect(data[i].city), pulseAnim: pulseAnim,
+    ),
+  );
 }
 
 class _RiverPulseCard extends StatelessWidget {
-  final FloodData         data;
-  final bool              isActive;
-  final VoidCallback      onTap;
+  final FloodData data;
+  final bool isActive;
+  final VoidCallback onTap;
   final Animation<double> pulseAnim;
   const _RiverPulseCard({
     required this.data, required this.isActive,
     required this.onTap, required this.pulseAnim,
   });
-
   @override
   Widget build(BuildContext context) {
-    final col    = data.priorityColor;
+    final col     = data.priorityColor;
     final fillPct = (data.capacityPercent / 100).clamp(0.0, 1.0);
-    final isCrit = data.riskLevel == 'CRITICAL' || data.riskLevel == 'SEVERE';
-
+    final isCrit  = data.riskLevel == 'CRITICAL' || data.riskLevel == 'SEVERE';
     return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
+      onTap: () { HapticFeedback.selectionClick(); onTap(); },
       child: AnimatedBuilder(
         animation: pulseAnim,
         builder: (_, __) => AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          curve:    Curves.easeOutCubic,
+          curve: Curves.easeOutCubic,
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
-            color: isActive
-                ? col.withValues(alpha: 0.06)
-                : AppPalette.abyss2,
+            color: isActive ? col.withValues(alpha: 0.06) : AppPalette.abyss2,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: isActive || isCrit
-                  ? col.withValues(alpha: isActive ? 0.40 : (
-                      0.15 + 0.12 * pulseAnim.value))
+                  ? col.withValues(alpha: isActive ? 0.40 : (0.15 + 0.12 * pulseAnim.value))
                   : AppPalette.abyssStroke,
               width: isActive ? 1.5 : 1,
             ),
-            boxShadow: (isActive || isCrit)
-                ? [
-                    BoxShadow(
-                      color: col.withValues(
-                          alpha: isActive ? 0.14 : 0.06 * pulseAnim.value),
-                      blurRadius: 18, offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
+            boxShadow: (isActive || isCrit) ? [
+              BoxShadow(
+                color: col.withValues(alpha: isActive ? 0.14 : 0.06 * pulseAnim.value),
+                blurRadius: 18, offset: const Offset(0, 4),
+              ),
+            ] : null,
           ),
           padding: const EdgeInsets.all(14),
           child: Column(
             children: [
               Row(
                 children: [
-                  // Status icon circle
                   Container(
                     width: 40, height: 40,
                     decoration: BoxDecoration(
-                      shape:  BoxShape.circle,
-                      color:  col.withValues(alpha: 0.10),
+                      shape: BoxShape.circle,
+                      color: col.withValues(alpha: 0.10),
                       border: Border.all(
-                        color: col.withValues(
-                          alpha: isCrit
-                              ? 0.20 + 0.20 * pulseAnim.value
-                              : 0.25,
-                        ),
+                        color: col.withValues(alpha: isCrit
+                            ? 0.20 + 0.20 * pulseAnim.value : 0.25),
                         width: 1.5,
                       ),
                     ),
                     child: Icon(_iconFor(data.riskLevel), color: col, size: 18),
                   ),
                   const SizedBox(width: 12),
-                  // City + sub-info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
                           Flexible(
-                            child: Text(
-                              data.city,
-                              style: const TextStyle(
-                                color:      AppPalette.textWhite,
-                                fontSize:   14,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.2,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            child: Text(data.city,
+                                style: const TextStyle(
+                                  color: AppPalette.textWhite, fontSize: 14,
+                                  fontWeight: FontWeight.w800, letterSpacing: -0.2,
+                                ),
+                                overflow: TextOverflow.ellipsis),
                           ),
                           const SizedBox(width: 6),
                           _chip(data.riskLevel, col),
                         ]),
                         const SizedBox(height: 2),
-                        Text(
-                          _subLabel,
-                          style: const TextStyle(
-                            color:    AppPalette.textGrey,
-                            fontSize: 10,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        Text(_subLabel, style: const TextStyle(
+                          color: AppPalette.textGrey, fontSize: 10),
+                          overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
-                  // Level reading
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        '${data.currentLevel.toStringAsFixed(2)} m',
-                        style: TextStyle(
-                          color:      col,
-                          fontSize:   18,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      Text(
-                        '${data.capacityPercent.toStringAsFixed(0)}% cap',
-                        style: const TextStyle(
-                          color:    AppPalette.textGrey,
-                          fontSize: 9,
-                        ),
-                      ),
+                      Text('${data.currentLevel.toStringAsFixed(2)} m',
+                          style: TextStyle(
+                            color: col, fontSize: 18, fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                          )),
+                      Text('${data.capacityPercent.toStringAsFixed(0)}% cap',
+                          style: const TextStyle(
+                            color: AppPalette.textGrey, fontSize: 9,
+                          )),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              // ── Liquid fill bar
               Stack(
                 children: [
                   Container(
                     height: 8,
                     decoration: BoxDecoration(
-                      color:        AppPalette.abyss4,
+                      color: AppPalette.abyss4,
                       borderRadius: BorderRadius.circular(4),
                     ),
                   ),
-                  // Warning marker
                   if (data.dangerLevel > 0 && data.warningLevel > 0)
                     Positioned(
-                      left: (data.warningLevel / data.dangerLevel)
-                              .clamp(0.0, 1.0) *
-                          (MediaQuery.of(context).size.width - 76),
+                      left: (data.warningLevel / data.dangerLevel).clamp(0.0, 1.0)
+                          * (MediaQuery.of(context).size.width - 76),
                       top: 0, bottom: 0,
                       child: Container(
-                        width: 2,
-                        color: AppPalette.amber.withValues(alpha: 0.7),
-                      ),
+                          width: 2, color: AppPalette.amber.withValues(alpha: 0.7)),
                     ),
-                  // Fill
                   FractionallySizedBox(
                     widthFactor: fillPct,
                     child: Container(
                       height: 8,
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [
-                            col.withValues(alpha: 0.45),
-                            col,
-                          ],
+                          colors: [col.withValues(alpha: 0.45), col],
                         ),
                         borderRadius: BorderRadius.circular(4),
                         boxShadow: [
-                          BoxShadow(
-                            color:      col.withValues(alpha: 0.45),
-                            blurRadius: 6,
-                          ),
+                          BoxShadow(color: col.withValues(alpha: 0.45), blurRadius: 6),
                         ],
                       ),
                     ),
@@ -1132,16 +974,13 @@ class _RiverPulseCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              // Threshold labels
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _miniLabel('W ${data.warningLevel.toStringAsFixed(1)} m',
-                      AppPalette.amber),
+                  _miniLabel('W ${data.warningLevel.toStringAsFixed(1)} m', AppPalette.amber),
                   if (data.riverName != null)
                     _miniLabel(data.riverName!, AppPalette.textDim),
-                  _miniLabel('D ${data.dangerLevel.toStringAsFixed(1)} m',
-                      AppPalette.danger),
+                  _miniLabel('D ${data.dangerLevel.toStringAsFixed(1)} m', AppPalette.danger),
                 ],
               ),
             ],
@@ -1150,7 +989,6 @@ class _RiverPulseCard extends StatelessWidget {
       ),
     );
   }
-
   String get _subLabel {
     final p = <String>[];
     if ((data.riverName ?? '').isNotEmpty) p.add(data.riverName!);
@@ -1158,7 +996,6 @@ class _RiverPulseCard extends StatelessWidget {
     if (data.state.isNotEmpty)             p.add(data.state);
     return p.join('  ·  ');
   }
-
   IconData _iconFor(String r) {
     switch (r) {
       case 'CRITICAL': return Icons.crisis_alert_rounded;
@@ -1167,150 +1004,102 @@ class _RiverPulseCard extends StatelessWidget {
       default:         return Icons.check_circle_outline_rounded;
     }
   }
-
   Widget _chip(String label, Color c) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color:        c.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(6),
-          border:       Border.all(color: c.withValues(alpha: 0.30)),
-        ),
-        child: Text(label,
-            style: TextStyle(
-              color: c, fontSize: 8, fontWeight: FontWeight.w900)),
-      );
-
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: c.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: c.withValues(alpha: 0.30)),
+    ),
+    child: Text(label, style: TextStyle(
+      color: c, fontSize: 8, fontWeight: FontWeight.w900)),
+  );
   Widget _miniLabel(String t, Color c) => Text(t,
-      style: TextStyle(
-          color: c, fontSize: 9, fontWeight: FontWeight.w600));
+      style: TextStyle(color: c, fontSize: 9, fontWeight: FontWeight.w600));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// TREND CARD
-// ═══════════════════════════════════════════════════════════════════════
 class _TrendCard extends StatelessWidget {
   final RealTimeService _service;
   final FloodData? selected;
   const _TrendCard({required RealTimeService service, required this.selected})
       : _service = service;
-
   @override
   Widget build(BuildContext context) {
     if (selected == null) return const SizedBox.shrink();
-    final d = selected!;
+    final d   = selected!;
     final col = d.priorityColor;
     final snapshots = _service.trendForCity(d.city);
     final history   = snapshots.map((s) => s.level).toList();
-
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end:   Alignment.bottomRight,
-          colors: [
-            col.withValues(alpha: 0.05),
-            AppPalette.abyss2,
-          ],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [col.withValues(alpha: 0.05), AppPalette.abyss2],
         ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-            color: col.withValues(alpha: 0.20), width: 1.5),
+        border: Border.all(color: col.withValues(alpha: 0.20), width: 1.5),
         boxShadow: [
-          BoxShadow(
-            color: col.withValues(alpha: 0.08),
-            blurRadius: 20, offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: col.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(d.city, style: const TextStyle(
-                  color:      AppPalette.textWhite,
-                  fontSize:   14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                )),
-                if (d.district.isNotEmpty)
-                  Text(
-                    '${d.riverName ?? ''}  ·  ${d.district}',
-                    style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 10),
-                  ),
-              ],
-            ),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(d.city, style: const TextStyle(
+                color: AppPalette.textWhite, fontSize: 14,
+                fontWeight: FontWeight.w800, letterSpacing: -0.3,
+              )),
+              if (d.district.isNotEmpty)
+                Text('${d.riverName ?? ''}  ·  ${d.district}',
+                    style: const TextStyle(color: AppPalette.textGrey, fontSize: 10)),
+            ]),
             const Spacer(),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${d.currentLevel.toStringAsFixed(2)} m',
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('${d.currentLevel.toStringAsFixed(2)} m',
                   style: TextStyle(
-                    color:      col,
-                    fontSize:   20,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.8,
-                  ),
-                ),
-                Text(
-                  d.riskLevel,
-                  style: TextStyle(
-                    color: col, fontSize: 9, fontWeight: FontWeight.w800),
-                ),
-              ],
-            ),
+                    color: col, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.8,
+                  )),
+              Text(d.riskLevel, style: TextStyle(
+                color: col, fontSize: 9, fontWeight: FontWeight.w800)),
+            ]),
           ]),
           const SizedBox(height: 14),
           if (history.isEmpty)
             Container(
-              height: 90,
-              alignment: Alignment.center,
-              child: Text(
-                'Building trend for ${d.city}…',
-                style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 11),
-              ),
+              height: 90, alignment: Alignment.center,
+              child: Text('Building trend for ${d.city}…',
+                  style: const TextStyle(color: AppPalette.textDim, fontSize: 11)),
             )
           else
             OpsAreaChart(
               values:   history,
               labels:   snapshots.asMap().entries
                   .map((e) => e.key % 4 == 0
-                      ? DateFormat('HH:mm')
-                          .format(snapshots[e.key].timestamp.toLocal())
+                      ? DateFormat('HH:mm').format(snapshots[e.key].timestamp.toLocal())
                       : '')
                   .toList(),
-              lineColor: col,
-              warningY:  d.warningLevel,
-              dangerY:   d.dangerLevel,
-              yUnit:     ' m',
-              height:    120,
+              lineColor: col, warningY: d.warningLevel,
+              dangerY: d.dangerLevel, yUnit: ' m', height: 120,
             ),
           const SizedBox(height: 12),
-          // Level pills row
           Row(
             children: [
               Expanded(child: _LevelPill(
-                label: 'Safe',
-                value: '${d.safeLevel.toStringAsFixed(1)} m',
+                label: 'Safe', value: '${d.safeLevel.toStringAsFixed(1)} m',
                 color: AppPalette.safe,
               )),
               const SizedBox(width: 8),
               Expanded(child: _LevelPill(
-                label: 'Warning',
-                value: '${d.warningLevel.toStringAsFixed(1)} m',
+                label: 'Warning', value: '${d.warningLevel.toStringAsFixed(1)} m',
                 color: AppPalette.amber,
               )),
               const SizedBox(width: 8),
               Expanded(child: _LevelPill(
-                label: 'Danger',
-                value: '${d.dangerLevel.toStringAsFixed(1)} m',
+                label: 'Danger', value: '${d.dangerLevel.toStringAsFixed(1)} m',
                 color: AppPalette.critical,
               )),
             ],
@@ -1324,71 +1113,59 @@ class _TrendCard extends StatelessWidget {
 class _LevelPill extends StatelessWidget {
   final String label, value;
   final Color  color;
-  const _LevelPill({
-    required this.label, required this.value, required this.color});
+  const _LevelPill({required this.label, required this.value, required this.color});
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
-        decoration: BoxDecoration(
-          color:        color.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.20)),
-        ),
-        child: Column(
-          children: [
-            Text(value, style: TextStyle(
-              color: color, fontSize: 11, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 2),
-            Text(label, style: const TextStyle(
-              color: AppPalette.textDim, fontSize: 8)),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.07),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: color.withValues(alpha: 0.20)),
+    ),
+    child: Column(
+      children: [
+        Text(value, style: TextStyle(
+          color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(
+          color: AppPalette.textDim, fontSize: 8)),
+      ],
+    ),
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// CAPACITY BAR CHART
-// ═══════════════════════════════════════════════════════════════════════
 class _CapacityChart extends StatelessWidget {
   final List<FloodData> data;
   const _CapacityChart({required this.data});
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-      decoration: BoxDecoration(
-        color:        AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppPalette.abyssStroke),
-      ),
-      child: Column(
-        children: [
-          OpsBarChart(
-            values:   data.map((d) =>
-                d.capacityPercent.clamp(0.0, 100.0)).toList(),
-            labels:   data.map((d) => d.city).toList(),
-            maxY:     100,
-            yUnit:    '%',
-            barWidth: 18,
-            height:   150,
-          ),
-          const SizedBox(height: 6),
-          Row(children: [
-            _ldot(AppPalette.safe,     'Safe <35%'),
-            const SizedBox(width: 10),
-            _ldot(AppPalette.warning,  '35–60%'),
-            const SizedBox(width: 10),
-            _ldot(AppPalette.danger,   '60–85%'),
-            const SizedBox(width: 10),
-            _ldot(AppPalette.critical, 'Critical ≥85%'),
-          ]),
-        ],
-      ),
-    );
-  }
-
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+    padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+    decoration: BoxDecoration(
+      color: AppPalette.abyss2,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: AppPalette.abyssStroke),
+    ),
+    child: Column(
+      children: [
+        OpsBarChart(
+          values: data.map((d) => d.capacityPercent.clamp(0.0, 100.0)).toList(),
+          labels: data.map((d) => d.city).toList(),
+          maxY: 100, yUnit: '%', barWidth: 18, height: 150,
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          _ldot(AppPalette.safe,     'Safe <35%'),
+          const SizedBox(width: 10),
+          _ldot(AppPalette.warning,  '35–60%'),
+          const SizedBox(width: 10),
+          _ldot(AppPalette.danger,   '60–85%'),
+          const SizedBox(width: 10),
+          _ldot(AppPalette.critical, 'Critical ≥85%'),
+        ]),
+      ],
+    ),
+  );
   Widget _ldot(Color c, String t) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -1396,61 +1173,45 @@ class _CapacityChart extends StatelessWidget {
         width: 7, height: 7,
         decoration: BoxDecoration(
           shape: BoxShape.circle, color: c,
-          boxShadow: [
-            BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 4),
-          ],
+          boxShadow: [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 4)],
         ),
       ),
       const SizedBox(width: 4),
-      Text(t, style: const TextStyle(
-        fontSize: 8.5, color: AppPalette.textGrey)),
+      Text(t, style: const TextStyle(fontSize: 8.5, color: AppPalette.textGrey)),
     ],
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// EMPTY STATE
-// ═══════════════════════════════════════════════════════════════════════
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 340,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 80, height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [
-                    AppPalette.cyan.withValues(alpha: 0.12),
-                    AppPalette.abyss2,
-                  ]),
-                  border: Border.all(
-                      color: AppPalette.cyan.withValues(alpha: 0.20)),
-                ),
-                child: const Icon(Icons.water_drop_outlined,
-                    color: AppPalette.cyan, size: 36),
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                'Fetching live flood data…',
-                style: TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 14, fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'CWC  •  GloFAS  •  IMD  •  Open-Meteo',
-                style: TextStyle(
-                  color: AppPalette.textDim,
-                  fontSize: 10, letterSpacing: 1.8,
-                ),
-              ),
-            ],
+    height: 340,
+    child: Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(colors: [
+                AppPalette.cyan.withValues(alpha: 0.12), AppPalette.abyss2,
+              ]),
+              border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.20)),
+            ),
+            child: const Icon(Icons.water_drop_outlined,
+                color: AppPalette.cyan, size: 36),
           ),
-        ),
-      );
+          const SizedBox(height: 18),
+          const Text('Fetching live flood data…', style: TextStyle(
+            color: AppPalette.textGrey, fontSize: 14, fontWeight: FontWeight.w700,
+          )),
+          const SizedBox(height: 6),
+          const Text('CWC  •  GloFAS  •  IMD  •  Open-Meteo', style: TextStyle(
+            color: AppPalette.textDim, fontSize: 10, letterSpacing: 1.8,
+          )),
+        ],
+      ),
+    ),
+  );
 }

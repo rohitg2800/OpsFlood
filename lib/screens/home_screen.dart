@@ -1,10 +1,11 @@
 // lib/screens/home_screen.dart
-// OpsFlood — HomeScreen v7  (7-tab nav: added LiveStationsScreen as 'Stations')
+// OpsFlood — HomeScreen v8  (Settings tab + locale-aware labels)
 library;
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
@@ -14,15 +15,16 @@ import 'live_stations_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
+import 'settings_screen.dart';
 import 'weather_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
+class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   final RealTimeService _svc = RealTimeService();
   int _idx = 0;
@@ -30,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen>
   late AnimationController _glowCtrl;
   late Animation<double> _glow;
 
+  // Labels are hardcoded English here; for full i18n swap with AppLocalizations
   static const _tabs = [
     _Tab('Dashboard', Icons.dashboard_outlined,      Icons.dashboard_rounded),
     _Tab('Rivers',    Icons.water_outlined,           Icons.water_rounded),
@@ -38,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen>
     _Tab('Predict',   Icons.model_training_outlined,  Icons.model_training_rounded),
     _Tab('Stations',  Icons.sensors_outlined,         Icons.sensors_rounded),
     _Tab('Monitor',   Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
+    _Tab('Settings',  Icons.settings_outlined,        Icons.settings_rounded),
   ];
 
   Widget _screen(int i) => switch (i) {
@@ -48,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen>
     4 => const PredictScreen(),
     5 => const LiveStationsScreen(),
     6 => const MonitorsScreen(),
+    7 => const SettingsScreen(),
     _ => const DashboardScreen(),
   };
 
@@ -142,8 +147,8 @@ class _NavBar extends StatelessWidget {
 
 class _NavItem extends StatelessWidget {
   const _NavItem({required this.tab, required this.active, required this.glowVal});
-  final _Tab tab;
-  final bool active;
+  final _Tab   tab;
+  final bool   active;
   final double glowVal;
 
   @override
@@ -174,7 +179,7 @@ class _NavItem extends StatelessWidget {
         AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 180),
           style: TextStyle(
-            fontSize: active ? 8.5 : 8,
+            fontSize:   active ? 8.5 : 8,
             fontWeight: active ? FontWeight.w700 : FontWeight.w400,
             color: c, letterSpacing: 0.2,
           ),
@@ -187,6 +192,6 @@ class _NavItem extends StatelessWidget {
 
 class _Tab {
   const _Tab(this.label, this.icon, this.activeIcon);
-  final String label;
+  final String   label;
   final IconData icon, activeIcon;
 }
