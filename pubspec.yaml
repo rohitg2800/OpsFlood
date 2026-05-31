@@ -34,12 +34,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
   assets:
     - .env
-  generate: true
-
-flutter_intl:
-  enabled: true
-  arb_dir: lib/l10n
-  output_dir: lib/l10n
-  output_class: AppLocalizations
