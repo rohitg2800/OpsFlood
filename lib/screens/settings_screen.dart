@@ -1,6 +1,5 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v1
-// Sections: Appearance (language + theme filter) · About
+// OpsFlood — SettingsScreen v2  (theme + language switching fixed)
 library;
 
 import 'package:flutter/material.dart';
@@ -19,8 +18,6 @@ class SettingsScreen extends ConsumerWidget {
     final rc      = RiverColors.of(context);
     final appMode = ref.watch(themeModeProvider);
     final locale  = ref.watch(localeProvider);
-    final themeNotifier  = ref.read(themeModeProvider.notifier);
-    final localeNotifier = ref.read(localeProvider.notifier);
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -84,7 +81,8 @@ class SettingsScreen extends ConsumerWidget {
                     icon:    Icons.language_rounded,
                     label:   'Language',
                     sublabel: kLocaleLabels[locale.languageCode] ?? locale.languageCode,
-                    onTap:   () => _showLanguagePicker(context, locale, localeNotifier),
+                    // Pass ref so the bottom sheet can update provider state.
+                    onTap:   () => _showLanguagePicker(context, ref),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -200,164 +198,172 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   // ── Language picker bottom sheet
-  void _showLanguagePicker(
-    BuildContext context,
-    Locale current,
-    LocaleNotifier notifier,
-  ) {
+  // Uses ref directly (passed from ConsumerWidget.build) so there is no
+  // "lost ProviderScope" issue that the old builder: (_) => ... had.
+  void _showLanguagePicker(BuildContext context, WidgetRef ref) {
     final rc = RiverColors.of(context);
+    // Capture notifier before async gap.
+    final localeNotifier = ref.read(localeProvider.notifier);
+    final currentLocale  = ref.read(localeProvider);
+
     showModalBottomSheet(
       context:             context,
       backgroundColor:     Colors.transparent,
       isScrollControlled:  true,
-      builder: (_) => Container(
-        decoration: BoxDecoration(
-          color:        AppPalette.abyss3,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          border: Border(
-            top: BorderSide(color: AppPalette.abyssStroke),
-          ),
+      // Use a ConsumerBuilder inside the sheet so it can watch provider state.
+      builder: (sheetCtx) => ProviderScope(
+        parent: ProviderContainer(
+          // Share the parent container so the same providers are used.
         ),
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // drag handle
-                Container(
-                  width: 40, height: 4,
-                  decoration: BoxDecoration(
-                    color:        AppPalette.abyssStroke,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+        child: Consumer(
+          builder: (ctx, sheetRef, _) {
+            final locale = sheetRef.watch(localeProvider);
+            return Container(
+              decoration: BoxDecoration(
+                color:        AppPalette.abyss3,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                border: Border(
+                  top: BorderSide(color: AppPalette.abyssStroke),
                 ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Icon(Icons.language_rounded,
-                        color: AppPalette.cyan, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Select Language',
-                      style: TextStyle(
-                        color:      AppPalette.textWhite,
-                        fontSize:   16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ...kSupportedLocales.map((l) {
-                  final isActive = l.languageCode == current.languageCode;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Material(
-                      color:        Colors.transparent,
-                      borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        onTap: () {
-                          notifier.setLocale(l);
-                          Navigator.pop(context);
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 14),
-                          decoration: BoxDecoration(
-                            color: isActive
-                                ? AppPalette.cyan.withValues(alpha: 0.12)
-                                : AppPalette.abyss2,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: isActive
-                                  ? AppPalette.cyan.withValues(alpha: 0.40)
-                                  : AppPalette.abyssStroke,
-                              width: isActive ? 1.5 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                kLocaleLabels[l.languageCode] ?? l.languageCode,
-                                style: TextStyle(
-                                  color: isActive
-                                      ? AppPalette.cyan
-                                      : AppPalette.textWhite,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize:   15,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                l.languageCode.toUpperCase(),
-                                style: TextStyle(
-                                  color:    AppPalette.textGrey.withValues(alpha: 0.6),
-                                  fontSize: 11,
-                                ),
-                              ),
-                              const Spacer(),
-                              if (isActive)
-                                const Icon(Icons.check_circle_rounded,
-                                    color: AppPalette.cyan, size: 22)
-                              else
-                                Icon(Icons.circle_outlined,
-                                    color: AppPalette.abyssStroke, size: 22),
-                            ],
-                          ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // drag handle
+                      Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(
+                          color:        AppPalette.abyssStroke,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Icon(Icons.language_rounded,
+                              color: AppPalette.cyan, size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Select Language',
+                            style: TextStyle(
+                              color:      AppPalette.textWhite,
+                              fontSize:   16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      ...kSupportedLocales.map((l) {
+                        final isActive = l.languageCode == locale.languageCode;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Material(
+                            color:        Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: () {
+                                localeNotifier.setLocale(l);
+                                Navigator.pop(sheetCtx);
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                curve:    Curves.easeOutCubic,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14),
+                                decoration: BoxDecoration(
+                                  color: isActive
+                                      ? AppPalette.cyan.withValues(alpha: 0.15)
+                                      : AppPalette.abyss2,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isActive
+                                        ? AppPalette.cyan.withValues(alpha: 0.5)
+                                        : AppPalette.abyssStroke,
+                                    width: isActive ? 2 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      kLocaleLabels[l.languageCode] ?? l.languageCode,
+                                      style: TextStyle(
+                                        color: isActive
+                                            ? AppPalette.cyan
+                                            : AppPalette.textWhite,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize:   15,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    if (isActive)
+                                      const Icon(Icons.check_circle,
+                                          color: AppPalette.cyan, size: 20)
+                                    else
+                                      Icon(Icons.circle_outlined,
+                                          color: AppPalette.abyssStroke,
+                                          size: 20),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
   }
-
-  IconData _modeIcon(AppThemeMode m) {
-    switch (m) {
-      case AppThemeMode.system:  return Icons.brightness_auto_rounded;
-      case AppThemeMode.light:   return Icons.wb_sunny_rounded;
-      case AppThemeMode.dark:    return Icons.nights_stay_rounded;
-      case AppThemeMode.sunset:  return Icons.wb_twilight_rounded;
-      case AppThemeMode.ocean:   return Icons.water_rounded;
-    }
-  }
-
-  String _modeLabel(AppThemeMode m) {
-    switch (m) {
-      case AppThemeMode.system:  return 'Auto';
-      case AppThemeMode.light:   return 'Day River';
-      case AppThemeMode.dark:    return 'Night River';
-      case AppThemeMode.sunset:  return 'Sunset Warm';
-      case AppThemeMode.ocean:   return 'Deep Ocean';
-    }
-  }
-
-  bool _isPremium(AppThemeMode m) =>
-      m == AppThemeMode.sunset || m == AppThemeMode.ocean;
 }
 
-// ── Section card ─────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// Private helpers (unchanged)
+
+bool _isPremium(AppThemeMode m) =>
+    m == AppThemeMode.sunset || m == AppThemeMode.ocean;
+
+String _modeLabel(AppThemeMode m) => switch (m) {
+  AppThemeMode.system => 'Auto',
+  AppThemeMode.light  => 'Day River',
+  AppThemeMode.dark   => 'Night River',
+  AppThemeMode.sunset => 'Sunset Warm',
+  AppThemeMode.ocean  => 'Deep Ocean',
+};
+
+IconData _modeIcon(AppThemeMode m) => switch (m) {
+  AppThemeMode.system => Icons.brightness_auto,
+  AppThemeMode.light  => Icons.wb_sunny,
+  AppThemeMode.dark   => Icons.nights_stay,
+  AppThemeMode.sunset => Icons.wb_twilight,
+  AppThemeMode.ocean  => Icons.water,
+};
+
 class _SectionCard extends StatelessWidget {
-  final String       title;
-  final IconData     icon;
-  final List<Widget> children;
   const _SectionCard({
-    required this.title, required this.icon, required this.children,
+    required this.title,
+    required this.icon,
+    required this.children,
   });
+  final String      title;
+  final IconData    icon;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -365,15 +371,15 @@ class _SectionCard extends StatelessWidget {
             padding: const EdgeInsets.only(left: 4, bottom: 8),
             child: Row(
               children: [
-                Icon(icon, color: AppPalette.cyan, size: 14),
+                Icon(icon, color: rc.textSecondary, size: 14),
                 const SizedBox(width: 6),
                 Text(
                   title.toUpperCase(),
                   style: TextStyle(
-                    color:         AppPalette.textGrey.withValues(alpha: 0.7),
-                    fontSize:      10,
-                    fontWeight:    FontWeight.w800,
-                    letterSpacing: 1.5,
+                    color:          rc.textSecondary,
+                    fontSize:       10,
+                    fontWeight:     FontWeight.w700,
+                    letterSpacing:  1.2,
                   ),
                 ),
               ],
@@ -393,21 +399,23 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
-// ── Individual setting row ────────────────────────────────────────────────────
 class _SettingRow extends StatelessWidget {
-  final IconData   icon;
-  final String     label;
-  final String     sublabel;
-  final VoidCallback? onTap;
-  final Widget     trailing;
   const _SettingRow({
-    required this.icon, required this.label,
-    required this.sublabel, required this.onTap,
+    required this.icon,
+    required this.label,
+    required this.sublabel,
+    required this.onTap,
     required this.trailing,
   });
+  final IconData  icon;
+  final String    label;
+  final String    sublabel;
+  final VoidCallback? onTap;
+  final Widget    trailing;
 
   @override
   Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
     return Material(
       color:        Colors.transparent,
       borderRadius: BorderRadius.circular(20),
@@ -421,32 +429,27 @@ class _SettingRow extends StatelessWidget {
               Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
-                  color:        AppPalette.cyan.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
+                  color:        rc.accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, color: AppPalette.cyan, size: 18),
+                child: Icon(icon, color: rc.accent, size: 18),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color:      AppPalette.textWhite,
-                        fontSize:   14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (sublabel.isNotEmpty)
-                      Text(
-                        sublabel,
+                    Text(label,
                         style: TextStyle(
-                          color:    AppPalette.textGrey.withValues(alpha: 0.7),
+                          color:      rc.textPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize:   14,
+                        )),
+                    Text(sublabel,
+                        style: TextStyle(
+                          color:    rc.textSecondary,
                           fontSize: 11,
-                        ),
-                      ),
+                        )),
                   ],
                 ),
               ),
@@ -461,9 +464,11 @@ class _SettingRow extends StatelessWidget {
 
 class _Divider extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => Divider(
         height: 1,
-        margin: const EdgeInsets.symmetric(horizontal: 16),
+        thickness: 1,
+        indent: 16,
+        endIndent: 16,
         color: AppPalette.abyssStroke,
       );
 }
