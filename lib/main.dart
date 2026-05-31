@@ -15,7 +15,17 @@ import 'providers/flood_providers.dart';
 import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
+import 'screens/bihar_river_map_screen.dart';
+import 'screens/india_river_explorer_screen.dart';
+import 'screens/live_stations_screen.dart';
+import 'screens/model_info_screen.dart';
+import 'screens/monitors_screen.dart';
+import 'screens/predict_screen.dart';
+import 'screens/river_monitor_screen.dart';
+import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/state_matrix_screen.dart';
+import 'screens/weather_screen.dart';
 import 'services/fcm_service.dart';
 import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
@@ -149,7 +159,17 @@ class EquinoxBHApp extends ConsumerWidget {
       ],
       home:   const SplashScreen(),
       routes: {
-        AlertsScreen.route: (_) => const AlertsScreen(),
+        AlertsScreen.route:             (_) => const AlertsScreen(),
+        '/live_stations':               (_) => const LiveStationsScreen(),
+        '/weather':                     (_) => const WeatherScreen(),
+        '/predict':                     (_) => const PredictScreen(),
+        '/monitors':                    (_) => const MonitorsScreen(),
+        '/river_monitor':               (_) => const RiverMonitorScreen(),
+        '/state_matrix':                (_) => const StateMatrixScreen(),
+        '/settings':                    (_) => const SettingsScreen(),
+        '/model_info':                  (_) => const ModelInfoScreen(),
+        '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
+        '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
