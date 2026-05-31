@@ -1,7 +1,7 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — MonitorsScreen v4  "Command Centre"
-// Full redesign: header stats bar · risk-sorted cards with fill bar
-// · detail expand panel · no-data skeleton · matches dashboard v20 theme
+// OpsFlood — MonitorsScreen v5  "Command Centre + Weather Feed"
+// Every station card shows live weather columns: Temp · 7d Rain · Rain Index
+// · Precip Prob · Humidity pulled from weatherProvider (shared state)
 library;
 
 import 'dart:math' as math;
@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
+import '../providers/weather_provider.dart';
 import '../theme/river_theme.dart';
 
 class MonitorsScreen extends ConsumerStatefulWidget {
@@ -51,7 +52,7 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
       case 'rain':
         list.sort((a, b) =>
             b.effectiveRainfallMm.compareTo(a.effectiveRainfallMm));
-      default: // risk
+      default:
         list.sort((a, b) {
           final c = b.priorityOrder.compareTo(a.priorityOrder);
           return c != 0 ? c : b.capacityPercent.compareTo(a.capacityPercent);
@@ -65,22 +66,20 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
     final rt       = ref.watch(realTimeServiceProvider);
     final cities   = ref.watch(monitoredCitiesProvider);
     final allData  = ref.watch(liveLevelsProvider);
+    final wx       = ref.watch(weatherProvider); // ← live weather feed
 
-    // Build FloodData list for monitored cities
     final items = cities
         .map((c) => rt.dataForCity(c))
         .where((d) => d != null)
         .cast<FloodData>()
         .toList();
 
-    final sorted = _sorted(items);
-
-    // KPI totals
-    final critCount  = sorted.where((d) => d.riskLevel == 'CRITICAL').length;
-    final sevCount   = sorted.where((d) => d.riskLevel == 'SEVERE').length;
-    final modCount   = sorted.where((d) => d.riskLevel == 'MODERATE').length;
-    final safeCount  = sorted.where((d) => d.riskLevel == 'LOW').length;
-    final noData     = cities.length - items.length;
+    final sorted    = _sorted(items);
+    final critCount = sorted.where((d) => d.riskLevel == 'CRITICAL').length;
+    final sevCount  = sorted.where((d) => d.riskLevel == 'SEVERE').length;
+    final modCount  = sorted.where((d) => d.riskLevel == 'MODERATE').length;
+    final safeCount = sorted.where((d) => d.riskLevel == 'LOW').length;
+    final noData    = cities.length - items.length;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -90,37 +89,36 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
           bottom: false,
           child: Column(
             children: [
-              // ── Header
               _Header(
                 total:     sorted.length,
                 critical:  critCount,
                 pulseAnim: _pulseAnim,
                 lastFetch: rt.lastFetchTime,
+                wxCity:    wx.cityName,
+                wxLoaded:  wx.status == WeatherStatus.loaded,
                 onRefresh: () {
                   HapticFeedback.mediumImpact();
                   rt.refreshData();
                 },
               ),
 
-              // ── Stats bar
               if (sorted.isNotEmpty)
                 _StatsBar(
-                  critical: critCount,
-                  severe:   sevCount,
-                  moderate: modCount,
-                  safe:     safeCount,
-                  noData:   noData,
-                  total:    cities.length,
+                  critical: critCount, severe:  sevCount,
+                  moderate: modCount,  safe:    safeCount,
+                  noData:   noData,    total:   cities.length,
                 ),
 
-              // ── Sort chips
+              // ── Weather feed banner (always visible if loaded)
+              if (wx.status == WeatherStatus.loaded)
+                _WxFeedBanner(wx: wx),
+
               if (sorted.isNotEmpty)
                 _SortChips(
                   current:  _sort,
                   onChange: (v) => setState(() => _sort = v),
                 ),
 
-              // ── List
               Expanded(
                 child: sorted.isEmpty
                     ? _EmptyState(hasCities: cities.isNotEmpty)
@@ -130,6 +128,7 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                         itemCount: sorted.length,
                         itemBuilder: (_, i) => _MonitorCard(
                           data:       sorted[i],
+                          wx:         wx,
                           isExpanded: _expanded == sorted[i].city,
                           pulseAnim:  _pulseAnim,
                           onTap: () {
@@ -154,14 +153,16 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
 // HEADER
 // ══════════════════════════════════════════════════════════════════════════════
 class _Header extends StatelessWidget {
-  final int               total;
-  final int               critical;
+  final int               total, critical;
   final Animation<double> pulseAnim;
   final DateTime?         lastFetch;
+  final String            wxCity;
+  final bool              wxLoaded;
   final VoidCallback      onRefresh;
   const _Header({
-    required this.total, required this.critical,
-    required this.pulseAnim, required this.lastFetch,
+    required this.total,      required this.critical,
+    required this.pulseAnim,  required this.lastFetch,
+    required this.wxCity,     required this.wxLoaded,
     required this.onRefresh,
   });
 
@@ -173,19 +174,16 @@ class _Header extends StatelessWidget {
         color: AppPalette.abyss0,
         border: Border(
           bottom: BorderSide(
-              color: AppPalette.cyan.withValues(alpha: 0.10), width: 1),
-        ),
+              color: AppPalette.cyan.withValues(alpha: 0.10), width: 1)),
       ),
       child: Row(
         children: [
-          // Icon mark
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end:   Alignment.bottomRight,
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [
                   AppPalette.cyan.withValues(alpha: 0.20),
                   AppPalette.cyan.withValues(alpha: 0.05),
@@ -220,19 +218,29 @@ class _Header extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  lastFetch != null
-                      ? 'Updated ${_fmt(lastFetch!)}'
-                      : '$total stations tracked',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    color: AppPalette.textGrey.withValues(alpha: 0.65),
+                Row(children: [
+                  Text(
+                    lastFetch != null ? 'Updated ${_fmt(lastFetch!)}' : '$total stations',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      color: AppPalette.textGrey.withValues(alpha: 0.65),
+                    ),
                   ),
-                ),
+                  if (wxLoaded) ...[
+                    Text(
+                      '  ·  wx: $wxCity',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        color: AppPalette.cyan.withValues(alpha: 0.55),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ]),
               ],
             ),
           ),
-          // Alert badge
+          // Alert / LIVE badge
           if (critical > 0)
             AnimatedBuilder(
               animation: pulseAnim,
@@ -243,8 +251,7 @@ class _Header extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: AppPalette.critical.withValues(
-                        alpha: 0.25 + 0.20 * pulseAnim.value),
-                  ),
+                        alpha: 0.25 + 0.20 * pulseAnim.value)),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Container(
@@ -253,29 +260,19 @@ class _Header extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: AppPalette.critical.withValues(
                           alpha: 0.5 + 0.5 * pulseAnim.value),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppPalette.critical
-                              .withValues(alpha: 0.7 * pulseAnim.value),
-                          blurRadius: 8,
-                        ),
-                      ],
                     ),
                   ),
                   const SizedBox(width: 5),
-                  Text(
-                    '$critical CRIT',
-                    style: const TextStyle(
-                      color: AppPalette.critical,
-                      fontSize: 9, fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
+                  Text('$critical CRIT',
+                      style: const TextStyle(
+                        color: AppPalette.critical,
+                        fontSize: 9, fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      )),
                 ]),
               ),
             )
           else
-            // LIVE badge
             AnimatedBuilder(
               animation: pulseAnim,
               builder: (_, __) => Container(
@@ -285,8 +282,7 @@ class _Header extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: AppPalette.safe.withValues(
-                        alpha: 0.20 + 0.15 * pulseAnim.value),
-                  ),
+                        alpha: 0.20 + 0.15 * pulseAnim.value)),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Container(
@@ -295,13 +291,6 @@ class _Header extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: AppPalette.safe.withValues(
                           alpha: 0.5 + 0.5 * pulseAnim.value),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppPalette.safe
-                              .withValues(alpha: 0.6 * pulseAnim.value),
-                          blurRadius: 8,
-                        ),
-                      ],
                     ),
                   ),
                   const SizedBox(width: 5),
@@ -342,7 +331,7 @@ class _Header extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// STATS BAR — horizontal risk breakdown strip
+// STATS BAR
 // ══════════════════════════════════════════════════════════════════════════════
 class _StatsBar extends StatelessWidget {
   final int critical, severe, moderate, safe, noData, total;
@@ -386,49 +375,109 @@ class _StatsBar extends StatelessWidget {
   }
 
   Widget _vDivider() => Container(
-    width: 1, height: 28,
-    color: AppPalette.abyssStroke,
-  );
+        width: 1, height: 28, color: AppPalette.abyssStroke);
 }
 
 class _StatPill extends StatelessWidget {
-  final int    value;
-  final String label;
-  final Color  color;
-  final bool   glow;
-  const _StatPill({
-    required this.value, required this.label,
-    required this.color, this.glow = false,
-  });
+  final int value; final String label; final Color color; final bool glow;
+  const _StatPill({required this.value, required this.label,
+      required this.color, this.glow = false});
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$value', style: TextStyle(
+            fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -1,
+            color: glow ? color : (value > 0 ? color : AppPalette.textDim),
+            shadows: glow ? [Shadow(color: color.withValues(alpha: 0.6),
+                blurRadius: 8)] : null,
+          )),
+          const SizedBox(height: 1),
+          Text(label, style: TextStyle(
+            fontSize: 7.5, fontWeight: FontWeight.w700, letterSpacing: 0.6,
+            color: glow ? color.withValues(alpha: 0.75) : AppPalette.textDim,
+          )),
+        ],
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WEATHER FEED BANNER
+// Shows a slim horizontal strip of global weather metrics below stats bar.
+// The same data also flows into each station card’s columns.
+// ══════════════════════════════════════════════════════════════════════════════
+class _WxFeedBanner extends StatelessWidget {
+  final WeatherState wx;
+  const _WxFeedBanner({required this.wx});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          '$value',
-          style: TextStyle(
-            fontSize: 22, fontWeight: FontWeight.w900,
-            color: glow ? color : (value > 0 ? color : AppPalette.textDim),
-            letterSpacing: -1,
-            shadows: glow
-                ? [Shadow(color: color.withValues(alpha: 0.6), blurRadius: 8)]
-                : null,
+    final indexColor = wx.rainfallIndex > 70
+        ? AppPalette.critical
+        : wx.rainfallIndex > 45
+            ? AppPalette.danger
+            : wx.rainfallIndex > 25
+                ? AppPalette.amber
+                : AppPalette.safe;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: AppPalette.cyan.withValues(alpha: 0.20), width: 1.2),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_rounded, color: AppPalette.cyan, size: 13),
+          const SizedBox(width: 5),
+          Text(
+            'WX·${wx.cityName.split(',').first}',
+            style: const TextStyle(
+              color: AppPalette.cyan, fontSize: 9, fontWeight: FontWeight.w800,
+              letterSpacing: 0.4),
           ),
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 7.5, fontWeight: FontWeight.w700,
-            color: glow ? color.withValues(alpha: 0.75) : AppPalette.textDim,
-            letterSpacing: 0.6,
-          ),
-        ),
-      ],
+          _b(),
+          _wxItem(Icons.thermostat_rounded,
+              '${wx.tempC.toStringAsFixed(1)}°', AppPalette.amber),
+          _b(),
+          _wxItem(Icons.grain_rounded,
+              '${wx.rainfall7dMm.toStringAsFixed(0)}mm 7d', AppPalette.cyan),
+          _b(),
+          _wxItem(Icons.analytics_rounded,
+              'RI ${wx.rainfallIndex.toStringAsFixed(0)}', indexColor),
+          _b(),
+          _wxItem(Icons.umbrella_rounded,
+              '${wx.maxPrecipProb.toStringAsFixed(0)}%', AppPalette.amber),
+          _b(),
+          _wxItem(Icons.water_drop_rounded,
+              '${wx.humidity}% RH', const Color(0xFF64B5F6)),
+          const Spacer(),
+          const Icon(Icons.link_rounded,
+              color: AppPalette.cyan, size: 10),
+          const SizedBox(width: 3),
+          const Text('fed to all cards',
+              style: TextStyle(
+                color: AppPalette.textDim, fontSize: 8)),
+        ],
+      ),
     );
   }
+
+  Widget _b() => Container(
+        width: 1, height: 12,
+        margin: const EdgeInsets.symmetric(horizontal: 7),
+        color: AppPalette.abyssStroke);
+
+  Widget _wxItem(IconData icon, String val, Color col) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: col, size: 10),
+        const SizedBox(width: 3),
+        Text(val, style: TextStyle(
+          color: col, fontSize: 9, fontWeight: FontWeight.w700)),
+      ]);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -438,13 +487,11 @@ class _SortChips extends StatelessWidget {
   final String current;
   final ValueChanged<String> onChange;
   const _SortChips({required this.current, required this.onChange});
-
   static const _opts = [
-    ('risk',  Icons.crisis_alert_rounded,  'Risk'),
-    ('level', Icons.water_rounded,         'Level'),
-    ('rain',  Icons.grain_rounded,         'Rainfall'),
+    ('risk',  Icons.crisis_alert_rounded, 'Risk'),
+    ('level', Icons.water_rounded,        'Level'),
+    ('rain',  Icons.grain_rounded,        'Rainfall'),
   ];
-
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -468,8 +515,7 @@ class _SortChips extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.only(right: 6),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: active
                       ? AppPalette.cyan.withValues(alpha: 0.12)
@@ -485,22 +531,16 @@ class _SortChips extends StatelessWidget {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(o.$2,
                       size: 11,
-                      color: active
-                          ? AppPalette.cyan
-                          : AppPalette.textGrey),
+                      color: active ? AppPalette.cyan : AppPalette.textGrey),
                   const SizedBox(width: 4),
-                  Text(
-                    o.$3,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: active
-                          ? FontWeight.w800
-                          : FontWeight.w500,
-                      color: active
-                          ? AppPalette.cyan
-                          : AppPalette.textGrey,
-                    ),
-                  ),
+                  Text(o.$3,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight:
+                            active ? FontWeight.w800 : FontWeight.w500,
+                        color:
+                            active ? AppPalette.cyan : AppPalette.textGrey,
+                      )),
                 ]),
               ),
             );
@@ -512,16 +552,18 @@ class _SortChips extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MONITOR CARD
+// MONITOR CARD  (now receives wx)
 // ══════════════════════════════════════════════════════════════════════════════
 class _MonitorCard extends StatelessWidget {
   final FloodData         data;
+  final WeatherState      wx;
   final bool              isExpanded;
   final Animation<double> pulseAnim;
   final VoidCallback      onTap;
   const _MonitorCard({
-    required this.data, required this.isExpanded,
-    required this.pulseAnim, required this.onTap,
+    required this.data,      required this.wx,
+    required this.isExpanded, required this.pulseAnim,
+    required this.onTap,
   });
 
   @override
@@ -529,6 +571,7 @@ class _MonitorCard extends StatelessWidget {
     final col    = data.priorityColor;
     final fill   = (data.capacityPercent / 100).clamp(0.0, 1.0);
     final isCrit = data.riskLevel == 'CRITICAL' || data.riskLevel == 'SEVERE';
+    final hasWx  = wx.status == WeatherStatus.loaded;
 
     return GestureDetector(
       onTap: onTap,
@@ -539,9 +582,7 @@ class _MonitorCard extends StatelessWidget {
           curve: Curves.easeOutCubic,
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
-            color: isExpanded
-                ? col.withValues(alpha: 0.06)
-                : AppPalette.abyss2,
+            color: isExpanded ? col.withValues(alpha: 0.06) : AppPalette.abyss2,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: isExpanded || isCrit
@@ -554,9 +595,10 @@ class _MonitorCard extends StatelessWidget {
                 ? [
                     BoxShadow(
                       color: col.withValues(
-                          alpha: isExpanded ? 0.14 : 0.05 * pulseAnim.value),
-                      blurRadius: 20,
-                      offset: const Offset(0, 4),
+                          alpha: isExpanded
+                              ? 0.14
+                              : 0.05 * pulseAnim.value),
+                      blurRadius: 20, offset: const Offset(0, 4),
                     ),
                   ]
                 : null,
@@ -564,15 +606,14 @@ class _MonitorCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              // ── Top row
+              // ── Top row: icon · city + risk chip · level
               Row(
                 children: [
-                  // Status circle
                   Container(
                     width: 46, height: 46,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color:  col.withValues(alpha: 0.10),
+                      color: col.withValues(alpha: 0.10),
                       border: Border.all(
                         color: col.withValues(
                           alpha: isCrit
@@ -585,7 +626,6 @@ class _MonitorCard extends StatelessWidget {
                     child: Icon(_iconFor(data.riskLevel), color: col, size: 20),
                   ),
                   const SizedBox(width: 12),
-                  // City + sub-info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -596,9 +636,8 @@ class _MonitorCard extends StatelessWidget {
                               child: Text(
                                 data.city,
                                 style: const TextStyle(
-                                  color:      AppPalette.textWhite,
-                                  fontSize:   15,
-                                  fontWeight: FontWeight.w800,
+                                  color: AppPalette.textWhite,
+                                  fontSize: 15, fontWeight: FontWeight.w800,
                                   letterSpacing: -0.3,
                                 ),
                                 overflow: TextOverflow.ellipsis,
@@ -612,13 +651,12 @@ class _MonitorCard extends StatelessWidget {
                         Text(
                           _subLine,
                           style: const TextStyle(
-                            color: AppPalette.textGrey, fontSize: 10),
+                              color: AppPalette.textGrey, fontSize: 10),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-                  // Level reading
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -626,30 +664,26 @@ class _MonitorCard extends StatelessWidget {
                         '${data.currentLevel.toStringAsFixed(2)} m',
                         style: TextStyle(
                           color: col, fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.8,
+                          fontWeight: FontWeight.w900, letterSpacing: -0.8,
                         ),
                       ),
-                      Text(
-                        '${data.capacityPercent.toStringAsFixed(0)}% cap',
-                        style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 9.5),
-                      ),
+                      Text('${data.capacityPercent.toStringAsFixed(0)}% cap',
+                          style: const TextStyle(
+                              color: AppPalette.textGrey, fontSize: 9.5)),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 12),
 
-              // ── Fill bar
+              // ── Capacity fill bar
               Stack(
                 children: [
                   Container(
                     height: 7,
                     decoration: BoxDecoration(
-                      color: AppPalette.abyss4,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
+                        color: AppPalette.abyss4,
+                        borderRadius: BorderRadius.circular(4)),
                   ),
                   FractionallySizedBox(
                     widthFactor: fill,
@@ -662,34 +696,37 @@ class _MonitorCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                         boxShadow: [
                           BoxShadow(
-                            color:      col.withValues(alpha: 0.45),
-                            blurRadius: 6,
-                          ),
+                              color: col.withValues(alpha: 0.45),
+                              blurRadius: 6),
                         ],
                       ),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
 
-              // ── Expand panel
-              AnimatedSize(
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeOutCubic,
-                child: isExpanded
-                    ? _ExpandPanel(data: data)
-                    : const SizedBox.shrink(),
-              ),
+              // ── Collapsed weather strip (4 columns, always visible when wx loaded)
+              if (hasWx && !isExpanded)
+                _WxCollapsedStrip(wx: wx, floodRain: data.effectiveRainfallMm),
 
-              // ── Collapse indicator
-              if (!isExpanded) ...
-                [const SizedBox(height: 4),
+              // ── Sub-line (warning/danger/rain) when no wx or collapsed
+              if (!hasWx && !isExpanded)
                 _SubLine(
                   warning: data.warningLevel,
                   danger:  data.dangerLevel,
                   rain:    data.effectiveRainfallMm,
                   river:   data.riverName,
-                )],
+                ),
+
+              // ── Expanded panel
+              AnimatedSize(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                child: isExpanded
+                    ? _ExpandPanel(data: data, wx: wx)
+                    : const SizedBox.shrink(),
+              ),
 
               // ── Expand arrow
               Padding(
@@ -732,10 +769,117 @@ class _MonitorCard extends StatelessWidget {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// COLLAPSED WEATHER STRIP — 4-column compact row inside card
+// Temp | 7d Rain | Rain Index | Humidity
+// ──────────────────────────────────────────────────────────────────────────────
+class _WxCollapsedStrip extends StatelessWidget {
+  final WeatherState wx;
+  final double       floodRain; // station’s own effective rainfall
+  const _WxCollapsedStrip({required this.wx, required this.floodRain});
+
+  @override
+  Widget build(BuildContext context) {
+    final indexColor = wx.rainfallIndex > 70
+        ? AppPalette.critical
+        : wx.rainfallIndex > 45
+            ? AppPalette.danger
+            : wx.rainfallIndex > 25
+                ? AppPalette.amber
+                : AppPalette.safe;
+    // Combine station rainfall with weather 7d rainfall for display
+    final combinedRain = math.max(floodRain, wx.precipMm);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss4,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: AppPalette.cyan.withValues(alpha: 0.10)),
+      ),
+      child: Row(
+        children: [
+          // Column 1 — Temperature
+          Expanded(child: _WxCol(
+            icon:  Icons.thermostat_rounded,
+            value: '${wx.tempC.toStringAsFixed(1)}°',
+            label: 'Temp',
+            color: AppPalette.amber,
+          )),
+          _vBar(),
+          // Column 2 — 7-day rainfall
+          Expanded(child: _WxCol(
+            icon:  Icons.grain_rounded,
+            value: '${wx.rainfall7dMm.toStringAsFixed(0)} mm',
+            label: '7d Rain',
+            color: AppPalette.cyan,
+          )),
+          _vBar(),
+          // Column 3 — Rain index (0-100)
+          Expanded(child: _WxCol(
+            icon:  Icons.analytics_rounded,
+            value: '${wx.rainfallIndex.toStringAsFixed(0)}/100',
+            label: 'Rain Idx',
+            color: indexColor,
+          )),
+          _vBar(),
+          // Column 4 — Precip probability
+          Expanded(child: _WxCol(
+            icon:  Icons.umbrella_rounded,
+            value: '${wx.maxPrecipProb.toStringAsFixed(0)}%',
+            label: 'Rain Prob',
+            color: AppPalette.amber,
+          )),
+          _vBar(),
+          // Column 5 — Humidity
+          Expanded(child: _WxCol(
+            icon:  Icons.water_drop_rounded,
+            value: '${wx.humidity}%',
+            label: 'Humidity',
+            color: const Color(0xFF64B5F6),
+          )),
+        ],
+      ),
+    );
+  }
+
+  Widget _vBar() => Container(
+        width: 1, height: 28,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        color: AppPalette.abyssStroke);
+}
+
+class _WxCol extends StatelessWidget {
+  final IconData icon;
+  final String   value, label;
+  final Color    color;
+  const _WxCol({
+    required this.icon, required this.value,
+    required this.label, required this.color,
+  });
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 10),
+          const SizedBox(height: 3),
+          Text(value, style: TextStyle(
+            color: color, fontSize: 9.5, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 1),
+          Text(label, style: const TextStyle(
+            color: AppPalette.textDim, fontSize: 7.5,
+            fontWeight: FontWeight.w600),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+}
+
 // ── Risk chip
 class _RiskChip extends StatelessWidget {
-  final String label;
-  final Color  color;
+  final String label; final Color color;
   const _RiskChip({required this.label, required this.color});
   @override
   Widget build(BuildContext context) => Container(
@@ -745,16 +889,14 @@ class _RiskChip extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           border:       Border.all(color: color.withValues(alpha: 0.30)),
         ),
-        child: Text(label,
-            style: TextStyle(
-              color: color, fontSize: 8, fontWeight: FontWeight.w900)),
+        child: Text(label, style: TextStyle(
+          color: color, fontSize: 8, fontWeight: FontWeight.w900)),
       );
 }
 
-// ── Sub-line (warning / danger / rain)
+// ── Sub-line (no wx fallback)
 class _SubLine extends StatelessWidget {
-  final double  warning, danger, rain;
-  final String? river;
+  final double warning, danger, rain; final String? river;
   const _SubLine({
     required this.warning, required this.danger,
     required this.rain,    this.river,
@@ -770,27 +912,37 @@ class _SubLine extends StatelessWidget {
           _mini('${rain.toStringAsFixed(1)} mm', AppPalette.cyan),
         ],
       );
-
   Widget _mini(String t, Color c) => Text(t,
-      style: TextStyle(
-          color: c, fontSize: 9, fontWeight: FontWeight.w600));
+      style: TextStyle(color: c, fontSize: 9, fontWeight: FontWeight.w600));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// EXPAND PANEL — tapped card detail
+// EXPAND PANEL — full weather columns + flood thresholds
 // ══════════════════════════════════════════════════════════════════════════════
 class _ExpandPanel extends StatelessWidget {
-  final FloodData data;
-  const _ExpandPanel({required this.data});
+  final FloodData    data;
+  final WeatherState wx;
+  const _ExpandPanel({required this.data, required this.wx});
 
   @override
   Widget build(BuildContext context) {
-    final col = data.priorityColor;
+    final col    = data.priorityColor;
+    final hasWx  = wx.status == WeatherStatus.loaded;
+    final indexColor = hasWx
+        ? (wx.rainfallIndex > 70
+            ? AppPalette.critical
+            : wx.rainfallIndex > 45
+                ? AppPalette.danger
+                : wx.rainfallIndex > 25
+                    ? AppPalette.amber
+                    : AppPalette.safe)
+        : AppPalette.textDim;
+
     return Padding(
       padding: const EdgeInsets.only(top: 14),
       child: Column(
         children: [
-          // Divider
+          // Gradient divider
           Container(
             height: 1,
             decoration: BoxDecoration(
@@ -802,7 +954,156 @@ class _ExpandPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          // 3-column threshold row
+
+          // ── WEATHER COLUMNS SECTION (only when wx loaded)
+          if (hasWx) ...[
+            // Section label
+            Row(
+              children: [
+                Container(
+                  width: 3, height: 12,
+                  decoration: BoxDecoration(
+                    color: AppPalette.cyan,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  'WEATHER FEED',
+                  style: TextStyle(
+                    color: AppPalette.cyan, fontSize: 9,
+                    fontWeight: FontWeight.w900, letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '· ${wx.cityName.split(',').first}',
+                  style: const TextStyle(
+                    color: AppPalette.textDim, fontSize: 9),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Row 1 — Temp | Feels Like | Humidity
+            Row(
+              children: [
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.thermostat_rounded,
+                  label: 'Temperature',
+                  value: '${wx.tempC.toStringAsFixed(1)}°C',
+                  color: AppPalette.amber,
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.device_thermostat_rounded,
+                  label: 'Feels Like',
+                  value: '${wx.current!.feelsLikeC.toStringAsFixed(1)}°C',
+                  color: AppPalette.amber,
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.water_drop_rounded,
+                  label: 'Humidity',
+                  value: '${wx.humidity}%',
+                  color: const Color(0xFF64B5F6),
+                )),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Row 2 — 7d Rainfall | Rain Index | Precip Prob
+            Row(
+              children: [
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.grain_rounded,
+                  label: '7-Day Rainfall',
+                  value: '${wx.rainfall7dMm.toStringAsFixed(1)} mm',
+                  color: AppPalette.cyan,
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.analytics_rounded,
+                  label: 'Rain Index',
+                  value: '${wx.rainfallIndex.toStringAsFixed(0)}/100',
+                  color: indexColor,
+                  isHighlight: wx.rainfallIndex > 45,
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.umbrella_rounded,
+                  label: 'Precip Prob',
+                  value: '${wx.maxPrecipProb.toStringAsFixed(0)}%',
+                  color: AppPalette.amber,
+                )),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Row 3 — Wind | UV | Current Precip
+            Row(
+              children: [
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.air_rounded,
+                  label: 'Wind',
+                  value: '${wx.windKph.toStringAsFixed(0)} km/h',
+                  color: const Color(0xFF64B5F6),
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.wb_sunny_rounded,
+                  label: 'UV Index',
+                  value: wx.current!.uvIndex.toStringAsFixed(1),
+                  color: AppPalette.amber,
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: _WxDetailTile(
+                  icon:  Icons.water_rounded,
+                  label: 'Now Precip',
+                  value: '${wx.precipMm.toStringAsFixed(1)} mm',
+                  color: AppPalette.cyan,
+                )),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Gradient divider
+            Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  Colors.transparent,
+                  AppPalette.abyssStroke,
+                  Colors.transparent,
+                ]),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // ── FLOOD COLUMNS SECTION (always shown)
+          Row(
+            children: [
+              Container(
+                width: 3, height: 12,
+                decoration: BoxDecoration(
+                  color: col,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text(
+                'RIVER DATA',
+                style: TextStyle(
+                  color: AppPalette.textGrey, fontSize: 9,
+                  fontWeight: FontWeight.w900, letterSpacing: 1.0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Threshold row
           Row(
             children: [
               Expanded(child: _ThresholdPill(
@@ -825,12 +1126,13 @@ class _ExpandPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // Stats grid
+
+          // Station rain + flow rate
           Row(
             children: [
               Expanded(child: _InfoTile(
                 icon:  Icons.grain_rounded,
-                label: 'Rainfall',
+                label: 'Station Rain',
                 value: '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
                 color: AppPalette.cyan,
               )),
@@ -839,13 +1141,14 @@ class _ExpandPanel extends StatelessWidget {
                 icon:  Icons.speed_rounded,
                 label: 'Flow Rate',
                 value: data.flowRate != null
-                    ? '${data.flowRate!.toStringAsFixed(0)} m³/s'
-                    : '—',
+                    ? '${data.flowRate!.toStringAsFixed(0)} m³/s' : '—',
                 color: AppPalette.cyan,
               )),
             ],
           ),
           const SizedBox(height: 8),
+
+          // IMD row
           Row(
             children: [
               Expanded(child: _InfoTile(
@@ -859,21 +1162,22 @@ class _ExpandPanel extends StatelessWidget {
                 icon:  Icons.cloud_rounded,
                 label: 'IMD Rain',
                 value: data.imdRainfallMm != null
-                    ? '${data.imdRainfallMm!.toStringAsFixed(1)} mm'
-                    : '—',
+                    ? '${data.imdRainfallMm!.toStringAsFixed(1)} mm' : '—',
                 color: AppPalette.amber,
               )),
             ],
           ),
           const SizedBox(height: 8),
-          // Gap to danger
+
+          // Gap-to-danger bar
           _GapBar(
             current: data.currentLevel,
             danger:  data.dangerLevel,
             color:   col,
           ),
           const SizedBox(height: 8),
-          // Status + updated
+
+          // Status + timestamp
           Row(
             children: [
               _StatusBadge(status: data.status),
@@ -882,7 +1186,7 @@ class _ExpandPanel extends StatelessWidget {
                 DateFormat('dd MMM HH:mm')
                     .format(data.lastUpdated.toLocal()),
                 style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 9.5),
+                    color: AppPalette.textDim, fontSize: 9.5),
               ),
             ],
           ),
@@ -892,9 +1196,49 @@ class _ExpandPanel extends StatelessWidget {
   }
 }
 
+// ── Weather detail tile (expand panel)
+class _WxDetailTile extends StatelessWidget {
+  final IconData icon;
+  final String   label, value;
+  final Color    color;
+  final bool     isHighlight;
+  const _WxDetailTile({
+    required this.icon, required this.label,
+    required this.value, required this.color,
+    this.isHighlight = false,
+  });
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isHighlight
+              ? color.withValues(alpha: 0.08)
+              : AppPalette.abyss4,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isHighlight
+                ? color.withValues(alpha: 0.25)
+                : AppPalette.abyssStroke,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 13),
+            const SizedBox(height: 4),
+            Text(value, style: TextStyle(
+              color: color, fontSize: 11, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 2),
+            Text(label, style: const TextStyle(
+              color: AppPalette.textDim, fontSize: 7.5),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+}
+
 class _ThresholdPill extends StatelessWidget {
-  final String label, value;
-  final Color  color;
+  final String label, value; final Color color;
   const _ThresholdPill({
     required this.label, required this.value, required this.color});
   @override
@@ -918,9 +1262,7 @@ class _ThresholdPill extends StatelessWidget {
 }
 
 class _InfoTile extends StatelessWidget {
-  final IconData icon;
-  final String   label, value;
-  final Color    color;
+  final IconData icon; final String label, value; final Color color;
   const _InfoTile({
     required this.icon, required this.label,
     required this.value, required this.color,
@@ -936,31 +1278,27 @@ class _InfoTile extends StatelessWidget {
         child: Row(children: [
           Icon(icon, color: color, size: 14),
           const SizedBox(width: 6),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(value, style: TextStyle(
-                  color: AppPalette.textWhite,
-                  fontSize: 11, fontWeight: FontWeight.w800)),
-                Text(label, style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 8.5)),
-              ],
-            ),
-          ),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(value, style: TextStyle(
+                color: AppPalette.textWhite, fontSize: 11,
+                fontWeight: FontWeight.w800)),
+              Text(label, style: const TextStyle(
+                color: AppPalette.textDim, fontSize: 8.5)),
+            ],
+          )),
         ]),
       );
 }
 
 class _GapBar extends StatelessWidget {
-  final double current, danger;
-  final Color  color;
+  final double current, danger; final Color color;
   const _GapBar({
     required this.current, required this.danger, required this.color});
   @override
   Widget build(BuildContext context) {
-    final gap     = (danger - current).clamp(0.0, danger);
-    final gapPct  = danger > 0 ? gap / danger : 0.0;
+    final gap    = (danger - current).clamp(0.0, danger);
     final isAbove = current >= danger;
     return Container(
       padding: const EdgeInsets.all(10),
@@ -977,7 +1315,7 @@ class _GapBar extends StatelessWidget {
             children: [
               Text(
                 isAbove
-                    ? '⚠️ ${(current - danger).abs().toStringAsFixed(2)} m above danger'
+                    ? '⚠️ ${(current-danger).abs().toStringAsFixed(2)} m above danger'
                     : '${gap.toStringAsFixed(2)} m to danger level',
                 style: TextStyle(
                   fontSize: 10,
@@ -985,11 +1323,9 @@ class _GapBar extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              Text(
-                'Danger: ${danger.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                  fontSize: 9.5, color: AppPalette.textDim),
-              ),
+              Text('Danger: ${danger.toStringAsFixed(1)} m',
+                  style: const TextStyle(
+                      color: AppPalette.textDim, fontSize: 9.5)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1012,8 +1348,7 @@ class _GapBar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(3),
                     boxShadow: [
                       BoxShadow(
-                          color: color.withValues(alpha: 0.4),
-                          blurRadius: 4),
+                          color: color.withValues(alpha: 0.4), blurRadius: 4),
                     ],
                   ),
                 ),
@@ -1105,8 +1440,7 @@ class _EmptyState extends StatelessWidget {
                     ? 'Live data is on its way'
                     : 'Stations appear here once live data arrives',
                 style: const TextStyle(
-                  color: AppPalette.textDim,
-                  fontSize: 10,
+                  color: AppPalette.textDim, fontSize: 10,
                 ),
                 textAlign: TextAlign.center,
               ),
