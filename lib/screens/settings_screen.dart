@@ -1,5 +1,5 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v3  (language picker orphaned-scope fix)
+// OpsFlood — SettingsScreen v4  (developer section added)
 library;
 
 import 'package:flutter/material.dart';
@@ -34,14 +34,14 @@ class SettingsScreen extends ConsumerWidget {
                     Container(
                       width: 42, height: 42,
                       decoration: BoxDecoration(
-                        color: AppPalette.cyan.withValues(alpha: 0.10),
+                        color: AppPalette.gold.withValues(alpha: 0.10),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: AppPalette.cyan.withValues(alpha: 0.25),
+                          color: AppPalette.gold.withValues(alpha: 0.25),
                         ),
                       ),
                       child: const Icon(Icons.settings_rounded,
-                          color: AppPalette.cyan, size: 22),
+                          color: AppPalette.gold, size: 22),
                     ),
                     const SizedBox(width: 14),
                     Column(
@@ -117,15 +117,15 @@ class SettingsScreen extends ConsumerWidget {
                                 horizontal: 6, vertical: 2),
                             margin: const EdgeInsets.only(right: 6),
                             decoration: BoxDecoration(
-                              color: AppPalette.amber.withValues(alpha: 0.15),
+                              color: AppPalette.gold.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                  color: AppPalette.amber.withValues(alpha: 0.4)),
+                                  color: AppPalette.gold.withValues(alpha: 0.4)),
                             ),
                             child: const Text(
                               'PREMIUM',
                               style: TextStyle(
-                                color:      AppPalette.amber,
+                                color:      AppPalette.gold,
                                 fontSize:   8,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.8,
@@ -189,6 +189,17 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
 
+            // ── Developer section ──────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: _SectionCard(
+                title: 'Developer',
+                icon:  Icons.code_rounded,
+                children: [
+                  _DeveloperTile(),
+                ],
+              ),
+            ),
+
             const SliverToBoxAdapter(child: SizedBox(height: 40)),
           ],
         ),
@@ -197,24 +208,14 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   // ── Language picker bottom sheet
-  // FIX: removed the wrapping ProviderScope(parent: ProviderContainer()).
-  // That created a brand-new, orphaned container isolated from the root
-  // ProviderScope. localeNotifier.setLocale() was updating the orphan,
-  // not the real app state — so the language never changed in the UI.
-  //
-  // Solution: use a plain Consumer(builder:) so the sheet inherits the
-  // root ProviderScope from the widget tree, and state updates propagate
-  // all the way up to MaterialApp.locale in main.dart.
   void _showLanguagePicker(BuildContext context, WidgetRef ref) {
     final rc             = RiverColors.of(context);
-    // Capture notifier before the async showModalBottomSheet gap.
     final localeNotifier = ref.read(localeProvider.notifier);
 
     showModalBottomSheet(
       context:             context,
       backgroundColor:     Colors.transparent,
       isScrollControlled:  true,
-      // Use ctx (not _) so the sheet is in the correct widget-tree scope.
       builder: (ctx) => Consumer(
         builder: (consumerCtx, sheetRef, _) {
           final locale = sheetRef.watch(localeProvider);
@@ -233,7 +234,6 @@ class SettingsScreen extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // drag handle
                     Container(
                       width: 40, height: 4,
                       decoration: BoxDecoration(
@@ -245,7 +245,7 @@ class SettingsScreen extends ConsumerWidget {
                     Row(
                       children: [
                         Icon(Icons.language_rounded,
-                            color: AppPalette.cyan, size: 20),
+                            color: AppPalette.gold, size: 20),
                         const SizedBox(width: 8),
                         const Text(
                           'Select Language',
@@ -278,12 +278,12 @@ class SettingsScreen extends ConsumerWidget {
                                   horizontal: 16, vertical: 14),
                               decoration: BoxDecoration(
                                 color: isActive
-                                    ? AppPalette.cyan.withValues(alpha: 0.15)
+                                    ? AppPalette.gold.withValues(alpha: 0.15)
                                     : AppPalette.abyss2,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
                                   color: isActive
-                                      ? AppPalette.cyan.withValues(alpha: 0.5)
+                                      ? AppPalette.gold.withValues(alpha: 0.5)
                                       : AppPalette.abyssStroke,
                                   width: isActive ? 2 : 1,
                                 ),
@@ -294,7 +294,7 @@ class SettingsScreen extends ConsumerWidget {
                                     kLocaleLabels[l.languageCode] ?? l.languageCode,
                                     style: TextStyle(
                                       color: isActive
-                                          ? AppPalette.cyan
+                                          ? AppPalette.gold
                                           : AppPalette.textWhite,
                                       fontWeight: FontWeight.w700,
                                       fontSize:   15,
@@ -303,7 +303,7 @@ class SettingsScreen extends ConsumerWidget {
                                   const Spacer(),
                                   if (isActive)
                                     const Icon(Icons.check_circle,
-                                        color: AppPalette.cyan, size: 20)
+                                        color: AppPalette.gold, size: 20)
                                   else
                                     Icon(Icons.circle_outlined,
                                         color: AppPalette.abyssStroke,
@@ -326,7 +326,103 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Developer tile  — styled credit card for Rohit28
+// ─────────────────────────────────────────────────────────────────────────────
+class _DeveloperTile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          // Avatar with gold ring
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppPalette.gold, AppPalette.goldDark],
+              ),
+              boxShadow: AppPalette.glowShadow(AppPalette.gold, blur: 14),
+            ),
+            child: const Center(
+              child: Text(
+                'R',
+                style: TextStyle(
+                  color:      AppPalette.abyss0,
+                  fontSize:   20,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+
+          // Name + role
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'Rohit28',
+                      style: TextStyle(
+                        color:      AppPalette.textWhite,
+                        fontSize:   15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppPalette.gold.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: AppPalette.gold.withValues(alpha: 0.45),
+                          width: 1,
+                        ),
+                      ),
+                      child: const Text(
+                        'DEV',
+                        style: TextStyle(
+                          color:         AppPalette.gold,
+                          fontSize:      8,
+                          fontWeight:    FontWeight.w800,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Developer  ·  OpsFlood',
+                  style: TextStyle(
+                    color:    AppPalette.textGrey,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Gold star badge
+          Icon(Icons.star_rounded, color: AppPalette.gold, size: 20),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Private helpers (unchanged)
 
 bool _isPremium(AppThemeMode m) =>
