@@ -58,9 +58,19 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/icon/opsflood_icon.png
+  min_sdk_android: 21
+  adaptive_icon_background: "#0d1b2a"
+  adaptive_icon_foreground: assets/icon/opsflood_icon.png
 
 flutter:
   uses-material-design: true
   generate: true
   assets:
     - .env
+    - assets/icon/
