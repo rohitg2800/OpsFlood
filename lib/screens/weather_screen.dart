@@ -1,7 +1,5 @@
 // lib/screens/weather_screen.dart
 // OpsFlood — WeatherScreen v3  "Command Centre"
-// Animated search bar · city autocomplete · full weather dashboard
-// Data shared to MonitorsScreen via weatherProvider
 library;
 
 import 'dart:math' as math;
@@ -51,7 +49,6 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
         vsync: this, duration: const Duration(seconds: 12))
       ..repeat();
 
-    // Animate content in on first load
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _contentCtrl.forward();
     });
@@ -108,7 +105,6 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
           bottom: false,
           child: Column(
             children: [
-              // ── Header
               _WeatherHeader(
                 cityName:   ws.cityName,
                 searchOpen: _searchOpen,
@@ -116,14 +112,13 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
                 onRefresh: () {
                   HapticFeedback.mediumImpact();
                   _contentCtrl.reset();
-                  ref.read(weatherProvider.notifier).fetchWeather();
+                  ref.read(weatherProvider.notifier)
+                      .fetchWeather(forceRefresh: true);
                   _contentCtrl.forward();
                 },
                 rotateCtrl: _rotateCtrl,
                 status: ws.status,
               ),
-
-              // ── Search bar (animated)
               SizeTransition(
                 sizeFactor: _searchBarAnim,
                 child: _SearchBar(
@@ -135,16 +130,16 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
                   onSelect:   _selectCity,
                 ),
               ),
-
-              // ── Body
               Expanded(
                 child: switch (ws.status) {
                   WeatherStatus.loading => const _LoadingView(),
                   WeatherStatus.error   => _ErrorView(
-                      message: ws.error,
+                      message:        ws.error,
+                      isRateLimited:  ws.isRateLimited,
+                      retryInSeconds: ws.retryInSeconds,
                       onRetry: () => ref
                           .read(weatherProvider.notifier)
-                          .fetchWeather(),
+                          .fetchWeather(forceRefresh: true),
                     ),
                   WeatherStatus.loaded  => _WeatherContent(
                       ws:          ws,
@@ -190,7 +185,6 @@ class _WeatherHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Icon tile
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
@@ -247,7 +241,6 @@ class _WeatherHeader extends StatelessWidget {
               ],
             ),
           ),
-          // Search toggle
           GestureDetector(
             onTap: () {
               HapticFeedback.selectionClick();
@@ -275,7 +268,6 @@ class _WeatherHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Refresh
           GestureDetector(
             onTap: onRefresh,
             child: Container(
@@ -318,7 +310,6 @@ class _SearchBar extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Column(
         children: [
-          // Text field
           Container(
             height: 46,
             decoration: BoxDecoration(
@@ -374,7 +365,6 @@ class _SearchBar extends StatelessWidget {
               ),
             ),
           ),
-          // Results dropdown
           if (results.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: 4),
@@ -460,15 +450,10 @@ class _WeatherContent extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
           physics: const BouncingScrollPhysics(),
           children: [
-            // ── Hero current card
             _HeroCard(current: ws.current!, cityName: ws.cityName),
             const SizedBox(height: 12),
-
-            // ── Quick metrics shared with MonitorsScreen
             _MonitorShareRow(ws: ws),
             const SizedBox(height: 12),
-
-            // ── Wind + UV row
             Row(
               children: [
                 Expanded(child: _MetricCard(
@@ -497,8 +482,6 @@ class _WeatherContent extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-
-            // ── Pressure + Cloud
             Row(
               children: [
                 Expanded(child: _MetricCard(
@@ -527,12 +510,8 @@ class _WeatherContent extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
-
-            // ── 7-day rainfall bar chart
             _RainfallChart(forecast: ws.forecast),
             const SizedBox(height: 14),
-
-            // ── 7-day forecast list
             _ForecastList(forecast: ws.forecast),
           ],
         ),
@@ -592,7 +571,6 @@ class _HeroCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Big temp
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -618,14 +596,12 @@ class _HeroCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                // Feels like
                 Text(
                   'Feels ${current.feelsLikeC.toStringAsFixed(1)}°C  ·  ${_wxLabel(wc)}',
                   style: const TextStyle(
                       color: AppPalette.textGrey, fontSize: 10.5),
                 ),
                 const SizedBox(height: 16),
-                // Rain + humidity pills
                 Row(
                   children: [
                     _HeroPill(
@@ -646,7 +622,6 @@ class _HeroCard extends StatelessWidget {
               ],
             ),
           ),
-          // Big weather icon
           Column(
             children: [
               Text(
@@ -675,37 +650,37 @@ class _HeroCard extends StatelessWidget {
   }
 
   Color _wxColor(int c) {
-    if (c == 0)              return AppPalette.amber;
-    if (c <= 3)              return const Color(0xFF64B5F6);
-    if (c <= 48)             return AppPalette.textGrey;
-    if (c <= 67)             return AppPalette.cyan;
-    if (c <= 77)             return Colors.white;
-    if (c <= 82)             return AppPalette.cyan;
-    if (c <= 99)             return AppPalette.danger;
+    if (c == 0)  return AppPalette.amber;
+    if (c <= 3)  return const Color(0xFF64B5F6);
+    if (c <= 48) return AppPalette.textGrey;
+    if (c <= 67) return AppPalette.cyan;
+    if (c <= 77) return Colors.white;
+    if (c <= 82) return AppPalette.cyan;
+    if (c <= 99) return AppPalette.danger;
     return AppPalette.textGrey;
   }
 
   String _wxLabel(int c) {
-    if (c == 0)   return 'Clear Sky';
-    if (c <= 3)   return 'Partly Cloudy';
-    if (c <= 48)  return 'Fog';
-    if (c <= 57)  return 'Drizzle';
-    if (c <= 67)  return 'Rain';
-    if (c <= 77)  return 'Snow';
-    if (c <= 82)  return 'Rain Showers';
-    if (c <= 99)  return 'Thunderstorm';
+    if (c == 0)  return 'Clear Sky';
+    if (c <= 3)  return 'Partly Cloudy';
+    if (c <= 48) return 'Fog';
+    if (c <= 57) return 'Drizzle';
+    if (c <= 67) return 'Rain';
+    if (c <= 77) return 'Snow';
+    if (c <= 82) return 'Rain Showers';
+    if (c <= 99) return 'Thunderstorm';
     return 'Unknown';
   }
 
   String _wxEmoji(int c) {
-    if (c == 0)   return '☀️';
-    if (c <= 3)   return '⛅';
-    if (c <= 48)  return '🌫️';
-    if (c <= 57)  return '🌦️';
-    if (c <= 67)  return '🌧️';
-    if (c <= 77)  return '❄️';
-    if (c <= 82)  return '🌦️';
-    if (c <= 99)  return '⛈️';
+    if (c == 0)  return '☀️';
+    if (c <= 3)  return '⛅';
+    if (c <= 48) return '🌫️';
+    if (c <= 57) return '🌦️';
+    if (c <= 67) return '🌧️';
+    if (c <= 77) return '❄️';
+    if (c <= 82) return '🌦️';
+    if (c <= 99) return '⛈️';
     return '🌡️';
   }
 }
@@ -743,7 +718,7 @@ class _HeroPill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Monitor-share row  (the data the Monitors screen reads from this provider)
+// Monitor-share row
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MonitorShareRow extends StatelessWidget {
@@ -922,10 +897,8 @@ class _RainfallChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxRain = forecast
-        .map((d) => d.rainMm)
-        .fold(0.0, math.max);
-    final scale  = maxRain > 0 ? maxRain : 1.0;
+    final maxRain = forecast.map((d) => d.rainMm).fold(0.0, math.max);
+    final scale   = maxRain > 0 ? maxRain : 1.0;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -942,27 +915,22 @@ class _RainfallChart extends StatelessWidget {
               const Icon(Icons.bar_chart_rounded,
                   color: AppPalette.cyan, size: 15),
               const SizedBox(width: 6),
-              const Text(
-                '7-Day Rainfall',
-                style: TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 11, fontWeight: FontWeight.w700,
-                ),
-              ),
+              const Text('7-Day Rainfall',
+                  style: TextStyle(
+                    color: AppPalette.textGrey,
+                    fontSize: 11, fontWeight: FontWeight.w700)),
               const Spacer(),
-              Text(
-                'Max ${maxRain.toStringAsFixed(1)} mm',
-                style: const TextStyle(
-                    color: AppPalette.textDim, fontSize: 9.5),
-              ),
+              Text('Max ${maxRain.toStringAsFixed(1)} mm',
+                  style: const TextStyle(
+                      color: AppPalette.textDim, fontSize: 9.5)),
             ],
           ),
           const SizedBox(height: 16),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: forecast.map((day) {
-              final frac = day.rainMm / scale;
-              final col  = day.rainMm > 20
+              final frac  = day.rainMm / scale;
+              final col   = day.rainMm > 20
                   ? AppPalette.danger
                   : day.rainMm > 5
                       ? AppPalette.amber
@@ -974,12 +942,10 @@ class _RainfallChart extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 3),
                   child: Column(
                     children: [
-                      Text(
-                        '${day.rainMm.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          color: col, fontSize: 8,
-                          fontWeight: FontWeight.w700),
-                      ),
+                      Text('${day.rainMm.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            color: col, fontSize: 8,
+                            fontWeight: FontWeight.w700)),
                       const SizedBox(height: 4),
                       Container(
                         height: math.max(4.0, 70.0 * frac),
@@ -987,9 +953,7 @@ class _RainfallChart extends StatelessWidget {
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
                             end:   Alignment.bottomCenter,
-                            colors: [
-                              col, col.withValues(alpha: 0.35),
-                            ],
+                            colors: [col, col.withValues(alpha: 0.35)],
                           ),
                           borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(4)),
@@ -1073,7 +1037,6 @@ class _ForecastList extends StatelessWidget {
                 ),
                 Text(emoji, style: const TextStyle(fontSize: 16)),
                 const Spacer(),
-                // Rain
                 Row(children: [
                   Icon(Icons.grain_rounded, color: col, size: 11),
                   const SizedBox(width: 3),
@@ -1083,12 +1046,10 @@ class _ForecastList extends StatelessWidget {
                           fontWeight: FontWeight.w700)),
                 ]),
                 const SizedBox(width: 12),
-                // Prob
                 Text('${day.precipProb.toStringAsFixed(0)}%',
                     style: const TextStyle(
                         color: AppPalette.textDim, fontSize: 10)),
                 const SizedBox(width: 12),
-                // Temp range
                 Text(
                   '${day.maxC.round()}° / ${day.minC.round()}°',
                   style: const TextStyle(
@@ -1105,19 +1066,19 @@ class _ForecastList extends StatelessWidget {
   }
 
   String _wxEmoji(int c) {
-    if (c == 0)   return '☀️';
-    if (c <= 3)   return '⛅';
-    if (c <= 48)  return '🌫️';
-    if (c <= 67)  return '🌧️';
-    if (c <= 77)  return '❄️';
-    if (c <= 82)  return '🌦️';
-    if (c <= 99)  return '⛈️';
+    if (c == 0)  return '☀️';
+    if (c <= 3)  return '⛅';
+    if (c <= 48) return '🌫️';
+    if (c <= 67) return '🌧️';
+    if (c <= 77) return '❄️';
+    if (c <= 82) return '🌦️';
+    if (c <= 99) return '⛈️';
     return '🌡️';
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Loading / Error
+// Loading / Error views
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LoadingView extends StatelessWidget {
@@ -1147,8 +1108,22 @@ class _LoadingView extends StatelessWidget {
 
 class _ErrorView extends StatelessWidget {
   final String       message;
+  final bool         isRateLimited;
+  final int          retryInSeconds;
   final VoidCallback onRetry;
-  const _ErrorView({required this.message, required this.onRetry});
+  const _ErrorView({
+    required this.message,
+    required this.isRateLimited,
+    required this.retryInSeconds,
+    required this.onRetry,
+  });
+
+  String _formatCountdown(int secs) {
+    final m = secs ~/ 60;
+    final s = secs % 60;
+    return m > 0 ? '${m}m ${s}s' : '${s}s';
+  }
+
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
@@ -1156,30 +1131,76 @@ class _ErrorView extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.cloud_off_rounded,
-                  color: AppPalette.danger, size: 44),
+              Icon(
+                isRateLimited
+                    ? Icons.hourglass_top_rounded
+                    : Icons.cloud_off_rounded,
+                color: isRateLimited
+                    ? AppPalette.amber
+                    : AppPalette.danger,
+                size: 44,
+              ),
               const SizedBox(height: 14),
-              Text(message,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 11),
-                  textAlign: TextAlign.center),
-              const SizedBox(height: 16),
+              Text(
+                isRateLimited
+                    ? 'Weather service is busy right now.'
+                    : message,
+                style: const TextStyle(
+                    color: AppPalette.textGrey,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              if (isRateLimited && retryInSeconds > 0) ...[
+                Text(
+                  'Auto-retrying in ${_formatCountdown(retryInSeconds)}',
+                  style: TextStyle(
+                      color: AppPalette.amber.withValues(alpha: 0.80),
+                      fontSize: 11),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 140,
+                  child: LinearProgressIndicator(
+                    value: 1 - (retryInSeconds / 300),
+                    backgroundColor:
+                        AppPalette.amber.withValues(alpha: 0.15),
+                    color: AppPalette.amber,
+                    minHeight: 3,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ] else
+                const SizedBox(height: 16),
               GestureDetector(
                 onTap: onRetry,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 20, vertical: 10),
                   decoration: BoxDecoration(
-                    color:        AppPalette.cyan.withValues(alpha: 0.10),
+                    color: isRateLimited
+                        ? AppPalette.amber.withValues(alpha: 0.10)
+                        : AppPalette.cyan.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(20),
-                    border:       Border.all(
-                        color: AppPalette.cyan.withValues(alpha: 0.30)),
+                    border: Border.all(
+                      color: isRateLimited
+                          ? AppPalette.amber.withValues(alpha: 0.30)
+                          : AppPalette.cyan.withValues(alpha: 0.30),
+                    ),
                   ),
-                  child: const Text('Retry',
-                      style: TextStyle(
-                        color: AppPalette.cyan,
-                        fontSize: 12, fontWeight: FontWeight.w800,
-                      )),
+                  child: Text(
+                    isRateLimited ? 'Try Now Anyway' : 'Retry',
+                    style: TextStyle(
+                      color: isRateLimited
+                          ? AppPalette.amber
+                          : AppPalette.cyan,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ),
             ],
