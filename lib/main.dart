@@ -30,7 +30,7 @@ Future<void> main() async {
     try {
       await dotenv.load(fileName: '.env', mergeWith: {});
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️  .env not found — running with defaults: $e');
+      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found \u2014 running with defaults: $e');
     }
 
     // 2. Firebase
@@ -42,13 +42,13 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
+              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out \u2014 continuing without Firebase');
               throw TimeoutException('Firebase init timeout');
             },
           );
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('⚠️  Firebase init failed (non-fatal): $e');
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase init failed (non-fatal): $e');
       }
     }
 
@@ -70,11 +70,11 @@ Future<void> main() async {
     FlutterError.onError = (FlutterErrorDetails details) {
       if (kDebugMode) {
         FlutterError.presentError(details);
-        debugPrint('❌ FlutterError: ${details.summary}');
+        debugPrint('\u274c FlutterError: ${details.summary}');
       }
     };
     PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-      if (kDebugMode) debugPrint('❌ PlatformDispatcher: $error\n$stack');
+      if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
       return true;
     };
 
@@ -84,18 +84,18 @@ Future<void> main() async {
     // 6. Essential services
     if (!kIsWeb) {
       await LocalCacheService.instance.init().catchError((e) {
-        if (kDebugMode) debugPrint('⚠️  LocalCacheService.init failed: $e');
+        if (kDebugMode) debugPrint('\u26a0\ufe0f  LocalCacheService.init failed: $e');
       });
 
       unawaited(
         FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
+          if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
         }),
       );
 
       unawaited(
         ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
+          if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
         }),
       );
     }
@@ -111,27 +111,29 @@ class EquinoxBHApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final appMode   = ref.watch(themeModeProvider);
-    final locale    = ref.watch(localeProvider);
+    // Use AppThemeMode from theme_provider (owns the full enum incl. sunset/ocean).
+    // themeModeProvider in flood_providers.dart has been removed to avoid the
+    // duplicate-export conflict.
+    final appMode = ref.watch(themeNotifierProvider);
+    final locale  = ref.watch(localeProvider);
 
-    // Derive flutter ThemeMode from AppThemeMode
-    final ThemeMode flutterMode;
-    switch (appMode) {
-      case AppThemeMode.system:  flutterMode = ThemeMode.system; break;
-      case AppThemeMode.light:   flutterMode = ThemeMode.light;  break;
-      case AppThemeMode.dark:    flutterMode = ThemeMode.dark;   break;
-      case AppThemeMode.sunset:  flutterMode = ThemeMode.light;  break;
-      case AppThemeMode.ocean:   flutterMode = ThemeMode.dark;   break;
-    }
+    // Switch expression — Dart sees exhaustiveness, so flutterMode is always assigned.
+    final ThemeMode flutterMode = switch (appMode) {
+      AppThemeMode.system => ThemeMode.system,
+      AppThemeMode.light  => ThemeMode.light,
+      AppThemeMode.dark   => ThemeMode.dark,
+      AppThemeMode.sunset => ThemeMode.light,
+      AppThemeMode.ocean  => ThemeMode.dark,
+    };
 
     return MaterialApp(
-      title:                   'EQUINOX-BH',
+      title:                      'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
-      themeMode:               flutterMode,
-      theme:                   RiverColors.lightTheme(),
-      darkTheme:               RiverColors.darkTheme(),
-      locale:                  locale,
-      supportedLocales:        kSupportedLocales,
+      themeMode:                  flutterMode,
+      theme:                      RiverColors.lightTheme(),
+      darkTheme:                  RiverColors.darkTheme(),
+      locale:                     locale,
+      supportedLocales:           kSupportedLocales,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,

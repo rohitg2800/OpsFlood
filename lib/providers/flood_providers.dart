@@ -16,7 +16,10 @@ final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
 /// Alias kept for backward compatibility with screens using the old name.
 final realTimeServiceProvider = realTimeProvider;
 
-final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
+// NOTE: themeModeProvider (StateProvider<ThemeMode>) was removed from here.
+// The canonical theme state lives in providers/theme_provider.dart as
+// themeNotifierProvider (StateNotifierProvider<ThemeProvider, AppThemeMode>).
+// Import theme_provider.dart directly when you need theme state.
 
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   return ref.watch(realTimeProvider).lastFetchTime;
@@ -30,35 +33,13 @@ final isWakingUpProvider = Provider<bool>((ref) {
   return ref.watch(realTimeProvider).isWakingUp;
 });
 
-final errorMessageProvider = Provider<String?>((ref) {
-  return ref.watch(realTimeProvider).error;
+final ndmaProvider = FutureProvider.autoDispose<List<EmergencyContact>>((ref) async {
+  final svc = NdmaService();
+  return svc.fetchEmergencyContacts();
 });
 
-final imdAlertsProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).imdAlerts;
-});
-
-final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).ndmaAdvisories;
-});
-
-final criticalCountProvider = Provider<int>((ref) {
-  return ref.watch(realTimeProvider).criticalCount;
-});
-
-final liveLevelsProvider = Provider<List<FloodData>>((ref) {
-  return ref.watch(realTimeProvider).liveLevels;
-});
-
-final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
-  return ref.watch(realTimeProvider).monitoringData;
-});
-
-/// List of city names that currently have live FloodData.
-final monitoredCitiesProvider = Provider<List<String>>((ref) {
-  return ref
-      .watch(realTimeProvider)
-      .liveLevels
-      .map((fd) => fd.city)
-      .toList();
+final riverMonitoringProvider =
+    FutureProvider.autoDispose<List<RiverStation>>((ref) async {
+  final svc = ref.watch(realTimeProvider);
+  return svc.fetchRiverStations();
 });

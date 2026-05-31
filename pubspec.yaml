@@ -9,8 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   http: ^1.2.0
-  xml: ^6.5.0  
+  xml: ^6.5.0
   flutter_riverpod: ^2.5.1
   flutter_dotenv: ^5.1.0
   firebase_core: ^3.4.1
@@ -34,3 +36,10 @@ flutter:
   uses-material-design: true
   assets:
     - .env
+  generate: true
+
+flutter_intl:
+  enabled: true
+  arb_dir: lib/l10n
+  output_dir: lib/l10n
+  output_class: AppLocalizations
