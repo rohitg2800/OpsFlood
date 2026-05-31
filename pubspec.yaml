@@ -4,27 +4,51 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+
+  # Networking & parsing
   http: ^1.2.0
-  xml: ^6.5.0
-  flutter_riverpod: ^2.5.1
-  flutter_dotenv: ^5.1.0
-  firebase_core: ^3.4.1
-  firebase_messaging: ^15.1.3
-  cloud_firestore: ^5.4.4
-  workmanager: ^0.9.0
+  xml: ^7.0.1
+
+  # State management
+  flutter_riverpod: ^3.3.1
+
+  # Config
+  flutter_dotenv: ^6.0.1
+
+  # Firebase suite  (3.x → 4.x — requires BoM bump together)
+  firebase_core:      ^4.9.0
+  firebase_messaging: ^16.2.2
+  cloud_firestore:    ^6.4.1
+
+  # Background tasks  (0.9 → 0.10 drops KGP usage)
+  workmanager: ^0.10.0
+
+  # Charts
   fl_chart: ^1.2.0
-  shared_preferences: ^2.2.2
+
+  # Storage & prefs  (latest already KGP-free)
+  shared_preferences: ^2.3.0
+
+  # i18n
   intl: ^0.20.2
-  url_launcher: ^6.2.5
+
+  # Links  (latest already KGP-free)
+  url_launcher: ^6.3.0
+
+  # Local notifications  (stay on 17.x — 18+ has breaking API changes)
   flutter_local_notifications: ^17.2.4
+
+  # Network status
   connectivity_plus: ^7.1.1
+
+  # Icons
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
