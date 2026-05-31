@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ─── Extended theme modes (includes premium filters) ─────────────────────────
+// ─── Extended theme modes (includes premium filters) ─────────────────────
 enum AppThemeMode {
   system,
-  light,       // Day River
-  dark,        // Night River
-  sunset,      // 🌅 Sunset Warm  (premium)
-  ocean,       // 🌊 Deep Ocean   (premium)
+  light,   // Day River
+  dark,    // Night River
+  sunset,  // 🌅 Sunset Warm  (premium)
+  ocean,   // 🌊 Deep Ocean   (premium)
 }
 
-// ─── ThemeProvider (ChangeNotifier — kept for legacy init()) ─────────────────
+// ─── ThemeProvider (ChangeNotifier — kept for legacy init()) ─────────────
 class ThemeProvider extends ChangeNotifier {
   static final ThemeProvider _instance = ThemeProvider._internal();
   factory ThemeProvider() => _instance;
@@ -22,14 +22,13 @@ class ThemeProvider extends ChangeNotifier {
 
   AppThemeMode get appMode => _appMode;
 
-  /// Maps premium modes → nearest Flutter ThemeMode for MaterialApp.themeMode
   ThemeMode get mode {
     switch (_appMode) {
       case AppThemeMode.system:  return ThemeMode.system;
       case AppThemeMode.light:   return ThemeMode.light;
       case AppThemeMode.dark:    return ThemeMode.dark;
-      case AppThemeMode.sunset:  return ThemeMode.light;  // warm light base
-      case AppThemeMode.ocean:   return ThemeMode.dark;   // deep dark base
+      case AppThemeMode.sunset:  return ThemeMode.light;
+      case AppThemeMode.ocean:   return ThemeMode.dark;
     }
   }
 
@@ -50,7 +49,6 @@ class ThemeProvider extends ChangeNotifier {
     await prefs.setString(_key, mode.name);
   }
 
-  // Legacy cycle (system → light → dark → system, skips premium)
   void cycle() {
     switch (_appMode) {
       case AppThemeMode.system:  setAppMode(AppThemeMode.light);  break;
@@ -80,30 +78,35 @@ class ThemeProvider extends ChangeNotifier {
   }
 }
 
-// ─── Riverpod provider ────────────────────────────────────────────────────────
-final themeModeProvider = StateNotifierProvider<_ThemeModeNotifier, AppThemeMode>(
-  (ref) => _ThemeModeNotifier(),
-);
-
+// ─── Riverpod StateNotifier ─────────────────────────────────────────────────────
 class _ThemeModeNotifier extends StateNotifier<AppThemeMode> {
-  _ThemeModeNotifier() : super(ThemeProvider().appMode);
+  static const _key = 'equinox_theme_mode';
 
-  AppThemeMode get appMode => state;
-
-  /// Flutter ThemeMode derived from current AppThemeMode
-  ThemeMode get flutterMode {
-    switch (state) {
-      case AppThemeMode.system:  return ThemeMode.system;
-      case AppThemeMode.light:   return ThemeMode.light;
-      case AppThemeMode.dark:    return ThemeMode.dark;
-      case AppThemeMode.sunset:  return ThemeMode.light;
-      case AppThemeMode.ocean:   return ThemeMode.dark;
-    }
+  // Start with system default; _loadSaved() will update state once prefs load.
+  _ThemeModeNotifier() : super(AppThemeMode.system) {
+    _loadSaved();
   }
 
+  Future<void> _loadSaved() async {
+    final prefs  = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_key);
+    if (stored == null) return;
+    final saved = AppThemeMode.values.firstWhere(
+      (e) => e.name == stored,
+      orElse: () => AppThemeMode.system,
+    );
+    // Only update if different to avoid unnecessary rebuilds.
+    if (saved != state) state = saved;
+  }
+
+  /// Update Riverpod state immediately (triggers MaterialApp rebuild),
+  /// then persist to SharedPreferences.
   Future<void> setMode(AppThemeMode mode) async {
-    state = mode;
-    await ThemeProvider().setAppMode(mode);
+    state = mode; // ← Riverpod listeners rebuild right here
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, mode.name);
+    // Keep legacy singleton in sync so ThemeProvider().appMode is consistent.
+    ThemeProvider()._appMode = mode;
   }
 
   void cycle() {
@@ -113,4 +116,17 @@ class _ThemeModeNotifier extends StateNotifier<AppThemeMode> {
       default:                   setMode(AppThemeMode.system); break;
     }
   }
+
+  ThemeMode get flutterMode => switch (state) {
+    AppThemeMode.system => ThemeMode.system,
+    AppThemeMode.light  => ThemeMode.light,
+    AppThemeMode.dark   => ThemeMode.dark,
+    AppThemeMode.sunset => ThemeMode.light,
+    AppThemeMode.ocean  => ThemeMode.dark,
+  };
 }
+
+final themeModeProvider =
+    StateNotifierProvider<_ThemeModeNotifier, AppThemeMode>(
+  (ref) => _ThemeModeNotifier(),
+);
