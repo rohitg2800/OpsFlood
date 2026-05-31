@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'ads/admob_init.dart';
 import 'firebase_options.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/flood_providers.dart';
@@ -30,7 +31,7 @@ Future<void> main() async {
     try {
       await dotenv.load(fileName: '.env', mergeWith: {});
     } catch (e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
+      if (kDebugMode) debugPrint('⚠️  .env not found — running with defaults: $e');
     }
 
     // 2. Firebase
@@ -42,17 +43,27 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out — continuing without Firebase');
+              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
               throw TimeoutException('Firebase init timeout');
             },
           );
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase init failed (non-fatal): $e');
+        if (kDebugMode) debugPrint('⚠️  Firebase init failed (non-fatal): $e');
       }
     }
 
-    // 3. System chrome
+    // 3. AdMob
+    if (!kIsWeb) {
+      try {
+        await AdmobInit.initialize();
+        if (kDebugMode) debugPrint('✅  AdMob initialized');
+      } catch (e) {
+        if (kDebugMode) debugPrint('⚠️  AdMob init failed (non-fatal): $e');
+      }
+    }
+
+    // 4. System chrome
     if (!kIsWeb) {
       SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
         statusBarColor:                    Colors.transparent,
@@ -66,36 +77,36 @@ Future<void> main() async {
       ]);
     }
 
-    // 4. Global error handlers
+    // 5. Global error handlers
     FlutterError.onError = (FlutterErrorDetails details) {
       if (kDebugMode) {
         FlutterError.presentError(details);
-        debugPrint('\u274c FlutterError: ${details.summary}');
+        debugPrint('❌ FlutterError: ${details.summary}');
       }
     };
     PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-      if (kDebugMode) debugPrint('\u274c PlatformDispatcher: $error\n$stack');
+      if (kDebugMode) debugPrint('❌ PlatformDispatcher: $error\n$stack');
       return true;
     };
 
-    // 5. Theme + locale
+    // 6. Theme + locale
     await ThemeProvider().init();
 
-    // 6. Essential services
+    // 7. Essential services
     if (!kIsWeb) {
       await LocalCacheService.instance.init().catchError((e) {
-        if (kDebugMode) debugPrint('\u26a0\ufe0f  LocalCacheService.init failed: $e');
+        if (kDebugMode) debugPrint('⚠️  LocalCacheService.init failed: $e');
       });
 
       unawaited(
         FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  FcmService.init failed: $e');
+          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
         }),
       );
 
       unawaited(
         ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('\u26a0\ufe0f  ThresholdAlertService.start failed: $e');
+          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
         }),
       );
     }
@@ -111,13 +122,9 @@ class EquinoxBHApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // themeModeProvider is now ONLY in theme_provider.dart (StateNotifierProvider).
-    // flood_providers.dart no longer declares it — ambiguity resolved.
     final AppThemeMode appMode = ref.watch(themeModeProvider);
     final locale               = ref.watch(localeProvider);
 
-    // Switch expression: Dart exhaustiveness checker guarantees flutterMode
-    // is always assigned — no "must be assigned before use" error.
     final ThemeMode flutterMode = switch (appMode) {
       AppThemeMode.system => ThemeMode.system,
       AppThemeMode.light  => ThemeMode.light,
