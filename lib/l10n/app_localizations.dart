@@ -1,10 +1,5 @@
 // GENERATED — hand-written stub.
-// Run `flutter gen-l10n` to replace this with the real generated file.
-// This stub keeps the build green without requiring the codegen step.
-//
-// FIX: All getters now return the correct locale string via _t().
-// Previously every getter was hardcoded English, so changing language
-// in Settings had zero visible effect on any screen.
+// Run `flutter gen-l10n` to replace with the real generated file.
 library app_localizations;
 
 export 'package:flutter_localizations/flutter_localizations.dart'
@@ -17,31 +12,25 @@ import 'dart:ui' show Locale;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-/// Supported locales exposed as a constant for MaterialApp.supportedLocales.
 const List<Locale> kSupportedLocales = [
   Locale('en'),
   Locale('hi'),
 ];
 
-/// AppLocalizations — returns the correct string for the active locale.
-/// Screens access strings via AppLocalizations.of(context)!.<key>.
 class AppLocalizations {
   AppLocalizations(this.localeName);
-
   final String localeName;
 
-  static AppLocalizations of(BuildContext context) {
-    return Localizations.of<AppLocalizations>(context, AppLocalizations) ??
-        AppLocalizations('en');
-  }
+  static AppLocalizations of(BuildContext context) =>
+      Localizations.of<AppLocalizations>(context, AppLocalizations) ??
+      AppLocalizations('en');
 
   static const LocalizationsDelegate<AppLocalizations> delegate =
       _AppLocalizationsDelegate();
 
-  // ── Internal helper: pick string by locale ────────────────────────────────
   String _t(String en, String hi) => localeName == 'hi' ? hi : en;
 
-  // ── Strings ───────────────────────────────────────────────────────────────
+  // ── Original keys ────────────────────────────────────────────────────────────
   String get appTitle        => _t('EQUINOX-BH',          'इक्विनॉक्स-बीएच');
   String get tabHome         => _t('Home',                 'होम');
   String get tabMonitors     => _t('Monitors',             'निगरानी');
@@ -94,6 +83,27 @@ class AppLocalizations {
   String get predictionModel => _t('Prediction Model',     'पूर्वानुमान मॉडल');
   String get accuracy        => _t('Accuracy',             'सटीकता');
   String get confidence      => _t('Confidence',           'विश्वास स्तर');
+
+  // ── New keys (from grep audit) ──────────────────────────────────────────────────
+  String get live                => _t('LIVE',                          'लाइव');
+  String get riskIndex           => _t('RISK INDEX',                    'जोखिम सूचकांक');
+  String get allStationsSafe     => _t('All stations within safe levels', 'सभी स्टेशन सुरक्षित स्तर में');
+  String get fetchingLiveData    => _t('Fetching live flood data…',      'लाइव बाढ़ डेटा लोड हो रहा है…');
+  String get dataSources         => _t('CWC  •  GloFAS  •  IMD  •  Open-Meteo', 'CWC  •  GloFAS  •  IMD  •  Open-Meteo');
+  String get noStationsFound     => _t('No stations found.',             'कोई स्टेशन नहीं मिला।');
+  String get rivers              => _t('Rivers',                        'नदियाँ');
+  String get floodAlerts         => _t('Flood Alerts',                  'बाढ़ अलर्ट');
+  String get mlModelInfo         => _t('ML Model Info',                 'ML मॉडल जानकारी');
+  String get floodPredictionEngine => _t('Flood Prediction Engine',     'बाढ़ पूर्वानुमान इंजन');
+  String get stateMatrix         => _t('State Matrix',                  'राज्य मैट्रिक्स');
+  String get primaryRivers       => _t('Primary Rivers',               'प्रमुख नदियाँ');
+  String get vulnerableDistricts => _t('Vulnerable Districts',          'संवेदनशील जिले');
+  String get sortBy              => _t('Sort by:',                      'क्रम दें:');
+  String get fetchingWeather     => _t('Fetching live weather…',        'लाइव मौसम लोड हो रहा है…');
+  String get riverLevelTrend     => _t('24-hr River Level Trend',       '24-घंटे नदी स्तर रुझान');
+  String get capacity            => _t('capacity',                      'क्षमता');
+  String get buildingTrend       => _t('Building trend…',               'रुझान बन रहा है…');
+  String get comingSoon          => _t('Coming soon',                   'जल्द आएगा');
 }
 
 class _AppLocalizationsDelegate
@@ -105,13 +115,9 @@ class _AppLocalizationsDelegate
       kSupportedLocales.any((l) => l.languageCode == locale.languageCode);
 
   @override
-  Future<AppLocalizations> load(Locale locale) async {
-    return AppLocalizations(locale.languageCode);
-  }
+  Future<AppLocalizations> load(Locale locale) async =>
+      AppLocalizations(locale.languageCode);
 
-  // FIX: shouldReload must return true so the delegate re-loads strings
-  // when the locale changes at runtime. false meant old English strings
-  // were cached and never replaced with Hindi.
   @override
   bool shouldReload(_AppLocalizationsDelegate old) => true;
 }
