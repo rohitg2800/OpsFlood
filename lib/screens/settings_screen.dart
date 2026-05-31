@@ -1,5 +1,5 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v2  (theme + language switching fixed)
+// OpsFlood — SettingsScreen v3  (language picker orphaned-scope fix)
 library;
 
 import 'package:flutter/material.dart';
@@ -81,7 +81,6 @@ class SettingsScreen extends ConsumerWidget {
                     icon:    Icons.language_rounded,
                     label:   'Language',
                     sublabel: kLocaleLabels[locale.languageCode] ?? locale.languageCode,
-                    // Pass ref so the bottom sheet can update provider state.
                     onTap:   () => _showLanguagePicker(context, ref),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -198,130 +197,130 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   // ── Language picker bottom sheet
-  // Uses ref directly (passed from ConsumerWidget.build) so there is no
-  // "lost ProviderScope" issue that the old builder: (_) => ... had.
+  // FIX: removed the wrapping ProviderScope(parent: ProviderContainer()).
+  // That created a brand-new, orphaned container isolated from the root
+  // ProviderScope. localeNotifier.setLocale() was updating the orphan,
+  // not the real app state — so the language never changed in the UI.
+  //
+  // Solution: use a plain Consumer(builder:) so the sheet inherits the
+  // root ProviderScope from the widget tree, and state updates propagate
+  // all the way up to MaterialApp.locale in main.dart.
   void _showLanguagePicker(BuildContext context, WidgetRef ref) {
-    final rc = RiverColors.of(context);
-    // Capture notifier before async gap.
+    final rc             = RiverColors.of(context);
+    // Capture notifier before the async showModalBottomSheet gap.
     final localeNotifier = ref.read(localeProvider.notifier);
-    final currentLocale  = ref.read(localeProvider);
 
     showModalBottomSheet(
       context:             context,
       backgroundColor:     Colors.transparent,
       isScrollControlled:  true,
-      // Use a ConsumerBuilder inside the sheet so it can watch provider state.
-      builder: (sheetCtx) => ProviderScope(
-        parent: ProviderContainer(
-          // Share the parent container so the same providers are used.
-        ),
-        child: Consumer(
-          builder: (ctx, sheetRef, _) {
-            final locale = sheetRef.watch(localeProvider);
-            return Container(
-              decoration: BoxDecoration(
-                color:        AppPalette.abyss3,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-                border: Border(
-                  top: BorderSide(color: AppPalette.abyssStroke),
-                ),
+      // Use ctx (not _) so the sheet is in the correct widget-tree scope.
+      builder: (ctx) => Consumer(
+        builder: (consumerCtx, sheetRef, _) {
+          final locale = sheetRef.watch(localeProvider);
+          return Container(
+            decoration: BoxDecoration(
+              color:        AppPalette.abyss3,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border(
+                top: BorderSide(color: AppPalette.abyssStroke),
               ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // drag handle
-                      Container(
-                        width: 40, height: 4,
-                        decoration: BoxDecoration(
-                          color:        AppPalette.abyssStroke,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // drag handle
+                    Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(
+                        color:        AppPalette.abyssStroke,
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Icon(Icons.language_rounded,
-                              color: AppPalette.cyan, size: 20),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Select Language',
-                            style: TextStyle(
-                              color:      AppPalette.textWhite,
-                              fontSize:   16,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Icon(Icons.language_rounded,
+                            color: AppPalette.cyan, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Select Language',
+                          style: TextStyle(
+                            color:      AppPalette.textWhite,
+                            fontSize:   16,
+                            fontWeight: FontWeight.w700,
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      ...kSupportedLocales.map((l) {
-                        final isActive = l.languageCode == locale.languageCode;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Material(
-                            color:        Colors.transparent,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ...kSupportedLocales.map((l) {
+                      final isActive = l.languageCode == locale.languageCode;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color:        Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
                             borderRadius: BorderRadius.circular(16),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: () {
-                                localeNotifier.setLocale(l);
-                                Navigator.pop(sheetCtx);
-                              },
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                curve:    Curves.easeOutCubic,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 14),
-                                decoration: BoxDecoration(
+                            onTap: () {
+                              localeNotifier.setLocale(l);
+                              Navigator.pop(ctx);
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              curve:    Curves.easeOutCubic,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                color: isActive
+                                    ? AppPalette.cyan.withValues(alpha: 0.15)
+                                    : AppPalette.abyss2,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
                                   color: isActive
-                                      ? AppPalette.cyan.withValues(alpha: 0.15)
-                                      : AppPalette.abyss2,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: isActive
-                                        ? AppPalette.cyan.withValues(alpha: 0.5)
-                                        : AppPalette.abyssStroke,
-                                    width: isActive ? 2 : 1,
-                                  ),
+                                      ? AppPalette.cyan.withValues(alpha: 0.5)
+                                      : AppPalette.abyssStroke,
+                                  width: isActive ? 2 : 1,
                                 ),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      kLocaleLabels[l.languageCode] ?? l.languageCode,
-                                      style: TextStyle(
-                                        color: isActive
-                                            ? AppPalette.cyan
-                                            : AppPalette.textWhite,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize:   15,
-                                      ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    kLocaleLabels[l.languageCode] ?? l.languageCode,
+                                    style: TextStyle(
+                                      color: isActive
+                                          ? AppPalette.cyan
+                                          : AppPalette.textWhite,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize:   15,
                                     ),
-                                    const Spacer(),
-                                    if (isActive)
-                                      const Icon(Icons.check_circle,
-                                          color: AppPalette.cyan, size: 20)
-                                    else
-                                      Icon(Icons.circle_outlined,
-                                          color: AppPalette.abyssStroke,
-                                          size: 20),
-                                  ],
-                                ),
+                                  ),
+                                  const Spacer(),
+                                  if (isActive)
+                                    const Icon(Icons.check_circle,
+                                        color: AppPalette.cyan, size: 20)
+                                  else
+                                    Icon(Icons.circle_outlined,
+                                        color: AppPalette.abyssStroke,
+                                        size: 20),
+                                ],
                               ),
                             ),
                           ),
-                        );
-                      }),
-                    ],
-                  ),
+                        ),
+                      );
+                    }),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
   }

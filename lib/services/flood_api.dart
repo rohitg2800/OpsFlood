@@ -32,15 +32,18 @@ class FloodApi {
   final _c = OpsClient.instance;
 
   // ── Health (only used by predict path, not polling) ───────────────────────
+  // FIX: pass path-only string, NOT AppConfig.epHealth (full URL).
+  // OpsClient._buildUri() prepends baseUrl — passing a full URL doubled it → 404.
   Future<Map<String, dynamic>> healthCheck({bool coldStart = false}) =>
       _c.get(
-        AppConfig.epHealth,
+        '/health',
         timeout: coldStart ? AppConfig.coldStartTimeout : AppConfig.healthTimeout,
       );
 
   // ── Prediction (ML inference) ─────────────────────────────────────────────
+  // FIX: pass path-only '/predict/v2', NOT AppConfig.epPredict (full URL).
   Future<Map<String, dynamic>> predict(Map<String, dynamic> payload) =>
-      _c.post(AppConfig.epPredict, payload);
+      _c.post('/predict/v2', payload);
 
   // ── STUBBED — backend endpoints that no longer exist ─────────────────────
   // Return empty but valid payloads so callers don't crash or retry.

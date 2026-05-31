@@ -62,12 +62,14 @@ class _FilterMeta {
 }
 
 // ─── Public helper ────────────────────────────────────────────────────────────
+// FIX: use builder: (ctx) not builder: (_) so the sheet receives the correct
+// BuildContext that is still inside the root ProviderScope widget tree.
 void showPremiumThemeSheet(BuildContext context) {
   showModalBottomSheet(
     context:          context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => const _PremiumThemeSheet(),
+    builder: (ctx) => const _PremiumThemeSheet(),
   );
 }
 
