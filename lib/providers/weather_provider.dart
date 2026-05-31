@@ -1,8 +1,5 @@
 // lib/providers/weather_provider.dart
-// OpsFlood — WeatherProvider v1
-// Riverpod StateNotifier: city search via geocoding.open-meteo.com
-// then live weather fetch via api.open-meteo.com
-// Exposes WeatherState shared by WeatherScreen AND MonitorsScreen
+// OpsFlood — WeatherProvider v2 (Riverpod 3)
 library;
 
 import 'dart:convert';
@@ -14,13 +11,12 @@ import 'package:http/http.dart' as http;
 // Models
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Snapshot of current conditions from Open-Meteo
 class WeatherCurrent {
   final double tempC;
   final int    humidity;
   final double precipMm;
   final double windKph;
-  final double windDir;        // degrees
+  final double windDir;
   final int    weatherCode;
   final double feelsLikeC;
   final double uvIndex;
@@ -56,7 +52,6 @@ class WeatherCurrent {
   );
 }
 
-/// One day of forecast
 class WeatherDay {
   final String date;
   final double maxC;
@@ -74,10 +69,9 @@ class WeatherDay {
   });
 }
 
-/// City search result
 class CityResult {
   final String name;
-  final String admin1;    // state/region
+  final String admin1;
   final String country;
   final double lat;
   final double lon;
@@ -114,24 +108,16 @@ class WeatherState {
   final bool             searchLoading;
   final String           error;
 
-  // ── Computed fields used by MonitorsScreen ──────────────────────────────
-  /// Current temperature in °C
-  double get tempC          => current?.tempC   ?? 0;
-  /// Current precipitation in mm
-  double get precipMm       => current?.precipMm ?? 0;
-  /// 7-day total rainfall (sum of forecast)
-  double get rainfall7dMm   =>
+  double get tempC        => current?.tempC    ?? 0;
+  double get precipMm     => current?.precipMm ?? 0;
+  double get rainfall7dMm =>
       forecast.fold(0.0, (s, d) => s + d.rainMm);
-  /// Rainfall risk index 0-100 (simple heuristic for monitors)
   double get rainfallIndex  => (rainfall7dMm / 3.5).clamp(0, 100);
-  /// Max precipitation probability in 7-day window
   double get maxPrecipProb  =>
       forecast.isEmpty ? 0 : forecast.map((d) => d.precipProb).reduce(
           (a, b) => a > b ? a : b);
-  /// Humidity %
-  int get humidity          => current?.humidity ?? 0;
-  /// Wind speed kph
-  double get windKph        => current?.windKph  ?? 0;
+  int    get humidity     => current?.humidity ?? 0;
+  double get windKph      => current?.windKph  ?? 0;
 
   const WeatherState({
     this.status        = WeatherStatus.idle,
@@ -169,15 +155,17 @@ class WeatherState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Notifier
+// Notifier (Riverpod 3)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class WeatherNotifier extends StateNotifier<WeatherState> {
-  WeatherNotifier() : super(const WeatherState()) {
-    fetchWeather();
+class WeatherNotifier extends Notifier<WeatherState> {
+  @override
+  WeatherState build() {
+    // Kick off initial fetch after build returns.
+    Future.microtask(fetchWeather);
+    return const WeatherState();
   }
 
-  // Search cities via Open-Meteo geocoding
   Future<void> searchCity(String query) async {
     if (query.trim().isEmpty) {
       state = state.copyWith(searchResults: [], searchLoading: false);
@@ -196,8 +184,7 @@ class WeatherNotifier extends StateNotifier<WeatherState> {
             .cast<Map<String, dynamic>>()
             .map(CityResult.fromJson)
             .toList();
-        state = state.copyWith(
-            searchResults: results, searchLoading: false);
+        state = state.copyWith(searchResults: results, searchLoading: false);
       } else {
         state = state.copyWith(searchResults: [], searchLoading: false);
       }
@@ -207,7 +194,6 @@ class WeatherNotifier extends StateNotifier<WeatherState> {
     }
   }
 
-  // Select a city from search results
   Future<void> selectCity(CityResult city) async {
     state = state.copyWith(
       cityName:      city.displayName,
@@ -218,7 +204,6 @@ class WeatherNotifier extends StateNotifier<WeatherState> {
     await fetchWeather();
   }
 
-  // Fetch weather for current lat/lon
   Future<void> fetchWeather() async {
     state = state.copyWith(status: WeatherStatus.loading, error: '');
     try {
@@ -240,24 +225,24 @@ class WeatherNotifier extends StateNotifier<WeatherState> {
         final cur     = WeatherCurrent.fromJson(
             body['current'] as Map<String, dynamic>? ?? {});
         final daily   = body['daily'] as Map<String, dynamic>? ?? {};
-        final dates   = (daily['time']                        as List?)?.cast<String>()  ?? [];
-        final maxT    = (daily['temperature_2m_max']          as List?)?.cast<num>()    ?? [];
-        final minT    = (daily['temperature_2m_min']          as List?)?.cast<num>()    ?? [];
-        final rains   = (daily['precipitation_sum']           as List?)?.cast<num?>()   ?? [];
-        final probs   = (daily['precipitation_probability_max'] as List?)?.cast<num?>() ?? [];
-        final winds   = (daily['wind_speed_10m_max']          as List?)?.cast<num?>()   ?? [];
-        final uvs     = (daily['uv_index_max']                as List?)?.cast<num?>()   ?? [];
-        final codes   = (daily['weathercode']                 as List?)?.cast<num?>()   ?? [];
+        final dates   = (daily['time']                          as List?)?.cast<String>()  ?? [];
+        final maxT    = (daily['temperature_2m_max']            as List?)?.cast<num>()    ?? [];
+        final minT    = (daily['temperature_2m_min']            as List?)?.cast<num>()    ?? [];
+        final rains   = (daily['precipitation_sum']             as List?)?.cast<num?>()   ?? [];
+        final probs   = (daily['precipitation_probability_max'] as List?)?.cast<num?>()   ?? [];
+        final winds   = (daily['wind_speed_10m_max']            as List?)?.cast<num?>()   ?? [];
+        final uvs     = (daily['uv_index_max']                  as List?)?.cast<num?>()   ?? [];
+        final codes   = (daily['weathercode']                   as List?)?.cast<num?>()   ?? [];
 
         final forecast = List.generate(dates.length, (i) => WeatherDay(
-          date:         dates[i],
-          maxC:         (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
-          minC:         (minT.elementAtOrNull(i)  ?? 0).toDouble(),
-          rainMm:       (rains.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-          precipProb:   (probs.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-          windMaxKph:   (winds.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-          uvIndex:      (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
-          weatherCode:  (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
+          date:        dates[i],
+          maxC:        (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
+          minC:        (minT.elementAtOrNull(i)  ?? 0).toDouble(),
+          rainMm:      (rains.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+          precipProb:  (probs.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+          windMaxKph:  (winds.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+          uvIndex:     (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
+          weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
         ));
 
         state = state.copyWith(
@@ -288,6 +273,6 @@ class WeatherNotifier extends StateNotifier<WeatherState> {
 // Provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-final weatherProvider =
-    StateNotifierProvider<WeatherNotifier, WeatherState>(
-        (_) => WeatherNotifier());
+final weatherProvider = NotifierProvider<WeatherNotifier, WeatherState>(
+  WeatherNotifier.new,
+);
