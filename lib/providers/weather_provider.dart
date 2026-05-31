@@ -159,11 +159,22 @@ class WeatherState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class WeatherNotifier extends Notifier<WeatherState> {
+  // Cache: track last successful fetch time + coords
+  DateTime? _lastFetchTime;
+  double?   _lastFetchLat;
+  double?   _lastFetchLon;
+  static const _cacheDuration = Duration(minutes: 15);
+
   @override
   WeatherState build() {
-    // Kick off initial fetch after build returns.
     Future.microtask(fetchWeather);
     return const WeatherState();
+  }
+
+  bool _isCacheValid() {
+    if (_lastFetchTime == null) return false;
+    if (_lastFetchLat != state.lat || _lastFetchLon != state.lon) return false;
+    return DateTime.now().difference(_lastFetchTime!) < _cacheDuration;
   }
 
   Future<void> searchCity(String query) async {
@@ -201,10 +212,18 @@ class WeatherNotifier extends Notifier<WeatherState> {
       lon:           city.lon,
       searchResults: [],
     );
+    // City changed — bypass cache
+    _lastFetchTime = null;
     await fetchWeather();
   }
 
-  Future<void> fetchWeather() async {
+  Future<void> fetchWeather({bool forceRefresh = false}) async {
+    // Return cached data if still fresh and not a manual refresh
+    if (!forceRefresh && _isCacheValid() && state.status == WeatherStatus.loaded) {
+      if (kDebugMode) debugPrint('WeatherNotifier: serving from cache');
+      return;
+    }
+
     state = state.copyWith(status: WeatherStatus.loading, error: '');
     try {
       final lat = state.lat;
@@ -244,6 +263,11 @@ class WeatherNotifier extends Notifier<WeatherState> {
           uvIndex:     (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
           weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
         ));
+
+        // Update cache metadata
+        _lastFetchTime = DateTime.now();
+        _lastFetchLat  = lat;
+        _lastFetchLon  = lon;
 
         state = state.copyWith(
           status:   WeatherStatus.loaded,
