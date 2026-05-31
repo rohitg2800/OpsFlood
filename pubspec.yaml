@@ -27,7 +27,7 @@ dependencies:
   firebase_messaging: ^16.2.2
   cloud_firestore:    ^6.4.1
 
-  # Background tasks (latest published version)
+  # Background tasks
   workmanager: ^0.9.0+3
 
   # Charts
@@ -42,11 +42,14 @@ dependencies:
   # Links
   url_launcher: ^6.3.0
 
-  # Local notifications (stay on 17.x — 18+ has breaking API changes)
+  # Local notifications
   flutter_local_notifications: ^17.2.4
 
   # Network status
   connectivity_plus: ^7.1.1
+
+  # Ads
+  google_mobile_ads: ^5.1.0
 
   # Icons
   cupertino_icons: ^1.0.6
