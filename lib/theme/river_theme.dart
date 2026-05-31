@@ -1,37 +1,35 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EQUINOX-BR05  –  Abyss Ops Design Language  (v5 — Authentic Rebuild)
+//  EQUINOX-BR05  –  Golden Ops Design Language  (v6 — Warm Gold Rebuild)
 //
 //  Philosophy:
-//    • True-black anchor          →  #08090C (near-black, warm-shifted not blue)
-//    • Desaturated charcoal layers→  low-chroma steps so accents breathe
-//    • Electric cyan accent        →  live data / active state
-//    • Warm amber gold             →  metrics / numbers
-//    • Red reserved                →  critical alerts ONLY
-//    • Vivid emerald / orange      →  safe / warning status
-//    • Glass morphism              →  frosted overlays for depth
+//    • Deep warm-gold base        →  rich dark-amber scaffold, zero blue
+//    • Bronze-to-gold layers      →  each card step warms upward visibly
+//    • Bright amber gold accent   →  primary CTA / live data highlights
+//    • Electric cyan retained     →  only for live status / alerts
+//    • Red reserved               →  critical alerts ONLY
+//    • Glass morphism             →  warm frosted overlays
 //
-//  Background progression (dark → light):
-//    abyss0  #08090C  ← app/scaffold floor  (warm near-black)
-//    abyss1  #0D0F14  ← screen bg           (slightly lifted, neutral-cool)
-//    abyss2  #131720  ← card surface        (subtle blue-grey undertone)
-//    abyss3  #1A1F2E  ← elevated card       (clearly distinct, richer)
-//    abyss4  #212840  ← chip / input field  (deeper blue for interactive)
-//    abyssStroke #2A3352 ← borders          (visible but not harsh)
+//  Background progression (dark → light, all warm gold):
+//    abyss0  #0F0A00  ← deepest floor  (near-black with warm gold tint)
+//    abyss1  #1A1000  ← scaffold bg    (dark amber-brown)
+//    abyss2  #251800  ← card surface   (deep bronze)
+//    abyss3  #312200  ← elevated card  (richer bronze-gold)
+//    abyss4  #3D2C00  ← chip / input   (warm mid-gold)
+//    abyssStroke #5A4000 ← borders     (visible golden edge)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppPalette {
-  // ── Abyss backgrounds ─────────────────────────────────────────────────────
-  //  Each step is clearly distinct — no two layers collapse into one.
-  //  Warm-neutral progression avoids the "generic dark mode blue" look.
-  static const abyss0      = Color(0xFF08090C);  // deepest bg — warm near-black
-  static const abyss1      = Color(0xFF0D0F14);  // scaffold — lifted neutral
-  static const abyss2      = Color(0xFF131720);  // card surface — blue-grey
-  static const abyss3      = Color(0xFF1A1F2E);  // card elevated — richer
-  static const abyss4      = Color(0xFF212840);  // chip / input — deeper blue
-  static const abyssStroke = Color(0xFF2A3352);  // borders — visible not harsh
-  static const abyssGlass  = Color(0xBB131720);  // frosted overlay (higher alpha for depth)
+  // ── Golden Abyss backgrounds ────────────────────────────────────────────────
+  //  Warm amber-to-bronze depth ladder. Zero blue anywhere.
+  static const abyss0      = Color(0xFF0F0A00);  // near-black warm gold floor
+  static const abyss1      = Color(0xFF1A1000);  // dark amber-brown scaffold
+  static const abyss2      = Color(0xFF251800);  // deep bronze card
+  static const abyss3      = Color(0xFF312200);  // elevated bronze-gold card
+  static const abyss4      = Color(0xFF3D2C00);  // chip / input warm gold
+  static const abyssStroke = Color(0xFF5A4000);  // golden border edge
+  static const abyssGlass  = Color(0xCC251800);  // frosted warm bronze overlay
 
   // ── Keep old names as aliases so existing code compiles ──────────────────
   static const navy0      = abyss0;
@@ -42,17 +40,26 @@ class AppPalette {
   static const navyStroke = abyssStroke;
   static const navyGlass  = abyssGlass;
 
-  // ── Electric cyan ─────────────────────────────────────────────────────────
-  static const cyan      = Color(0xFF00C6FF);
+  // ── Primary accent — bright amber gold ───────────────────────────────────
+  //  Replaces cyan as the main accent throughout the UI
+  static const gold        = Color(0xFFFFB800);  // vivid amber gold (primary)
+  static const goldLight   = Color(0xFFFFD966);  // bright highlight gold
+  static const goldDark    = Color(0xFFB07800);  // pressed / muted gold
+  static const goldGlow    = Color(0x55FFB800);  // glow halo
+  static const goldGlow2   = Color(0x22FFB800);  // subtle ambient glow
+  static const goldDim     = Color(0xFF7A5200);  // inactive gold
+
+  // ── Keep cyan alias for live-status only ─────────────────────────────────
+  static const cyan      = Color(0xFF00C6FF);  // reserved for LIVE badge only
   static const cyanDark  = Color(0xFF007FA8);
   static const cyanGlow  = Color(0x4400C6FF);
   static const cyanDim   = Color(0xFF005F80);
   static const cyanGlow2 = Color(0x1A00C6FF);
 
-  // ── Warm amber gold ───────────────────────────────────────────────────────
-  static const amber      = Color(0xFFE8A020);
-  static const amberLight = Color(0xFFFFCC55);
-  static const amberDim   = Color(0xFF8A5C00);
+  // ── Warm amber gold metrics ──────────────────────────────────────────────
+  static const amber      = Color(0xFFFFB800);  // same as gold — unified
+  static const amberLight = Color(0xFFFFD966);
+  static const amberDim   = Color(0xFF7A5200);
 
   // ── Status palette ────────────────────────────────────────────────────────
   static const safe        = Color(0xFF10E88A);
@@ -65,30 +72,27 @@ class AppPalette {
   static const critGlow    = Color(0x28FF1A44);
 
   // ── Text ──────────────────────────────────────────────────────────────────
-  static const textWhite = Color(0xFFF2F6FF);
-  static const textGrey  = Color(0xFF6A7E98);
-  static const textDim   = Color(0xFF2E3E55);
+  static const textWhite = Color(0xFFFFF8E7);  // warm white — cream not cold
+  static const textGrey  = Color(0xFF9A8060);  // warm tan-grey
+  static const textDim   = Color(0xFF4A3410);  // dark warm-brown
 
   // ── Gradient helpers ──────────────────────────────────────────────────────
-  //  Diagonal gradient — abyss1 to abyss3 for visible card depth
   static const LinearGradient abyssGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [abyss1, abyss3],
   );
 
-  // keep old name alive
   static const LinearGradient navyGradient = abyssGradient;
 
-  // Scaffold radial glow — subtle cyan bloom from top-center
-  // Use as a Stack background behind your scaffold content for depth
+  // Golden radial glow from top-center — warm amber bloom
   static BoxDecoration scaffoldDecoration() => const BoxDecoration(
     gradient: RadialGradient(
-      center: Alignment(0.0, -0.7),
-      radius: 1.2,
+      center: Alignment(0.0, -0.6),
+      radius: 1.1,
       colors: [
-        Color(0x1200C6FF),  // faint cyan bloom at top
-        Color(0xFF08090C),  // warm-black floor
+        Color(0x33FFB800),  // warm gold bloom at top
+        Color(0xFF0F0A00),  // deep warm-black floor
       ],
     ),
   );
@@ -97,19 +101,19 @@ class AppPalette {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [
-      c.withValues(alpha: 0.18),
+      c.withValues(alpha: 0.20),
       c.withValues(alpha: 0.04),
     ],
   );
 
   static List<BoxShadow> glowShadow(Color c, {double blur = 20}) => [
     BoxShadow(
-      color: c.withValues(alpha: 0.22),
+      color: c.withValues(alpha: 0.28),
       blurRadius: blur,
       offset: const Offset(0, 6),
     ),
     BoxShadow(
-      color: c.withValues(alpha: 0.08),
+      color: c.withValues(alpha: 0.10),
       blurRadius: blur * 2,
       spreadRadius: 2,
     ),
@@ -133,7 +137,6 @@ class AppPalette {
         ],
       );
 
-  // ── Convenience: status color by level string ─────────────────────────────
   static Color statusColor(String level) {
     switch (level.toUpperCase()) {
       case 'SAFE':     return safe;
@@ -189,27 +192,27 @@ class RiverColors extends ThemeExtension<RiverColors> {
   final Color navInactive;
 
   static RiverColors of(BuildContext context) =>
-      Theme.of(context).extension<RiverColors>() ?? _abyss;
+      Theme.of(context).extension<RiverColors>() ?? _golden;
 
-  static const RiverColors _abyss = RiverColors(
+  static const RiverColors _golden = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
     riverDanger:    AppPalette.danger,
     riverCritical:  AppPalette.critical,
     riverSurface:   AppPalette.abyss2,
-    riverGlow:      AppPalette.cyanGlow,
+    riverGlow:      AppPalette.goldGlow,
     cardBg:         AppPalette.abyss2,
     cardBgElevated: AppPalette.abyss3,
     chipBg:         AppPalette.abyss4,
     stroke:         AppPalette.abyssStroke,
     textPrimary:    AppPalette.textWhite,
     textSecondary:  AppPalette.textGrey,
-    sparklineColor: AppPalette.cyan,
-    accent:         AppPalette.cyan,
-    accentGlow:     AppPalette.cyanGlow,
-    metricColor:    AppPalette.amber,
+    sparklineColor: AppPalette.gold,
+    accent:         AppPalette.gold,
+    accentGlow:     AppPalette.goldGlow,
+    metricColor:    AppPalette.goldLight,
     navBg:          AppPalette.abyss0,
-    navActive:      AppPalette.cyan,
+    navActive:      AppPalette.gold,
     navInactive:    AppPalette.textDim,
   );
 
@@ -218,21 +221,21 @@ class RiverColors extends ThemeExtension<RiverColors> {
     riverWarning:   AppPalette.warning,
     riverDanger:    AppPalette.danger,
     riverCritical:  AppPalette.critical,
-    riverSurface:   Color(0xFFF0F4FF),
-    riverGlow:      Color(0x220099BB),
+    riverSurface:   Color(0xFFFFF8E7),
+    riverGlow:      Color(0x33FFB800),
     cardBg:         Colors.white,
-    cardBgElevated: Color(0xFFF0F4FF),
-    chipBg:         Color(0xFFE0EAF8),
-    stroke:         Color(0xFFCCDDEE),
-    textPrimary:    Color(0xFF0A1628),
-    textSecondary:  Color(0xFF4A6080),
-    sparklineColor: AppPalette.cyanDark,
-    accent:         AppPalette.cyanDark,
-    accentGlow:     Color(0x220099BB),
+    cardBgElevated: Color(0xFFFFF3CC),
+    chipBg:         Color(0xFFFFE999),
+    stroke:         Color(0xFFE8C84A),
+    textPrimary:    Color(0xFF1A0F00),
+    textSecondary:  Color(0xFF6B4F20),
+    sparklineColor: AppPalette.goldDark,
+    accent:         AppPalette.goldDark,
+    accentGlow:     Color(0x33FFB800),
     metricColor:    AppPalette.amberDim,
-    navBg:          Color(0xFF0A1628),
-    navActive:      AppPalette.cyan,
-    navInactive:    Color(0xFF8A9AAA),
+    navBg:          Color(0xFF1A1000),
+    navActive:      AppPalette.gold,
+    navInactive:    Color(0xFF9A8060),
   );
 
   @override
@@ -294,10 +297,10 @@ class RiverColors extends ThemeExtension<RiverColors> {
 
   static ThemeData lightTheme() => _buildTheme(
       brightness: Brightness.light, ext: _light,
-      scaffoldBg: const Color(0xFF0A1628));
+      scaffoldBg: const Color(0xFF1A1000));
 
   static ThemeData darkTheme() => _buildTheme(
-      brightness: Brightness.dark, ext: _abyss,
+      brightness: Brightness.dark, ext: _golden,
       scaffoldBg: AppPalette.abyss1);
 
   static ThemeData _buildTheme({
@@ -307,11 +310,11 @@ class RiverColors extends ThemeExtension<RiverColors> {
   }) {
     final isDark = brightness == Brightness.dark;
     final cs = ColorScheme.fromSeed(
-      seedColor: AppPalette.cyan,
+      seedColor: AppPalette.gold,
       brightness: brightness,
     ).copyWith(
-      primary:     AppPalette.cyan,
-      secondary:   AppPalette.amber,
+      primary:     AppPalette.gold,
+      secondary:   AppPalette.goldLight,
       surface:     isDark ? AppPalette.abyss2 : Colors.white,
       onPrimary:   AppPalette.abyss0,
       onSecondary: AppPalette.abyss0,
@@ -356,13 +359,13 @@ class RiverColors extends ThemeExtension<RiverColors> {
         shape:     RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(22),
           side: BorderSide(
-            color: isDark ? AppPalette.abyssStroke : const Color(0xFFCCDDEE),
+            color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
             width: 1,
           ),
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF0A1628),
+        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF1A1000),
         foregroundColor:  AppPalette.textWhite,
         elevation:        0,
         centerTitle:      false,
@@ -371,22 +374,22 @@ class RiverColors extends ThemeExtension<RiverColors> {
           color: AppPalette.textWhite, fontSize: 20,
           fontWeight: FontWeight.w800, letterSpacing: -0.5,
         ),
-        iconTheme: const IconThemeData(color: AppPalette.cyan),
+        iconTheme: const IconThemeData(color: AppPalette.gold),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF0A1628),
-        indicatorColor:   AppPalette.cyanGlow,
+        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF1A1000),
+        indicatorColor:   AppPalette.goldGlow,
         height:           64,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: AppPalette.cyan, size: 24);
+            return const IconThemeData(color: AppPalette.gold, size: 24);
           }
           return const IconThemeData(color: AppPalette.textDim, size: 22);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return const TextStyle(
-              color: AppPalette.cyan, fontSize: 10,
+              color: AppPalette.gold, fontSize: 10,
               fontWeight: FontWeight.w700, letterSpacing: 0.3);
           }
           return const TextStyle(
@@ -395,7 +398,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppPalette.cyan,
+          backgroundColor: AppPalette.gold,
           foregroundColor: AppPalette.abyss0,
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -404,26 +407,26 @@ class RiverColors extends ThemeExtension<RiverColors> {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppPalette.cyan,
-          side: const BorderSide(color: AppPalette.cyan, width: 1.5),
+          foregroundColor: AppPalette.gold,
+          side: const BorderSide(color: AppPalette.gold, width: 1.5),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: isDark ? AppPalette.abyss4 : const Color(0xFFE0EAF8),
+        backgroundColor: isDark ? AppPalette.abyss4 : const Color(0xFFFFE999),
         labelStyle: TextStyle(
           fontSize: 12, fontWeight: FontWeight.w600,
           color: isDark ? AppPalette.textWhite : AppPalette.abyss2,
         ),
         side: BorderSide(
-          color: isDark ? AppPalette.abyssStroke : const Color(0xFFCCDDEE),
+          color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
           width: 1,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppPalette.cyan,
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: AppPalette.gold,
         linearTrackColor: AppPalette.abyss3,
       ),
       dividerTheme: const DividerThemeData(
@@ -442,7 +445,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.cyan, width: 2),
+          borderSide: const BorderSide(color: AppPalette.gold, width: 2),
         ),
         hintStyle: const TextStyle(color: AppPalette.textDim),
       ),
