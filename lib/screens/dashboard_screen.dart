@@ -80,7 +80,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _onData() {
     if (!mounted) return;
-    // Build alert log from risk changes
     final snap = _sorted.map((d) => '${d.city}:${d.riskLevel}').join(',');
     if (_prevRiskSnapshot != null && snap != _prevRiskSnapshot) {
       for (final d in _sorted) {
@@ -118,7 +117,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  // ── Data helpers ────────────────────────────────────────────────────────
+  // ── Data helpers ─────────────────────────────────────────────────────
   List<FloodData> get _sorted {
     final list = List<FloodData>.from(_service.liveLevels);
     list.sort((a, b) {
@@ -149,7 +148,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     catch (_) { return null; }
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final data = _sorted;
@@ -162,7 +161,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              // ── Command header
               SliverToBoxAdapter(child: _CommandHeader(
                 pulseAnim:   _pulseAnim,
                 shimmerAnim: _shimmerAnim,
@@ -174,7 +172,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 lastUpdated: _service.lastFetchTime,
               )),
 
-              // ── Hero Arc Gauge + Bento KPI grid
               SliverToBoxAdapter(child: _HeroSection(
                 arcAnim:       _arcAnim,
                 overallRisk:   _overallRisk,
@@ -192,10 +189,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 SliverToBoxAdapter(child: _EmptyState()),
               ] else ...[
 
-                // ── NEW: Quick Access Grid
                 SliverToBoxAdapter(child: _QuickAccessGrid(context: context)),
 
-                // ── NEW: Flood Hotspot Cards (top 3)
                 if (_sorted.isNotEmpty) ...[
                   SliverToBoxAdapter(child: _SectionHeader(
                     title: 'Flood Hotspots',
@@ -208,7 +203,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   )),
                 ],
 
-                // ── Live River Status
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Live River Status',
                   sub:   '${data.length} stations monitored',
@@ -223,7 +217,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   service:   _service,
                 )),
 
-                // ── River Level Trend
                 SliverToBoxAdapter(child: _SectionHeader(
                   title:    'River Level Trend',
                   sub:      _selectedCity ?? (data.isNotEmpty ? data.first.city : ''),
@@ -235,7 +228,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   selected: _selectedData ?? (data.isNotEmpty ? data.first : null),
                 )),
 
-                // ── NEW: Rainfall Forecast Strip
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Rainfall Data',
                   sub:   'IMD 24h estimate · ${_selectedCity ?? (data.isNotEmpty ? data.first.city : '')}',
@@ -246,7 +238,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   cities: data.take(8).toList(),
                 )),
 
-                // ── Capacity Overview
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Capacity Overview',
                   sub:   'Top 8 by flood fill %',
@@ -255,7 +246,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 )),
                 SliverToBoxAdapter(child: _CapacityChart(data: data.take(8).toList())),
 
-                // ── State Risk Heatmap
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'State Risk Heatmap',
                   sub:   'Region-level flood index',
@@ -267,7 +257,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   child: RiskHeatmap(entries: _buildHeatmapEntries(data)),
                 )),
 
-                // ── NEW: Alert Activity Log
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Alert Activity',
                   sub:   _alertLog.isEmpty ? 'Watching for changes…' : 'Last ${_alertLog.length} status changes',
@@ -275,11 +264,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                   color: AppPalette.amber,
                 )),
                 SliverToBoxAdapter(child: _AlertActivityLog(
-                  log:     _alertLog,
-                  data:    data,
+                  log:  _alertLog,
+                  data: data,
                 )),
 
-                // ── NEW: System Stats Bar
                 SliverToBoxAdapter(child: _SystemStatsBar(
                   totalStations: data.length,
                   riversCount:   data.map((d) => d.riverName ?? '').toSet().where((s) => s.isNotEmpty).length,
@@ -339,7 +327,7 @@ class _AlertEvent {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// COMMAND HEADER  (unchanged from v21)
+// COMMAND HEADER  — title changed to EQUINOX-BR05
 // ═══════════════════════════════════════════════════════════════════════
 class _CommandHeader extends StatelessWidget {
   final Animation<double> pulseAnim;
@@ -364,6 +352,7 @@ class _CommandHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // Logo mark
           AnimatedBuilder(
             animation: shimmerAnim,
             builder: (_, __) {
@@ -407,10 +396,10 @@ class _CommandHeader extends StatelessWidget {
                     colors: [Color(0xFF00E5FF), Color(0xFF0072FF)],
                   ).createShader(b),
                   child: const Text(
-                    'OpsFlood',
+                    'EQUINOX-BR05',
                     style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w900,
-                      color: Colors.white, letterSpacing: -0.8,
+                      fontSize: 18, fontWeight: FontWeight.w900,
+                      color: Colors.white, letterSpacing: 1.2,
                       height: 1.1,
                     ),
                   ),
@@ -436,6 +425,7 @@ class _CommandHeader extends StatelessWidget {
             ),
           ),
 
+          // Live badge
           AnimatedBuilder(
             animation: pulseAnim,
             builder: (_, __) => Container(
@@ -603,7 +593,7 @@ class _HeroSection extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// NEW: QUICK ACCESS GRID
+// QUICK ACCESS GRID
 // ═══════════════════════════════════════════════════════════════════════
 class _QuickAccessGrid extends StatelessWidget {
   final BuildContext context;
@@ -612,10 +602,10 @@ class _QuickAccessGrid extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final items = [
-      _QuickItem(Icons.sensors_rounded,       'Live Stations', AppPalette.cyan,     '/live_stations'),
-      _QuickItem(Icons.psychology_alt_rounded, 'ML Predict',   AppPalette.amber,    '/predict'),
-      _QuickItem(Icons.map_rounded,            'Bihar Map',    AppPalette.safe,     '/bihar_map'),
-      _QuickItem(Icons.monitor_heart_rounded,  'Monitors',     AppPalette.danger,   '/monitors'),
+      _QuickItem(Icons.sensors_rounded,        'Live Stations', AppPalette.cyan,   '/live_stations'),
+      _QuickItem(Icons.psychology_alt_rounded,  'ML Predict',   AppPalette.amber,  '/predict'),
+      _QuickItem(Icons.map_rounded,             'Bihar Map',    AppPalette.safe,   '/bihar_map'),
+      _QuickItem(Icons.monitor_heart_rounded,   'Monitors',     AppPalette.danger, '/monitors'),
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -668,7 +658,7 @@ class _QuickItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// NEW: FLOOD HOTSPOT CAROUSEL (top 3 cities)
+// FLOOD HOTSPOT CAROUSEL (top 3 cities)
 // ═══════════════════════════════════════════════════════════════════════
 class _HotspotCarousel extends StatelessWidget {
   final List<FloodData> cities;
@@ -794,7 +784,7 @@ class _HotspotCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// NEW: RAINFALL FORECAST STRIP
+// RAINFALL FORECAST STRIP
 // ═══════════════════════════════════════════════════════════════════════
 class _RainfallForecastStrip extends StatelessWidget {
   final List<FloodData> cities;
@@ -921,7 +911,7 @@ class _RainfallForecastStrip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// NEW: ALERT ACTIVITY LOG
+// ALERT ACTIVITY LOG
 // ═══════════════════════════════════════════════════════════════════════
 class _AlertActivityLog extends StatelessWidget {
   final List<_AlertEvent> log;
@@ -977,7 +967,7 @@ class _AlertActivityLog extends StatelessWidget {
                               _levelChip(ev.toLevel, toCol),
                               const SizedBox(width: 6),
                               Text('${ev.level.toStringAsFixed(2)} m',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     color: AppPalette.textGrey, fontSize: 9,
                                   )),
                             ]),
@@ -1002,14 +992,14 @@ class _AlertActivityLog extends StatelessWidget {
   Widget _emptyLog() => Padding(
     padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
     child: Row(children: [
-      Icon(Icons.notifications_none_rounded,
+      const Icon(Icons.notifications_none_rounded,
           color: AppPalette.textDim, size: 20),
       const SizedBox(width: 10),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Monitoring for changes',
             style: TextStyle(color: AppPalette.textGrey,
                 fontSize: 12, fontWeight: FontWeight.w700)),
-        Text('Alert transitions appear here in real-time',
+        const Text('Alert transitions appear here in real-time',
             style: TextStyle(color: AppPalette.textDim, fontSize: 9.5)),
       ]),
     ]),
@@ -1052,7 +1042,7 @@ class _AlertActivityLog extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// NEW: SYSTEM STATS BAR
+// SYSTEM STATS BAR
 // ═══════════════════════════════════════════════════════════════════════
 class _SystemStatsBar extends StatelessWidget {
   final int totalStations, riversCount, statesAtRisk;
@@ -1069,10 +1059,10 @@ class _SystemStatsBar extends StatelessWidget {
         : DateFormat('HH:mm').format(lastUpdated!.toLocal());
 
     final stats = [
-      _Stat(Icons.sensors_rounded,       '$totalStations', 'Stations',   AppPalette.cyan),
-      _Stat(Icons.waves_rounded,          '$riversCount',  'Rivers',     AppPalette.safe),
-      _Stat(Icons.warning_amber_rounded,  '$statesAtRisk', 'At Risk',    AppPalette.amber),
-      _Stat(Icons.sync_rounded,           syncStr,         'Last Sync',  AppPalette.textGrey),
+      _Stat(Icons.sensors_rounded,      '$totalStations', 'Stations',  AppPalette.cyan),
+      _Stat(Icons.waves_rounded,         '$riversCount',  'Rivers',    AppPalette.safe),
+      _Stat(Icons.warning_amber_rounded, '$statesAtRisk', 'At Risk',   AppPalette.amber),
+      _Stat(Icons.sync_rounded,          syncStr,         'Last Sync', AppPalette.textGrey),
     ];
 
     return Container(
@@ -1132,7 +1122,7 @@ class _Stat {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// EXISTING INNER WIDGETS (unchanged from v21)
+// EXISTING INNER WIDGETS (unchanged)
 // ═══════════════════════════════════════════════════════════════════════
 class _ArcGauge extends StatelessWidget {
   final Animation<double> anim;
@@ -1482,7 +1472,6 @@ class _RiverPulseCard extends StatelessWidget {
     required this.trendHistory,
   });
 
-  // ── Trend arrow from history
   Widget _trendArrow() {
     if (trendHistory.length < 2) {
       return const Icon(Icons.remove_rounded, color: AppPalette.textDim, size: 14);
@@ -1562,7 +1551,6 @@ class _RiverPulseCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 6),
                           _chip(data.riskLevel, col),
-                          // ── NEW: "Above Danger" badge
                           if (isAboveDanger) ...[
                             const SizedBox(width: 4),
                             Container(
@@ -1594,7 +1582,6 @@ class _RiverPulseCard extends StatelessWidget {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // ── NEW: trend arrow
                           _trendArrow(),
                           const SizedBox(width: 4),
                           Text('${data.currentLevel.toStringAsFixed(2)} m',
@@ -1663,6 +1650,7 @@ class _RiverPulseCard extends StatelessWidget {
       ),
     );
   }
+
   String get _subLabel {
     final p = <String>[];
     if ((data.riverName ?? '').isNotEmpty) p.add(data.riverName!);
