@@ -22,27 +22,27 @@ dependencies:
   # Config
   flutter_dotenv: ^6.0.1
 
-  # Firebase suite  (3.x → 4.x — requires BoM bump together)
+  # Firebase suite
   firebase_core:      ^4.9.0
   firebase_messaging: ^16.2.2
   cloud_firestore:    ^6.4.1
 
-  # Background tasks  (0.9 → 0.10 drops KGP usage)
-  workmanager: ^0.10.0
+  # Background tasks (latest published version)
+  workmanager: ^0.9.0+3
 
   # Charts
   fl_chart: ^1.2.0
 
-  # Storage & prefs  (latest already KGP-free)
+  # Storage & prefs
   shared_preferences: ^2.3.0
 
   # i18n
   intl: ^0.20.2
 
-  # Links  (latest already KGP-free)
+  # Links
   url_launcher: ^6.3.0
 
-  # Local notifications  (stay on 17.x — 18+ has breaking API changes)
+  # Local notifications (stay on 17.x — 18+ has breaking API changes)
   flutter_local_notifications: ^17.2.4
 
   # Network status
