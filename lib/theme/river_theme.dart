@@ -1,26 +1,37 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  OpsFlood  –  Abyss Ops Design Language  (v4 — Premium Rebuild)
+//  EQUINOX-BR05  –  Abyss Ops Design Language  (v5 — Authentic Rebuild)
 //
 //  Philosophy:
-//    • Abyss black-blue base   →  deeper, richer than old navy
-//    • Electric cyan accent    →  live data / active state
-//    • Warm amber gold         →  metrics / numbers
-//    • Red reserved            →  critical alerts ONLY
-//    • Vivid emerald / orange  →  safe / warning status
-//    • Glass morphism          →  frosted overlays for depth
+//    • True-black anchor          →  #08090C (near-black, warm-shifted not blue)
+//    • Desaturated charcoal layers→  low-chroma steps so accents breathe
+//    • Electric cyan accent        →  live data / active state
+//    • Warm amber gold             →  metrics / numbers
+//    • Red reserved                →  critical alerts ONLY
+//    • Vivid emerald / orange      →  safe / warning status
+//    • Glass morphism              →  frosted overlays for depth
+//
+//  Background progression (dark → light):
+//    abyss0  #08090C  ← app/scaffold floor  (warm near-black)
+//    abyss1  #0D0F14  ← screen bg           (slightly lifted, neutral-cool)
+//    abyss2  #131720  ← card surface        (subtle blue-grey undertone)
+//    abyss3  #1A1F2E  ← elevated card       (clearly distinct, richer)
+//    abyss4  #212840  ← chip / input field  (deeper blue for interactive)
+//    abyssStroke #2A3352 ← borders          (visible but not harsh)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppPalette {
   // ── Abyss backgrounds ─────────────────────────────────────────────────────
-  static const abyss0     = Color(0xFF010810);   // deepest bg
-  static const abyss1     = Color(0xFF030D1A);   // scaffold
-  static const abyss2     = Color(0xFF071525);   // card bg
-  static const abyss3     = Color(0xFF0B1D32);   // card elevated
-  static const abyss4     = Color(0xFF102440);   // chip / input bg
-  static const abyssStroke= Color(0xFF152E50);   // borders
-  static const abyssGlass = Color(0xAA071525);   // frosted card
+  //  Each step is clearly distinct — no two layers collapse into one.
+  //  Warm-neutral progression avoids the "generic dark mode blue" look.
+  static const abyss0      = Color(0xFF08090C);  // deepest bg — warm near-black
+  static const abyss1      = Color(0xFF0D0F14);  // scaffold — lifted neutral
+  static const abyss2      = Color(0xFF131720);  // card surface — blue-grey
+  static const abyss3      = Color(0xFF1A1F2E);  // card elevated — richer
+  static const abyss4      = Color(0xFF212840);  // chip / input — deeper blue
+  static const abyssStroke = Color(0xFF2A3352);  // borders — visible not harsh
+  static const abyssGlass  = Color(0xBB131720);  // frosted overlay (higher alpha for depth)
 
   // ── Keep old names as aliases so existing code compiles ──────────────────
   static const navy0      = abyss0;
@@ -59,6 +70,7 @@ class AppPalette {
   static const textDim   = Color(0xFF2E3E55);
 
   // ── Gradient helpers ──────────────────────────────────────────────────────
+  //  Diagonal gradient — abyss1 to abyss3 for visible card depth
   static const LinearGradient abyssGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -67,6 +79,19 @@ class AppPalette {
 
   // keep old name alive
   static const LinearGradient navyGradient = abyssGradient;
+
+  // Scaffold radial glow — subtle cyan bloom from top-center
+  // Use as a Stack background behind your scaffold content for depth
+  static BoxDecoration scaffoldDecoration() => const BoxDecoration(
+    gradient: RadialGradient(
+      center: Alignment(0.0, -0.7),
+      radius: 1.2,
+      colors: [
+        Color(0x1200C6FF),  // faint cyan bloom at top
+        Color(0xFF08090C),  // warm-black floor
+      ],
+    ),
+  );
 
   static LinearGradient glowGradient(Color c) => LinearGradient(
     begin: Alignment.topLeft,
@@ -101,8 +126,8 @@ class AppPalette {
         border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.40),
-            blurRadius: 28,
+            color: Colors.black.withValues(alpha: 0.50),
+            blurRadius: 32,
             offset: const Offset(0, 8),
           ),
         ],
@@ -273,7 +298,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
 
   static ThemeData darkTheme() => _buildTheme(
       brightness: Brightness.dark, ext: _abyss,
-      scaffoldBg: AppPalette.abyss0);
+      scaffoldBg: AppPalette.abyss1);
 
   static ThemeData _buildTheme({
     required Brightness brightness,
@@ -287,7 +312,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     ).copyWith(
       primary:     AppPalette.cyan,
       secondary:   AppPalette.amber,
-      surface:     isDark ? AppPalette.abyss1 : Colors.white,
+      surface:     isDark ? AppPalette.abyss2 : Colors.white,
       onPrimary:   AppPalette.abyss0,
       onSecondary: AppPalette.abyss0,
       error:       AppPalette.critical,
@@ -348,7 +373,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
         ),
         iconTheme: const IconThemeData(color: AppPalette.cyan),
       ),
-      // NavigationBar is rebuilt custom in home_screen; these are fallback values
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF0A1628),
         indicatorColor:   AppPalette.cyanGlow,
