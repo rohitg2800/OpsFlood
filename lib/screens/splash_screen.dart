@@ -1,5 +1,5 @@
 // lib/screens/splash_screen.dart
-// OpsFlood — SplashScreen v6  (Deep Space — ultra-minimal premium)
+// EQUINOX-BR05 — SplashScreen v6  (Deep Space — ultra-minimal premium)
 library;
 
 import 'dart:async';
@@ -171,7 +171,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     position: _textSlide,
                     child: const Column(
                       children: [
-                        Text('OpsFlood',
+                        Text('EQUINOX-BR05',
                             style: TextStyle(
                               fontSize: 32,
                               fontWeight: FontWeight.w700,
