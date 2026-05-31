@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import '../services/real_time_service.dart';
-import '../services/ndma_service.dart' hide EmergencyContact;  // avoid duplicate with flood_data.dart
+import '../services/ndma_service.dart' hide EmergencyContact; // avoid duplicate with flood_data.dart
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 // Source policy provider — re-exported so screens import one file.
@@ -16,10 +16,10 @@ final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
 /// Alias kept for backward compatibility with screens using the old name.
 final realTimeServiceProvider = realTimeProvider;
 
-// NOTE: themeModeProvider (StateProvider<ThemeMode>) was removed from here.
-// The canonical theme state lives in providers/theme_provider.dart as
-// themeNotifierProvider (StateNotifierProvider<ThemeProvider, AppThemeMode>).
-// Import theme_provider.dart directly when you need theme state.
+// NOTE: themeModeProvider was removed from here.
+// The canonical provider is in providers/theme_provider.dart:
+//   final themeModeProvider = StateNotifierProvider<..., AppThemeMode>(...)
+// Import theme_provider.dart directly when you need theme or AppThemeMode state.
 
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   return ref.watch(realTimeProvider).lastFetchTime;
@@ -33,13 +33,35 @@ final isWakingUpProvider = Provider<bool>((ref) {
   return ref.watch(realTimeProvider).isWakingUp;
 });
 
-final ndmaProvider = FutureProvider.autoDispose<List<EmergencyContact>>((ref) async {
-  final svc = NdmaService();
-  return svc.fetchEmergencyContacts();
+final errorMessageProvider = Provider<String?>((ref) {
+  return ref.watch(realTimeProvider).error;
 });
 
-final riverMonitoringProvider =
-    FutureProvider.autoDispose<List<RiverStation>>((ref) async {
-  final svc = ref.watch(realTimeProvider);
-  return svc.fetchRiverStations();
+final imdAlertsProvider = Provider<List<dynamic>>((ref) {
+  return ref.watch(realTimeProvider).imdAlerts;
+});
+
+final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) {
+  return ref.watch(realTimeProvider).ndmaAdvisories;
+});
+
+final criticalCountProvider = Provider<int>((ref) {
+  return ref.watch(realTimeProvider).criticalCount;
+});
+
+final liveLevelsProvider = Provider<List<FloodData>>((ref) {
+  return ref.watch(realTimeProvider).liveLevels;
+});
+
+final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
+  return ref.watch(realTimeProvider).monitoringData;
+});
+
+/// List of city names that currently have live FloodData.
+final monitoredCitiesProvider = Provider<List<String>>((ref) {
+  return ref
+      .watch(realTimeProvider)
+      .liveLevels
+      .map((fd) => fd.city)
+      .toList();
 });
