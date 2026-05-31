@@ -20,7 +20,6 @@ class SourcePolicyNotifier extends ChangeNotifier {
   PolicyStatus get status => _status;
   String? get error => _error;
 
-  /// Option A gate: true only when backend confirms allow_live_cwc_in_app = true.
   bool get allowLiveCwc =>
       _status == PolicyStatus.live && _policy.allowLiveCwcInApp;
 
@@ -66,15 +65,14 @@ class SourcePolicyNotifier extends ChangeNotifier {
   }
 }
 
-/// Riverpod provider — drop-in alongside existing ChangeNotifierProviders.
-final sourcePolicyProvider =
-    ChangeNotifierProvider<SourcePolicyNotifier>((ref) {
+// ChangeNotifierProvider removed in Riverpod 3.
+// Use Provider<T> + ref.onDispose for ChangeNotifier subclasses.
+final sourcePolicyProvider = Provider<SourcePolicyNotifier>((ref) {
   final notifier = SourcePolicyNotifier();
   ref.onDispose(notifier.dispose);
   return notifier;
 });
 
-/// Convenience derived providers — use these in widgets.
 final allowLiveCwcProvider = Provider<bool>((ref) {
   return ref.watch(sourcePolicyProvider).allowLiveCwc;
 });

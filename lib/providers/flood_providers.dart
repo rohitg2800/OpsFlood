@@ -1,25 +1,22 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import '../services/real_time_service.dart';
-import '../services/ndma_service.dart' hide EmergencyContact; // avoid duplicate with flood_data.dart
+import '../services/ndma_service.dart' hide EmergencyContact;
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-// Source policy provider — re-exported so screens import one file.
 export 'source_policy_provider.dart';
 
-final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
+// ChangeNotifierProvider was removed in Riverpod 3.
+// Use Provider<T> + ref.onDispose for ChangeNotifier subclasses.
+final realTimeProvider = Provider<RealTimeService>((ref) {
   final service = RealTimeService();
   Future.microtask(() => service.startPolling());
+  ref.onDispose(service.dispose);
   return service;
 });
 
-/// Alias kept for backward compatibility with screens using the old name.
+/// Alias kept for backward compatibility.
 final realTimeServiceProvider = realTimeProvider;
-
-// NOTE: themeModeProvider was removed from here.
-// The canonical provider is in providers/theme_provider.dart:
-//   final themeModeProvider = StateNotifierProvider<..., AppThemeMode>(...)
-// Import theme_provider.dart directly when you need theme or AppThemeMode state.
 
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   return ref.watch(realTimeProvider).lastFetchTime;
@@ -57,7 +54,6 @@ final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
   return ref.watch(realTimeProvider).monitoringData;
 });
 
-/// List of city names that currently have live FloodData.
 final monitoredCitiesProvider = Provider<List<String>>((ref) {
   return ref
       .watch(realTimeProvider)
