@@ -30,7 +30,7 @@ Future<void> main() async {
     try {
       await dotenv.load(fileName: '.env', mergeWith: {});
     } catch (e) {
-      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found \u2014 running with defaults: $e');
+      if (kDebugMode) debugPrint('\u26a0\ufe0f  .env not found — running with defaults: $e');
     }
 
     // 2. Firebase
@@ -42,7 +42,7 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out \u2014 continuing without Firebase');
+              if (kDebugMode) debugPrint('\u26a0\ufe0f  Firebase.initializeApp timed out — continuing without Firebase');
               throw TimeoutException('Firebase init timeout');
             },
           );
@@ -111,13 +111,13 @@ class EquinoxBHApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Use AppThemeMode from theme_provider (owns the full enum incl. sunset/ocean).
-    // themeModeProvider in flood_providers.dart has been removed to avoid the
-    // duplicate-export conflict.
-    final appMode = ref.watch(themeNotifierProvider);
-    final locale  = ref.watch(localeProvider);
+    // themeModeProvider is now ONLY in theme_provider.dart (StateNotifierProvider).
+    // flood_providers.dart no longer declares it — ambiguity resolved.
+    final AppThemeMode appMode = ref.watch(themeModeProvider);
+    final locale               = ref.watch(localeProvider);
 
-    // Switch expression — Dart sees exhaustiveness, so flutterMode is always assigned.
+    // Switch expression: Dart exhaustiveness checker guarantees flutterMode
+    // is always assigned — no "must be assigned before use" error.
     final ThemeMode flutterMode = switch (appMode) {
       AppThemeMode.system => ThemeMode.system,
       AppThemeMode.light  => ThemeMode.light,
