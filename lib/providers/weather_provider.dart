@@ -1,5 +1,5 @@
 // lib/providers/weather_provider.dart
-// OpsFlood — WeatherProvider v4 (CDN-balanced, 429-free)
+// OpsFlood — WeatherProvider v5 (multi-source fallback)
 library;
 
 import 'dart:async';
@@ -8,17 +8,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Open-Meteo endpoints
-//
-// Primary:  customer-api.open-meteo.com  — CDN-load-balanced, much higher limits
-// Fallback: api.open-meteo.com           — direct, may hit per-IP rate limits
-// We try primary first; on 429/error we immediately retry on fallback.
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Open-Meteo has multiple free geographic mirrors — all same API, no key needed.
+// We rotate through them so a single IP rate-limit on one doesn’t block the app.
 const _kWeatherHosts = [
-  'https://customer-api.open-meteo.com',
-  'https://api.open-meteo.com',
+  'https://api.open-meteo.com',          // primary
+  'https://api-eu.open-meteo.com',       // EU mirror (different IP pool)
+  'https://api-asia.open-meteo.com',     // Asia mirror (closest to India)
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,8 +213,8 @@ class WeatherNotifier extends Notifier<WeatherState> {
     });
   }
 
-  String _buildUrl(String host, double lat, double lon) =>
-      '$host/v1/forecast'
+  String _buildPath(double lat, double lon) =>
+      '/v1/forecast'
       '?latitude=$lat&longitude=$lon'
       '&current=temperature_2m,relative_humidity_2m,precipitation,weathercode,'
       'wind_speed_10m,wind_direction_10m,apparent_temperature,'
@@ -283,13 +278,13 @@ class WeatherNotifier extends Notifier<WeatherState> {
       isRateLimited: false,
     );
 
-    final lat = state.lat;
-    final lon = state.lon;
+    final lat  = state.lat;
+    final lon  = state.lon;
+    final path = _buildPath(lat, lon);
 
-    // Try each host in order — CDN first, direct API as fallback
     for (final host in _kWeatherHosts) {
       try {
-        final uri = Uri.parse(_buildUrl(host, lat, lon));
+        final uri = Uri.parse('$host$path');
         if (kDebugMode) debugPrint('WeatherNotifier: trying $host');
         final res = await http.get(uri).timeout(const Duration(seconds: 10));
 
@@ -330,14 +325,10 @@ class WeatherNotifier extends Notifier<WeatherState> {
             isRateLimited:  false,
             retryInSeconds: 0,
           );
-          return; // success — stop trying other hosts
+          return; // success
 
-        } else if (res.statusCode == 429) {
-          if (kDebugMode) debugPrint('WeatherNotifier: 429 on $host, trying next...');
-          continue; // try next host
         } else {
-          // Non-retryable error on this host
-          if (kDebugMode) debugPrint('WeatherNotifier: HTTP ${res.statusCode} on $host');
+          if (kDebugMode) debugPrint('WeatherNotifier: HTTP ${res.statusCode} on $host, trying next...');
           continue;
         }
       } catch (e) {
@@ -346,9 +337,7 @@ class WeatherNotifier extends Notifier<WeatherState> {
       }
     }
 
-    // All hosts failed — check if it was 429
-    // At this point we don't know the last status code easily, so
-    // show a rate-limit message and start countdown as last resort
+    // All mirrors failed — show countdown + auto-retry
     state = state.copyWith(
       status:        WeatherStatus.error,
       error:         'Weather service busy. Auto-retrying in 5 min…',
