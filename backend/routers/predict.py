@@ -6,6 +6,14 @@ All endpoints now use pipeline_autofill_predict_input() so that:
     features CSV before calling the ML model
   - Manual values from the Flutter UI always take precedence (defaults are only
     replaced when the caller sends the sentinel defaults: Peak=8.5, T1d=10.0)
+
+Option-A Guard wiring (NEW):
+  - Both /predict/legacy and /predict/v2 now call select_best_station_node() and
+    build_effective_state_entry() so that station-specific CWC warning/danger/HFL
+    thresholds override the state-matrix defaults before severity_from_entry() fires.
+  - The effective entry is passed to predictor.predict_flood() via the
+    state_entry_override= kwarg, which the predictor must accept and forward to
+    severity_from_entry().
 """
 
 import asyncio
@@ -20,6 +28,8 @@ from .dependencies import (
     operational_store,
     STATE_SEVERITY_MATRIX,
     get_state_severity_entry,
+    build_effective_state_entry,
+    select_best_station_node,
     get_pipeline_features,
     pipeline_autofill_predict_input,
 )
@@ -76,7 +86,7 @@ def persist_prediction_record(input_data, result):
             }
         )
     except Exception as exc:
-        print(f"⚠️ Prediction persistence failed: {exc}")
+        print(f"\u26a0\ufe0f Prediction persistence failed: {exc}")
         prediction_id = None
 
     write_audit_log(
@@ -221,7 +231,13 @@ async def predict_flood_legacy(
                     data_source = "Live CWC Data"
                     river_level_m = live_data.get("current_level_m")
             except Exception as e:
-                print(f"⚠️ Live CWC fetch failed, falling back: {e}")
+                print(f"\u26a0\ufe0f Live CWC fetch failed, falling back: {e}")
+
+        # Build effective state entry using state-matrix defaults (no telemetry in legacy mode)
+        _legacy_effective_entry = build_effective_state_entry(
+            state_name=input_data.state,
+            station_telemetry=None,
+        )
 
         if predictor:
             result = await asyncio.to_thread(
@@ -229,13 +245,14 @@ async def predict_flood_legacy(
                 input_data,
                 source=data_source,
                 river_level_m=river_level_m,
+                state_entry_override=_legacy_effective_entry,
             )
         else:
             result = {
                 "severity": "MODERATE",
                 "confidence_percent": 75.0,
                 "probabilities": {"SEVERE": 25, "MODERATE": 75, "LOW": 0, "CRITICAL": 0},
-                "alert": "⚠️",
+                "alert": "\u26a0\ufe0f",
                 "algorithm": "Fallback",
                 "data_source": data_source,
                 "model_trained": False,
@@ -271,8 +288,12 @@ async def predict_flood_v2(
       2. Live CWC scraper                     (real-time gauge, if enabled)
       3. Values from the request body         (Flutter manual input)
 
-    This means the Flutter app can send state + station only and get
-    a fully data-driven prediction with zero manual field entry.
+    Option-A guard:
+      4. select_best_station_node() picks the best matching CWC node
+      5. build_effective_state_entry() merges station warning/danger/HFL into
+         the state-matrix defaults
+      6. Effective entry passed to predictor.predict_flood() via state_entry_override=
+         so severity_from_entry() uses real CWC thresholds not state defaults.
     """
     try:
         source_policy = get_source_policy_payload()
@@ -292,12 +313,10 @@ async def predict_flood_v2(
         if pipeline_meta and pipeline_meta.get("applied"):
             autofill_applied = True
             data_source = "OperationalDataPipeline + " + data_source
-            # Rebuild input model with enriched values
             input_data = input_data.model_copy(update={
                 k: v for k, v in enriched.items()
                 if k in FloodPredictionInput.model_fields and v is not None
             })
-            # Extract river_level for Option-A guard
             features = get_pipeline_features(input_data.state, input_data.station)
             if features:
                 rl = features.get("river_level_m")
@@ -324,7 +343,34 @@ async def predict_flood_v2(
                             autofill_applied = True
                         data_source = "Live CWC (real-time override)"
             except Exception as e:
-                print(f"⚠️ V2 CWC auto-fill failed: {e}")
+                print(f"\u26a0\ufe0f V2 CWC auto-fill failed: {e}")
+
+        # ── Step 2b: Build effective state entry from live station telemetry ──
+        # Attempt a non-blocking telemetry fetch to get real CWC station
+        # warning/danger/HFL thresholds for the Option-A guard.
+        # If telemetry is unavailable, falls back gracefully to state-matrix defaults.
+        _telemetry_payload: dict | None = None
+        try:
+            if _importlib_util.find_spec("backend") is not None:
+                from backend.cwc_scraper import CWCScraper as _CWCScraper
+            else:
+                from cwc_scraper import CWCScraper as _CWCScraper  # type: ignore
+            _ts = _CWCScraper()
+            _raw = _ts.get_state_telemetry(input_data.state)
+            if isinstance(_raw, dict) and _raw.get("data"):
+                _telemetry_payload = _raw
+        except Exception:
+            pass  # Non-fatal — guard falls back to state defaults
+
+        _best_node = select_best_station_node(
+            state_name=input_data.state,
+            station_name=input_data.station,
+            telemetry_payload=_telemetry_payload,
+        )
+        _effective_entry = build_effective_state_entry(
+            state_name=input_data.state,
+            station_telemetry=_best_node,
+        )
 
         # ── Step 3: Run inference ─────────────────────────────────────────────
         if predictor:
@@ -333,13 +379,14 @@ async def predict_flood_v2(
                 input_data,
                 source=data_source,
                 river_level_m=river_level_m,
+                state_entry_override=_effective_entry,
             )
         else:
             result = {
                 "severity": "MODERATE",
                 "confidence_percent": 75.0,
                 "probabilities": {"SEVERE": 25, "MODERATE": 75, "LOW": 0, "CRITICAL": 0},
-                "alert": "⚠️",
+                "alert": "\u26a0\ufe0f",
                 "algorithm": "Fallback",
                 "data_source": data_source,
                 "model_trained": False,
