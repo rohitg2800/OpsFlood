@@ -1,7 +1,7 @@
 name: equinox_flood
 description: EQUINOX-BR05 - AI-powered flood prediction app
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -48,7 +48,7 @@ dependencies:
   # Network status
   connectivity_plus: ^7.1.1
 
-  # Ads — v4.x is compatible with AGP 8.x / Gradle 9.x
+  # Ads
   google_mobile_ads: ^4.0.0
 
   # Icons

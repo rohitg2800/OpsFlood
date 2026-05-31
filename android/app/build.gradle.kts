@@ -14,6 +14,19 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
+// ── Keystore signing ────────────────────────────────────────────────────────
+// Place your keystore at android/keystore.jks and set these 4 lines
+// in android/keystore.properties (DO NOT commit that file):
+//   storeFile=keystore.jks
+//   storePassword=YOUR_STORE_PASSWORD
+//   keyAlias=YOUR_KEY_ALIAS
+//   keyPassword=YOUR_KEY_PASSWORD
+//
+// If keystore.properties is missing (e.g. CI without secrets), the build
+// falls back to the debug keystore so it still compiles.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val useReleaseKeystore = keystorePropertiesFile.exists()
+
 android {
     namespace = "com.equinox_bh.android"
     compileSdk = flutter.compileSdkVersion
@@ -31,19 +44,35 @@ android {
         }
     }
 
+    if (useReleaseKeystore) {
+        val keystoreProperties = Properties()
+        keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+        signingConfigs {
+            create("release") {
+                keyAlias     = keystoreProperties["keyAlias"]     as String
+                keyPassword  = keystoreProperties["keyPassword"]  as String
+                storeFile    = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.equinox_bh.android"
-        minSdk = flutter.minSdkVersion
+        minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = 2
+        versionName = "1.1.0"
         multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
+            signingConfig = if (useReleaseKeystore)
+                signingConfigs.getByName("release")
+            else
+                signingConfigs.getByName("debug")
+            isMinifyEnabled   = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
