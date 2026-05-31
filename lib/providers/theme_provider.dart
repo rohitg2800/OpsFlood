@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ─── Extended theme modes (includes premium filters) ─────────────────────
+// ─── Extended theme modes ────────────────────────────────────────────────────
 enum AppThemeMode {
   system,
   light,   // Day River
@@ -11,7 +11,7 @@ enum AppThemeMode {
   ocean,   // 🌊 Deep Ocean   (premium)
 }
 
-// ─── ThemeProvider (ChangeNotifier — kept for legacy init()) ─────────────
+// ─── Legacy ChangeNotifier singleton (kept for non-Riverpod init() callers) ──
 class ThemeProvider extends ChangeNotifier {
   static final ThemeProvider _instance = ThemeProvider._internal();
   factory ThemeProvider() => _instance;
@@ -78,13 +78,15 @@ class ThemeProvider extends ChangeNotifier {
   }
 }
 
-// ─── Riverpod StateNotifier ─────────────────────────────────────────────────────
-class _ThemeModeNotifier extends StateNotifier<AppThemeMode> {
+// ─── Riverpod 3 Notifier ─────────────────────────────────────────────────────
+class _ThemeModeNotifier extends Notifier<AppThemeMode> {
   static const _key = 'equinox_theme_mode';
 
-  // Start with system default; _loadSaved() will update state once prefs load.
-  _ThemeModeNotifier() : super(AppThemeMode.system) {
+  @override
+  AppThemeMode build() {
+    // Start with system; _loadSaved() will update state once prefs load.
     _loadSaved();
+    return AppThemeMode.system;
   }
 
   Future<void> _loadSaved() async {
@@ -95,17 +97,14 @@ class _ThemeModeNotifier extends StateNotifier<AppThemeMode> {
       (e) => e.name == stored,
       orElse: () => AppThemeMode.system,
     );
-    // Only update if different to avoid unnecessary rebuilds.
     if (saved != state) state = saved;
   }
 
-  /// Update Riverpod state immediately (triggers MaterialApp rebuild),
-  /// then persist to SharedPreferences.
   Future<void> setMode(AppThemeMode mode) async {
-    state = mode; // ← Riverpod listeners rebuild right here
+    state = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, mode.name);
-    // Keep legacy singleton in sync so ThemeProvider().appMode is consistent.
+    // Keep legacy singleton in sync.
     ThemeProvider()._appMode = mode;
   }
 
@@ -126,7 +125,6 @@ class _ThemeModeNotifier extends StateNotifier<AppThemeMode> {
   };
 }
 
-final themeModeProvider =
-    StateNotifierProvider<_ThemeModeNotifier, AppThemeMode>(
-  (ref) => _ThemeModeNotifier(),
+final themeModeProvider = NotifierProvider<_ThemeModeNotifier, AppThemeMode>(
+  _ThemeModeNotifier.new,
 );
