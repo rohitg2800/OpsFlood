@@ -6,9 +6,9 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ChangeNotifierProvider was removed in Riverpod 3.
-// Use Provider<T> + ref.onDispose for ChangeNotifier subclasses.
-final realTimeProvider = Provider<RealTimeService>((ref) {
+// RealTimeService is a ChangeNotifier — must use ChangeNotifierProvider
+// so Riverpod listens to notifyListeners() and rebuilds dependent widgets.
+final realTimeProvider = ChangeNotifierProvider<RealTimeService>((ref) {
   final service = RealTimeService();
   Future.microtask(() => service.startPolling());
   ref.onDispose(service.dispose);
