@@ -1,7 +1,8 @@
 // lib/providers/weather_provider.dart
-// OpsFlood — WeatherProvider v2 (Riverpod 3)
+// OpsFlood — WeatherProvider v3 (429-resilient)
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -107,6 +108,8 @@ class WeatherState {
   final List<CityResult> searchResults;
   final bool             searchLoading;
   final String           error;
+  final bool             isRateLimited;
+  final int              retryInSeconds;
 
   double get tempC        => current?.tempC    ?? 0;
   double get precipMm     => current?.precipMm ?? 0;
@@ -129,6 +132,8 @@ class WeatherState {
     this.searchResults = const [],
     this.searchLoading = false,
     this.error         = '',
+    this.isRateLimited = false,
+    this.retryInSeconds = 0,
   });
 
   WeatherState copyWith({
@@ -141,29 +146,36 @@ class WeatherState {
     List<CityResult>? searchResults,
     bool?             searchLoading,
     String?           error,
+    bool?             isRateLimited,
+    int?              retryInSeconds,
   }) => WeatherState(
-    status:        status        ?? this.status,
-    cityName:      cityName      ?? this.cityName,
-    lat:           lat           ?? this.lat,
-    lon:           lon           ?? this.lon,
-    current:       current       ?? this.current,
-    forecast:      forecast      ?? this.forecast,
-    searchResults: searchResults ?? this.searchResults,
-    searchLoading: searchLoading ?? this.searchLoading,
-    error:         error         ?? this.error,
+    status:         status         ?? this.status,
+    cityName:       cityName       ?? this.cityName,
+    lat:            lat            ?? this.lat,
+    lon:            lon            ?? this.lon,
+    current:        current        ?? this.current,
+    forecast:       forecast       ?? this.forecast,
+    searchResults:  searchResults  ?? this.searchResults,
+    searchLoading:  searchLoading  ?? this.searchLoading,
+    error:          error          ?? this.error,
+    isRateLimited:  isRateLimited  ?? this.isRateLimited,
+    retryInSeconds: retryInSeconds ?? this.retryInSeconds,
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Notifier (Riverpod 3)
+// Notifier
 // ─────────────────────────────────────────────────────────────────────────────
 
 class WeatherNotifier extends Notifier<WeatherState> {
-  // Cache: track last successful fetch time + coords
   DateTime? _lastFetchTime;
   double?   _lastFetchLat;
   double?   _lastFetchLon;
-  static const _cacheDuration = Duration(minutes: 15);
+  Timer?    _countdownTimer;
+  int       _retrySeconds = 0;
+
+  static const _cacheDuration    = Duration(minutes: 15);
+  static const _rateLimitBackoff = Duration(minutes: 5); // wait before auto-retry
 
   @override
   WeatherState build() {
@@ -175,6 +187,22 @@ class WeatherNotifier extends Notifier<WeatherState> {
     if (_lastFetchTime == null) return false;
     if (_lastFetchLat != state.lat || _lastFetchLon != state.lon) return false;
     return DateTime.now().difference(_lastFetchTime!) < _cacheDuration;
+  }
+
+  void _startCountdown(int seconds) {
+    _retrySeconds = seconds;
+    _countdownTimer?.cancel();
+    state = state.copyWith(retryInSeconds: _retrySeconds);
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      _retrySeconds--;
+      if (_retrySeconds <= 0) {
+        t.cancel();
+        state = state.copyWith(retryInSeconds: 0, isRateLimited: false);
+        fetchWeather();
+      } else {
+        state = state.copyWith(retryInSeconds: _retrySeconds);
+      }
+    });
   }
 
   Future<void> searchCity(String query) async {
@@ -206,25 +234,34 @@ class WeatherNotifier extends Notifier<WeatherState> {
   }
 
   Future<void> selectCity(CityResult city) async {
+    _countdownTimer?.cancel();
     state = state.copyWith(
       cityName:      city.displayName,
       lat:           city.lat,
       lon:           city.lon,
       searchResults: [],
+      isRateLimited: false,
+      retryInSeconds: 0,
     );
-    // City changed — bypass cache
     _lastFetchTime = null;
     await fetchWeather();
   }
 
   Future<void> fetchWeather({bool forceRefresh = false}) async {
-    // Return cached data if still fresh and not a manual refresh
+    // Serve cache if fresh
     if (!forceRefresh && _isCacheValid() && state.status == WeatherStatus.loaded) {
       if (kDebugMode) debugPrint('WeatherNotifier: serving from cache');
       return;
     }
+    // Don't hammer while rate-limited
+    if (state.isRateLimited && !forceRefresh) return;
 
-    state = state.copyWith(status: WeatherStatus.loading, error: '');
+    state = state.copyWith(
+      status: WeatherStatus.loading,
+      error: '',
+      isRateLimited: false,
+    );
+
     try {
       final lat = state.lat;
       final lon = state.lon;
@@ -238,7 +275,9 @@ class WeatherNotifier extends Notifier<WeatherState> {
         'precipitation_probability_max,wind_speed_10m_max,uv_index_max,weathercode'
         '&forecast_days=7&timezone=Asia%2FKolkata',
       );
+
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
+
       if (res.statusCode == 200) {
         final body    = jsonDecode(res.body) as Map<String, dynamic>;
         final cur     = WeatherCurrent.fromJson(
@@ -264,7 +303,6 @@ class WeatherNotifier extends Notifier<WeatherState> {
           weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
         ));
 
-        // Update cache metadata
         _lastFetchTime = DateTime.now();
         _lastFetchLat  = lat;
         _lastFetchLon  = lon;
@@ -274,7 +312,20 @@ class WeatherNotifier extends Notifier<WeatherState> {
           current:  cur,
           forecast: forecast,
           error:    '',
+          isRateLimited: false,
+          retryInSeconds: 0,
         );
+
+      } else if (res.statusCode == 429) {
+        // Rate limited — auto-retry after backoff
+        if (kDebugMode) debugPrint('WeatherNotifier: 429 rate limited — backing off');
+        state = state.copyWith(
+          status:        WeatherStatus.error,
+          error:         'Weather service busy. Auto-retrying in 5 min…',
+          isRateLimited: true,
+        );
+        _startCountdown(_rateLimitBackoff.inSeconds);
+
       } else {
         state = state.copyWith(
           status: WeatherStatus.error,
