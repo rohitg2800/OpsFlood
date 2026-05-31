@@ -1,5 +1,5 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v4  (developer section added)
+// OpsFlood — SettingsScreen v5  (AdMob banner placed)
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/locale_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/river_theme.dart';
+import '../widgets/ad_banner_widget.dart';
 import '../widgets/premium_theme_sheet.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -76,7 +77,6 @@ class SettingsScreen extends ConsumerWidget {
                 title: 'Appearance',
                 icon:  Icons.palette_outlined,
                 children: [
-                  // ── Language picker
                   _SettingRow(
                     icon:    Icons.language_rounded,
                     label:   'Language',
@@ -99,10 +99,7 @@ class SettingsScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-
                   _Divider(),
-
-                  // ── Theme filter picker
                   _SettingRow(
                     icon:    _modeIcon(appMode),
                     label:   'Theme',
@@ -189,6 +186,11 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
 
+            // ── AdMob Banner ───────────────────────────────────────────────
+            const SliverToBoxAdapter(
+              child: Center(child: AdBannerWidget()),
+            ),
+
             // ── Developer section ──────────────────────────────────────────
             SliverToBoxAdapter(
               child: _SectionCard(
@@ -207,7 +209,6 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  // ── Language picker bottom sheet
   void _showLanguagePicker(BuildContext context, WidgetRef ref) {
     final rc             = RiverColors.of(context);
     final localeNotifier = ref.read(localeProvider.notifier);
@@ -327,7 +328,7 @@ class SettingsScreen extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Developer tile  — styled credit card for Rohit28
+// Developer tile
 // ─────────────────────────────────────────────────────────────────────────────
 class _DeveloperTile extends StatelessWidget {
   @override
@@ -336,7 +337,6 @@ class _DeveloperTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
-          // Avatar with gold ring
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
@@ -361,8 +361,6 @@ class _DeveloperTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 14),
-
-          // Name + role
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,8 +411,6 @@ class _DeveloperTile extends StatelessWidget {
               ],
             ),
           ),
-
-          // Gold star badge
           Icon(Icons.star_rounded, color: AppPalette.gold, size: 20),
         ],
       ),
@@ -423,7 +419,8 @@ class _DeveloperTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Private helpers (unchanged)
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 bool _isPremium(AppThemeMode m) =>
     m == AppThemeMode.sunset || m == AppThemeMode.ocean;
