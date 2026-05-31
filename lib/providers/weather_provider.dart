@@ -1,5 +1,7 @@
 // lib/providers/weather_provider.dart
-// OpsFlood — WeatherProvider v5 (multi-source fallback)
+// OpsFlood — WeatherProvider v6
+// Primary:  api.open-meteo.com  (free, no key)
+// Fallback: wttr.in             (completely separate service, different servers)
 library;
 
 import 'dart:async';
@@ -7,14 +9,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
-
-// Open-Meteo has multiple free geographic mirrors — all same API, no key needed.
-// We rotate through them so a single IP rate-limit on one doesn’t block the app.
-const _kWeatherHosts = [
-  'https://api.open-meteo.com',          // primary
-  'https://api-eu.open-meteo.com',       // EU mirror (different IP pool)
-  'https://api-asia.open-meteo.com',     // Asia mirror (closest to India)
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Models
@@ -59,6 +53,37 @@ class WeatherCurrent {
     cloudCoverPct:   (j['cloud_cover']            as num?)?.toDouble() ?? 0,
     surfacePressure: (j['surface_pressure']       as num?)?.toDouble() ?? 0,
   );
+
+  // Build from wttr.in JSON response (fallback)
+  // wttr.in /v2.json format
+  factory WeatherCurrent.fromWttrJson(Map<String, dynamic> j) {
+    final cur = (j['current_condition'] as List?)?.first as Map<String, dynamic>? ?? {};
+    return WeatherCurrent(
+      tempC:           double.tryParse(cur['temp_C']?.toString() ?? '0') ?? 0,
+      humidity:        int.tryParse(cur['humidity']?.toString() ?? '0') ?? 0,
+      precipMm:        double.tryParse(cur['precipMM']?.toString() ?? '0') ?? 0,
+      windKph:         double.tryParse(cur['windspeedKmph']?.toString() ?? '0') ?? 0,
+      windDir:         double.tryParse(cur['winddirDegree']?.toString() ?? '0') ?? 0,
+      weatherCode:     _wttrCode(int.tryParse(cur['weatherCode']?.toString() ?? '0') ?? 0),
+      feelsLikeC:      double.tryParse(cur['FeelsLikeC']?.toString() ?? '0') ?? 0,
+      uvIndex:         double.tryParse(cur['uvIndex']?.toString() ?? '0') ?? 0,
+      visibilityKm:    double.tryParse(cur['visibility']?.toString() ?? '0') ?? 0,
+      cloudCoverPct:   double.tryParse(cur['cloudcover']?.toString() ?? '0') ?? 0,
+      surfacePressure: double.tryParse(cur['pressure']?.toString() ?? '0') ?? 0,
+    );
+  }
+
+  // wttr.in weather codes → approximate WMO codes
+  static int _wttrCode(int w) {
+    if (w == 113) return 0;   // sunny
+    if (w == 116) return 1;   // partly cloudy
+    if (w == 119 || w == 122) return 3; // overcast
+    if (w >= 176 && w <= 266) return 61; // rain
+    if (w >= 293 && w <= 321) return 61;
+    if (w >= 353 && w <= 395) return 80; // showers
+    if (w >= 200 && w <= 232) return 95; // thunder
+    return 1;
+  }
 }
 
 class WeatherDay {
@@ -76,6 +101,30 @@ class WeatherDay {
     required this.windMaxKph, required this.uvIndex,
     required this.weatherCode,
   });
+
+  // Build from wttr.in daily weather entry
+  factory WeatherDay.fromWttrJson(Map<String, dynamic> d) {
+    final hourly = (d['hourly'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    double totalRain = 0;
+    double maxWind   = 0;
+    int    wCode     = 0;
+    for (final h in hourly) {
+      totalRain += double.tryParse(h['precipMM']?.toString() ?? '0') ?? 0;
+      final w = double.tryParse(h['windspeedKmph']?.toString() ?? '0') ?? 0;
+      if (w > maxWind) maxWind = w;
+      wCode = int.tryParse(h['weatherCode']?.toString() ?? '0') ?? 0;
+    }
+    return WeatherDay(
+      date:       d['date']?.toString() ?? '',
+      maxC:       double.tryParse(d['maxtempC']?.toString() ?? '0') ?? 0,
+      minC:       double.tryParse(d['mintempC']?.toString() ?? '0') ?? 0,
+      rainMm:     totalRain,
+      precipProb: 0, // wttr.in doesn’t give probability directly
+      windMaxKph: maxWind,
+      uvIndex:    double.tryParse(d['uvIndex']?.toString() ?? '0') ?? 0,
+      weatherCode: WeatherCurrent._wttrCode(wCode),
+    );
+  }
 }
 
 class CityResult {
@@ -213,15 +262,92 @@ class WeatherNotifier extends Notifier<WeatherState> {
     });
   }
 
-  String _buildPath(double lat, double lon) =>
-      '/v1/forecast'
+  // ─ Open-Meteo fetch ────────────────────────────────────────────────────────
+
+  Future<bool> _tryOpenMeteo(double lat, double lon) async {
+    final uri = Uri.parse(
+      'https://api.open-meteo.com/v1/forecast'
       '?latitude=$lat&longitude=$lon'
       '&current=temperature_2m,relative_humidity_2m,precipitation,weathercode,'
       'wind_speed_10m,wind_direction_10m,apparent_temperature,'
       'uv_index,visibility,cloud_cover,surface_pressure'
       '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,'
       'precipitation_probability_max,wind_speed_10m_max,uv_index_max,weathercode'
-      '&forecast_days=7&timezone=Asia%2FKolkata';
+      '&forecast_days=7&timezone=Asia%2FKolkata',
+    );
+    if (kDebugMode) debugPrint('WeatherNotifier: trying Open-Meteo');
+    final res = await http.get(uri).timeout(const Duration(seconds: 10));
+    if (res.statusCode != 200) {
+      if (kDebugMode) debugPrint('WeatherNotifier: Open-Meteo HTTP ${res.statusCode}');
+      return false;
+    }
+    final body    = jsonDecode(res.body) as Map<String, dynamic>;
+    final cur     = WeatherCurrent.fromJson(
+        body['current'] as Map<String, dynamic>? ?? {});
+    final daily   = body['daily'] as Map<String, dynamic>? ?? {};
+    final dates   = (daily['time']                          as List?)?.cast<String>()  ?? [];
+    final maxT    = (daily['temperature_2m_max']            as List?)?.cast<num>()    ?? [];
+    final minT    = (daily['temperature_2m_min']            as List?)?.cast<num>()    ?? [];
+    final rains   = (daily['precipitation_sum']             as List?)?.cast<num?>()   ?? [];
+    final probs   = (daily['precipitation_probability_max'] as List?)?.cast<num?>()   ?? [];
+    final winds   = (daily['wind_speed_10m_max']            as List?)?.cast<num?>()   ?? [];
+    final uvs     = (daily['uv_index_max']                  as List?)?.cast<num?>()   ?? [];
+    final codes   = (daily['weathercode']                   as List?)?.cast<num?>()   ?? [];
+
+    final forecast = List.generate(dates.length, (i) => WeatherDay(
+      date:        dates[i],
+      maxC:        (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
+      minC:        (minT.elementAtOrNull(i)  ?? 0).toDouble(),
+      rainMm:      (rains.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+      precipProb:  (probs.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+      windMaxKph:  (winds.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
+      uvIndex:     (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
+      weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
+    ));
+
+    _applySuccess(lat, lon, cur, forecast);
+    return true;
+  }
+
+  // ─ wttr.in fetch (fallback) ────────────────────────────────────────────
+
+  Future<bool> _tryWttr(double lat, double lon) async {
+    // wttr.in accepts lat,lon directly and returns JSON v2
+    final uri = Uri.parse(
+      'https://wttr.in/$lat,$lon?format=j2',
+    );
+    if (kDebugMode) debugPrint('WeatherNotifier: trying wttr.in fallback');
+    final res = await http.get(uri, headers: {'Accept': 'application/json'})
+        .timeout(const Duration(seconds: 12));
+    if (res.statusCode != 200) {
+      if (kDebugMode) debugPrint('WeatherNotifier: wttr.in HTTP ${res.statusCode}');
+      return false;
+    }
+    final body     = jsonDecode(res.body) as Map<String, dynamic>;
+    final cur      = WeatherCurrent.fromWttrJson(body);
+    final weather  = (body['weather'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final forecast = weather.map(WeatherDay.fromWttrJson).toList();
+    _applySuccess(lat, lon, cur, forecast);
+    if (kDebugMode) debugPrint('WeatherNotifier: wttr.in success');
+    return true;
+  }
+
+  void _applySuccess(double lat, double lon,
+      WeatherCurrent cur, List<WeatherDay> forecast) {
+    _lastFetchTime = DateTime.now();
+    _lastFetchLat  = lat;
+    _lastFetchLon  = lon;
+    state = state.copyWith(
+      status:         WeatherStatus.loaded,
+      current:        cur,
+      forecast:       forecast,
+      error:          '',
+      isRateLimited:  false,
+      retryInSeconds: 0,
+    );
+  }
+
+  // ─ City search ───────────────────────────────────────────────────────────
 
   Future<void> searchCity(String query) async {
     if (query.trim().isEmpty) {
@@ -265,6 +391,8 @@ class WeatherNotifier extends Notifier<WeatherState> {
     await fetchWeather();
   }
 
+  // ─ Main fetch ──────────────────────────────────────────────────────────────
+
   Future<void> fetchWeather({bool forceRefresh = false}) async {
     if (!forceRefresh && _isCacheValid() && state.status == WeatherStatus.loaded) {
       if (kDebugMode) debugPrint('WeatherNotifier: cache hit');
@@ -278,69 +406,24 @@ class WeatherNotifier extends Notifier<WeatherState> {
       isRateLimited: false,
     );
 
-    final lat  = state.lat;
-    final lon  = state.lon;
-    final path = _buildPath(lat, lon);
+    final lat = state.lat;
+    final lon = state.lon;
 
-    for (final host in _kWeatherHosts) {
-      try {
-        final uri = Uri.parse('$host$path');
-        if (kDebugMode) debugPrint('WeatherNotifier: trying $host');
-        final res = await http.get(uri).timeout(const Duration(seconds: 10));
+    try {
+      // 1️⃣ Try Open-Meteo (primary — richest data)
+      if (await _tryOpenMeteo(lat, lon)) return;
 
-        if (res.statusCode == 200) {
-          final body    = jsonDecode(res.body) as Map<String, dynamic>;
-          final cur     = WeatherCurrent.fromJson(
-              body['current'] as Map<String, dynamic>? ?? {});
-          final daily   = body['daily'] as Map<String, dynamic>? ?? {};
-          final dates   = (daily['time']                          as List?)?.cast<String>()  ?? [];
-          final maxT    = (daily['temperature_2m_max']            as List?)?.cast<num>()    ?? [];
-          final minT    = (daily['temperature_2m_min']            as List?)?.cast<num>()    ?? [];
-          final rains   = (daily['precipitation_sum']             as List?)?.cast<num?>()   ?? [];
-          final probs   = (daily['precipitation_probability_max'] as List?)?.cast<num?>()   ?? [];
-          final winds   = (daily['wind_speed_10m_max']            as List?)?.cast<num?>()   ?? [];
-          final uvs     = (daily['uv_index_max']                  as List?)?.cast<num?>()   ?? [];
-          final codes   = (daily['weathercode']                   as List?)?.cast<num?>()   ?? [];
+      // 2️⃣ Open-Meteo failed — try wttr.in (completely different service)
+      if (await _tryWttr(lat, lon)) return;
 
-          final forecast = List.generate(dates.length, (i) => WeatherDay(
-            date:        dates[i],
-            maxC:        (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
-            minC:        (minT.elementAtOrNull(i)  ?? 0).toDouble(),
-            rainMm:      (rains.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-            precipProb:  (probs.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-            windMaxKph:  (winds.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-            uvIndex:     (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
-            weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
-          ));
-
-          _lastFetchTime = DateTime.now();
-          _lastFetchLat  = lat;
-          _lastFetchLon  = lon;
-
-          state = state.copyWith(
-            status:         WeatherStatus.loaded,
-            current:        cur,
-            forecast:       forecast,
-            error:          '',
-            isRateLimited:  false,
-            retryInSeconds: 0,
-          );
-          return; // success
-
-        } else {
-          if (kDebugMode) debugPrint('WeatherNotifier: HTTP ${res.statusCode} on $host, trying next...');
-          continue;
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('WeatherNotifier: error on $host: $e');
-        continue;
-      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('WeatherNotifier: unexpected error: $e');
     }
 
-    // All mirrors failed — show countdown + auto-retry
+    // Both sources failed — auto-retry after backoff
     state = state.copyWith(
       status:        WeatherStatus.error,
-      error:         'Weather service busy. Auto-retrying in 5 min…',
+      error:         'Weather unavailable. Auto-retrying in 5 min…',
       isRateLimited: true,
     );
     _startCountdown(_rateLimitBackoff.inSeconds);
