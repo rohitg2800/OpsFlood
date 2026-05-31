@@ -5,10 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'firebase_options.dart';
+import 'l10n/app_localizations.dart';
 import 'providers/flood_providers.dart';
+import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/splash_screen.dart';
@@ -75,7 +78,7 @@ Future<void> main() async {
       return true;
     };
 
-    // 5. Theme
+    // 5. Theme + locale
     await ThemeProvider().init();
 
     // 6. Essential services
@@ -108,17 +111,36 @@ class EquinoxBHApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final themeMode = ref.watch(themeModeProvider);
+    final appMode   = ref.watch(themeModeProvider);
+    final locale    = ref.watch(localeProvider);
+
+    // Derive flutter ThemeMode from AppThemeMode
+    final ThemeMode flutterMode;
+    switch (appMode) {
+      case AppThemeMode.system:  flutterMode = ThemeMode.system; break;
+      case AppThemeMode.light:   flutterMode = ThemeMode.light;  break;
+      case AppThemeMode.dark:    flutterMode = ThemeMode.dark;   break;
+      case AppThemeMode.sunset:  flutterMode = ThemeMode.light;  break;
+      case AppThemeMode.ocean:   flutterMode = ThemeMode.dark;   break;
+    }
 
     return MaterialApp(
-      title: 'EQUINOX-BH',
+      title:                   'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
-      themeMode:                  themeMode,
-      theme:                      RiverColors.lightTheme(),
-      darkTheme:                  RiverColors.darkTheme(),
-      home:                       const SplashScreen(),
+      themeMode:               flutterMode,
+      theme:                   RiverColors.lightTheme(),
+      darkTheme:               RiverColors.darkTheme(),
+      locale:                  locale,
+      supportedLocales:        kSupportedLocales,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home:   const SplashScreen(),
       routes: {
-        AlertsScreen.route: (_) => const AlertsScreen(),   // '/alerts'
+        AlertsScreen.route: (_) => const AlertsScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
