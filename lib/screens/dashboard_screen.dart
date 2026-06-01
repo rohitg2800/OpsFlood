@@ -2,11 +2,13 @@
 // OpsFlood — DashboardScreen v22  "Command Centre +"
 // Added: HotspotCarousel, RainfallForecastStrip, AlertActivityLog,
 //        SystemStatsBar, QuickAccessGrid, trend arrows on RiverPulseCard
+//        AdMob Banner ad at bottom
 library;
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
@@ -17,6 +19,9 @@ import '../widgets/ops_area_chart.dart';
 import '../widgets/ops_bar_chart.dart';
 import '../widgets/premium_theme_sheet.dart';
 import '../widgets/risk_heatmap.dart';
+
+// ── Ad Unit IDs ──────────────────────────────────────────────────────────────
+const String _kBannerAdUnitId = 'ca-app-pub-6001698589023170/6430029201';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -42,6 +47,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   // Alert activity log — maintained locally
   final List<_AlertEvent> _alertLog = [];
   String? _prevRiskSnapshot;
+
+  // AdMob banner
+  BannerAd? _bannerAd;
+  bool _bannerLoaded = false;
 
   @override
   void initState() {
@@ -76,6 +85,24 @@ class _DashboardScreenState extends State<DashboardScreen>
     _shimmerAnim = CurvedAnimation(parent: _shimmerCtrl, curve: Curves.linear);
 
     _service.addListener(_onData);
+    _loadBannerAd();
+  }
+
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: _kBannerAdUnitId,
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (mounted) setState(() => _bannerLoaded = true);
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          _bannerAd = null;
+        },
+      ),
+    )..load();
   }
 
   void _onData() {
@@ -114,6 +141,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _arcCtrl.dispose();
     _tickerCtrl.dispose();
     _shimmerCtrl.dispose();
+    _bannerAd?.dispose();
     super.dispose();
   }
 
@@ -156,6 +184,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: AppPalette.abyss0,
+        // ── Banner Ad at the very bottom ──────────────────────────────
+        bottomNavigationBar: _bannerLoaded && _bannerAd != null
+            ? SafeArea(
+                child: SizedBox(
+                  height: _bannerAd!.size.height.toDouble(),
+                  child: AdWidget(ad: _bannerAd!),
+                ),
+              )
+            : null,
         body: SafeArea(
           bottom: false,
           child: CustomScrollView(
@@ -1823,55 +1860,35 @@ class _CapacityChart extends StatelessWidget {
           const SizedBox(width: 10),
           _ldot(AppPalette.danger,   '60–85%'),
           const SizedBox(width: 10),
-          _ldot(AppPalette.critical, 'Critical ≥85%'),
+          _ldot(AppPalette.critical, '>85% Critical'),
         ]),
       ],
     ),
   );
+
   Widget _ldot(Color c, String t) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Container(
-        width: 7, height: 7,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle, color: c,
-          boxShadow: [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 4)],
-        ),
-      ),
+      Container(width: 7, height: 7,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
       const SizedBox(width: 4),
-      Text(t, style: const TextStyle(fontSize: 8.5, color: AppPalette.textGrey)),
+      Text(t, style: const TextStyle(fontSize: 7.5, color: AppPalette.textGrey)),
     ],
   );
 }
 
 class _EmptyState extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 340,
-    child: Center(
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.only(top: 60),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 80, height: 80,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(colors: [
-                AppPalette.cyan.withValues(alpha: 0.12), AppPalette.abyss2,
-              ]),
-              border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.20)),
-            ),
-            child: const Icon(Icons.water_drop_outlined,
-                color: AppPalette.cyan, size: 36),
-          ),
-          const SizedBox(height: 18),
-          const Text('Fetching live flood data…', style: TextStyle(
-            color: AppPalette.textGrey, fontSize: 14, fontWeight: FontWeight.w700,
-          )),
-          const SizedBox(height: 6),
-          const Text('CWC  •  GloFAS  •  IMD  •  Open-Meteo', style: TextStyle(
-            color: AppPalette.textDim, fontSize: 10, letterSpacing: 1.8,
-          )),
+          Icon(Icons.water_damage_outlined,
+              color: AppPalette.cyan.withValues(alpha: 0.3), size: 56),
+          const SizedBox(height: 16),
+          const Text('Loading flood data…',
+              style: TextStyle(color: AppPalette.textGrey, fontSize: 14)),
         ],
       ),
     ),
