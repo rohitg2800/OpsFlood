@@ -4,14 +4,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="EQUINOX-BR05"
+        android:label="EQUINOX-BH"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- AdMob App ID — REPLACE ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX with your real ID before release -->
+        <!-- AdMob Real App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-6001698589023170~4240191583"/>
 
         <activity
             android:name=".MainActivity"
