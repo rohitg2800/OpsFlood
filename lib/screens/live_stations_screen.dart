@@ -1,11 +1,11 @@
 // lib/screens/live_stations_screen.dart
-// OpsFlood — LiveStationsScreen v2  "Uses real providers"
-// Uses liveLevelsProvider (List<FloodData>) from flood_providers.dart.
-// StationTile is inlined here — no separate widget file needed.
+// OpsFlood — LiveStationsScreen v3
+// AdMob interstitial (ca-app-pub-6001698589023170/6530780174) shown on back-press
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
 
 import '../l10n/context_l10n.dart';
@@ -13,43 +13,101 @@ import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 
-class LiveStationsScreen extends ConsumerWidget {
+// ── Ad Unit IDs ──────────────────────────────────────────────────────────────
+const String _kInterstitialAdUnitId = 'ca-app-pub-6001698589023170/6530780174';
+
+class LiveStationsScreen extends ConsumerStatefulWidget {
   const LiveStationsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LiveStationsScreen> createState() => _LiveStationsScreenState();
+}
+
+class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
+  InterstitialAd? _interstitialAd;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInterstitial();
+  }
+
+  void _loadInterstitial() {
+    InterstitialAd.load(
+      adUnitId: _kInterstitialAdUnitId,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _interstitialAd!.setImmersiveMode(true);
+        },
+        onAdFailedToLoad: (error) {
+          _interstitialAd = null;
+        },
+      ),
+    );
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_interstitialAd != null) {
+      await _interstitialAd!.show();
+      _interstitialAd = null;
+      // Reload for next time user visits this screen
+      _loadInterstitial();
+    }
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _interstitialAd?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final s        = context.l10n;
     final stations = ref.watch(liveLevelsProvider);
 
-    return Scaffold(
-      backgroundColor: AppPalette.abyss0,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
         backgroundColor: AppPalette.abyss0,
-        title: Text(
-          s.liveData,
-          style: const TextStyle(
-            color: AppPalette.textWhite,
-            fontSize: 18, fontWeight: FontWeight.w800,
-          ),
-        ),
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: AppPalette.textWhite),
-        elevation: 0,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: AppPalette.cyan.withValues(alpha: 0.10),
-          ),
-        ),
-      ),
-      body: stations.isEmpty
-          ? _EmptyStations(label: s.noStationsFound)
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              itemCount: stations.length,
-              itemBuilder: (_, i) => _StationTile(data: stations[i]),
+        appBar: AppBar(
+          backgroundColor: AppPalette.abyss0,
+          title: Text(
+            s.liveData,
+            style: const TextStyle(
+              color: AppPalette.textWhite,
+              fontSize: 18, fontWeight: FontWeight.w800,
             ),
+          ),
+          centerTitle: true,
+          iconTheme: const IconThemeData(color: AppPalette.textWhite),
+          elevation: 0,
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Container(
+              height: 1,
+              color: AppPalette.cyan.withValues(alpha: 0.10),
+            ),
+          ),
+        ),
+        body: stations.isEmpty
+            ? _EmptyStations(label: s.noStationsFound)
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                itemCount: stations.length,
+                itemBuilder: (_, i) => _StationTile(data: stations[i]),
+              ),
+      ),
     );
   }
 }
@@ -129,7 +187,6 @@ class _StationTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // Capacity fill bar
           Stack(
             children: [
               Container(
