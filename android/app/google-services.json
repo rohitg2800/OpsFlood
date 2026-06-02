@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:1071864126219:android:fc5dc962ef143d4ae7e00e",
         "android_client_info": {
-          "package_name": "com.equinox_bh.android"
+          "package_name": "in.rohitg.floodwatch"
         }
       },
       "oauth_client": [],
