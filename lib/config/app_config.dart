@@ -19,10 +19,7 @@ class AppConfig {
   );
 
   /// Primary backend URL.
-<<<<<<< HEAD
   /// Override at build time: --dart-define=EQUINOX_BH_BASE_URL=https://...
-=======
->>>>>>> origin/refactor/station-msl-map
   static const String baseUrl = String.fromEnvironment(
     'EQUINOX_BH_BASE_URL',
     defaultValue: 'https://equinox-bh.onrender.com',
@@ -47,19 +44,12 @@ class AppConfig {
   static bool get isLoggingEnabled =>
       debugLogging || !isProduction || kDebugMode;
 
-<<<<<<< HEAD
   /// How often the app polls the backend for fresh data (seconds).
   /// 0 = use the default defined inside each service.
-=======
-  static bool get isDebugLogging => isLoggingEnabled;
-
-  /// How often the app polls the backend for fresh data (seconds).
->>>>>>> origin/refactor/station-msl-map
   static const int pollSeconds = int.fromEnvironment(
     'EQUINOX_BH_POLL_SECONDS', defaultValue: 0,
   );
 
-<<<<<<< HEAD
   // ── API endpoint paths ─────────────────────────────────────────────────────
 
   /// Health-check endpoint — GET /health
@@ -75,28 +65,4 @@ class AppConfig {
 
   /// Timeout for a normal (warm) health check.
   static const Duration healthTimeout = Duration(seconds: 10);
-=======
-  static int get healthRetries => 3;
-
-  // ── Standard API endpoint paths ─────────────────────────────────────────
-
-  static String get epHealth   => '$baseUrl/health';
-  static String get epPredict  => '$baseUrl/predict/v2';
-
-  // ── Extended endpoint paths ────────────────────────────────────────────
-
-  static String get epCwcFfs            => '$baseUrl/cwc/ffs';
-  static String get epCwcStations       => '$baseUrl/cwc/stations';
-  static String get epLiveTelemetry     => '$baseUrl/live/telemetry';
-  static String get epLiveLevels        => '$baseUrl/live/levels';
-  static String get epCriticalAlerts    => '$baseUrl/alerts/critical';
-  static String get epPipelineManifest  => '$baseUrl/pipeline/manifest';
-  static String get epStateSeverity     => '$baseUrl/state/severity';
-  static String get epLiveLevels2       => '$baseUrl/live/levels/v2';
-
-  // ── Timeouts ──────────────────────────────────────────────────────────
-
-  static const Duration coldStartTimeout = Duration(seconds: 45);
-  static const Duration healthTimeout    = Duration(seconds: 10);
->>>>>>> origin/refactor/station-msl-map
 }
