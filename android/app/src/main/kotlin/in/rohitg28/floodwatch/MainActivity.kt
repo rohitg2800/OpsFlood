@@ -1,4 +1,4 @@
-package in.rohitg28.floodwatch
+package com.rohitg28.floodwatch
 
 import io.flutter.embedding.android.FlutterActivity
 
