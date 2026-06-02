@@ -19,7 +19,6 @@ class AppConfig {
   );
 
   /// Primary backend URL.
-  /// Override at build time: --dart-define=EQUINOX_BH_BASE_URL=https://...
   static const String baseUrl = String.fromEnvironment(
     'EQUINOX_BH_BASE_URL',
     defaultValue: 'https://equinox-bh.onrender.com',
@@ -44,25 +43,33 @@ class AppConfig {
   static bool get isLoggingEnabled =>
       debugLogging || !isProduction || kDebugMode;
 
+  static bool get isDebugLogging => isLoggingEnabled;
+
   /// How often the app polls the backend for fresh data (seconds).
-  /// 0 = use the default defined inside each service.
   static const int pollSeconds = int.fromEnvironment(
     'EQUINOX_BH_POLL_SECONDS', defaultValue: 0,
   );
 
-  // ── API endpoint paths ─────────────────────────────────────────────────────
+  static int get healthRetries => 3;
 
-  /// Health-check endpoint — GET /health
-  static String get epHealth  => '$baseUrl/health';
+  // ── Standard API endpoint paths ─────────────────────────────────────────
 
-  /// ML prediction endpoint — POST /predict/v2
-  static String get epPredict => '$baseUrl/predict/v2';
+  static String get epHealth   => '$baseUrl/health';
+  static String get epPredict  => '$baseUrl/predict/v2';
 
-  // ── Timeouts ───────────────────────────────────────────────────────────────
+  // ── Extended endpoint paths ────────────────────────────────────────────
 
-  /// Timeout for a cold-start wake-up health check (Render spins down on idle).
+  static String get epCwcFfs            => '$baseUrl/cwc/ffs';
+  static String get epCwcStations       => '$baseUrl/cwc/stations';
+  static String get epLiveTelemetry     => '$baseUrl/live/telemetry';
+  static String get epLiveLevels        => '$baseUrl/live/levels';
+  static String get epCriticalAlerts    => '$baseUrl/alerts/critical';
+  static String get epPipelineManifest  => '$baseUrl/pipeline/manifest';
+  static String get epStateSeverity     => '$baseUrl/state/severity';
+  static String get epLiveLevels2       => '$baseUrl/live/levels/v2';
+
+  // ── Timeouts ──────────────────────────────────────────────────────────
+
   static const Duration coldStartTimeout = Duration(seconds: 45);
-
-  /// Timeout for a normal (warm) health check.
-  static const Duration healthTimeout = Duration(seconds: 10);
+  static const Duration healthTimeout    = Duration(seconds: 10);
 }
