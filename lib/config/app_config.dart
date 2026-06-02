@@ -1,107 +1,75 @@
 // lib/config/app_config.dart
+// EQUINOX-BH — Single Source of Truth: App Configuration
 //
-// OpsFlood — Single Source of Truth: App Configuration
-//
-// ALL bool.fromEnvironment / String.fromEnvironment calls MUST be const.
-// Override at build time via:
-//   flutter run --dart-define=OPSFLOOD_BASE_URL=http://localhost:8000
-//   flutter build apk --dart-define=OPSFLOOD_ENV=production
-library;
+// Usage:
+//   flutter run --dart-define=EQUINOX_BH_BASE_URL=http://localhost:8000
+//   flutter build apk --dart-define=EQUINOX_BH_ENV=production
+
+import 'package:flutter/foundation.dart';
 
 class AppConfig {
   AppConfig._();
 
-  // ── Environment ────────────────────────────────────────────────────────────────────
-  static const String env = String.fromEnvironment(
-    'OPSFLOOD_ENV', defaultValue: 'production',
-  );
-  static bool get isProduction  => env == 'production';
-  static bool get isDevelopment => env == 'development';
-
-  // MUST remain const — bool.fromEnvironment is only valid as a const expression
-  static const bool isDebugLogging = bool.fromEnvironment(
-    'OPSFLOOD_DEBUG_LOGGING', defaultValue: false,
+  static const String environment = String.fromEnvironment(
+    'EQUINOX_BH_ENV', defaultValue: 'production',
   );
 
-  // ── Primary backend ───────────────────────────────────────────────────────────
+  static const bool debugLogging = bool.fromEnvironment(
+    'EQUINOX_BH_DEBUG_LOGGING', defaultValue: false,
+  );
+
+  /// Primary backend URL.
   static const String baseUrl = String.fromEnvironment(
-    'OPSFLOOD_BASE_URL',
-    defaultValue: 'https://opsflood.onrender.com',
+    'EQUINOX_BH_BASE_URL',
+    defaultValue: 'https://equinox-bh.onrender.com',
   );
 
-  /// Secondary backend URL (empty = disabled). Used by tests to verify
-  /// the candidate-list logic. Override via --dart-define=OPSFLOOD_BACKUP_URL.
-  static const String backupBaseUrl = String.fromEnvironment(
-    'OPSFLOOD_BACKUP_URL',
+  /// Fallback / backup backend URL for resilience.
+  static const String backupUrl = String.fromEnvironment(
+    'EQUINOX_BH_BACKUP_URL',
     defaultValue: '',
   );
 
-  // ── API Token (optional — empty means no auth header is sent) ─────────────────
+  /// Optional bearer token for authenticated endpoints.
   static const String apiToken = String.fromEnvironment(
-    'OPSFLOOD_API_TOKEN',
+    'EQUINOX_BH_API_TOKEN',
     defaultValue: '',
   );
 
-  // ── Timeouts ──────────────────────────────────────────────────────────────────
-  // requestTimeout must be ≤60s (test: 5–60s) and strictly < coldStartTimeout.
-  static const Duration requestTimeout   = Duration(seconds: 30);
-  static const Duration healthTimeout    = Duration(seconds: 10);
-  static const Duration coldStartTimeout = Duration(seconds: 65);
+  static bool get isProduction  => environment == 'production';
+  static bool get isDevelopment => environment == 'development';
+  static bool get isStaging     => environment == 'staging';
 
-  // ── Retry policy ────────────────────────────────────────────────────────────────
-  static const int      maxRetries           = 3;
-  static const int      healthRetries        = 2;
-  static const Duration retryBackoff         = Duration(seconds: 2);
-  static const Duration serverOverloadWait   = Duration(seconds: 5);
+  static bool get isLoggingEnabled =>
+      debugLogging || !isProduction || kDebugMode;
 
-  // ── Polling ────────────────────────────────────────────────────────────────────
-  static const int _pollSecondsOverride = int.fromEnvironment(
-    'OPSFLOOD_POLL_SECONDS', defaultValue: 0,
+  static bool get isDebugLogging => isLoggingEnabled;
+
+  /// How often the app polls the backend for fresh data (seconds).
+  static const int pollSeconds = int.fromEnvironment(
+    'EQUINOX_BH_POLL_SECONDS', defaultValue: 0,
   );
-  // Non-const getter is fine; only the fromEnvironment call itself must be const
-  static Duration get realtimeInterval =>
-      _pollSecondsOverride > 0
-          ? Duration(seconds: _pollSecondsOverride)
-          : const Duration(seconds: 45);
-  static const Duration backgroundInterval = Duration(minutes: 5);
 
-  /// Alias used by tests — matches the background poll cadence.
-  static Duration get pollingInterval => backgroundInterval;
+  static int get healthRetries => 3;
 
-  // ── Cache ──────────────────────────────────────────────────────────────────────────
-  static const Duration cacheTtl = Duration(minutes: 5);
+  // ── Standard API endpoint paths ─────────────────────────────────────────
 
-  // ── Animation durations (used by constants_domain_test) ─────────────────────────
-  static const Duration shortAnimDuration = Duration(milliseconds: 200);
-  static const Duration longAnimDuration  = Duration(milliseconds: 500);
+  static String get epHealth   => '$baseUrl/health';
+  static String get epPredict  => '$baseUrl/predict/v2';
 
-  // ── Endpoints ───────────────────────────────────────────────────────────────────
-  static const String epHealth           = '/health';
-  static const String epPredict          = '/predict';
-  static const String epLiveTelemetry    = '/api/live-telemetry';
-  static const String epLiveLevels       = '/api/live-levels';
-  static const String epCriticalAlerts   = '/api/critical-alerts';
-  static const String epCwcFfs           = '/api/cwc-ffs/station';
-  static const String epCwcStations      = '/api/cwc-stations';
-  static const String epCwcReservoir     = '/api/cwc-reservoir/state';
-  static const String epWeatherCurrent   = '/weather/current';
-  static const String epWeatherForecast  = '/weather/forecast';
-  static const String epPipelineFeatures = '/api/pipeline/features';
-  static const String epPipelineManifest = '/api/pipeline/manifest';
-  static const String epStateSeverity    = '/api/state-severity';
-  static const String epIngestionRun     = '/ingestion/run';
-  static const String epModelMetrics     = '/model-metrics';
-  static const String epNdmaAdvisories   = '/api/ndma/advisories';
-  static const String epNdmaContacts     = '/api/ndma/contacts';
+  // ── Extended endpoint paths ────────────────────────────────────────────
 
-  // ── Endpoint aliases (used by tests) ────────────────────────────────────────────
-  static String get healthEndpoint           => epHealth;
-  static String get liveTelemetryEndpoint    => epLiveTelemetry;
-  static String get liveLevelsEndpoint       => epLiveLevels;
-  static String get criticalAlertsEndpoint   => epCriticalAlerts;
-  static String get predictLegacyEndpoint    => epPredict;
-  static String get weatherCurrentEndpoint   => epWeatherCurrent;
-  static String get weatherForecastEndpoint  => epWeatherForecast;
-  static String get ndmaAdvisoriesEndpoint   => epNdmaAdvisories;
-  static String get ndmaContactsEndpoint     => epNdmaContacts;
+  static String get epCwcFfs            => '$baseUrl/cwc/ffs';
+  static String get epCwcStations       => '$baseUrl/cwc/stations';
+  static String get epLiveTelemetry     => '$baseUrl/live/telemetry';
+  static String get epLiveLevels        => '$baseUrl/live/levels';
+  static String get epCriticalAlerts    => '$baseUrl/alerts/critical';
+  static String get epPipelineManifest  => '$baseUrl/pipeline/manifest';
+  static String get epStateSeverity     => '$baseUrl/state/severity';
+  static String get epLiveLevels2       => '$baseUrl/live/levels/v2';
+
+  // ── Timeouts ──────────────────────────────────────────────────────────
+
+  static const Duration coldStartTimeout = Duration(seconds: 45);
+  static const Duration healthTimeout    = Duration(seconds: 10);
 }
