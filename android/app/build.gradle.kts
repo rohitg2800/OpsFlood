@@ -14,21 +14,11 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
-// ── Keystore signing ────────────────────────────────────────────────────────
-// Place your keystore at android/keystore.jks and set these 4 lines
-// in android/keystore.properties (DO NOT commit that file):
-//   storeFile=keystore.jks
-//   storePassword=YOUR_STORE_PASSWORD
-//   keyAlias=YOUR_KEY_ALIAS
-//   keyPassword=YOUR_KEY_PASSWORD
-//
-// If keystore.properties is missing (e.g. CI without secrets), the build
-// falls back to the debug keystore so it still compiles.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val useReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
-    namespace = "in.rohitg28.floodwatch"
+    namespace = "app.rohitg28.floodwatch"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -58,7 +48,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "in.rohitg28.floodwatch"
+        applicationId = "app.rohitg28.floodwatch"
         minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = 2
