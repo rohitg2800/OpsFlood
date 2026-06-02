@@ -28,7 +28,7 @@ val keystorePropertiesFile = rootProject.file("keystore.properties")
 val useReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
-    namespace = "com.equinox_bh.android"
+    namespace = "in.rohitg28.floodwatch"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -58,7 +58,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.equinox_bh.android"
+        applicationId = "in.rohitg28.floodwatch"
         minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = 2
