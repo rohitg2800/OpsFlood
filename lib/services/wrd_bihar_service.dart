@@ -1,19 +1,22 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v5.0 — 100% on-device, no backend)
+// OpsFlood — WRD Bihar Service (v5.1 — 100% on-device, no backend)
 //
 // SOURCE: Central Flood Control Cell, WRD Patna
-// PRIMARY:  https://irrigation.befiqr.in/state/table/rivers
-// FALLBACK: allOrigins CORS proxy (for portal bot-blocks)
+// PRIMARY:  https://irrigation.befiqr.in/state/table/rivers  (direct scrape)
+// FALLBACK: allOrigins proxy  (for portal bot-blocks)
 //
-// No backend required. All scraping done directly on the device.
+// BeFIQR table layout (two header rows!):
+//   Row 0: (1) (2) (3) ... (11)   ← column numbers, ignored
+//   Row 1: River | Site | HFL | DL | Yesterday | Current | Diff | Above/Below | Trend | District
+//   Rows 2-32: 31 live data rows
 library;
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-// ── Data model ──────────────────────────────────────────────────────────────────────
+// ── Data model ────────────────────────────────────────────────────────────────
 class WrdStation {
   final String  river;
   final String  site;
@@ -102,7 +105,7 @@ class WrdStation {
       'risk=$riskLabel | live=$hasLiveData)';
 }
 
-// ── WRD site name ⇒ city alias map ─────────────────────────────────────────────
+// ── WRD site name ⇒ city alias map ───────────────────────────────────────────
 const Map<String, String> _kAliasMap = {
   'ekmighat':                  'Ekmighat',
   'kamtaul':                   'Kamtaul',
@@ -138,18 +141,16 @@ const Map<String, String> _kAliasMap = {
   'sripalpur':                 'Sripalpur',
 };
 
-// ── Direct scrape URLs (tried in order) ───────────────────────────────────────
+// ── Scrape URLs (tried in order) ──────────────────────────────────────────────
 const _kDirectUrls = [
   'https://irrigation.befiqr.in/state/table/rivers',
-  'https://beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx',
   'http://irrigation.befiqr.in/state/table/rivers',
 ];
 
-// allOrigins proxy — used when the portal blocks direct Android HTTP
 String _proxyUrl(String target) =>
     'https://api.allorigins.win/get?url=${Uri.encodeComponent(target)}';
 
-// Headers that mimic a real desktop browser (portal rejects bare Dart UA)
+// Full Android browser UA — portal rejects bare Dart http-client UA
 const _kHeaders = {
   'User-Agent':
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) '
@@ -162,14 +163,15 @@ const _kHeaders = {
   'Cache-Control':   'no-cache',
 };
 
-// ── Service ───────────────────────────────────────────────────────────────────────────
+// ── Service ───────────────────────────────────────────────────────────────────
 class WrdBiharService {
   WrdBiharService._();
   static final WrdBiharService instance = WrdBiharService._();
 
-  static const _cacheTtl = Duration(minutes: 15);
-  static const _source   = 'WRD_BIHAR_LIVE';
-  static const _timeout  = Duration(seconds: 25);
+  static const _cacheTtl      = Duration(minutes: 15);
+  static const _source        = 'WRD_BIHAR_LIVE';
+  static const _directTimeout = Duration(seconds: 25);
+  static const _proxyTimeout  = Duration(seconds: 40); // proxy chains 2 HTTP calls
 
   List<WrdStation>?        _cache;
   DateTime?                _cacheTime;
@@ -185,20 +187,20 @@ class WrdBiharService {
       return _cache!;
     }
 
-    // 1️⃣ Try each BeFIQR URL directly with browser headers
+    // 1️⃣ Direct scrape with browser headers
     for (final url in _kDirectUrls) {
       try {
         final res = await http
             .get(Uri.parse(url), headers: _kHeaders)
-            .timeout(_timeout);
+            .timeout(_directTimeout);
         if (res.statusCode == 200) {
           final stations = _parseHtmlTable(res.body);
           if (stations.isNotEmpty) {
             _setCache(stations);
-            _log('direct-scrape ✓ ${stations.length} stations ($url)');
+            _log('direct-scrape ✓ ${stations.length} stations');
             return stations;
           }
-          _log('direct-scrape: HTTP 200 but 0 rows from $url');
+          _log('direct-scrape: HTTP 200 but 0 stations from $url');
         } else {
           _log('direct-scrape: HTTP ${res.statusCode} from $url');
         }
@@ -207,14 +209,15 @@ class WrdBiharService {
       }
     }
 
-    // 2️⃣ Proxy fallback (allOrigins) — wraps response in JSON {contents:"<html>"}
+    // 2️⃣ allOrigins proxy fallback
     const primaryUrl = 'https://irrigation.befiqr.in/state/table/rivers';
     try {
-      final proxyUri = Uri.parse(_proxyUrl(primaryUrl));
-      final res = await http.get(proxyUri).timeout(_timeout);
+      final res = await http
+          .get(Uri.parse(_proxyUrl(primaryUrl)))
+          .timeout(_proxyTimeout);
       if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
-        final html = body['contents'] as String? ?? '';
+        final json = jsonDecode(res.body) as Map?;
+        final html = json?['contents'] as String? ?? '';
         if (html.isNotEmpty) {
           final stations = _parseHtmlTable(html);
           if (stations.isNotEmpty) {
@@ -222,14 +225,16 @@ class WrdBiharService {
             _log('proxy-scrape ✓ ${stations.length} stations');
             return stations;
           }
+          _log('proxy-scrape: 0 stations parsed from proxy HTML');
         }
+      } else {
+        _log('proxy-scrape: HTTP ${res.statusCode}');
       }
-      _log('proxy-scrape: HTTP ${res.statusCode}');
     } catch (e) {
       _log('proxy-scrape error: $e');
     }
 
-    _log('all sources failed — returning stale cache (${_cache?.length ?? 0} stations)');
+    _log('all sources failed — stale cache: ${_cache?.length ?? 0} stations');
     return _cache ?? [];
   }
 
@@ -278,7 +283,7 @@ class WrdBiharService {
     return map;
   }
 
-  // ── Internal ────────────────────────────────────────────────────────────────
+  // ── Internals ────────────────────────────────────────────────────────────
 
   void _setCache(List<WrdStation> stations) {
     _cache     = stations;
@@ -296,86 +301,118 @@ class WrdBiharService {
     _log('city index: ${map.length}/${stations.length} resolved');
   }
 
-  // HTML table parser
-  // BeFIQR column order: 0=SL 1=River 2=Site 3=HFL 4=DL 5=Yesterday
-  //                      6=Current 7=Diff24h 8=AboveBelowDL 9=Trend 10=District
+  // ── HTML table parser ─────────────────────────────────────────────────────
+  //
+  // BeFIQR uses TWO header rows:
+  //   Row 0 → (1)(2)(3)...(11)   [column number labels — NOT text]
+  //   Row 1 → River|Site|HFL|DL|Yesterday|Current|Diff|Above/Below|Trend|District
+  //   Rows 2..N → data
+  //
+  // Strategy: scan first 4 rows looking for one containing the word "river".
+  // That is the real text-header row. Data starts on the row AFTER it.
   List<WrdStation> _parseHtmlTable(String html) {
     final now    = DateTime.now();
     final result = <WrdStation>[];
-    final rowRe  = RegExp(r'<tr[^>]*>(.*?)<\/tr>', dotAll: true, caseSensitive: false);
+    final rowRe  = RegExp(r'<tr[^>]*>(.*?)<\/tr>',  dotAll: true, caseSensitive: false);
     final cellRe = RegExp(r'<t[dh][^>]*>(.*?)<\/t[dh]>', dotAll: true, caseSensitive: false);
     final tagRe  = RegExp(r'<[^>]+>');
 
-    String clean(String s) =>
-        s.replaceAll(tagRe, '').replaceAll('\u00a0', ' ').replaceAll('&nbsp;', ' ').trim();
+    String clean(String s) => s
+        .replaceAll(tagRe, '')
+        .replaceAll('\u00a0', ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .trim();
 
     final rows = rowRe.allMatches(html).toList();
     if (rows.isEmpty) {
-      _log('HTML parser: 0 <tr> rows found');
+      _log('HTML parser: 0 <tr> rows found — page may be JS-rendered or empty');
       return result;
     }
 
-    // Detect header row to confirm BeFIQR layout
-    final headerCells = cellRe
-        .allMatches(rows.first.group(1)!)
-        .map((m) => clean(m.group(1)!).toLowerCase())
-        .toList();
-    final isBefiqr = headerCells.any((h) => h.contains('river'));
-    _log('HTML parser: ${rows.length} rows, isBefiqr=$isBefiqr, headers=$headerCells');
+    // Find the real text-header row (the one containing the word "river")
+    // BeFIQR wraps the real headers in a second <tr> after a numeric-label row
+    int textHeaderIdx = -1;
+    final scanLimit   = rows.length < 5 ? rows.length : 5;
+    for (int i = 0; i < scanLimit; i++) {
+      final rowText = rows[i].group(1)!;
+      final cells   = cellRe
+          .allMatches(rowText)
+          .map((m) => clean(m.group(1)!).toLowerCase())
+          .toList();
+      _log('HTML parser row[$i] cells: $cells');
+      if (cells.any((c) => c.contains('river'))) {
+        textHeaderIdx = i;
+        break;
+      }
+    }
 
-    for (final row in rows.skip(1)) {
+    _log('HTML parser: ${rows.length} total rows, text-header at row $textHeaderIdx');
+
+    if (textHeaderIdx < 0) {
+      _log('HTML parser: no text-header row found — cannot determine column layout');
+      return result;
+    }
+
+    // Parse data rows: everything after the text-header row
+    for (final row in rows.skip(textHeaderIdx + 1)) {
       final cells = cellRe
           .allMatches(row.group(1)!)
           .map((m) => clean(m.group(1)!))
           .toList();
-      if (cells.length < 6) continue;
+
+      if (cells.length < 10) continue;
+
+      final river = cells[1].trim();
+      final site  = cells[2].replaceAll('*', '').trim();
+
+      // Skip blank rows, repeat-header rows, or label rows
+      if (river.isEmpty || site.isEmpty) continue;
+      if (river.toLowerCase() == 'river' || site.toLowerCase() == 'site') continue;
+      if (river.toLowerCase().contains('sl.') || river.startsWith('(')) continue;
 
       try {
-        if (isBefiqr) {
-          if (cells.length < 10) continue;
-          final river = cells[1].trim();
-          final site  = cells[2].replaceAll('*', '').trim();
-          if (river.isEmpty || site.isEmpty) continue;
-          // Skip header-repeat rows
-          if (river.toLowerCase() == 'river' || site.toLowerCase() == 'site') continue;
+        final cur   = _dblStr(cells[6]);
+        final dl    = _dblStr(cells[4]);
+        final bdRaw = _dblStr(cells[8]);
+        // above_below_danger_m: positive = below danger, negative = above danger
+        final bd    = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
 
-          final cur    = _dblStr(cells.length > 6 ? cells[6] : '');
-          final dl     = _dblStr(cells.length > 4 ? cells[4] : '');
-          final bdRaw  = _dblStr(cells.length > 8 ? cells[8] : '');
-          final bd     = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
+        final trendRaw = cells.length > 9 ? cells[9] : '';
+        final trend = trendRaw.contains('↑') || trendRaw.toUpperCase().contains('RISE') ? '↑'
+                    : trendRaw.contains('↓') || trendRaw.toUpperCase().contains('FALL') ? '↓'
+                    : trendRaw.contains('→') || trendRaw.toUpperCase().contains('STEAD') ? '→'
+                    : trendRaw.isNotEmpty ? trendRaw
+                    : null;
 
-          final trendRaw = cells.length > 9 ? cells[9] : '';
-          final trend = trendRaw.contains('↑') ? '↑'
-                      : trendRaw.contains('↓') ? '↓'
-                      : trendRaw.contains('→') ? '→'
-                      : trendRaw.isNotEmpty    ? trendRaw
-                      : null;
-
-          result.add(WrdStation(
-            river:        river,
-            site:         site,
-            district:     cells.length > 10 ? _districtOnly(cells[10]) : '',
-            hfl:          _dblStr(cells[3]),
-            dangerLevel:  dl,
-            warningLevel: null,
-            prevLevel:    _dblStr(cells.length > 5 ? cells[5] : ''),
-            currentLevel: cur,
-            diff24h:      _dblStr(cells.length > 7 ? cells[7] : ''),
-            belowDanger:  bd,
-            trend:        trend,
-            source:       _source,
-            fetchedAt:    now,
-          ));
-        }
-      } catch (_) {}
+        result.add(WrdStation(
+          river:        river,
+          site:         site,
+          district:     cells.length > 10 ? _districtOnly(cells[10]) : '',
+          hfl:          _dblStr(cells[3]),
+          dangerLevel:  dl,
+          warningLevel: null,
+          prevLevel:    _dblStr(cells[5]),
+          currentLevel: cur,
+          diff24h:      _dblStr(cells[7]),
+          belowDanger:  bd,
+          trend:        trend,
+          source:       _source,
+          fetchedAt:    now,
+        ));
+      } catch (e) {
+        _log('HTML parser: skipping row (parse error): $e | cells=$cells');
+      }
     }
+
     _log('HTML parser: parsed ${result.length} stations from ${rows.length} rows');
     return result;
   }
 
   double? _dblStr(String s) {
+    // Strip everything except digits, dot, minus
     final c = s.replaceAll(RegExp(r'[^\d.\-]'), '').trim();
-    if (c.isEmpty || c == '-') return null;
+    if (c.isEmpty || c == '-' || c == '.') return null;
     return double.tryParse(c);
   }
 
