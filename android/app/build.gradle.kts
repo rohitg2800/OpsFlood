@@ -51,8 +51,8 @@ android {
         applicationId = "app.rohitg28.floodwatch"
         minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
         multiDexEnabled = true
     }
 
