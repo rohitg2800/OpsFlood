@@ -75,6 +75,8 @@ if _is_package_context():
     from backend.routers.ingestion import router as ingestion_router
     from backend.routers.live_levels import router as live_levels_router
     from backend.routers.wrd_bihar import router as wrd_bihar_router
+    from backend.routers.wrd_bihar import start_scheduler as wrd_start_scheduler
+    from backend.routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
 else:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
@@ -95,6 +97,8 @@ else:
     from routers.ingestion import router as ingestion_router
     from routers.live_levels import router as live_levels_router
     from routers.wrd_bihar import router as wrd_bihar_router
+    from routers.wrd_bihar import start_scheduler as wrd_start_scheduler
+    from routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
 
 
 warnings.filterwarnings('ignore')
@@ -1486,11 +1490,15 @@ data_ingestion_scheduler = ScheduledIngestionService(
 async def startup_ingestion_scheduler():
     data_pipeline.update_targets(get_data_ingestion_targets())
     data_ingestion_scheduler.start()
+    # ── WRD Bihar auto-refresh scheduler ──────────────────────────────────
+    wrd_start_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown_ingestion_scheduler():
     data_ingestion_scheduler.stop()
+    # ── WRD Bihar auto-refresh scheduler ──────────────────────────────────
+    wrd_stop_scheduler()
 
 
 @app.get("/weather/status")
