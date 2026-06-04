@@ -7,6 +7,7 @@ from .telemetry import router as telemetry_router
 from .ingestion import router as ingestion_router
 from .live_levels import router as live_levels_router
 from .fcm import router as fcm_router
+from .wrd_bihar import router as wrd_bihar_router
 
 __all__ = [
     "core_router",
@@ -16,4 +17,5 @@ __all__ = [
     "ingestion_router",
     "live_levels_router",
     "fcm_router",
+    "wrd_bihar_router",
 ]
