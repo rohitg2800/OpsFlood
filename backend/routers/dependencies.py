@@ -74,6 +74,10 @@ operational_store.initialize()
 # ============= CONSTANTS =============
 WEATHER_CACHE_TTL_SECONDS = 600
 
+# India Standard Time: UTC+5:30 = 19800 seconds offset
+WEATHER_TIMEZONE_OFFSET: int = 19800
+WEATHER_TIMEZONE_NAME: str = "Asia/Kolkata"
+
 # Repo root (two levels up from this file: routers/ -> backend/ -> repo root)
 REPO_DIR = str(Path(__file__).resolve().parent.parent.parent)
 
