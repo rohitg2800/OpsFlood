@@ -54,12 +54,14 @@ class DefaultFirebaseOptions {
   }
 
   // SECURITY: Replace FIREBASE_API_KEY and FIREBASE_APP_ID with your actual
-  // values from the Firebase console. Never commit real keys to git.
+
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey:             String.fromEnvironment('FIREBASE_API_KEY',    defaultValue: 'REPLACE_WITH_YOUR_API_KEY'),
-    appId:              String.fromEnvironment('FIREBASE_APP_ID',     defaultValue: 'REPLACE_WITH_YOUR_APP_ID'),
-    messagingSenderId:  String.fromEnvironment('FIREBASE_SENDER_ID',  defaultValue: '1071864126219'),
-    projectId:          'device-streaming-e762727d',
-    storageBucket:      'device-streaming-e762727d.firebasestorage.app',
+    apiKey: 'AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU',
+    appId: '1:1071864126219:android:5751e3c0e5e4c59be7e00e',
+    messagingSenderId: '1071864126219',
+    projectId: 'device-streaming-e762727d',
+    storageBucket: 'device-streaming-e762727d.firebasestorage.app',
   );
+
+  // values from the Firebase console. Never commit real keys to git.
 }
