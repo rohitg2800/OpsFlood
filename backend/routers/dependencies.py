@@ -183,25 +183,15 @@ def repo_relative_path(path: str) -> str:
 
 
 def resolve_model_artifact_path(path_name: str) -> str:
-    """
-    Resolve a model artifact path to an absolute path.
-    Supports:
-      - Absolute paths
-      - Paths relative to the backend/ directory
-      - Paths relative to the repo root
-    """
     p = Path(path_name)
     if p.is_absolute():
         return str(p)
-    # Try relative to backend/
     backend_p = Path(__file__).resolve().parent.parent / p
     if backend_p.exists():
         return str(backend_p)
-    # Try relative to repo root
     repo_p = Path(__file__).resolve().parent.parent.parent / p
     if repo_p.exists():
         return str(repo_p)
-    # Fall back to backend-relative (even if not found)
     return str(backend_p)
 
 
@@ -258,6 +248,9 @@ def _weather_cache_key(path: str, params: Dict[str, Any]) -> str:
 
 
 _weather_cache: Dict[str, Any] = {}
+
+# Public alias used by weather.py
+WEATHER_CACHE = _weather_cache
 
 
 def get_cached_weather_response(
@@ -389,14 +382,6 @@ def get_pipeline_features(
     state_name: str | None = None,
     station_name: str | None = None,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Read the most recent OperationalDataPipeline feature row for this
-    (state, station) pair from:
-
-        data/features/weather_water/weather_water_features_latest.csv
-
-    Returns a dict with column names as keys, or None if not available.
-    """
     try:
         import pandas as pd
         csv_path = backend_relative_path(
