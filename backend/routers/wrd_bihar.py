@@ -119,12 +119,14 @@ def _normalize(value: str) -> str:
 
 
 def _safe_float(value: Any) -> Optional[float]:
+    """Parse a float from scraped cell text. Returns None for missing/invalid,
+    but returns 0.0 as a valid numeric value (e.g. zero 24h change)."""
     try:
         v = str(value).strip().replace(",", "")
         if v in ("", "--", "N/A", "NA", "-", ".", "nil", "NIL"):
             return None
         f = float(v)
-        return round(f, 3) if f != 0.0 else None
+        return round(f, 3)
     except (ValueError, TypeError):
         return None
 
@@ -141,11 +143,18 @@ def _enrich(station_name: str) -> Dict[str, Any]:
 
 
 def _status_label(current: Optional[float], danger: Optional[float], hfl: Optional[float]) -> str:
+    """
+    CRITICAL  — at or above HFL (or within 3% of HFL)
+    DANGER    — at or above danger level
+    WARNING   — within 3 metres below danger level
+    NORMAL    — below warning threshold but level known
+    UNKNOWN   — no current reading
+    """
     if current is None:
         return "UNKNOWN"
-    if danger and current >= danger:
+    if danger is not None and current >= danger:
         return "CRITICAL" if (hfl and current >= hfl * 0.97) else "DANGER"
-    if danger and current >= danger * 0.95:
+    if danger is not None and current >= (danger - 3.0):
         return "WARNING"
     if current > 0:
         return "NORMAL"
