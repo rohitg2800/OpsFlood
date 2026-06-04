@@ -78,7 +78,10 @@ WEATHER_CACHE_TTL_SECONDS = 600
 WEATHER_TIMEZONE_OFFSET: int = 19800
 WEATHER_TIMEZONE_NAME: str = "Asia/Kolkata"
 
-# Repo root (two levels up from this file: routers/ -> backend/ -> repo root)
+# BASE_DIR: backend/ directory (parent of routers/)
+BASE_DIR = str(Path(__file__).resolve().parent.parent)
+
+# REPO_DIR: repo root (two levels up: routers/ -> backend/ -> repo root)
 REPO_DIR = str(Path(__file__).resolve().parent.parent.parent)
 
 # Keywords used to identify flood model artifact files
@@ -166,7 +169,6 @@ def get_model_artifact_root() -> str:
     root = os.getenv("MODEL_ARTIFACT_ROOT", "").strip()
     if root:
         return root
-    # Default: backend/artifacts/models
     base = Path(__file__).resolve().parent.parent  # backend/
     return str(base / "artifacts" / "models")
 
