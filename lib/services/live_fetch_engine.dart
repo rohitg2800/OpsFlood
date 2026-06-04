@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v2.2 — district propagated)
+// lib/services/live_fetch_engine.dart  (v3.0 — WRD Bihar primary)
 library;
 
 import 'dart:async';
@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import '../constants/india_geodata.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
+import 'wrd_bihar_service.dart';
 
 class LiveCityData {
   final double?   currentLevel;
@@ -32,7 +33,7 @@ class LiveCityData {
 
   @override
   String toString() =>
-      'LiveCityData(flow=$flowRate m³/s, risk=$riskLevel, '
+      'LiveCityData(flow=$flowRate m\u00b3/s, risk=$riskLevel, '
       'rain=${rainfall24h}mm, level=$currentLevel m)';
 
   FloodData toFloodData(String city, String state,
@@ -78,6 +79,8 @@ class LiveFetchEngine {
   int        _wakeAttempts  = 0;
 
   void Function()? onStateChanged;
+
+  final WrdBiharService _wrd = WrdBiharService.instance;
 
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
@@ -193,12 +196,24 @@ class LiveFetchEngine {
     await refreshData();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // PRIMARY: fetch WRD actual gauge readings for every Bihar city,
+  //          then overlay GloFAS flow + rainfall for context.
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
         .toList();
     if (biharCities.isEmpty) return;
 
+    // ── 1. WRD Bihar actual gauged levels (primary) ──────────────────────
+    final wrdStations = await _wrd.fetch();
+    final wrdByKey = <String, WrdStation>{};
+    for (final s in wrdStations) {
+      wrdByKey[s.site.toLowerCase().trim()] = s;
+    }
+
+    // ── 2. GloFAS for river flow + rainfall context (secondary) ──────────
     final lats = biharCities.map((c) => '${c['lat']}').join(',');
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
 
@@ -213,8 +228,9 @@ class LiveFetchEngine {
     var rainMap = <String, double?>{};
     try {
       rainMap = await _fetchRainfall(lats, lons, biharCities.length);
-    } catch (e) { _log('Open-Meteo batch fetch failed: $e'); }
+    } catch (e) { _log('Open-Meteo rainfall fetch failed: $e'); }
 
+    // ── 3. Merge: WRD level takes priority; GloFAS fills context ─────────
     final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
       final mc        = biharCities[i];
@@ -222,25 +238,46 @@ class LiveFetchEngine {
       final dl        = (mc['danger_level']  as num).toDouble();
       final wl        = (mc['warning_level'] as num).toDouble();
       final key       = cityName.toLowerCase().trim();
-      final discharge = dischargeMap[key]?.firstOrNull;
-      final mean      = meanMap[key]?.firstOrNull;
-      final rain      = rainMap[key];
-      final risk      = _deriveRisk(discharge, mean);
-      final estLevel  = (discharge != null && mean != null && mean > 0 && dl > 0)
-          ? (discharge / mean) * dl * 0.85
-          : null;
+
+      // Try to match WRD station by city name or alias
+      WrdStation? wrdMatch = wrdByKey[key];
+      if (wrdMatch == null) {
+        // Try partial match on site name
+        try {
+          wrdMatch = wrdStations.firstWhere(
+            (s) => s.site.toLowerCase().contains(key) ||
+                   key.contains(s.site.toLowerCase()),
+          );
+        } catch (_) { wrdMatch = null; }
+      }
+
+      // Actual gauge level from WRD (most accurate)
+      final wrdLevel    = wrdMatch?.currentLevel;
+      final wrdDL       = wrdMatch?.dangerLevel   ?? dl;
+      final wrdWL       = wrdMatch?.warningLevel  ?? wl;
+      final wrdRisk     = wrdMatch?.riskLabel;
+
+      // GloFAS flow/rainfall for context
+      final discharge   = dischargeMap[key]?.firstOrNull;
+      final mean        = meanMap[key]?.firstOrNull;
+      final rain        = rainMap[key];
+
+      // Risk: prefer WRD risk label; fall back to GloFAS-derived ratio
+      final risk = wrdRisk ?? _deriveRisk(discharge, mean);
+
       _cache[key] = LiveCityData(
-        currentLevel: estLevel,
-        warningLevel: wl,
-        dangerLevel:  dl,
-        flowRate:     discharge,
-        rainfall24h:  rain,
+        currentLevel: wrdLevel,   // ✅ REAL gauge reading, not estimated
+        warningLevel: wrdWL,
+        dangerLevel:  wrdDL,
+        flowRate:     discharge,  // GloFAS context
+        rainfall24h:  rain,       // Open-Meteo context
         riskLevel:    risk,
         lastUpdated:  now,
       );
     }
     _lastFetch = now;
-    _log('Bihar cache updated — ${_cache.length} cities');
+    final matched = _cache.values.where((v) => v.currentLevel != null).length;
+    _log('Bihar cache updated — ${_cache.length} cities ($matched with WRD live level)');
   }
 
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
