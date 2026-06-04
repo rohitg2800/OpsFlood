@@ -1,177 +1,299 @@
 """
-WRD Bihar Live Data Router
-Scrapes fldcontrolbihar.org flood monitoring table and exposes
-GET /api/wrd-bihar/stations  — live station data for Bihar rivers
+WRD Bihar Live River Level Router
+Scrapes BeFIQR portal (befiqr.wrd.bih.nic.in) — the official Central Flood
+Control Cell, Water Resources Department, Govt of Bihar.
+
+Routes:
+  GET /api/wrd-bihar/stations          — all 31 stations (live or fallback)
+  GET /api/wrd-bihar/stations/{name}   — single station by name
+  GET /api/wrd-bihar/summary           — danger/warning/normal counts + top alerts
+  GET /api/wrd-bihar/health            — portal reachability check
+
+DATA SOURCE: WRD Bihar only. No other states or cities.
 """
 
 from __future__ import annotations
 
 import datetime
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from cachetools import TTLCache
 
 router = APIRouter(prefix="/api/wrd-bihar", tags=["WRD Bihar"])
 
 # ---------------------------------------------------------------------------
-# Cache — 10-minute TTL (WRD Bihar updates ~every 15 min)
+# Cache — 10-minute TTL (BeFIQR updates every ~15 min)
 # ---------------------------------------------------------------------------
-_CACHE: TTLCache = TTLCache(maxsize=64, ttl=600)
+_CACHE: TTLCache = TTLCache(maxsize=32, ttl=600)
 
 # ---------------------------------------------------------------------------
-# Known Bihar WRD station metadata (lat/lon for map pins)
-# ---------------------------------------------------------------------------
-_STATION_META: Dict[str, Dict[str, Any]] = {
-    "gandhi setu": {"district": "Patna", "river": "Ganga", "lat": 25.736, "lon": 85.004},
-    "patna": {"district": "Patna", "river": "Ganga", "lat": 25.594, "lon": 85.138},
-    "hajipur": {"district": "Vaishali", "river": "Ganga", "lat": 25.686, "lon": 85.208},
-    "dumariaghat": {"district": "Sitamarhi", "river": "Bagmati", "lat": 26.804, "lon": 85.513},
-    "raxaul": {"district": "East Champaran", "river": "Gandak", "lat": 26.986, "lon": 84.850},
-    "muzaffarpur": {"district": "Muzaffarpur", "river": "Burhi Gandak", "lat": 26.121, "lon": 85.391},
-    "darbhanga": {"district": "Darbhanga", "river": "Kamla Balan", "lat": 26.152, "lon": 85.901},
-    "bhagalpur": {"district": "Bhagalpur", "river": "Ganga", "lat": 25.244, "lon": 86.972},
-    "munger": {"district": "Munger", "river": "Ganga", "lat": 25.375, "lon": 86.473},
-    "araria": {"district": "Araria", "river": "Kosi", "lat": 26.147, "lon": 87.471},
-    "supaul": {"district": "Supaul", "river": "Kosi", "lat": 26.124, "lon": 86.604},
-    "saharsa": {"district": "Saharsa", "river": "Kosi", "lat": 25.877, "lon": 86.594},
-    "gopalganj": {"district": "Gopalganj", "river": "Gandak", "lat": 26.469, "lon": 84.436},
-    "saran": {"district": "Saran", "river": "Ghaghara", "lat": 25.919, "lon": 84.733},
-    "siwan": {"district": "Siwan", "river": "Ghaghara", "lat": 26.219, "lon": 84.358},
-}
-
-# ---------------------------------------------------------------------------
-# Scraper targets (in priority order)
+# BeFIQR scraper targets (priority order)
 # ---------------------------------------------------------------------------
 _WRD_URLS = [
-    "http://fldcontrolbihar.org/",
-    "http://fldcontrolbihar.org/flood-monitoring",
-    "http://fldcontrolbihar.org/river-data",
+    "http://befiqr.wrd.bih.nic.in/pages/riverlevel.aspx",
+    "http://befiqr.wrd.bih.nic.in/pages/riverlevel",
+    "http://befiqr.wrd.bih.nic.in/",
+    "https://befiqr.wrd.bih.nic.in/pages/riverlevel.aspx",
+    "https://befiqr.wrd.bih.nic.in/pages/riverlevel",
 ]
 
 _HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-IN,en;q=0.9",
-    "Referer": "http://fldcontrolbihar.org/",
+    "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
 }
+
+# ---------------------------------------------------------------------------
+# All 31 WRD Bihar stations — exact data from BeFIQR table
+# Keys: station name (lowercase, normalised), river, district/block,
+#       HFL (historical flood level), DL (danger level), lat, lon
+# ---------------------------------------------------------------------------
+_STATION_REGISTRY: List[Dict[str, Any]] = [
+    # Adhwara
+    {"station": "Ekmighat",     "river": "Adhwara",      "district": "Darbhanga / Bahadurpur",    "hfl": 49.52, "danger_level_m": 46.94, "lat": 26.095, "lon": 85.902},
+    {"station": "Kamtaul",      "river": "Adhwara",      "district": "Darbhanga / Jale",          "hfl": 53.05, "danger_level_m": 50.00, "lat": 26.272, "lon": 85.959},
+    {"station": "Sonbarsa",     "river": "Adhwara",      "district": "Sitamarhi / Sonbarsa",      "hfl": 83.20, "danger_level_m": 81.85, "lat": 26.799, "lon": 85.483},
+    # Bagmati
+    {"station": "Benibad",      "river": "Bagmati",      "district": "Muzaffarpur / Gaighat",      "hfl": 50.12, "danger_level_m": 48.68, "lat": 26.005, "lon": 85.608},
+    {"station": "Dheng Bridge", "river": "Bagmati",      "district": "Sitamarhi / Suppi",          "hfl": 73.47, "danger_level_m": 71.00, "lat": 26.587, "lon": 85.480},
+    {"station": "Hayaghat",     "river": "Bagmati",      "district": "Darbhanga / Hayaghat",      "hfl": 48.96, "danger_level_m": 45.72, "lat": 25.985, "lon": 85.806},
+    # Burhi Gandak
+    {"station": "Khagaria",     "river": "Burhi Gandak", "district": "Khagaria / Khagaria",        "hfl": 39.22, "danger_level_m": 36.58, "lat": 25.502, "lon": 86.467},
+    {"station": "Rosera",       "river": "Burhi Gandak", "district": "Samastipur / Rosera",        "hfl": 46.56, "danger_level_m": 42.63, "lat": 25.868, "lon": 85.992},
+    {"station": "Samastipur",   "river": "Burhi Gandak", "district": "Samastipur / Samastipur",    "hfl": 49.40, "danger_level_m": 46.00, "lat": 25.877, "lon": 85.782},
+    {"station": "Sikandarpur",  "river": "Burhi Gandak", "district": "Muzaffarpur / Musahari",     "hfl": 54.29, "danger_level_m": 52.53, "lat": 26.098, "lon": 85.396},
+    # Gandak
+    {"station": "Chatia",       "river": "Gandak",       "district": "East Champaran / Areraj",   "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
+    {"station": "Dumariaghat",  "river": "Gandak",       "district": "Gopalganj / Sidhwalia",     "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
+    {"station": "Hajipur",      "river": "Gandak",       "district": "Vaishali / Hajipur",         "hfl": 50.93, "danger_level_m": 50.32, "lat": 25.686, "lon": 85.208},
+    {"station": "Rewaghat",     "river": "Gandak",       "district": "Muzaffarpur / Saraiya",      "hfl": 55.46, "danger_level_m": 54.41, "lat": 25.940, "lon": 85.383},
+    # Ganga
+    {"station": "Bhagalpur",    "river": "Ganga",        "district": "Bhagalpur / Nathnagar",     "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
+    {"station": "Buxar",        "river": "Ganga",        "district": "Buxar / Buxar",              "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
+    {"station": "Dighaghat",    "river": "Ganga",        "district": "Patna / Patna Rural",       "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
+    {"station": "Gandhighat",   "river": "Ganga",        "district": "Patna / Patna Rural",       "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
+    {"station": "Hathidah",     "river": "Ganga",        "district": "Patna / Mokameh",           "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
+    {"station": "Kahalgaon",    "river": "Ganga",        "district": "Bhagalpur / Gopalpur",      "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
+    {"station": "Munger",       "river": "Ganga",        "district": "Munger / Sadar Munger",     "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
+    # Ghaghra
+    {"station": "Darauli",      "river": "Ghaghra",      "district": "Siwan / Darauli",            "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
+    {"station": "Gangpur Siswan","river": "Ghaghra",     "district": "Siwan / Siswan",             "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
+    # Kamalabalan
+    {"station": "Jhanjharpur",  "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur",   "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
+    # Kamla
+    {"station": "Jainagar",     "river": "Kamla",        "district": "Madhubani / Jainagar",       "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
+    # Kosi
+    {"station": "Baltara",      "river": "Kosi",         "district": "Khagaria / Beldaur",        "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
+    {"station": "Basua",        "river": "Kosi",         "district": "Supaul / Supaul",           "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
+    {"station": "Kursela",      "river": "Kosi",         "district": "Katihar / Kursela",         "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
+    # Mahananda
+    {"station": "Dhengraghat",  "river": "Mahananda",    "district": "Purnia / Baisi",             "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
+    {"station": "Taibpur",      "river": "Mahananda",    "district": "Kishanganj / Thakurganj",   "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
+    # Punpun
+    {"station": "Sripalpur",    "river": "Punpun",       "district": "Patna / Phulwari",          "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
+]
+
+# Lookup map: normalised name -> registry entry
+_REGISTRY_MAP: Dict[str, Dict[str, Any]] = {
+    " ".join(s["station"].lower().split()): s for s in _STATION_REGISTRY
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _normalize(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _safe_float(value: Any) -> Optional[float]:
     try:
-        return float(str(value).strip().replace(",", "")) if value not in (None, "", "--", "N/A") else default
+        v = str(value).strip().replace(",", "")
+        if v in ("", "--", "N/A", "NA", "-", "."):
+            return None
+        f = float(v)
+        return round(f, 3) if f != 0.0 else None
     except (ValueError, TypeError):
-        return default
+        return None
 
 
-def _enrich_station(name: str) -> Dict[str, Any]:
-    """Return lat/lon/district/river for a station name via fuzzy key match."""
-    key = _normalize(name)
-    for meta_key, meta in _STATION_META.items():
-        if meta_key in key or key in meta_key:
-            return meta
-    # Unknown station — synthetic coords near Bihar centre
-    return {"district": "Bihar", "river": "Unknown", "lat": 25.8 + hash(key) % 100 / 500, "lon": 85.4}
+def _enrich(station_name: str) -> Dict[str, Any]:
+    """Find registry entry for a scraped station name via fuzzy match."""
+    key = _normalize(station_name)
+    # Exact match first
+    if key in _REGISTRY_MAP:
+        return _REGISTRY_MAP[key]
+    # Partial match
+    for rk, rv in _REGISTRY_MAP.items():
+        if rk in key or key in rk:
+            return rv
+    # Unknown station — default Bihar centre coords
+    return {
+        "station": station_name,
+        "river": "Unknown",
+        "district": "Bihar",
+        "hfl": None,
+        "danger_level_m": None,
+        "lat": 25.8,
+        "lon": 85.4,
+    }
 
 
-def _status_label(current: float, warning: float, danger: float) -> str:
-    if danger > 0 and current >= danger:
-        return "CRITICAL"
-    if warning > 0 and current >= warning:
+def _status_label(current: Optional[float], danger: Optional[float], hfl: Optional[float]) -> str:
+    if current is None:
+        return "UNKNOWN"
+    if danger and current >= danger:
+        return "CRITICAL" if (hfl and current >= hfl * 0.97) else "DANGER"
+    if danger and current >= danger * 0.95:
         return "WARNING"
     if current > 0:
         return "NORMAL"
     return "UNKNOWN"
 
 
-def _parse_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+# ---------------------------------------------------------------------------
+# BeFIQR table parser
+# ---------------------------------------------------------------------------
+
+def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
     """
-    Try to extract station rows from any HTML table on the WRD Bihar page.
-    Handles both named-column headers and positional fallback.
+    Parse the BeFIQR 'Water level of important rivers of Bihar' HTML table.
+    Columns (0-indexed, based on live BeFIQR layout):
+      0: S.No
+      1: River
+      2: Site / Station
+      3: HFL (m)
+      4: DL (m)          <- Danger Level
+      5: Yesterday WL
+      6: Current Observed WL (m)  <- MOST IMPORTANT
+      7: 24h Difference
+      8: Above/Below DL
+      9: Trend
+      10: District / Block
     """
     stations: List[Dict[str, Any]] = []
+    now = _now_iso()
 
     for table in soup.find_all("table"):
-        headers_raw = [th.get_text(strip=True).lower() for th in table.find_all("th")]
+        rows = table.find_all("tr")
+        if len(rows) < 3:
+            continue
 
-        # Detect column positions
-        def col(keywords: list[str]) -> int:
+        # Check if this looks like the river-level table
+        header_text = " ".join(th.get_text(" ", strip=True).lower() for th in rows[0].find_all(["th", "td"]))
+        if not any(kw in header_text for kw in ["river", "site", "station", "danger", "level"]):
+            continue
+
+        # Detect column indices from header row(s)
+        header_cells: List[str] = []
+        for hr in rows[:3]:
+            cells = [c.get_text(" ", strip=True).lower() for c in hr.find_all(["th", "td"])]
+            if len(cells) > header_cells.__len__():
+                header_cells = cells
+
+        def col_idx(keywords: List[str]) -> int:
             for kw in keywords:
-                for i, h in enumerate(headers_raw):
+                for i, h in enumerate(header_cells):
                     if kw in h:
                         return i
             return -1
 
-        idx_station = col(["station", "gauge", "site", "location"])
-        idx_river = col(["river", "nadi"])
-        idx_current = col(["current", "observed", "water level", "wl", "level (m)", "gauge reading"])
-        idx_warning = col(["warning", "warn"])
-        idx_danger = col(["danger", "hfl", "flood level"])
-        idx_status = col(["status", "remark", "flood situation"])
+        i_river   = col_idx(["river", "nadi"])
+        i_site    = col_idx(["site", "station", "gauge", "location"])
+        i_hfl     = col_idx(["hfl"])
+        i_dl      = col_idx(["danger level", "dl ", "d.l", "danger"])
+        i_current = col_idx(["current observed", "observed wl", "current wl", "current level", "water level", "gauge reading", "observed"])
+        i_yest    = col_idx(["yesterday", "previous"])
+        i_diff    = col_idx(["24", "diff", "change"])
+        i_above   = col_idx(["above", "below danger"])
+        i_trend   = col_idx(["trend", "situation"])
+        i_dist    = col_idx(["district", "block", "location"])
 
-        for row in table.find_all("tr"):
-            cells = [td.get_text(strip=True) for td in row.find_all("td")]
-            if len(cells) < 3:
+        for row in rows[1:]:
+            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+            if len(cells) < 4:
                 continue
 
-            def cell(idx: int, fallback: str = "") -> str:
-                return cells[idx] if 0 <= idx < len(cells) else fallback
+            def c(idx: int, fallback: str = "") -> str:
+                return cells[idx].strip() if 0 <= idx < len(cells) else fallback
 
-            station_name = cell(idx_station, cell(0))
-            if not station_name or station_name.lower() in ("station", "s.no", "#", ""):
+            site = c(i_site) if i_site >= 0 else c(2)
+            if not site or site.lower() in ("site", "station", "s.no", "#", ""):
                 continue
 
-            river_name = cell(idx_river, "")
-            current_level = _safe_float(cell(idx_current, cell(2)))
-            warning_level = _safe_float(cell(idx_warning, cell(3) if len(cells) > 3 else ""))
-            danger_level = _safe_float(cell(idx_danger, cell(4) if len(cells) > 4 else ""))
-            raw_status = cell(idx_status, "")
+            river    = c(i_river) if i_river >= 0 else c(1)
+            hfl      = _safe_float(c(i_hfl)   if i_hfl >= 0    else c(3))
+            dl       = _safe_float(c(i_dl)    if i_dl >= 0     else c(4))
+            yest     = _safe_float(c(i_yest)  if i_yest >= 0   else c(5))
+            current  = _safe_float(c(i_current) if i_current >= 0 else c(6))
+            diff_24h = _safe_float(c(i_diff)  if i_diff >= 0   else c(7))
+            above_dl = _safe_float(c(i_above) if i_above >= 0  else None)
+            trend    = c(i_trend)  if i_trend >= 0  else ""
+            district = c(i_dist)   if i_dist >= 0   else ""
 
-            meta = _enrich_station(station_name)
-            if not river_name:
-                river_name = meta.get("river", "Unknown")
+            meta = _enrich(site)
+            if not river:
+                river = meta.get("river", "Unknown")
+            if not district:
+                district = meta.get("district", "Bihar")
+            if hfl is None:
+                hfl = meta.get("hfl")
+            if dl is None:
+                dl = meta.get("danger_level_m")
 
-            status = (
-                raw_status.upper()
-                if raw_status.upper() in ("CRITICAL", "WARNING", "NORMAL", "SAFE")
-                else _status_label(current_level, warning_level, danger_level)
-            )
+            below_danger: Optional[float] = None
+            if dl and current is not None:
+                bd = round(dl - current, 3)
+                below_danger = bd  # negative means above danger
+
+            status = _status_label(current, dl, hfl)
 
             stations.append({
-                "station": station_name,
-                "river": river_name,
-                "district": meta["district"],
-                "lat": meta["lat"],
-                "lon": meta["lon"],
-                "current_level_m": round(current_level, 3),
-                "warning_level_m": round(warning_level, 3),
-                "danger_level_m": round(danger_level, 3),
-                "below_danger_m": round(max(danger_level - current_level, 0.0), 3) if danger_level > 0 else None,
+                "station": site,
+                "river": river,
+                "district": district,
+                "lat": meta.get("lat", 25.8),
+                "lon": meta.get("lon", 85.4),
+                "hfl_m": hfl,
+                "danger_level_m": dl,
+                "yesterday_level_m": yest,
+                "current_level_m": current,
+                "change_24h_m": diff_24h,
+                "above_below_danger_m": above_dl if above_dl is not None else below_danger,
+                "trend": trend or "—",
                 "status": status,
-                "source": "WRD_BIHAR",
-                "last_update": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "source": "WRD_BIHAR_BEFIQR",
+                "last_update": now,
             })
+
+        if stations:
+            break
 
     return stations
 
 
-def _fetch_wrd_bihar_live() -> Dict[str, Any]:
-    """Attempt each WRD Bihar URL in order; return parsed stations or raise."""
-    errors: list[str] = []
+# ---------------------------------------------------------------------------
+# Live fetch from BeFIQR
+# ---------------------------------------------------------------------------
+
+def _fetch_befiqr_live() -> Dict[str, Any]:
+    errors: List[str] = []
     timeout = (
-        max(1.0, float(os.getenv("WRD_BIHAR_CONNECT_TIMEOUT", "4"))),
-        max(1.0, float(os.getenv("WRD_BIHAR_READ_TIMEOUT", "10"))),
+        max(2.0, float(os.getenv("WRD_BIHAR_CONNECT_TIMEOUT", "5"))),
+        max(5.0, float(os.getenv("WRD_BIHAR_READ_TIMEOUT", "15"))),
     )
 
     for url in _WRD_URLS:
@@ -179,40 +301,50 @@ def _fetch_wrd_bihar_live() -> Dict[str, Any]:
             resp = requests.get(url, headers=_HEADERS, timeout=timeout)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
-            stations = _parse_table(soup)
+            stations = _parse_befiqr_table(soup)
             if stations:
                 return {
                     "status": "LIVE",
-                    "data_source": "WRD_BIHAR",
+                    "data_source": "WRD_BIHAR_BEFIQR",
                     "source_url": url,
                     "station_count": len(stations),
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": _now_iso(),
                     "stations": stations,
                 }
-            errors.append(f"{url}: page loaded but no table rows found")
+            errors.append(f"{url}: page loaded but no table rows extracted")
         except requests.Timeout:
             errors.append(f"{url}: timeout")
         except requests.RequestException as exc:
-            errors.append(f"{url}: {exc.__class__.__name__} — {str(exc)[:120]}")
+            errors.append(f"{url}: {exc.__class__.__name__} — {str(exc)[:140]}")
 
     raise RuntimeError(" | ".join(errors))
 
 
+# ---------------------------------------------------------------------------
+# Fallback — all 31 stations with known HFL/DL, current=None
+# ---------------------------------------------------------------------------
+
 def _tactical_fallback() -> Dict[str, Any]:
-    """Return known-static Bihar station data when live scrape fails."""
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    """
+    Return all 31 WRD Bihar stations with known static thresholds.
+    current_level_m is None (live scrape failed) but HFL/DL are real.
+    """
+    now = _now_iso()
     stations = []
-    for name, meta in _STATION_META.items():
+    for s in _STATION_REGISTRY:
         stations.append({
-            "station": name.title(),
-            "river": meta["river"],
-            "district": meta["district"],
-            "lat": meta["lat"],
-            "lon": meta["lon"],
+            "station": s["station"],
+            "river": s["river"],
+            "district": s["district"],
+            "lat": s["lat"],
+            "lon": s["lon"],
+            "hfl_m": s["hfl"],
+            "danger_level_m": s["danger_level_m"],
+            "yesterday_level_m": None,
             "current_level_m": None,
-            "warning_level_m": None,
-            "danger_level_m": None,
-            "below_danger_m": None,
+            "change_24h_m": None,
+            "above_below_danger_m": None,
+            "trend": "—",
             "status": "UNKNOWN",
             "source": "WRD_BIHAR_FALLBACK",
             "last_update": now,
@@ -228,49 +360,79 @@ def _tactical_fallback() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Shared getter (used by all routes)
 # ---------------------------------------------------------------------------
 
-@router.get("/stations")
-async def get_wrd_bihar_stations(force_refresh: bool = False) -> Dict[str, Any]:
-    """
-    Fetch live WRD Bihar flood station data.
-
-    - Returns scraped table from fldcontrolbihar.org
-    - Cached for 10 minutes to avoid hammering the government portal
-    - Falls back to known static station list if portal is unreachable
-    - Pass ?force_refresh=true to bypass cache
-    """
-    cache_key = "wrd_bihar_stations"
-
+async def _get_stations(force_refresh: bool = False) -> Dict[str, Any]:
+    cache_key = "wrd_bihar_stations_v2"
     if not force_refresh and cache_key in _CACHE:
-        cached = _CACHE[cache_key]
+        cached = dict(_CACHE[cache_key])
         cached["_cache_hit"] = True
         return cached
-
     try:
-        result = _fetch_wrd_bihar_live()
+        result = _fetch_befiqr_live()
         _CACHE[cache_key] = result
+        result = dict(result)
         result["_cache_hit"] = False
         return result
     except RuntimeError as exc:
         fallback = _tactical_fallback()
-        fallback["_scrape_error"] = str(exc)
+        fallback["_scrape_error"] = str(exc)[:400]
         fallback["_cache_hit"] = False
         return fallback
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/stations")
+async def get_wrd_bihar_stations(
+    force_refresh: bool = False,
+    river: Optional[str] = None,
+    district: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    All 31 WRD Bihar river gauge stations.
+    Optional filters: ?river=Ganga  ?district=Patna
+    Pass ?force_refresh=true to bypass 10-min cache.
+    DATA SOURCE: WRD Bihar BeFIQR only — no other states.
+    """
+    result = await _get_stations(force_refresh=force_refresh)
+    stations = result.get("stations", [])
+
+    if river:
+        rk = _normalize(river)
+        stations = [s for s in stations if rk in _normalize(s.get("river", ""))]
+    if district:
+        dk = _normalize(district)
+        stations = [s for s in stations if dk in _normalize(s.get("district", ""))]
+
+    return {
+        **result,
+        "station_count": len(stations),
+        "stations": stations,
+    }
+
+
 @router.get("/stations/{station_name}")
-async def get_wrd_bihar_station(station_name: str) -> Dict[str, Any]:
-    """Get data for a single WRD Bihar station by name (case-insensitive partial match)."""
-    all_data = await get_wrd_bihar_stations()
+async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """Single WRD Bihar station by name (case-insensitive partial match)."""
+    all_data = await _get_stations(force_refresh=force_refresh)
     key = _normalize(station_name)
     matches = [
         s for s in all_data.get("stations", [])
         if key in _normalize(s.get("station", "")) or _normalize(s.get("station", "")) in key
     ]
     if not matches:
-        raise HTTPException(status_code=404, detail=f"No WRD Bihar station found matching '{station_name}'")
+        # Return 200 with empty result instead of 404 for app compatibility
+        return {
+            "status": "NOT_FOUND",
+            "data_source": all_data["data_source"],
+            "timestamp": all_data["timestamp"],
+            "query": station_name,
+            "station": None,
+        }
     return {
         "status": all_data["status"],
         "data_source": all_data["data_source"],
@@ -279,21 +441,84 @@ async def get_wrd_bihar_station(station_name: str) -> Dict[str, Any]:
     }
 
 
+@router.get("/summary")
+async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Bihar flood situation summary:
+    - Count of stations by status (CRITICAL / DANGER / WARNING / NORMAL / UNKNOWN)
+    - Top 5 most critical stations (closest to or above danger level)
+    - State-wide flood alert level
+    """
+    all_data = await _get_stations(force_refresh=force_refresh)
+    stations = all_data.get("stations", [])
+
+    counts: Dict[str, int] = {"CRITICAL": 0, "DANGER": 0, "WARNING": 0, "NORMAL": 0, "UNKNOWN": 0}
+    alert_stations: List[Dict[str, Any]] = []
+
+    for s in stations:
+        status = s.get("status", "UNKNOWN")
+        counts[status] = counts.get(status, 0) + 1
+
+        current = s.get("current_level_m")
+        dl = s.get("danger_level_m")
+        if current is not None and dl and dl > 0:
+            pct = round((current / dl) * 100, 1)
+            alert_stations.append({**s, "_pct_of_danger": pct})
+
+    alert_stations.sort(key=lambda x: x["_pct_of_danger"], reverse=True)
+    top_alerts = alert_stations[:5]
+
+    # Overall state alert level
+    if counts["CRITICAL"] > 0:
+        state_alert = "RED"
+    elif counts["DANGER"] > 0:
+        state_alert = "ORANGE"
+    elif counts["WARNING"] > 0:
+        state_alert = "YELLOW"
+    elif counts["NORMAL"] > 0:
+        state_alert = "GREEN"
+    else:
+        state_alert = "GREY"
+
+    return {
+        "status": all_data["status"],
+        "data_source": all_data["data_source"],
+        "timestamp": all_data["timestamp"],
+        "state": "Bihar",
+        "total_stations": len(stations),
+        "state_alert_level": state_alert,
+        "station_counts": counts,
+        "top_alerts": [
+            {
+                "station": s["station"],
+                "river": s["river"],
+                "district": s["district"],
+                "current_level_m": s["current_level_m"],
+                "danger_level_m": s["danger_level_m"],
+                "pct_of_danger": s["_pct_of_danger"],
+                "status": s["status"],
+            }
+            for s in top_alerts
+        ],
+    }
+
+
 @router.get("/health")
 async def wrd_bihar_health() -> Dict[str, Any]:
-    """Quick health check — does WRD Bihar portal respond?"""
+    """Check if BeFIQR portal is reachable."""
+    primary_url = _WRD_URLS[0]
     try:
-        resp = requests.get(_WRD_URLS[0], headers=_HEADERS, timeout=(3, 6))
+        resp = requests.get(primary_url, headers=_HEADERS, timeout=(4, 8))
         return {
             "reachable": resp.ok,
             "status_code": resp.status_code,
-            "url": _WRD_URLS[0],
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "url": primary_url,
+            "timestamp": _now_iso(),
         }
     except requests.RequestException as exc:
         return {
             "reachable": False,
-            "error": str(exc)[:200],
-            "url": _WRD_URLS[0],
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "error": str(exc)[:250],
+            "url": primary_url,
+            "timestamp": _now_iso(),
         }
