@@ -10,17 +10,11 @@ import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
 // ── Notifier wrapper ──────────────────────────────────────────────────────────
-// Riverpod 3 replaced ChangeNotifierProvider with Notifier/NotifierProvider.
-// We expose RealTimeService as the state; every time the service calls
-// notifyListeners() we call state = state (same object) which triggers
-// Riverpod to re-read all downstream Provider<T> that watch realTimeProvider.
 class RealTimeNotifier extends Notifier<RealTimeService> {
   @override
   RealTimeService build() {
     final service = RealTimeService();
-    // Hook: re-assign state so Riverpod propagates changes to all watchers.
     service.addListener(() => state = service);
-    // Start polling after the first frame.
     Future.microtask(() => service.startPolling());
     ref.onDispose(service.dispose);
     return service;
@@ -76,5 +70,69 @@ final monitoredCitiesProvider = Provider<List<String>>((ref) {
       .watch(realTimeProvider)
       .liveLevels
       .map((fd) => fd.city)
+      .toList();
+});
+
+// ── Per-city providers (used by CityDetailScreen) ─────────────────────────────
+
+/// Returns the live [FloodData] for a specific city, or null if not found.
+final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
+  return ref
+      .watch(liveLevelsProvider)
+      .cast<FloodData?>()
+      .firstWhere(
+        (fd) => fd!.city.toLowerCase() == city.toLowerCase(),
+        orElse: () => null,
+      );
+});
+
+/// Returns the 24-hr trend snapshots for a city from RealTimeService.
+final cityTrendProvider =
+    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
+  return ref.watch(realTimeProvider).trendForCity(city);
+});
+
+// ── Per-state providers (used by CityDetailScreen) ────────────────────────────
+
+/// IMD alerts filtered to a specific state name.
+final stateImdAlertsProvider =
+    Provider.family<List<dynamic>, String>((ref, stateName) {
+  final all = ref.watch(imdAlertsProvider);
+  if (stateName.isEmpty) return all;
+  return all.where((a) {
+    final s = (a.state as String? ?? '').toLowerCase();
+    return s.isEmpty || s.contains(stateName.toLowerCase());
+  }).toList();
+});
+
+/// NDMA advisories filtered to a specific state name.
+final stateNdmaAdvisoriesProvider =
+    Provider.family<List<dynamic>, String>((ref, stateName) {
+  final all = ref.watch(ndmaAdvisoriesProvider);
+  if (stateName.isEmpty) return all;
+  return all.where((a) {
+    final s = (a.state as String? ?? '').toLowerCase();
+    return s.isEmpty || s.contains(stateName.toLowerCase());
+  }).toList();
+});
+
+/// Emergency contacts for a specific state.
+/// Delegates to RealTimeService; returns empty list if not available.
+final stateEmergencyContactsProvider =
+    Provider.family<List<dynamic>, String>((ref, stateName) {
+  try {
+    return ref.watch(realTimeProvider).emergencyContactsForState(stateName);
+  } catch (_) {
+    return const [];
+  }
+});
+
+/// Live FloodData list for a specific state (used by StateMatrixScreen).
+final stateLiveLevelsProvider =
+    Provider.family<List<FloodData>, String>((ref, stateName) {
+  return ref
+      .watch(liveLevelsProvider)
+      .where((fd) =>
+          fd.state.toLowerCase().contains(stateName.toLowerCase()))
       .toList();
 });
