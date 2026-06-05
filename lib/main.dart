@@ -16,6 +16,7 @@ import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
+import 'screens/city_detail_screen.dart';
 import 'screens/india_river_explorer_screen.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/model_info_screen.dart';
@@ -170,6 +171,11 @@ class EquinoxBHApp extends ConsumerWidget {
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
+        // ── Phase 3 — city detail with named-route + arg pass-through ──────
+        CityDetailScreen.route: (ctx) {
+          final city = ModalRoute.of(ctx)!.settings.arguments as String;
+          return CityDetailScreen(cityName: city);
+        },
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
