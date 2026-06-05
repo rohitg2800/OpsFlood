@@ -1,13 +1,19 @@
 // lib/screens/city_detail_screen.dart
-// CityDetailScreen v3
-//  - Route const for named navigation
-//  - Replaced inline _SparklinePainter with shared SparklineChart widget
-//  - Theme tokens from AppPalette instead of local constants
-//  - showLabels: true on SparklineChart so W / D markers are visible
-//  - Accepts both push (cityName param) and named route (/city_detail)
+// EQUINOX-BH — CityDetailScreen v4
+// Phase 6 upgrades over v3:
+//  - Animated staggered entry per section card (FadeTransition + SlideTransition)
+//  - Threshold status banner  (danger / warning / normal colour strip)
+//  - Share FAB  (copies city summary to clipboard + shows SnackBar)
+//  - Skeleton loading state when data == null (shimmer-like pulse)
+//  - Section collapse/expand toggle for Emergency Contacts (long list friendly)
+//  - «View on Map» CTA chip linking to /bihar_river_map with city arg
+//  - Refreshes via pull-to-refresh (RefreshIndicator wrapping CustomScrollView)
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,137 +21,308 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../providers/flood_providers.dart';
-import '../services/ndma_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/sparkline_chart.dart';
 
-/// Named-route constant — register in MaterialApp as:
-///   '/city_detail': (ctx) {
-///     final city = ModalRoute.of(ctx)!.settings.arguments as String;
-///     return CityDetailScreen(cityName: city);
-///   }
-class CityDetailScreen extends ConsumerWidget {
+class CityDetailScreen extends ConsumerStatefulWidget {
   static const String route = '/city_detail';
 
   final String cityName;
   const CityDetailScreen({super.key, required this.cityName});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data       = ref.watch(cityDataProvider(cityName));
-    final trend      = ref.watch(cityTrendProvider(cityName));
-    final imdAlerts  = ref.watch(stateImdAlertsProvider(data?.state ?? ''));
-    final advisories = ref.watch(stateNdmaAdvisoriesProvider(data?.state ?? ''));
+  ConsumerState<CityDetailScreen> createState() => _CityDetailScreenState();
+}
+
+class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entryCtrl;
+  late final List<Animation<double>>  _sectionFades;
+  late final List<Animation<Offset>>  _sectionSlides;
+
+  bool _contactsExpanded = false;
+  bool _refreshing       = false;
+
+  static const int _sectionCount = 6; // gauge, trend, imd, ndma, contacts, predict
+
+  @override
+  void initState() {
+    super.initState();
+    _entryCtrl = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 900));
+
+    _sectionFades  = [];
+    _sectionSlides = [];
+    for (int i = 0; i < _sectionCount; i++) {
+      final start = i * 0.12;
+      final end   = (start + 0.28).clamp(0.0, 1.0);
+      _sectionFades.add(
+        Tween<double>(begin: 0, end: 1).animate(
+            CurvedAnimation(
+                parent: _entryCtrl,
+                curve: Interval(start, end, curve: Curves.easeOut))),
+      );
+      _sectionSlides.add(
+        Tween<Offset>(
+                begin: const Offset(0, 0.06), end: Offset.zero)
+            .animate(CurvedAnimation(
+                parent: _entryCtrl,
+                curve: Interval(start, end, curve: Curves.easeOutCubic))),
+      );
+    }
+    _entryCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    HapticFeedback.mediumImpact();
+    try {
+      await ref.read(realTimeProvider).refreshData();
+      _entryCtrl
+        ..reset()
+        ..forward();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  void _share(FloodData data) {
+    final text =
+        'EQUINOX-BH · ${widget.cityName}\n'
+        'Level: ${data.currentLevel.toStringAsFixed(2)} m · '
+        'Risk: ${data.riskLevel}\n'
+        'W ${data.warningLevel.toStringAsFixed(1)} m  '
+        'D ${data.dangerLevel.toStringAsFixed(1)} m\n'
+        'Updated: ${DateFormat("dd MMM HH:mm").format(data.lastUpdated.toLocal())}';
+    Clipboard.setData(ClipboardData(text: text));
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Copied city summary to clipboard'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppPalette.abyss2,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _section(int idx, Widget child) => FadeTransition(
+        opacity: _sectionFades[idx],
+        child: SlideTransition(
+          position: _sectionSlides[idx],
+          child: child,
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final data       = ref.watch(cityDataProvider(widget.cityName));
+    final trend      = ref.watch(cityTrendProvider(widget.cityName));
+    final imdAlerts  = ref.watch(
+        stateImdAlertsProvider(data?.state ?? ''));
+    final advisories = ref.watch(
+        stateNdmaAdvisoriesProvider(data?.state ?? ''));
     final contacts   = ref
         .watch(stateEmergencyContactsProvider(data?.state ?? ''))
         .cast<EmergencyContact>();
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
+      floatingActionButton: data != null
+          ? FloatingActionButton.small(
+              heroTag: 'share_${widget.cityName}',
+              backgroundColor: AppPalette.abyss2,
+              foregroundColor: AppPalette.cyan,
+              tooltip: 'Copy city summary',
+              onPressed: () => _share(data),
+              child: const Icon(Icons.share_rounded, size: 17),
+            )
+          : null,
       body: Container(
         decoration: AppPalette.scaffoldDecoration(),
         child: SafeArea(
-          child: CustomScrollView(
-            physics: const BouncingScrollPhysics(),
-            slivers: [
-              // ── App Bar ─────────────────────────────────────────────────────
-              SliverAppBar(
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                pinned: true,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_rounded,
-                      color: AppPalette.textWhite, size: 18),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                title: Text(
-                  cityName,
-                  style: const TextStyle(
-                    color: AppPalette.textWhite,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.refresh_rounded,
-                        color: AppPalette.textGrey, size: 20),
-                    onPressed: () =>
-                        ref.read(realTimeProvider).refreshData(),
-                  ),
-                ],
-              ),
+          child: RefreshIndicator(
+            color: AppPalette.cyan,
+            backgroundColor: AppPalette.abyss2,
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics()),
+              slivers: [
 
-              // ── Body ──────────────────────────────────────────────────────────
-              if (data == null)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.location_off_rounded,
-                            color: AppPalette.textGrey, size: 44),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No live data for $cityName',
-                          style: const TextStyle(
-                              color: AppPalette.textGrey, fontSize: 14),
+                // ── App Bar ────────────────────────────────────────────────
+                SliverAppBar(
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  pinned: true,
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_rounded,
+                        color: AppPalette.textWhite, size: 18),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.cityName,
+                        style: const TextStyle(
+                          color: AppPalette.textWhite,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
                         ),
-                      ],
+                      ),
+                      if (data != null)
+                        Text(
+                          '${data.riverName ?? "River"}  ·  ${data.state}',
+                          style: const TextStyle(
+                              color: AppPalette.textGrey,
+                              fontSize: 10),
+                        ),
+                    ],
+                  ),
+                  actions: [
+                    if (_refreshing)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 14),
+                        child: SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppPalette.cyan),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.refresh_rounded,
+                            color: AppPalette.textGrey, size: 20),
+                        onPressed: _refresh,
+                      ),
+                  ],
+                ),
+
+                // ── threshold banner ───────────────────────────────────────
+                if (data != null)
+                  SliverToBoxAdapter(
+                    child: _ThresholdBanner(data: data),
+                  ),
+
+                // ── no-data skeleton ───────────────────────────────────────
+                if (data == null)
+                  SliverFillRemaining(
+                    child: _SkeletonView(cityName: widget.cityName),
+                  )
+
+                // ── loaded body ────────────────────────────────────────────
+                else
+                  SliverPadding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 10, 16, 100),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+
+                        // 0 — gauge hero
+                        _section(0, _GaugeHeroCard(data: data)),
+                        const SizedBox(height: 12),
+
+                        // 1 — 24-hr trend
+                        if (trend.length >= 2) ...[
+                          _section(
+                            1,
+                            _TrendCard(
+                              trend:        trend,
+                              warningLevel: data.warningLevel,
+                              dangerLevel:  data.dangerLevel,
+                              riskColor:    _riskColor(data.riskLevel),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // 2 — IMD alerts
+                        if (imdAlerts.isNotEmpty) ...[
+                          _section(
+                            2,
+                            Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                _SectionLabel(
+                                    '🌧  IMD Weather Alerts'),
+                                ...imdAlerts
+                                    .take(3)
+                                    .map((a) => _ImdAlertTile(alert: a)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // 3 — NDMA advisories
+                        if (advisories.isNotEmpty) ...[
+                          _section(
+                            3,
+                            Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                _SectionLabel(
+                                    '🚨  NDMA Advisories'),
+                                ...advisories
+                                    .take(2)
+                                    .map(
+                                        (a) => _NdmaAdvisoryTile(adv: a)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // 4 — emergency contacts (collapsible)
+                        _section(
+                          4,
+                          _CollapsibleContacts(
+                            contacts:  contacts,
+                            state:     data.state,
+                            expanded:  _contactsExpanded,
+                            onToggle:  () => setState(
+                                () => _contactsExpanded =
+                                    !_contactsExpanded),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // CTA row: predict + map
+                        _section(
+                          5,
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: _PredictCta(
+                                    cityName:     widget.cityName,
+                                    currentLevel: data.currentLevel),
+                              ),
+                              const SizedBox(width: 10),
+                              _MapChip(cityName: widget.cityName),
+                            ],
+                          ),
+                        ),
+                      ]),
                     ),
                   ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 60),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-
-                      // ── Gauge hero ──────────────────────────────────────
-                      _GaugeHeroCard(data: data),
-                      const SizedBox(height: 14),
-
-                      // ── 24-hr SparklineChart ────────────────────────────
-                      if (trend.length >= 2) ...[
-                        _TrendCard(
-                          trend: trend,
-                          warningLevel: data.warningLevel,
-                          dangerLevel: data.dangerLevel,
-                          riskColor: _riskColor(data.riskLevel),
-                        ),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── IMD alerts ─────────────────────────────────────
-                      if (imdAlerts.isNotEmpty) ...[
-                        _SectionLabel('🌧  IMD Weather Alerts'),
-                        ...imdAlerts.take(3)
-                            .map((a) => _ImdAlertTile(alert: a)),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── NDMA advisories ────────────────────────────────
-                      if (advisories.isNotEmpty) ...[
-                        _SectionLabel('🚨  NDMA Advisories'),
-                        ...advisories.take(2)
-                            .map((a) => _NdmaAdvisoryTile(adv: a)),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── Emergency contacts ────────────────────────────
-                      _SectionLabel('📞  Emergency Contacts'),
-                      _EmergencyContactsCard(
-                          contacts: contacts, state: data.state),
-                      const SizedBox(height: 20),
-
-                      // ── Predict CTA ───────────────────────────────────
-                      _PredictCta(
-                          cityName: cityName,
-                          currentLevel: data.currentLevel),
-                    ]),
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -153,7 +330,7 @@ class CityDetailScreen extends ConsumerWidget {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 Color _riskColor(String r) {
   switch (r.toUpperCase()) {
@@ -174,6 +351,146 @@ Color _imdColor(String s) {
   }
 }
 
+// ── Threshold Banner ──────────────────────────────────────────────────────────
+
+class _ThresholdBanner extends StatelessWidget {
+  final FloodData data;
+  const _ThresholdBanner({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final level  = data.currentLevel;
+    final Color col;
+    final String label;
+    final IconData ico;
+
+    if (level >= data.dangerLevel) {
+      col   = AppPalette.critical;
+      label = '⚠ ABOVE DANGER LEVEL  '
+              '(+${(level - data.dangerLevel).toStringAsFixed(2)} m)';
+      ico   = Icons.crisis_alert_rounded;
+    } else if (level >= data.warningLevel) {
+      col   = AppPalette.amber;
+      label = '△ ABOVE WARNING LEVEL  '
+              '(+${(level - data.warningLevel).toStringAsFixed(2)} m)';
+      ico   = Icons.warning_rounded;
+    } else {
+      col   = AppPalette.safe;
+      label = '✓ Below warning level  '
+              '(${(data.warningLevel - level).toStringAsFixed(2)} m buffer)';
+      ico   = Icons.check_circle_rounded;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+          horizontal: 16, vertical: 9),
+      color: col.withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          Icon(ico, color: col, size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                  color: col,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Skeleton loading view ─────────────────────────────────────────────────────
+
+class _SkeletonView extends StatefulWidget {
+  final String cityName;
+  const _SkeletonView({required this.cityName});
+  @override
+  State<_SkeletonView> createState() => _SkeletonViewState();
+}
+
+class _SkeletonViewState extends State<_SkeletonView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, __) {
+        final alpha = 0.04 + 0.06 * _pulse.value;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _bone(height: 100, alpha: alpha),
+              const SizedBox(height: 12),
+              _bone(height: 80, alpha: alpha),
+              const SizedBox(height: 12),
+              _bone(height: 60, alpha: alpha),
+              const SizedBox(height: 24),
+              Center(
+                child: Column(
+                  children: [
+                    const Icon(Icons.location_off_rounded,
+                        color: AppPalette.textGrey, size: 36),
+                    const SizedBox(height: 10),
+                    Text(
+                      'No live data for ${widget.cityName}',
+                      style: const TextStyle(
+                          color: AppPalette.textGrey,
+                          fontSize: 13),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Pull down to refresh',
+                      style: TextStyle(
+                          color: AppPalette.textDim,
+                          fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _bone({required double height, required double alpha}) =>
+      Container(
+        width: double.infinity,
+        height: height,
+        decoration: BoxDecoration(
+          color: AppPalette.textWhite.withValues(alpha: alpha),
+          borderRadius: BorderRadius.circular(14),
+        ),
+      );
+}
+
 // ── Gauge Hero Card ───────────────────────────────────────────────────────────
 
 class _GaugeHeroCard extends StatelessWidget {
@@ -182,8 +499,8 @@ class _GaugeHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rc  = _riskColor(data.riskLevel);
-    final pct = data.capacityPercent.clamp(0.0, 100.0);
+    final rc     = _riskColor(data.riskLevel);
+    final pct    = data.capacityPercent.clamp(0.0, 100.0);
     final isLive = data.status.toUpperCase() != 'ESTIMATED';
 
     return Container(
@@ -202,7 +519,6 @@ class _GaugeHeroCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // State / river row
           Row(
             children: [
               Expanded(
@@ -229,7 +545,6 @@ class _GaugeHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // Level hero + source badge
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -249,8 +564,9 @@ class _GaugeHeroCard extends StatelessWidget {
                     bg: (isLive ? AppPalette.cyan : AppPalette.textGrey)
                         .withValues(alpha: 0.12),
                     fg: isLive ? AppPalette.cyan : AppPalette.textGrey,
-                    border: (isLive ? AppPalette.cyan : AppPalette.textGrey)
-                        .withValues(alpha: 0.45)),
+                    border:
+                        (isLive ? AppPalette.cyan : AppPalette.textGrey)
+                            .withValues(alpha: 0.45)),
               ),
               if (data.imdSeverity != null) ...[
                 const SizedBox(width: 6),
@@ -268,14 +584,12 @@ class _GaugeHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Capacity bar
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: Stack(
               children: [
                 Container(
-                    height: 8,
-                    color: AppPalette.abyss3),
+                    height: 8, color: AppPalette.abyss3),
                 FractionallySizedBox(
                   widthFactor: pct / 100,
                   child: Container(
@@ -309,7 +623,6 @@ class _GaugeHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Stat chips row
           Row(
             children: [
               if (data.flowRate != null)
@@ -324,7 +637,8 @@ class _GaugeHeroCard extends StatelessWidget {
                     data.imdRainfallMm != null ? 'IMD rain' : 'Rain 24h'),
               _StatChip(
                   Icons.schedule_rounded,
-                  DateFormat('HH:mm').format(data.lastUpdated.toLocal()),
+                  DateFormat('HH:mm')
+                      .format(data.lastUpdated.toLocal()),
                   'Updated'),
             ],
           ),
@@ -393,14 +707,12 @@ class _StatChip extends StatelessWidget {
       );
 }
 
-// ── 24-hr Trend Card (uses shared SparklineChart) ─────────────────────────────
+// ── 24-hr Trend Card ──────────────────────────────────────────────────────────
 
 class _TrendCard extends StatelessWidget {
   final List<RiverLevelSnapshot> trend;
-  final double warningLevel;
-  final double dangerLevel;
-  final Color riskColor;
-
+  final double warningLevel, dangerLevel;
+  final Color  riskColor;
   const _TrendCard({
     required this.trend,
     required this.warningLevel,
@@ -438,7 +750,7 @@ class _TrendCard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                '${trend.length} readings  '
+                '${trend.length} pts  '
                 '${minL.toStringAsFixed(2)}–${maxL.toStringAsFixed(2)} m',
                 style: const TextStyle(
                     color: AppPalette.textGrey, fontSize: 9),
@@ -446,7 +758,6 @@ class _TrendCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // ✔ Using shared SparklineChart widget with W/D labels
           SparklineChart(
             snapshots:    trend,
             warningLevel: warningLevel,
@@ -505,7 +816,8 @@ class _ImdAlertTile extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                      color: c.withValues(alpha: 0.5), blurRadius: 5)
+                      color: c.withValues(alpha: 0.5),
+                      blurRadius: 5)
                 ]),
           ),
           const SizedBox(width: 10),
@@ -604,13 +916,19 @@ class _NdmaAdvisoryTile extends StatelessWidget {
       );
 }
 
-// ── Emergency Contacts Card ───────────────────────────────────────────────────
+// ── Collapsible Emergency Contacts ────────────────────────────────────────────
 
-class _EmergencyContactsCard extends StatelessWidget {
+class _CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
-  final String state;
-  const _EmergencyContactsCard(
-      {required this.contacts, required this.state});
+  final String       state;
+  final bool         expanded;
+  final VoidCallback onToggle;
+  const _CollapsibleContacts({
+    required this.contacts,
+    required this.state,
+    required this.expanded,
+    required this.onToggle,
+  });
 
   Future<void> _call(String phone) async {
     final uri = Uri(scheme: 'tel', path: phone);
@@ -618,30 +936,82 @@ class _EmergencyContactsCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          color: AppPalette.abyss1,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppPalette.abyssStroke),
-        ),
-        child: Column(
-          children: [
-            _row('NDMA Helpline', '1078'),
-            _row('NDRF',          '011-24363260'),
-            _row('Police',        '100'),
-            _row('Ambulance',     '108'),
-            if (contacts.isNotEmpty) ...[
-              Divider(
-                  height: 1,
-                  color: AppPalette.abyssStroke),
-              ...contacts.take(4).map(
-                  (c) => _row(
-                      c.role.isNotEmpty ? c.role : c.name,
-                      c.phone)),
-            ],
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    const always = [
+      ('NDMA Helpline', '1078'),
+      ('NDRF',          '011-24363260'),
+      ('Police',        '100'),
+      ('Ambulance',     '108'),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppPalette.abyss1,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppPalette.abyssStroke),
+      ),
+      child: Column(
+        children: [
+          // header row — tap to toggle
+          InkWell(
+            onTap: onToggle,
+            borderRadius: expanded
+                ? const BorderRadius.vertical(top: Radius.circular(14))
+                : BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 11),
+              child: Row(
+                children: [
+                  const Icon(Icons.phone_rounded,
+                      color: AppPalette.safe, size: 14),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '📞  Emergency Contacts',
+                      style: TextStyle(
+                          color: AppPalette.textWhite,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: AppPalette.textGrey, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // always-visible rows
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 280),
+            crossFadeState: expanded
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Column(
+              children: [
+                for (final e in always)
+                  _row(e.$1, e.$2),
+                if (contacts.isNotEmpty) ...[
+                  Divider(
+                      height: 1, color: AppPalette.abyssStroke),
+                  ...contacts
+                      .take(4)
+                      .map((c) => _row(
+                          c.role.isNotEmpty ? c.role : c.name,
+                          c.phone)),
+                ],
+              ],
+            ),
+            secondChild: const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _row(String label, String phone) => InkWell(
         onTap: () => _call(phone),
@@ -656,8 +1026,7 @@ class _EmergencyContactsCard extends StatelessWidget {
               Expanded(
                 child: Text(label,
                     style: const TextStyle(
-                        color: AppPalette.textWhite,
-                        fontSize: 13)),
+                        color: AppPalette.textWhite, fontSize: 13)),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -690,14 +1059,17 @@ class _PredictCta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-        onTap: () => Navigator.pushNamed(
-          context,
-          '/predict',
-          arguments: {
-            'city':        cityName,
-            'river_level': currentLevel,
-          },
-        ),
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.pushNamed(
+            context,
+            '/predict',
+            arguments: {
+              'city':        cityName,
+              'river_level': currentLevel,
+            },
+          );
+        },
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -724,8 +1096,48 @@ class _PredictCta extends StatelessWidget {
                 style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
-                    fontSize: 15,
+                    fontSize: 14,
                     letterSpacing: 0.3),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+// ── Map Chip CTA ──────────────────────────────────────────────────────────────
+
+class _MapChip extends StatelessWidget {
+  final String cityName;
+  const _MapChip({required this.cityName});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.pushNamed(context, '/bihar_river_map');
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 14, vertical: 16),
+          decoration: BoxDecoration(
+            color: AppPalette.gold.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: AppPalette.gold.withValues(alpha: 0.35)),
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.map_rounded,
+                  color: AppPalette.gold, size: 20),
+              SizedBox(height: 4),
+              Text(
+                'Map',
+                style: TextStyle(
+                    color: AppPalette.gold,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11),
               ),
             ],
           ),
