@@ -172,10 +172,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
           SliverToBoxAdapter(
             child: StationStatusStrip(
               counts: isLoading ? {} : _counts(allLevels),
-              lastSynced: isLoading ? null : rt.lastUpdated,
+              lastSynced: isLoading ? null : rt.lastFetchTime,  // ✅ fixed
               isLoading: isLoading,
               onTap: (sev) {
-                // Filter list to this severity level
                 setState(() {
                   _query = FloodSeverityHelper.label(sev);
                 });
@@ -192,7 +191,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                           message:
                               '${fd.city}: ${FloodSeverityHelper.label(FloodSeverityHelper.fromString(fd.status))} level',
                           subMessage:
-                              '${fd.riverName ?? fd.river} · ${fd.district.isNotEmpty ? fd.district : fd.state}',
+                              '${fd.riverName ?? ''} · ${fd.district.isNotEmpty ? fd.district : fd.state}',
                           severity:
                               FloodSeverityHelper.fromString(fd.status),
                           onTap: () =>
@@ -297,7 +296,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Premium River Card  (unchanged visual — now reads FloodData.status via helper)
+// Premium River Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RiverCard extends StatelessWidget {
@@ -360,18 +359,14 @@ class _RiverCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          Icon(
-                            Icons.waves_rounded,
-                            size: 13,
-                            color: AppPalette.gold,
-                          ),
+                          const Icon(Icons.waves_rounded,
+                              size: 13, color: AppPalette.gold),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
                               '${data.riverName ?? 'N/A'}  •  ${data.state}',
                               style: const TextStyle(
-                                  color: AppPalette.textGrey,
-                                  fontSize: 12),
+                                  color: AppPalette.textGrey, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -507,8 +502,6 @@ class _RiverCard extends StatelessWidget {
     if (diff.inHours   < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
-  // ignore: unused_element
-  String get river => '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
