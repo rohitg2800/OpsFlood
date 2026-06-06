@@ -1,11 +1,9 @@
 // lib/providers/flood_providers.dart
 // Riverpod 3.x — RealTimeService is a singleton ChangeNotifier.
 //
-// Strategy: a stable _serviceInstance field is set once in initState().
-// A separate _tickProvider (StateProvider<int>) is incremented on every
-// notifyListeners(). All data providers watch _tickProvider so they
-// rebuild on each fetch cycle — no identity-check problem, no duplicate
-// listener registration, no re-startPolling.
+// Strategy: a stable _serviceBootProvider sets up the singleton once.
+// A _TickNotifier (Notifier<int>) is incremented on every notifyListeners().
+// All data providers watch _tickProvider so they rebuild on each fetch cycle.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,15 +12,21 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Internal tick — increments on every RealTimeService.notifyListeners() ────
-final _tickProvider = StateProvider<int>((_) => 0);
+// ── Tick notifier ───────────────────────────────────────────────────────────────
+class _TickNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+  void increment() => state = state + 1;
+}
+
+final _tickProvider = NotifierProvider<_TickNotifier, int>(_TickNotifier.new);
 
 // ── Bootstrap provider — runs once, wires listener, starts polling ─────────
 final _serviceBootProvider = Provider<RealTimeService>((ref) {
   final service = RealTimeService();
 
   void onUpdate() {
-    ref.read(_tickProvider.notifier).update((t) => t + 1);
+    ref.read(_tickProvider.notifier).increment();
   }
 
   service.addListener(onUpdate);
@@ -34,10 +38,8 @@ final _serviceBootProvider = Provider<RealTimeService>((ref) {
 
 // ── Public providers ─────────────────────────────────────────────────────────
 
-/// Exposes the singleton RealTimeService. Watching this provider rebuilds
-/// on every fetch because _tickProvider is also watched.
 final realTimeProvider = Provider<RealTimeService>((ref) {
-  ref.watch(_tickProvider);          // rebuild when tick changes
+  ref.watch(_tickProvider);               // rebuild when tick changes
   return ref.watch(_serviceBootProvider); // stable singleton
 });
 
@@ -90,7 +92,7 @@ final monitoredCitiesProvider = Provider<List<String>>((ref) {
       .toList();
 });
 
-// ── Per-city providers ────────────────────────────────────────────────────────
+// ── Per-city ─────────────────────────────────────────────────────────────────
 
 final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
   return ref
@@ -107,7 +109,7 @@ final cityTrendProvider =
   return ref.watch(realTimeProvider).trendForCity(city);
 });
 
-// ── Per-state providers ───────────────────────────────────────────────────────
+// ── Per-state ─────────────────────────────────────────────────────────────────
 
 final stateImdAlertsProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {

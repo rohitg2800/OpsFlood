@@ -37,7 +37,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   late Animation<double> _shimmerAnim;
 
   int _tickerIdx = 0;
-  String? _prevRiskSnapshot;
 
   BannerAd? _bannerAd;
   bool _bannerLoaded = false;
@@ -93,8 +92,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _onData() {
     if (!mounted) return;
-    final snap = _sorted.map((d) => '${d.city}:${d.riskLevel}').join(',');
-    _prevRiskSnapshot = snap;
     setState(() {});
   }
 
@@ -153,7 +150,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              // ── 1. Header ──────────────────────────────────────────────
               SliverToBoxAdapter(child: _CommandHeader(
                 pulseAnim: _pulseAnim, shimmerAnim: _shimmerAnim,
                 onRefresh: () {
@@ -163,8 +159,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 },
                 lastUpdated: _service.lastFetchTime,
               )),
-
-              // ── 2. Hero: Arc gauge + 4 KPI + ticker ───────────────────
               SliverToBoxAdapter(child: _HeroSection(
                 arcAnim: _arcAnim, overallRisk: _overallRisk,
                 critical: _criticalCount, severe: _severeCount,
@@ -172,15 +166,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 total: data.length, alertCities: _alertCities,
                 tickerIdx: _tickerIdx, pulseAnim: _pulseAnim,
               )),
-
               if (data.isEmpty) ...[
                 const SliverToBoxAdapter(child: _EmptyState()),
               ] else ...[
-
-                // ── 3. Quick Access ──────────────────────────────────────
                 SliverToBoxAdapter(child: _QuickAccessGrid(context: context)),
-
-                // ── 4. Critical Summary Card (only if critical/severe) ───
                 if (_alertCities.isNotEmpty) ...[
                   SliverToBoxAdapter(child: _SectionHeader(
                     title: 'Highest Threat',
@@ -194,8 +183,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     pulseAnim: _pulseAnim,
                   )),
                 ],
-
-                // ── 5. Hotspot Carousel (top 5) ──────────────────────────
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Flood Hotspots',
                   sub: 'Top ${math.min(5, data.length)} by risk',
@@ -205,8 +192,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 SliverToBoxAdapter(child: _HotspotCarousel(
                   cities: data.take(5).toList(),
                 )),
-
-                // ── 6. Live Pulse Strip (all stations, horizontal chips) ─
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'All Stations',
                   sub: '${data.length} stations · swipe to browse',
@@ -214,8 +199,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   color: AppPalette.cyan,
                 )),
                 SliverToBoxAdapter(child: _LivePulseStrip(data: data)),
-
-                // ── 7. River vs Danger bars (top 6) ──────────────────────
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'River vs Danger',
                   sub: 'Gap to danger level · top 6 stations',
@@ -225,8 +208,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 SliverToBoxAdapter(child: _RiverDangerBars(
                   data: data.take(6).toList(),
                 )),
-
-                // ── 8. Trend chart (highest risk city) ───────────────────
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Level Trend',
                   sub: data.first.city,
@@ -236,19 +217,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                 SliverToBoxAdapter(child: _TrendCard(
                   service: _service, selected: data.first,
                 )),
-
-                // ── 9. Rainfall chips grid ───────────────────────────────
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Rainfall 24h',
                   sub: 'IMD estimate · all stations',
                   icon: Icons.grain_rounded,
                   color: AppPalette.cyan,
                 )),
-                SliverToBoxAdapter(child: _RainfallChipsGrid(
-                  data: data,
-                )),
-
-                // ── 10. Risk heatmap ─────────────────────────────────────
+                SliverToBoxAdapter(child: _RainfallChipsGrid(data: data)),
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'State Risk Map',
                   sub: 'Region-level flood index',
@@ -259,8 +234,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: RiskHeatmap(entries: _buildHeatmapEntries(data)),
                 )),
-
-                // ── 11. Footer stats ─────────────────────────────────────
                 SliverToBoxAdapter(child: _FooterStatsBar(
                   totalStations: data.length,
                   riversCount: data
@@ -276,7 +249,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   lastUpdated: _service.lastFetchTime,
                 )),
               ],
-
               const SliverToBoxAdapter(child: SizedBox(height: 40)),
             ],
           ),
@@ -601,7 +573,7 @@ class _QuickItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// CRITICAL SUMMARY CARD  (new)
+// CRITICAL SUMMARY CARD
 // ═══════════════════════════════════════════════════════════════════════
 class _CriticalSummaryCard extends StatelessWidget {
   final FloodData data;
@@ -612,7 +584,7 @@ class _CriticalSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col      = data.priorityColor;
+    final col       = data.priorityColor;
     final snapshots = service.trendForCity(data.city);
     final history   = snapshots.map((s) => s.level).toList();
     final overshoot = data.currentLevel - data.dangerLevel;
@@ -648,7 +620,6 @@ class _CriticalSummaryCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // top row: badge + city + level
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -691,8 +662,9 @@ class _CriticalSummaryCard extends StatelessWidget {
                           fontWeight: FontWeight.w900, letterSpacing: -0.5,
                           height: 1.1)),
                         Text(
-                          '${data.riverName ?? ''}'  +
-                          (data.district.isNotEmpty ? '  ·  ${data.district}' : ''),
+                          (data.riverName ?? '') +
+                          (data.district.isNotEmpty
+                            ? '  ·  ${data.district}' : ''),
                           style: const TextStyle(
                             color: AppPalette.textGrey, fontSize: 10)),
                       ],
@@ -704,18 +676,15 @@ class _CriticalSummaryCard extends StatelessWidget {
                       Text('${data.currentLevel.toStringAsFixed(2)} m',
                         style: TextStyle(
                           color: col, fontSize: 28,
-                          fontWeight: FontWeight.w900, letterSpacing: -1.2,
-                          height: 1)),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -1.2, height: 1)),
                       Text('current level', style: TextStyle(
                         color: AppPalette.textDim, fontSize: 8.5)),
                     ],
                   ),
                 ],
               ),
-
               const SizedBox(height: 14),
-
-              // Gap to danger bar
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -762,11 +731,9 @@ class _CriticalSummaryCard extends StatelessWidget {
                   ),
                 ],
               ),
-
-              // Mini trend if available
               if (history.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                Container(
+                SizedBox(
                   height: 70,
                   child: OpsAreaChart(
                     values: history,
@@ -776,10 +743,7 @@ class _CriticalSummaryCard extends StatelessWidget {
                   ),
                 ),
               ],
-
               const SizedBox(height: 14),
-
-              // Info tiles row
               Row(
                 children: [
                   Expanded(child: _InfoTile(
@@ -790,8 +754,8 @@ class _CriticalSummaryCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(child: _InfoTile(
                     label: 'Flow Rate',
-                    value: data.flowRateCumec != null
-                        ? '${data.flowRateCumec!.toStringAsFixed(0)} m³/s'
+                    value: data.flowRate != null
+                        ? '${data.flowRate!.toStringAsFixed(0)} m³/s'
                         : '—',
                     icon: Icons.speed_rounded,
                     color: AppPalette.amber)),
@@ -882,9 +846,8 @@ class _HotspotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col      = data.priorityColor;
+    final col       = data.priorityColor;
     final overshoot = data.currentLevel - data.dangerLevel;
-    final isAboveDanger = overshoot > 0;
     return Container(
       width: 200,
       margin: const EdgeInsets.only(right: 12),
@@ -940,7 +903,7 @@ class _HotspotCard extends StatelessWidget {
               style: TextStyle(color: col, fontSize: 20,
                 fontWeight: FontWeight.w900, letterSpacing: -0.8)),
             const SizedBox(width: 6),
-            if (isAboveDanger)
+            if (overshoot > 0)
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 6, vertical: 2),
@@ -973,7 +936,7 @@ class _HotspotCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// LIVE PULSE STRIP  (new — all stations as mini chips)
+// LIVE PULSE STRIP
 // ═══════════════════════════════════════════════════════════════════════
 class _LivePulseStrip extends StatelessWidget {
   final List<FloodData> data;
@@ -1004,8 +967,7 @@ class _PulseChip extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
-        Navigator.pushNamed(context, '/city_detail',
-          arguments: d.city);
+        Navigator.pushNamed(context, '/city_detail', arguments: d.city);
       },
       child: Container(
         width: 90,
@@ -1031,10 +993,12 @@ class _PulseChip extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Expanded(
-                child: Text(d.riskLevel.substring(0, math.min(3, d.riskLevel.length)),
+                child: Text(
+                  d.riskLevel.substring(0,
+                    math.min(3, d.riskLevel.length)),
                   style: TextStyle(
-                    color: col, fontSize: 7.5, fontWeight: FontWeight.w900,
-                    letterSpacing: 0.3)),
+                    color: col, fontSize: 7.5,
+                    fontWeight: FontWeight.w900, letterSpacing: 0.3)),
               ),
             ]),
             Text(d.city, style: const TextStyle(
@@ -1053,7 +1017,7 @@ class _PulseChip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// RIVER VS DANGER BARS  (new)
+// RIVER VS DANGER BARS
 // ═══════════════════════════════════════════════════════════════════════
 class _RiverDangerBars extends StatelessWidget {
   final List<FloodData> data;
@@ -1094,7 +1058,7 @@ class _RiverDangerBars extends StatelessWidget {
                         color: col, fontSize: 11,
                         fontWeight: FontWeight.w800)),
                     const SizedBox(width: 6),
-                    Text('/ ${d.dangerLevel.toStringAsFixed(1)} m danger',
+                    Text('/ ${d.dangerLevel.toStringAsFixed(1)} m',
                       style: const TextStyle(
                         color: AppPalette.textDim, fontSize: 9)),
                     const SizedBox(width: 6),
@@ -1112,7 +1076,6 @@ class _RiverDangerBars extends StatelessWidget {
                         color: AppPalette.abyss4,
                         borderRadius: BorderRadius.circular(4)),
                     ),
-                    // Danger threshold marker at 100%
                     Positioned(
                       right: 0, top: 0, bottom: 0,
                       child: Container(
@@ -1150,7 +1113,7 @@ class _RiverDangerBars extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// RAINFALL CHIPS GRID  (replaces bar chart strip)
+// RAINFALL CHIPS GRID
 // ═══════════════════════════════════════════════════════════════════════
 class _RainfallChipsGrid extends StatelessWidget {
   final List<FloodData> data;
@@ -1183,7 +1146,6 @@ class _RainfallChipsGrid extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Legend
           Row(children: [
             _leg(AppPalette.safe,     '< 15 Light'),
             const SizedBox(width: 8),
@@ -1366,7 +1328,7 @@ class _LevelPill extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// FOOTER STATS BAR  (was _SystemStatsBar, now compact at bottom)
+// FOOTER STATS BAR
 // ═══════════════════════════════════════════════════════════════════════
 class _FooterStatsBar extends StatelessWidget {
   final int totalStations, riversCount, statesAtRisk;
@@ -1420,7 +1382,8 @@ class _FooterStatsBar extends StatelessWidget {
                 ),
                 if (idx < stats.length - 1)
                   Container(
-                    width: 1, height: 28, color: AppPalette.abyssStroke),
+                    width: 1, height: 28,
+                    color: AppPalette.abyssStroke),
               ],
             ),
           );
