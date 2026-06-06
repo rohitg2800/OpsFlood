@@ -129,7 +129,7 @@ Future<void> main() async {
         }),
       );
 
-      // 8. CWC alert watcher — polls befiqr every 15 min, fires local notifs
+      // 8. CWC alert watcher — polls every 15 min, fires local notifs
       unawaited(
         CwcAlertWatcher.instance.start(container).catchError((e) {
           if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
@@ -189,6 +189,8 @@ class EquinoxBHApp extends ConsumerWidget {
         '/settings':                    (_) => const SettingsScreen(),
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
+        // FIX: dashboard pushes '/bihar_map' — register alias pointing to same screen
+        '/bihar_map':                   (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
         CityDetailScreen.route: (ctx) {
           final city = ModalRoute.of(ctx)!.settings.arguments as String;
