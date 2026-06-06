@@ -1,11 +1,8 @@
 // lib/screens/river_monitor_screen.dart
-// RiverMonitorScreen v6
-// Fix: severity chips now work as real enum-based filters.
-//   - _severityFilter: FloodSeverity? replaces the broken _query text approach
-//   - Tapping a chip filters CWC + legacy cards to that severity bucket
-//   - Tapping the same chip again clears the filter (toggle behaviour)
-//   - Text search (_query) and severity filter are independent and additive
-//   - StationStatusStrip receives activeFilter so the selected chip highlights
+// RiverMonitorScreen v7
+// Change: every _CwcCard is now tappable → pushes CwcStationDetailScreen.
+// Birpur card passes live KosiBirpurReading so the detail screen shows
+// discharge, source, observed-at, warning/danger discharge thresholds.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -16,6 +13,7 @@ import '../models/flood_data.dart';
 import '../providers/cwc_provider.dart';
 import '../providers/flood_providers.dart';
 import '../providers/kosi_birpur_provider.dart';
+import '../screens/cwc_station_detail_screen.dart';
 import '../services/befiqr_cwc_service.dart';
 import '../services/kosi_birpur_service.dart';
 import '../theme/river_theme.dart';
@@ -35,7 +33,7 @@ class RiverMonitorScreen extends ConsumerStatefulWidget {
 
 class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   String _query = '';
-  FloodSeverity? _severityFilter; // null = show all
+  FloodSeverity? _severityFilter;
   final _scrollCtrl = ScrollController();
   bool _showFab = false;
 
@@ -54,8 +52,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     super.dispose();
   }
 
-  // ── Severity helpers ─────────────────────────────────────────────────────
-
   FloodSeverity _cwcSeverity(CwcStation s) {
     if (s.isDanger)   return FloodSeverity.danger;
     if (s.isWarning)  return FloodSeverity.warning;
@@ -63,16 +59,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     return FloodSeverity.normal;
   }
 
-  // ── Tap a chip: toggle filter (same chip = clear) ────────────────────────
-
   void _onChipTap(FloodSeverity sev) {
     setState(() {
       _severityFilter = (_severityFilter == sev) ? null : sev;
-      _query = '';  // clear text search when a chip is tapped
+      _query = '';
     });
   }
-
-  // ── Deduplication ────────────────────────────────────────────────────────
 
   List<FloodData> _deduplicateLegacy(
       List<FloodData> legacy, List<CwcStation> cwc) {
@@ -87,15 +79,11 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     }).toList();
   }
 
-  // ── Filtering: text + severity are additive ─────────────────────────────
-
   List<CwcStation> _filteredCwc(List<CwcStation> stations) {
     var list = stations;
-    // 1. severity filter
     if (_severityFilter != null) {
       list = list.where((s) => _cwcSeverity(s) == _severityFilter).toList();
     }
-    // 2. text filter
     if (_query.isNotEmpty) {
       final q = _query.toLowerCase();
       list = list
@@ -109,14 +97,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
   List<FloodData> _filteredLegacy(List<FloodData> levels) {
     var list = levels;
-    // 1. severity filter
     if (_severityFilter != null) {
       list = list
           .where((fd) =>
               FloodSeverityHelper.fromString(fd.status) == _severityFilter)
           .toList();
     }
-    // 2. text filter
     if (_query.isNotEmpty) {
       final q = _query.toLowerCase();
       list = list
@@ -129,10 +115,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     }
     return list;
   }
-
-  // ── Counts ────────────────────────────────────────────────────────────────
-  // Always count against the FULL (unfiltered) list so numbers on chips
-  // stay stable even while a filter is active.
 
   Map<FloodSeverity, int> _counts(
       List<CwcStation> cwc, List<FloodData> legacy) {
@@ -154,8 +136,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     return '$cwc CWC Bihar';
   }
 
-  // ── Active filter label (shown below search bar when a chip is active) ────
-
   String? get _activeFilterLabel {
     if (_severityFilter == null) return null;
     return FloodSeverityHelper.label(_severityFilter!);
@@ -175,21 +155,17 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     );
 
     final legacy = _deduplicateLegacy(rawLegacy, cwcStations);
-
     final isLoading =
         rt.isLoading && rawLegacy.isEmpty && cwcAsync is AsyncLoading;
 
-    // Full sorted list (for counts + alert banners)
     final List<CwcStation> sortedCwc = List<CwcStation>.from(cwcStations)
       ..sort((a, b) =>
           BefiqrCwcService.riskScore(b).compareTo(BefiqrCwcService.riskScore(a)));
 
-    // Filtered lists (text + severity)
     final filteredCwc    = _filteredCwc(sortedCwc);
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
 
-    // .value returns null when loading/error in Riverpod 3.x (no valueOrNull)
     final liveBirpur = birpurAsync.value;
 
     return Scaffold(
@@ -213,7 +189,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
         physics: const BouncingScrollPhysics(),
         slivers: [
 
-          // ── Sliver AppBar ─────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             floating: false,
@@ -267,7 +242,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 error: (_, __) => const Icon(Icons.cloud_off_rounded,
                     color: AppPalette.amber, size: 18),
               ),
-              // Clear filter button (visible when a chip filter is active)
               if (_severityFilter != null)
                 TextButton.icon(
                   onPressed: () => setState(() => _severityFilter = null),
@@ -311,13 +285,22 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Kosi Birpur Live Banner ─────────────────────────────────────
           if (liveBirpur != null && liveBirpur.source != 'SEED')
             SliverToBoxAdapter(
-              child: _KosiBirpurBanner(reading: liveBirpur),
+              child: _KosiBirpurBanner(
+                reading: liveBirpur,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CwcStationDetailScreen(
+                      station: liveBirpur.toCwcStation(),
+                      birpurReading: liveBirpur,
+                    ),
+                  ),
+                ),
+              ),
             ),
 
-          // ── Search bar ─────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -340,14 +323,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 ),
                 onChanged: (v) => setState(() {
                   _query = v;
-                  // Typing clears the chip filter
                   if (v.isNotEmpty) _severityFilter = null;
                 }),
               ),
             ),
           ),
 
-          // ── Active filter pill ("Showing: Warning  ×") ─────────────────────
           if (_activeFilterLabel != null)
             SliverToBoxAdapter(
               child: Padding(
@@ -373,7 +354,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Status strip (chips act as filters) ──────────────────────────
           SliverToBoxAdapter(
             child: StationStatusStrip(
               counts:       isLoading ? {} : _counts(sortedCwc, legacy),
@@ -384,7 +364,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── CWC alert banners (always from full list, not filtered) ───────
           if (!isLoading && _query.isEmpty &&
               _severityFilter == null && cwcStations.isNotEmpty)
             SliverToBoxAdapter(
@@ -396,13 +375,21 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                               '${s.isDanger ? "above" : "below"} danger',
                           subMessage: '${s.river} · Bihar CWC',
                           severity: _cwcSeverity(s),
-                          onTap: () {},
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CwcStationDetailScreen(
+                                station: s,
+                                birpurReading:
+                                    _isBirpur(s) ? liveBirpur : null,
+                              ),
+                            ),
+                          ),
                         ))
                     .toList(),
               ),
             ),
 
-          // ── Legend ───────────────────────────────────────────────────────
           if (!isLoading)
             SliverToBoxAdapter(
               child: Padding(
@@ -427,7 +414,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Count header ─────────────────────────────────────────────────
           if (!isLoading && totalCount > 0)
             SliverToBoxAdapter(
               child: Padding(
@@ -452,13 +438,11 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Shimmer ──────────────────────────────────────────────────────
           if (isLoading)
             SliverToBoxAdapter(
               child: ShimmerLoader.stationList(count: 6),
             )
 
-          // ── CWC stations ─────────────────────────────────────────────────
           else if (filteredCwc.isNotEmpty) ...[
             if (_query.isEmpty && _severityFilter == null)
               const SliverToBoxAdapter(
@@ -483,19 +467,29 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => _CwcCard(
-                    station: filteredCwc[i],
-                    birpurReading: _isBirpur(filteredCwc[i])
-                        ? liveBirpur
-                        : null,
-                  ),
+                  (ctx, i) {
+                    final s = filteredCwc[i];
+                    final bp = _isBirpur(s) ? liveBirpur : null;
+                    return _CwcCard(
+                      station:       s,
+                      birpurReading: bp,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CwcStationDetailScreen(
+                            station:       s,
+                            birpurReading: bp,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                   childCount: filteredCwc.length,
                 ),
               ),
             ),
           ],
 
-          // ── Legacy stations ────────────────────────────────────────────────
           if (filteredLegacy.isNotEmpty) ...[
             if (_query.isEmpty && _severityFilter == null)
               const SliverToBoxAdapter(
@@ -527,7 +521,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ],
 
-          // ── Empty state ───────────────────────────────────────────────────
           if (!isLoading && totalCount == 0)
             SliverFillRemaining(
               child: Center(
@@ -582,12 +575,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Kosi Birpur Live Banner
+// Kosi Birpur Live Banner  (now tappable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _KosiBirpurBanner extends StatelessWidget {
   final KosiBirpurReading reading;
-  const _KosiBirpurBanner({required this.reading});
+  final VoidCallback onTap;
+  const _KosiBirpurBanner({required this.reading, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -598,75 +592,81 @@ class _KosiBirpurBanner extends StatelessWidget {
     else if (reading.isElevated) statusColor = AppPalette.amber;
     else                         statusColor = AppPalette.safe;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: statusColor.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: statusColor.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.water_rounded, color: statusColor, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Kosi @ Birpur  ·  ${reading.levelM.toStringAsFixed(2)} m'
-                  '  (${reading.statusLabel})',
-                  style: TextStyle(
-                      color: statusColor,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      'Danger: ${reading.dangerLevel.toStringAsFixed(2)} m  '
-                      '·  Gap: ${reading.gap.toStringAsFixed(2)} m',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 11),
-                    ),
-                    if (reading.dischargeCumecs != null) ...[
-                      const Text('  ·  ',
-                          style: TextStyle(
-                              color: AppPalette.textGrey, fontSize: 11)),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: statusColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.water_rounded, color: statusColor, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Kosi @ Birpur  ·  ${reading.levelM.toStringAsFixed(2)} m'
+                    '  (${reading.statusLabel})',
+                    style: TextStyle(
+                        color: statusColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
                       Text(
-                        'Q: ${reading.dischargeCumecs!.toStringAsFixed(0)} m³/s',
+                        'Danger: ${reading.dangerLevel.toStringAsFixed(2)} m  '
+                        '·  Gap: ${reading.gap.toStringAsFixed(2)} m',
                         style: const TextStyle(
                             color: AppPalette.textGrey, fontSize: 11),
                       ),
+                      if (reading.dischargeCumecs != null) ...[
+                        const Text('  ·  ',
+                            style: TextStyle(
+                                color: AppPalette.textGrey, fontSize: 11)),
+                        Text(
+                          'Q: ${reading.dischargeCumecs!.toStringAsFixed(0)} m³/s',
+                          style: const TextStyle(
+                              color: AppPalette.textGrey, fontSize: 11),
+                        ),
+                      ],
                     ],
-                  ],
-                ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _SourceBadge(source: reading.source),
+                const SizedBox(height: 4),
+                if (isStale)
+                  const Text('STALE',
+                      style: TextStyle(
+                          color: AppPalette.amber,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w800))
+                else
+                  Text(
+                    DateFormat('HH:mm').format(reading.observedAt),
+                    style: const TextStyle(
+                        color: AppPalette.textGrey, fontSize: 9),
+                  ),
+                const SizedBox(height: 4),
+                const Icon(Icons.chevron_right_rounded,
+                    size: 14, color: AppPalette.textGrey),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _SourceBadge(source: reading.source),
-              const SizedBox(height: 4),
-              if (isStale)
-                const Text('STALE',
-                    style: TextStyle(
-                        color: AppPalette.amber,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w800))
-              else
-                Text(
-                  DateFormat('HH:mm').format(reading.observedAt),
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 9),
-                ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -710,13 +710,18 @@ class _SourceBadge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC Station Card
+// CWC Station Card  (now tappable via onTap)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CwcCard extends StatelessWidget {
-  final CwcStation station;
+  final CwcStation        station;
   final KosiBirpurReading? birpurReading;
-  const _CwcCard({required this.station, this.birpurReading});
+  final VoidCallback      onTap;          // ← NEW
+  const _CwcCard({
+    required this.station,
+    required this.onTap,
+    this.birpurReading,
+  });
 
   Color get _statusColor {
     if (station.isDanger)   return AppPalette.critical;
@@ -733,175 +738,188 @@ class _CwcCard extends StatelessWidget {
     const warnPct   = 0.97;
     final isBirpur  = birpurReading != null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: AppPalette.abyss1,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isBirpur
-              ? color.withValues(alpha: 0.55)
-              : color.withValues(alpha: 0.30),
-          width: isBirpur ? 1.5 : 1,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        decoration: BoxDecoration(
+          color: AppPalette.abyss1,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isBirpur
+                ? color.withValues(alpha: 0.55)
+                : color.withValues(alpha: 0.30),
+            width: isBirpur ? 1.5 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: isBirpur ? 0.14 : 0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 5),
+            ),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: isBirpur ? 0.14 : 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 14, 0),
-            child: Row(
-              children: [
-                _ArcGauge(
-                  percent: pct,
-                  warnAt: warnPct,
-                  color: color,
-                  size: 72,
-                  centerLabel: '${(pct * 100).toStringAsFixed(0)}%',
-                  subLabel: 'fill',
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        station.site,
-                        style: const TextStyle(
-                            color: AppPalette.textWhite,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          const Icon(Icons.waves_rounded,
-                              size: 13, color: AppPalette.gold),
-                          const SizedBox(width: 4),
-                          Text('${station.river}  ·  Bihar',
-                              style: const TextStyle(
-                                  color: AppPalette.textGrey, fontSize: 12)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          _Badge(
-                            label: station.statusLabel,
-                            bg: color.withValues(alpha: 0.15),
-                            fg: color,
-                          ),
-                          _Badge(
-                            label: 'Risk ${riskScore.toStringAsFixed(0)}%',
-                            bg: AppPalette.gold.withValues(alpha: 0.10),
-                            fg: AppPalette.gold,
-                          ),
-                          if (isBirpur)
-                            _Badge(
-                              label: birpurReading!.source,
-                              bg: AppPalette.cyan.withValues(alpha: 0.10),
-                              fg: AppPalette.cyan,
-                            )
-                          else
-                            _Badge(
-                              label: 'CWC',
-                              bg: AppPalette.cyan.withValues(alpha: 0.08),
-                              fg: AppPalette.cyan,
-                            ),
-                        ],
-                      ),
-                      if (isBirpur &&
-                          birpurReading!.dischargeCumecs != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Discharge: ${birpurReading!.dischargeCumecs!.toStringAsFixed(0)} m³/s'
-                          '  ·  Danger: ${kBirpurDangerDischarge.toStringAsFixed(0)} m³/s',
-                          style: const TextStyle(
-                              color: AppPalette.textGrey, fontSize: 11),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Divider(
-              color: AppPalette.abyssStroke,
-              height: 1,
-              indent: 14,
-              endIndent: 14),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                _StatChip(
-                  icon: Icons.height_rounded,
-                  label: 'Level',
-                  value: '${station.currentLevel.toStringAsFixed(2)} m',
-                  accent: color,
-                ),
-                const SizedBox(width: 8),
-                _StatChip(
-                  icon: Icons.stream_rounded,
-                  label: 'Danger',
-                  value: '${station.dangerLevel.toStringAsFixed(2)} m',
-                  accent: AppPalette.danger,
-                ),
-                const SizedBox(width: 8),
-                _StatChip(
-                  icon: Icons.trending_down_rounded,
-                  label: 'Gap',
-                  value: '${station.gap.toStringAsFixed(2)} m',
-                  accent: station.isDanger
-                      ? AppPalette.critical
-                      : AppPalette.safe,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-            child: _LevelBar(
-              current: station.currentLevel,
-              warning: station.dangerLevel * 0.97,
-              danger:  station.dangerLevel,
-              color:   color,
-            ),
-          ),
-          if (isBirpur)
+        child: Column(
+          children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 14, 0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const Icon(Icons.access_time_rounded,
-                      size: 10, color: AppPalette.textGrey),
-                  const SizedBox(width: 3),
-                  Text(
-                    'Observed: '
-                    '${DateFormat('dd MMM HH:mm').format(birpurReading!.observedAt)}'
-                    '  ·  ${birpurReading!.source}',
-                    style: const TextStyle(
-                        color: AppPalette.textGrey, fontSize: 9),
+                  _ArcGauge(
+                    percent: pct,
+                    warnAt: warnPct,
+                    color: color,
+                    size: 72,
+                    centerLabel: '${(pct * 100).toStringAsFixed(0)}%',
+                    subLabel: 'fill',
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                station.site,
+                                style: const TextStyle(
+                                    color: AppPalette.textWhite,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w700),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            // Tap hint chevron
+                            const Icon(Icons.chevron_right_rounded,
+                                size: 16, color: AppPalette.textGrey),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            const Icon(Icons.waves_rounded,
+                                size: 13, color: AppPalette.gold),
+                            const SizedBox(width: 4),
+                            Text('${station.river}  ·  Bihar',
+                                style: const TextStyle(
+                                    color: AppPalette.textGrey,
+                                    fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            _Badge(
+                              label: station.statusLabel,
+                              bg: color.withValues(alpha: 0.15),
+                              fg: color,
+                            ),
+                            _Badge(
+                              label: 'Risk ${riskScore.toStringAsFixed(0)}%',
+                              bg: AppPalette.gold.withValues(alpha: 0.10),
+                              fg: AppPalette.gold,
+                            ),
+                            if (isBirpur)
+                              _Badge(
+                                label: birpurReading!.source,
+                                bg: AppPalette.cyan.withValues(alpha: 0.10),
+                                fg: AppPalette.cyan,
+                              )
+                            else
+                              _Badge(
+                                label: 'CWC',
+                                bg: AppPalette.cyan.withValues(alpha: 0.08),
+                                fg: AppPalette.cyan,
+                              ),
+                          ],
+                        ),
+                        if (isBirpur &&
+                            birpurReading!.dischargeCumecs != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Discharge: ${birpurReading!.dischargeCumecs!.toStringAsFixed(0)} m³/s'
+                            '  ·  Danger: ${kBirpurDangerDischarge.toStringAsFixed(0)} m³/s',
+                            style: const TextStyle(
+                                color: AppPalette.textGrey, fontSize: 11),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-        ],
+            const SizedBox(height: 14),
+            Divider(
+                color: AppPalette.abyssStroke,
+                height: 1,
+                indent: 14,
+                endIndent: 14),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  _StatChip(
+                    icon: Icons.height_rounded,
+                    label: 'Level',
+                    value: '${station.currentLevel.toStringAsFixed(2)} m',
+                    accent: color,
+                  ),
+                  const SizedBox(width: 8),
+                  _StatChip(
+                    icon: Icons.stream_rounded,
+                    label: 'Danger',
+                    value: '${station.dangerLevel.toStringAsFixed(2)} m',
+                    accent: AppPalette.danger,
+                  ),
+                  const SizedBox(width: 8),
+                  _StatChip(
+                    icon: Icons.trending_down_rounded,
+                    label: 'Gap',
+                    value: '${station.gap.toStringAsFixed(2)} m',
+                    accent: station.isDanger
+                        ? AppPalette.critical
+                        : AppPalette.safe,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: _LevelBar(
+                current: station.currentLevel,
+                warning: station.dangerLevel * 0.97,
+                danger:  station.dangerLevel,
+                color:   color,
+              ),
+            ),
+            if (isBirpur)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    const Icon(Icons.access_time_rounded,
+                        size: 10, color: AppPalette.textGrey),
+                    const SizedBox(width: 3),
+                    Text(
+                      'Observed: '
+                      '${DateFormat('dd MMM HH:mm').format(birpurReading!.observedAt)}'
+                      '  ·  ${birpurReading!.source}',
+                      style: const TextStyle(
+                          color: AppPalette.textGrey, fontSize: 9),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
