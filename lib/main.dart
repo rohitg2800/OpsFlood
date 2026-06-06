@@ -27,6 +27,7 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/state_matrix_screen.dart';
 import 'screens/weather_screen.dart';
+import 'services/cwc_alert_watcher.dart';
 import 'services/fcm_service.dart';
 import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
@@ -39,8 +40,10 @@ import 'screens/prediction_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   WidgetsBinding.instance.deferFirstFrame();
+
+  // Riverpod container needed early for CwcAlertWatcher
+  final container = ProviderContainer();
 
   try {
     // 1. Load .env
@@ -59,7 +62,7 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
+              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out');
               throw TimeoutException('Firebase init timeout');
             },
           );
@@ -125,12 +128,22 @@ Future<void> main() async {
           if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
         }),
       );
+
+      // 8. CWC alert watcher — polls befiqr every 15 min, fires local notifs
+      unawaited(
+        CwcAlertWatcher.instance.start(container).catchError((e) {
+          if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
+        }),
+      );
     }
   } finally {
     WidgetsBinding.instance.allowFirstFrame();
   }
 
-  runApp(const ProviderScope(child: EquinoxBHApp()));
+  runApp(UncontrolledProviderScope(
+    container: container,
+    child: const EquinoxBHApp(),
+  ));
 }
 
 class EquinoxBHApp extends ConsumerWidget {
@@ -177,13 +190,11 @@ class EquinoxBHApp extends ConsumerWidget {
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
-        // city detail with arg pass-through
         CityDetailScreen.route: (ctx) {
           final city = ModalRoute.of(ctx)!.settings.arguments as String;
           return CityDetailScreen(cityName: city);
         },
-
-        // ── Phase 2: new routes ─────────────────────────────────────────────
+        // ── Phase 2 ────────────────────────────────────────────────────────
         '/sos':        (_) => const SosScreen(),
         '/news':       (_) => const NewsFeedScreen(),
         '/ai_predict': (_) => const PredictionScreen(),
