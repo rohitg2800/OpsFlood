@@ -1,7 +1,11 @@
 // lib/screens/river_monitor_screen.dart
-// RiverMonitorScreen v5
-// Wired: cwcStationsWithBirpurProvider replaces cwcStationsProvider so
-//        Kosi @ Birpur always shows LIVE gauge data (3-source pipeline).
+// RiverMonitorScreen v6
+// Fix: severity chips now work as real enum-based filters.
+//   - _severityFilter: FloodSeverity? replaces the broken _query text approach
+//   - Tapping a chip filters CWC + legacy cards to that severity bucket
+//   - Tapping the same chip again clears the filter (toggle behaviour)
+//   - Text search (_query) and severity filter are independent and additive
+//   - StationStatusStrip receives activeFilter so the selected chip highlights
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -15,6 +19,7 @@ import '../providers/kosi_birpur_provider.dart';
 import '../services/befiqr_cwc_service.dart';
 import '../services/kosi_birpur_service.dart';
 import '../theme/river_theme.dart';
+import '../utils/flood_severity.dart';
 import '../utils/flood_severity_helper.dart';
 import '../widgets/live_alert_banner.dart';
 import '../widgets/severity_legend.dart';
@@ -30,6 +35,7 @@ class RiverMonitorScreen extends ConsumerStatefulWidget {
 
 class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   String _query = '';
+  FloodSeverity? _severityFilter; // null = show all
   final _scrollCtrl = ScrollController();
   bool _showFab = false;
 
@@ -48,7 +54,26 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     super.dispose();
   }
 
-  // ── Deduplication ─────────────────────────────────────────────────────────
+  // ── Severity helpers ─────────────────────────────────────────────────────
+
+  FloodSeverity _cwcSeverity(CwcStation s) {
+    if (s.isDanger)   return FloodSeverity.danger;
+    if (s.isWarning)  return FloodSeverity.warning;
+    if (s.isElevated) return FloodSeverity.watch;
+    return FloodSeverity.normal;
+  }
+
+  // ── Tap a chip: toggle filter (same chip = clear) ────────────────────────
+
+  void _onChipTap(FloodSeverity sev) {
+    setState(() {
+      _severityFilter = (_severityFilter == sev) ? null : sev;
+      _query = '';  // clear text search when a chip is tapped
+    });
+  }
+
+  // ── Deduplication ────────────────────────────────────────────────────────
+
   List<FloodData> _deduplicateLegacy(
       List<FloodData> legacy, List<CwcStation> cwc) {
     final cwcSiteNames =
@@ -62,48 +87,63 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     }).toList();
   }
 
+  // ── Filtering: text + severity are additive ─────────────────────────────
+
   List<CwcStation> _filteredCwc(List<CwcStation> stations) {
-    if (_query.isEmpty) return stations;
-    final q = _query.toLowerCase();
-    return stations
-        .where((s) =>
-            s.site.toLowerCase().contains(q) ||
-            s.river.toLowerCase().contains(q))
-        .toList();
+    var list = stations;
+    // 1. severity filter
+    if (_severityFilter != null) {
+      list = list.where((s) => _cwcSeverity(s) == _severityFilter).toList();
+    }
+    // 2. text filter
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      list = list
+          .where((s) =>
+              s.site.toLowerCase().contains(q) ||
+              s.river.toLowerCase().contains(q))
+          .toList();
+    }
+    return list;
   }
 
   List<FloodData> _filteredLegacy(List<FloodData> levels) {
-    if (_query.isEmpty) return levels;
-    final q = _query.toLowerCase();
-    return levels
-        .where((fd) =>
-            fd.city.toLowerCase().contains(q) ||
-            fd.state.toLowerCase().contains(q) ||
-            (fd.riverName?.toLowerCase().contains(q) ?? false) ||
-            fd.district.toLowerCase().contains(q))
-        .toList();
+    var list = levels;
+    // 1. severity filter
+    if (_severityFilter != null) {
+      list = list
+          .where((fd) =>
+              FloodSeverityHelper.fromString(fd.status) == _severityFilter)
+          .toList();
+    }
+    // 2. text filter
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      list = list
+          .where((fd) =>
+              fd.city.toLowerCase().contains(q) ||
+              fd.state.toLowerCase().contains(q) ||
+              (fd.riverName?.toLowerCase().contains(q) ?? false) ||
+              fd.district.toLowerCase().contains(q))
+          .toList();
+    }
+    return list;
   }
+
+  // ── Counts ────────────────────────────────────────────────────────────────
+  // Always count against the FULL (unfiltered) list so numbers on chips
+  // stay stable even while a filter is active.
 
   Map<FloodSeverity, int> _counts(
       List<CwcStation> cwc, List<FloodData> legacy) {
     final m = <FloodSeverity, int>{};
     for (final s in FloodSeverity.values) m[s] = 0;
-    for (final s in cwc) {
-      final sev = _cwcSeverity(s);
-      m[sev] = (m[sev] ?? 0) + 1;
-    }
+    for (final s in cwc)    m[_cwcSeverity(s)] = (m[_cwcSeverity(s)] ?? 0) + 1;
     for (final fd in legacy) {
       final sev = FloodSeverityHelper.fromString(fd.status);
       m[sev] = (m[sev] ?? 0) + 1;
     }
     return m;
-  }
-
-  FloodSeverity _cwcSeverity(CwcStation s) {
-    if (s.isDanger)   return FloodSeverity.danger;
-    if (s.isWarning)  return FloodSeverity.warning;
-    if (s.isElevated) return FloodSeverity.watch;
-    return FloodSeverity.normal;
   }
 
   List<CwcStation> _cwcAlerts(List<CwcStation> stations) =>
@@ -114,9 +154,15 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     return '$cwc CWC Bihar';
   }
 
+  // ── Active filter label (shown below search bar when a chip is active) ────
+
+  String? get _activeFilterLabel {
+    if (_severityFilter == null) return null;
+    return FloodSeverityHelper.label(_severityFilter!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // ── WIRED: cwcStationsWithBirpurProvider injects live Kosi/Birpur ──────
     final cwcAsync    = ref.watch(cwcStationsWithBirpurProvider);
     final birpurAsync = ref.watch(kosiBirpurProvider);
     final rt          = ref.watch(realTimeServiceProvider);
@@ -128,21 +174,21 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
       error:   (_, __) => const [],
     );
 
-    // Deduplicate: drop legacy entries already covered by CWC Bihar
     final legacy = _deduplicateLegacy(rawLegacy, cwcStations);
 
     final isLoading =
         rt.isLoading && rawLegacy.isEmpty && cwcAsync is AsyncLoading;
 
+    // Full sorted list (for counts + alert banners)
     final List<CwcStation> sortedCwc = List<CwcStation>.from(cwcStations)
       ..sort((a, b) =>
           BefiqrCwcService.riskScore(b).compareTo(BefiqrCwcService.riskScore(a)));
 
+    // Filtered lists (text + severity)
     final filteredCwc    = _filteredCwc(sortedCwc);
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
 
-    // Extract live Birpur reading for the special badge (may be null)
     final liveBirpur = birpurAsync.valueOrNull;
 
     return Scaffold(
@@ -165,7 +211,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
         controller: _scrollCtrl,
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── Sliver AppBar ────────────────────────────────────────────────
+
+          // ── Sliver AppBar ─────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             floating: false,
@@ -219,6 +266,18 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 error: (_, __) => const Icon(Icons.cloud_off_rounded,
                     color: AppPalette.amber, size: 18),
               ),
+              // Clear filter button (visible when a chip filter is active)
+              if (_severityFilter != null)
+                TextButton.icon(
+                  onPressed: () => setState(() => _severityFilter = null),
+                  icon: const Icon(Icons.close_rounded, size: 14,
+                      color: AppPalette.gold),
+                  label: const Text('Clear',
+                      style: TextStyle(
+                          color: AppPalette.gold,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                ),
               IconButton(
                 icon: const Icon(Icons.palette_outlined, size: 20),
                 color: AppPalette.gold,
@@ -251,13 +310,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Kosi Birpur Live Banner (shows when data is fresh) ───────────
+          // ── Kosi Birpur Live Banner ─────────────────────────────────────
           if (liveBirpur != null && liveBirpur.source != 'SEED')
             SliverToBoxAdapter(
               child: _KosiBirpurBanner(reading: liveBirpur),
             ),
 
-          // ── Search bar ───────────────────────────────────────────────────
+          // ── Search bar ─────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -278,24 +337,55 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                         )
                       : null,
                 ),
-                onChanged: (v) => setState(() => _query = v),
+                onChanged: (v) => setState(() {
+                  _query = v;
+                  // Typing clears the chip filter
+                  if (v.isNotEmpty) _severityFilter = null;
+                }),
               ),
             ),
           ),
 
-          // ── Status strip ─────────────────────────────────────────────────
+          // ── Active filter pill ("Showing: Warning  ×") ─────────────────────
+          if (_activeFilterLabel != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.filter_list_rounded,
+                        size: 13, color: AppPalette.gold),
+                    const SizedBox(width: 5),
+                    Text('Showing: $_activeFilterLabel',
+                        style: const TextStyle(
+                            color: AppPalette.gold,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () => setState(() => _severityFilter = null),
+                      child: const Icon(Icons.close_rounded,
+                          size: 13, color: AppPalette.textGrey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── Status strip (chips act as filters) ──────────────────────────
           SliverToBoxAdapter(
             child: StationStatusStrip(
-              counts: isLoading ? {} : _counts(sortedCwc, legacy),
-              lastSynced: isLoading ? null : rt.lastFetchTime,
-              isLoading: isLoading,
-              onTap: (sev) =>
-                  setState(() => _query = FloodSeverityHelper.label(sev)),
+              counts:       isLoading ? {} : _counts(sortedCwc, legacy),
+              lastSynced:   isLoading ? null : rt.lastFetchTime,
+              isLoading:    isLoading,
+              activeFilter: _severityFilter,
+              onTap:        _onChipTap,
             ),
           ),
 
-          // ── CWC alert banners ────────────────────────────────────────────
-          if (!isLoading && _query.isEmpty && cwcStations.isNotEmpty)
+          // ── CWC alert banners (always from full list, not filtered) ───────
+          if (!isLoading && _query.isEmpty &&
+              _severityFilter == null && cwcStations.isNotEmpty)
             SliverToBoxAdapter(
               child: LiveAlertBannerStack(
                 alerts: _cwcAlerts(sortedCwc)
@@ -323,10 +413,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                     SeverityLegend.compact(),
                     const SizedBox(width: 6),
                     Text(
-                      'Tap chip to filter',
+                      _severityFilter == null
+                          ? 'Tap chip to filter'
+                          : 'Tap again to clear',
                       style: TextStyle(
                           fontSize: 10,
-                          color: AppPalette.textGrey.withValues(alpha: 0.6)),
+                          color: AppPalette.textGrey
+                              .withValues(alpha: 0.6)),
                     ),
                   ],
                 ),
@@ -339,9 +432,17 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
-                  _query.isEmpty
-                      ? _countHeader(cwcStations.length, legacy.length)
-                      : '$totalCount result${totalCount == 1 ? '' : 's'} for "$_query"',
+                  () {
+                    if (_severityFilter != null) {
+                      return '$totalCount '
+                          '${FloodSeverityHelper.label(_severityFilter!)} '
+                          'station${totalCount == 1 ? '' : 's'}';
+                    }
+                    if (_query.isNotEmpty) {
+                      return '$totalCount result${totalCount == 1 ? '' : 's'} for "$_query"';
+                    }
+                    return _countHeader(cwcStations.length, legacy.length);
+                  }(),
                   style: const TextStyle(
                       fontSize: 12,
                       color: AppPalette.textGrey,
@@ -356,9 +457,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               child: ShimmerLoader.stationList(count: 6),
             )
 
-          // ── CWC stations (primary — authoritative Bihar data) ────────────
+          // ── CWC stations ─────────────────────────────────────────────────
           else if (filteredCwc.isNotEmpty) ...[
-            if (_query.isEmpty)
+            if (_query.isEmpty && _severityFilter == null)
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
@@ -383,7 +484,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 delegate: SliverChildBuilderDelegate(
                   (ctx, i) => _CwcCard(
                     station: filteredCwc[i],
-                    // Pass the live reading only for the Birpur card
                     birpurReading: _isBirpur(filteredCwc[i])
                         ? liveBirpur
                         : null,
@@ -394,9 +494,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ],
 
-          // ── Legacy stations (secondary — non-Bihar / non-duplicate) ──────
+          // ── Legacy stations ────────────────────────────────────────────────
           if (filteredLegacy.isNotEmpty) ...[
-            if (_query.isEmpty)
+            if (_query.isEmpty && _severityFilter == null)
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -426,30 +526,46 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ],
 
+          // ── Empty state ───────────────────────────────────────────────────
           if (!isLoading && totalCount == 0)
             SliverFillRemaining(
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.search_off_rounded,
-                        color: AppPalette.textDim, size: 48),
+                    Icon(
+                      _severityFilter != null
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.search_off_rounded,
+                      color: _severityFilter != null
+                          ? AppPalette.safe
+                          : AppPalette.textDim,
+                      size: 48,
+                    ),
                     const SizedBox(height: 12),
                     Text(
-                      _query.isEmpty
-                          ? 'No live data available.'
-                          : 'No results for "$_query".',
+                      _severityFilter != null
+                          ? 'No ${FloodSeverityHelper.label(_severityFilter!)} stations right now 🎉'
+                          : _query.isEmpty
+                              ? 'No live data available.'
+                              : 'No results for "$_query".',
                       style: const TextStyle(
                           color: AppPalette.textGrey, fontSize: 14),
+                      textAlign: TextAlign.center,
                     ),
-                    if (_query.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: () => setState(() => _query = ''),
-                        child: const Text('Clear search',
-                            style: TextStyle(color: AppPalette.gold)),
-                      ),
-                    ],
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () => setState(() {
+                        _severityFilter = null;
+                        _query = '';
+                      }),
+                      icon: const Icon(Icons.clear_all_rounded,
+                          size: 16, color: AppPalette.gold),
+                      label: const Text('Clear filters',
+                          style: TextStyle(
+                              color: AppPalette.gold,
+                              fontWeight: FontWeight.w600)),
+                    ),
                   ],
                 ),
               ),
@@ -466,7 +582,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Kosi Birpur Live Banner
-// Shown just below the AppBar whenever live (non-seed) data is available.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _KosiBirpurBanner extends StatelessWidget {
@@ -599,7 +714,6 @@ class _SourceBadge extends StatelessWidget {
 
 class _CwcCard extends StatelessWidget {
   final CwcStation station;
-  /// Non-null only for the Kosi/Birpur card — carries source + discharge info.
   final KosiBirpurReading? birpurReading;
   const _CwcCard({required this.station, this.birpurReading});
 
@@ -625,7 +739,7 @@ class _CwcCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isBirpur
-              ? color.withValues(alpha: 0.55)   // thicker highlight for Birpur
+              ? color.withValues(alpha: 0.55)
               : color.withValues(alpha: 0.30),
           width: isBirpur ? 1.5 : 1,
         ),
@@ -691,7 +805,6 @@ class _CwcCard extends StatelessWidget {
                             bg: AppPalette.gold.withValues(alpha: 0.10),
                             fg: AppPalette.gold,
                           ),
-                          // Show data source badge for Birpur
                           if (isBirpur)
                             _Badge(
                               label: birpurReading!.source,
@@ -706,7 +819,6 @@ class _CwcCard extends StatelessWidget {
                             ),
                         ],
                       ),
-                      // Show discharge for Birpur if available
                       if (isBirpur &&
                           birpurReading!.dischargeCumecs != null) ...[
                         const SizedBox(height: 6),
@@ -769,7 +881,6 @@ class _CwcCard extends StatelessWidget {
               color:   color,
             ),
           ),
-          // Last-updated row for Birpur
           if (isBirpur)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
