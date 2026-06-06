@@ -1,7 +1,5 @@
 // lib/screens/river_monitor_screen.dart
 // RiverMonitorScreen v3 — wired to live CWC befiqr data
-// Shows merged list: CwcStations (befiqr live) + legacy FloodData
-// CWC stations are shown first, sorted by risk score descending.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -92,13 +90,22 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   List<CwcStation> _cwcAlerts(List<CwcStation> stations) =>
       stations.where((s) => s.isDanger || s.isWarning).take(3).toList();
 
+  // ── Count header string ──────────────────────────────────────────────
+  // Shows: "31 CWC Bihar  ·  15 All India"
+  // If legacy is 0 (still loading / empty): "31 CWC Bihar"
+  String _countHeader(int cwc, int india) {
+    if (india > 0) {
+      return '$cwc CWC Bihar  ·  $india All India';
+    }
+    return '$cwc CWC Bihar';
+  }
+
   @override
   Widget build(BuildContext context) {
     final cwcAsync = ref.watch(cwcStationsProvider);
     final rt = ref.watch(realTimeServiceProvider);
     final legacy = rt.liveLevels;
 
-    // ── FIX: use .when() instead of .valueOrNull (Riverpod 3.x) ──────────
     final List<CwcStation> cwcStations = cwcAsync.when(
       data: (list) => list,
       loading: () => const [],
@@ -108,7 +115,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final isLoading =
         rt.isLoading && legacy.isEmpty && cwcAsync is AsyncLoading;
 
-    // ── FIX: explicitly typed List<CwcStation> so spread keeps the type ──
     final List<CwcStation> sortedCwc = List<CwcStation>.from(cwcStations)
       ..sort((a, b) => BefiqrCwcService.riskScore(b)
           .compareTo(BefiqrCwcService.riskScore(a)));
@@ -137,7 +143,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
         controller: _scrollCtrl,
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── Sliver AppBar ────────────────────────────────────────────
+          // ── Sliver AppBar ──────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             floating: false,
@@ -223,7 +229,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Search bar ───────────────────────────────────────────────
+          // ── Search bar ────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -249,7 +255,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Status strip ─────────────────────────────────────────────
+          // ── Status strip ───────────────────────────────────────────────
           SliverToBoxAdapter(
             child: StationStatusStrip(
               counts: isLoading ? {} : _counts(sortedCwc, legacy),
@@ -260,7 +266,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── CWC alert banners ────────────────────────────────────────
+          // ── CWC alert banners ─────────────────────────────────────────
           if (!isLoading && _query.isEmpty && cwcStations.isNotEmpty)
             SliverToBoxAdapter(
               child: LiveAlertBannerStack(
@@ -277,7 +283,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Legend ───────────────────────────────────────────────────
+          // ── Legend ─────────────────────────────────────────────────────
           if (!isLoading)
             SliverToBoxAdapter(
               child: Padding(
@@ -299,15 +305,14 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Count header ─────────────────────────────────────────────
+          // ── Count header ───────────────────────────────────────────────
           if (!isLoading && totalCount > 0)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
                   _query.isEmpty
-                      ? '${cwcStations.length} CWC stations  ·  '
-                          '${legacy.length} live stations'
+                      ? _countHeader(cwcStations.length, legacy.length)
                       : '$totalCount result${totalCount == 1 ? '' : 's'} for "$_query"',
                   style: const TextStyle(
                       fontSize: 12,
@@ -317,7 +322,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Shimmer ──────────────────────────────────────────────────
+          // ── Shimmer ───────────────────────────────────────────────────
           if (isLoading)
             SliverToBoxAdapter(
               child: ShimmerLoader.stationList(count: 6),
