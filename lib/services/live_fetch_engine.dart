@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v3.3 — silent background GloFAS)
+// lib/services/live_fetch_engine.dart  (v3.4 — trendForCity rolling window)
 library;
 
 import 'dart:async';
@@ -73,12 +73,17 @@ class LiveCityData {
 }
 
 class LiveFetchEngine {
-  static const _cacheTtl      = Duration(minutes: 15);
-  static const _pollInterval  = Duration(seconds: 45);
-  static const _httpTimeout   = Duration(seconds: 20);
-  static const _glofasTimeout = Duration(seconds: 8);
+  static const _cacheTtl         = Duration(minutes: 15);
+  static const _pollInterval     = Duration(seconds: 45);
+  static const _httpTimeout      = Duration(seconds: 20);
+  static const _glofasTimeout    = Duration(seconds: 8);
+  /// Max snapshots kept per city for the sparkline (≈6 min of history at 45s)
+  static const _maxTrendPoints   = 8;
 
-  final Map<String, LiveCityData> _cache = {};
+  final Map<String, LiveCityData>              _cache = {};
+  /// Rolling window of level readings per city key.
+  final Map<String, List<RiverLevelSnapshot>>  _trend = {};
+
   DateTime?  _lastFetch;
   Timer?     _pollTimer;
   bool       _isLoading     = false;
@@ -201,7 +206,16 @@ class LiveFetchEngine {
     );
   }
 
-  List<RiverLevelSnapshot> trendForCity(String city) => const [];
+  /// Returns the rolling sparkline history for [city] (oldest → newest).
+  /// Returns an empty list when fewer than 2 readings have been recorded
+  /// (sparklines need at least 2 points to draw a line).
+  List<RiverLevelSnapshot> trendForCity(String city) {
+    final key      = city.toLowerCase().trim();
+    final snaps    = _trend[key];
+    if (snaps == null || snaps.length < 2) return const [];
+    return List.unmodifiable(snaps);
+  }
+
   List<dynamic> imdAlertsForState(String state)         => const [];
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
@@ -232,6 +246,14 @@ class LiveFetchEngine {
     if (_isLoading) return;
     if (!_isOnline) _queuedOffline++;
     await refreshData();
+  }
+
+  /// Appends a snapshot to the rolling window for [key], keeping at most
+  /// [_maxTrendPoints] entries (oldest is dropped when full).
+  void _appendTrend(String key, double level, DateTime ts) {
+    final list = _trend.putIfAbsent(key, () => []);
+    list.add(RiverLevelSnapshot(level: level, timestamp: ts));
+    if (list.length > _maxTrendPoints) list.removeAt(0);
   }
 
   Future<void> _fetchBiharCities() async {
@@ -279,20 +301,21 @@ class LiveFetchEngine {
         lastUpdated:  now,
         hasLiveLevel: wrdMatch?.currentLevel != null,
       );
+
+      // ── Record snapshot into rolling trend window ────────────────────────
+      final lvl = wrdMatch?.currentLevel;
+      if (lvl != null) _appendTrend(key, lvl, now);
     }
     _lastFetch = now;
 
     final matched = _cache.values.where((v) => v.hasLiveLevel).length;
     _log('WRD done — ${_cache.length} cities ($matched live). Notifying UI.');
 
-    // ── EARLY NOTIFY: screen shows data now, _isLoading stays false ──────────
-    // Do NOT set _isLoading=true again — that was the bug causing the screen
-    // to stay on the loading spinner even after data arrived.
+    // ── EARLY NOTIFY ─────────────────────────────────────────────────────────
     _isLoading = false;
     _notify();
 
     // ── 2. GloFAS + Open-Meteo in background (best-effort, silent) ───────────
-    // Runs after the screen has already updated. Any errors are swallowed.
     unawaited(_overlayGloFAS(biharCities, lats, lons));
   }
 
@@ -340,7 +363,7 @@ class LiveFetchEngine {
     }
     _lastFetch = updateNow;
     _log('GloFAS overlay done.');
-    _notify(); // silent background update — cards refresh with flow+rain data
+    _notify();
   }
 
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
