@@ -1,9 +1,10 @@
 // lib/screens/live_stations_screen.dart
-// LiveStationsScreen v4  —  FloodSeverityHelper + SparklineChart + sort/filter
+// LiveStationsScreen v5  —  collapsible cards + FloodSeverityHelper + sparkline
 // AdMob interstitial (ca-app-pub-6001698589023170/6530780174) shown on back-press
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:intl/intl.dart';
@@ -16,7 +17,6 @@ import '../utils/flood_severity_helper.dart';
 import '../widgets/sparkline_chart.dart';
 import 'city_detail_screen.dart';
 
-// ── Ad Unit ID ───────────────────────────────────────────────────────────────
 const String _kInterstitialAdUnitId = 'ca-app-pub-6001698589023170/6530780174';
 
 enum _SortMode { severity, level, name, updated }
@@ -30,9 +30,10 @@ class LiveStationsScreen extends ConsumerStatefulWidget {
 
 class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
   InterstitialAd? _interstitialAd;
-  String _query = '';
-  _SortMode _sort = _SortMode.severity;
-  String? _stateFilter; // null = all states
+  String    _query       = '';
+  _SortMode _sort        = _SortMode.severity;
+  String?   _stateFilter;
+  String?   _expanded;   // city name of currently expanded card
 
   @override
   void initState() {
@@ -100,8 +101,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
     final s        = context.l10n;
     final all      = ref.watch(liveLevelsProvider);
     final stations = _process(all);
-
-    final states = all.map((e) => e.state).toSet().toList()..sort();
+    final states   = all.map((e) => e.state).toSet().toList()..sort();
 
     return PopScope(
       canPop: false,
@@ -123,11 +123,9 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
               backgroundColor: AppPalette.abyss0,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
-              iconTheme:
-                  const IconThemeData(color: AppPalette.textWhite),
+              iconTheme: const IconThemeData(color: AppPalette.textWhite),
               flexibleSpace: FlexibleSpaceBar(
-                titlePadding:
-                    const EdgeInsets.only(left: 56, bottom: 14),
+                titlePadding: const EdgeInsets.only(left: 56, bottom: 14),
                 title: Text(
                   s.liveData,
                   style: const TextStyle(
@@ -145,8 +143,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
             // ── Search bar ───────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
-                padding:
-                    const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
                 child: TextField(
                   style: const TextStyle(
                       color: AppPalette.textWhite, fontSize: 14),
@@ -176,10 +173,8 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                 height: 36,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
-                    // Sort chips
                     for (final mode in _SortMode.values)
                       Padding(
                         padding: const EdgeInsets.only(right: 6),
@@ -191,12 +186,10 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                       ),
                     const VerticalDivider(
                         width: 16, color: AppPalette.abyssStroke),
-                    // State filter chips
                     _FilterChip(
                       label: 'All States',
                       selected: _stateFilter == null,
-                      onTap: () =>
-                          setState(() => _stateFilter = null),
+                      onTap: () => setState(() => _stateFilter = null),
                     ),
                     for (final st in states)
                       Padding(
@@ -204,8 +197,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                         child: _FilterChip(
                           label: st,
                           selected: _stateFilter == st,
-                          onTap: () =>
-                              setState(() => _stateFilter = st),
+                          onTap: () => setState(() => _stateFilter = st),
                         ),
                       ),
                   ],
@@ -234,13 +226,20 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                     child: _EmptyStations(label: s.noStationsFound),
                   )
                 : SliverPadding(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
-                        (ctx, i) => _StationTile(
-                          data: stations[i],
-                          onTap: () => Navigator.pushNamed(
+                        (ctx, i) => _StationCard(
+                          data:       stations[i],
+                          isExpanded: _expanded == stations[i].city,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _expanded =
+                                _expanded == stations[i].city
+                                    ? null
+                                    : stations[i].city);
+                          },
+                          onDetailTap: () => Navigator.pushNamed(
                             ctx,
                             CityDetailScreen.route,
                             arguments: stations[i].city,
@@ -265,51 +264,68 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station Tile  (now with inline sparkline)
+// Collapsible Station Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _StationTile extends ConsumerWidget {
-  final FloodData data;
+class _StationCard extends ConsumerWidget {
+  final FloodData    data;
+  final bool         isExpanded;
   final VoidCallback onTap;
-  const _StationTile({required this.data, required this.onTap});
+  final VoidCallback onDetailTap;
+  const _StationCard({
+    required this.data,
+    required this.isExpanded,
+    required this.onTap,
+    required this.onDetailTap,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final sev   = FloodSeverityHelper.fromString(data.status);
-    final color = FloodSeverityHelper.color(sev);
-    final fill  = (data.capacityPercent / 100).clamp(0.0, 1.0);
+    final sev    = FloodSeverityHelper.fromString(data.status);
+    final color  = FloodSeverityHelper.color(sev);
+    final fill   = (data.capacityPercent / 100).clamp(0.0, 1.0);
+    final isCrit = sev == FloodSeverity.critical || sev == FloodSeverity.danger;
 
-    // Pull trend snapshots from service for sparkline
-    final rt      = ref.watch(realTimeServiceProvider);
-    final trend   = rt.trendForCity(data.city);
-    final hasData = trend.length >= 2;
+    final rt       = ref.watch(realTimeServiceProvider);
+    final trend    = rt.trendForCity(data.city);
+    final hasTrend = trend.length >= 2;
 
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
         decoration: BoxDecoration(
-          color: AppPalette.abyss2,
-          borderRadius: BorderRadius.circular(16),
+          color: isExpanded
+              ? color.withValues(alpha: 0.06)
+              : AppPalette.abyss2,
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-              color: FloodSeverityHelper.cardBorder(sev), width: 0.9),
-          boxShadow: [
-            BoxShadow(
-              color: FloodSeverityHelper.glowColor(sev),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
+            color: isExpanded || isCrit
+                ? color.withValues(alpha: isExpanded ? 0.40 : 0.20)
+                : AppPalette.abyssStroke,
+            width: isExpanded ? 1.5 : 0.9,
+          ),
+          boxShadow: (isExpanded || isCrit)
+              ? [
+                  BoxShadow(
+                    color: color.withValues(
+                        alpha: isExpanded ? 0.12 : 0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
         ),
         child: Column(
           children: [
-            // ── Top row ─────────────────────────────────────────────────
+            // ── Top row ──────────────────────────────────────────────────
             Row(
               children: [
-                // Status icon
                 Container(
-                  width: 40, height: 40,
+                  width: 42, height: 42,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: color.withValues(alpha: 0.10),
@@ -320,7 +336,6 @@ class _StationTile extends ConsumerWidget {
                       color: color, size: 18),
                 ),
                 const SizedBox(width: 10),
-                // Name + meta
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -353,7 +368,6 @@ class _StationTile extends ConsumerWidget {
                     ],
                   ),
                 ),
-                // Level + badge
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -377,37 +391,68 @@ class _StationTile extends ConsumerWidget {
 
             const SizedBox(height: 9),
 
-            // ── Sparkline OR level bar ───────────────────────────────────
-            if (hasData)
+            // ── Sparkline OR level bar ────────────────────────────────────
+            if (hasTrend)
               SparklineChart(
-                snapshots: trend,
+                snapshots:    trend,
                 warningLevel: data.warningLevel,
-                dangerLevel: data.dangerLevel,
-                color: color,
-                height: 42,
+                dangerLevel:  data.dangerLevel,
+                color:        color,
+                height:       42,
               )
             else
               _LevelBar(fill: fill, color: color),
 
             const SizedBox(height: 7),
 
-            // ── Stats row ────────────────────────────────────────────────
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _mini('W ${data.warningLevel.toStringAsFixed(1)} m',
-                    AppPalette.warning),
-                _mini('D ${data.dangerLevel.toStringAsFixed(1)} m',
-                    AppPalette.danger),
-                _mini('${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
-                    AppPalette.gold),
-                Text(
-                  DateFormat('HH:mm')
-                      .format(data.lastUpdated.toLocal()),
-                  style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9),
+            // ── Collapsed stats row ───────────────────────────────────────
+            if (!isExpanded)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _mini('W ${data.warningLevel.toStringAsFixed(1)} m',
+                      AppPalette.warning),
+                  _mini('D ${data.dangerLevel.toStringAsFixed(1)} m',
+                      AppPalette.danger),
+                  _mini(
+                      '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
+                      AppPalette.gold),
+                  Text(
+                    DateFormat('HH:mm')
+                        .format(data.lastUpdated.toLocal()),
+                    style: const TextStyle(
+                        color: AppPalette.textDim, fontSize: 9),
+                  ),
+                ],
+              ),
+
+            // ── Expand panel ──────────────────────────────────────────────
+            AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              child: isExpanded
+                  ? _ExpandPanel(
+                      data:       data,
+                      color:      color,
+                      onDetailTap: onDetailTap,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // ── Chevron ───────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Center(
+                child: AnimatedRotation(
+                  turns:    isExpanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 260),
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    color: AppPalette.textDim.withValues(alpha: 0.55),
+                    size: 16,
+                  ),
                 ),
-              ],
+              ),
             ),
           ],
         ),
@@ -421,61 +466,334 @@ class _StationTile extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Filter Chip
+// Expand Panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
+class _ExpandPanel extends StatelessWidget {
+  final FloodData    data;
+  final Color        color;
+  final VoidCallback onDetailTap;
+  const _ExpandPanel({
+    required this.data,
+    required this.color,
+    required this.onDetailTap,
   });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Gradient divider
+          Container(
+            height: 1,
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.transparent,
+                color.withValues(alpha: 0.25),
+                Colors.transparent,
+              ]),
+            ),
+          ),
+
+          // ── Threshold pills ──────────────────────────────────────────
+          Row(children: [
+            Expanded(child: _ThresholdPill(
+                label: 'Safe',
+                value: '${data.safeLevel.toStringAsFixed(1)} m',
+                color: AppPalette.safe)),
+            const SizedBox(width: 8),
+            Expanded(child: _ThresholdPill(
+                label: 'Warning',
+                value: '${data.warningLevel.toStringAsFixed(1)} m',
+                color: AppPalette.warning)),
+            const SizedBox(width: 8),
+            Expanded(child: _ThresholdPill(
+                label: 'Danger',
+                value: '${data.dangerLevel.toStringAsFixed(1)} m',
+                color: AppPalette.danger)),
+          ]),
+          const SizedBox(height: 8),
+
+          // ── Info tiles ───────────────────────────────────────────────
+          Row(children: [
+            Expanded(child: _InfoTile(
+              icon:  Icons.grain_rounded,
+              label: 'Rainfall',
+              value: '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
+              color: AppPalette.gold,
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: _InfoTile(
+              icon:  Icons.speed_rounded,
+              label: 'Flow Rate',
+              value: data.flowRate != null
+                  ? '${data.flowRate!.toStringAsFixed(0)} m³/s' : '—',
+              color: AppPalette.cyan,
+            )),
+          ]),
+          const SizedBox(height: 8),
+
+          // ── Gap-to-danger bar ─────────────────────────────────────────
+          _GapBar(
+              current: data.currentLevel,
+              danger:  data.dangerLevel,
+              color:   color),
+          const SizedBox(height: 10),
+
+          // ── Full Details button ───────────────────────────────────────
+          GestureDetector(
+            onTap: onDetailTap,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: color.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.open_in_new_rounded,
+                      color: color, size: 13),
+                  const SizedBox(width: 6),
+                  Text('Full Details',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      )),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Status badge + timestamp ──────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _StatusBadge(status: data.status),
+                Text(
+                  DateFormat('dd MMM HH:mm')
+                      .format(data.lastUpdated.toLocal()),
+                  style: const TextStyle(
+                      color: AppPalette.textDim, fontSize: 9.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ThresholdPill extends StatelessWidget {
+  final String label, value;
+  final Color  color;
+  const _ThresholdPill(
+      {required this.label, required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
+        decoration: BoxDecoration(
+          color:        color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border:       Border.all(color: color.withValues(alpha: 0.20)),
+        ),
+        child: Column(children: [
+          Text(value,
+              style: TextStyle(
+                  color: color, fontSize: 11, fontWeight: FontWeight.w800),
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(
+                  color: AppPalette.textDim, fontSize: 8)),
+        ]),
+      );
+}
+
+class _InfoTile extends StatelessWidget {
+  final IconData icon;
+  final String   label, value;
+  final Color    color;
+  const _InfoTile(
+      {required this.icon, required this.label,
+       required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        decoration: BoxDecoration(
+          color:        AppPalette.abyss4,
+          borderRadius: BorderRadius.circular(10),
+          border:       Border.all(color: AppPalette.abyssStroke),
+        ),
+        child: Row(children: [
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value,
+                    style: const TextStyle(
+                        color: AppPalette.textWhite,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800),
+                    overflow: TextOverflow.ellipsis),
+                Text(label,
+                    style: const TextStyle(
+                        color: AppPalette.textDim, fontSize: 8.5)),
+              ],
+            ),
+          ),
+        ]),
+      );
+}
+
+class _GapBar extends StatelessWidget {
+  final double current, danger;
+  final Color  color;
+  const _GapBar(
+      {required this.current, required this.danger, required this.color});
+  @override
+  Widget build(BuildContext context) {
+    final gap     = (danger - current).clamp(0.0, danger);
+    final isAbove = current >= danger;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color:        AppPalette.abyss4,
+        borderRadius: BorderRadius.circular(10),
+        border:       Border.all(color: AppPalette.abyssStroke),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            isAbove
+                ? '⚠ ${(current - danger).abs().toStringAsFixed(2)} m above danger'
+                : '${gap.toStringAsFixed(2)} m to danger level',
+            style: TextStyle(
+              fontSize: 10,
+              color: isAbove ? AppPalette.critical : AppPalette.textGrey,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Stack(children: [
+            Container(
+                height: 5,
+                decoration: BoxDecoration(
+                    color: AppPalette.abyssStroke,
+                    borderRadius: BorderRadius.circular(3))),
+            FractionallySizedBox(
+              widthFactor:
+                  (current / danger.clamp(1.0, double.infinity))
+                      .clamp(0.0, 1.0),
+              child: Container(
+                height: 5,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                      colors: [color.withValues(alpha: 0.4), color]),
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: [
+                    BoxShadow(
+                        color: color.withValues(alpha: 0.4),
+                        blurRadius: 4),
+                  ],
+                ),
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  const _StatusBadge({required this.status});
+  @override
+  Widget build(BuildContext context) {
+    final isLive = ['LIVE', 'REAL', 'CRITICAL', 'DANGER', 'WARNING', 'SAFE']
+        .contains(status.toUpperCase());
+    final c = isLive ? AppPalette.safe : AppPalette.textDim;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color:        c.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border:       Border.all(color: c.withValues(alpha: 0.25)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 5, height: 5,
+            decoration:
+                BoxDecoration(shape: BoxShape.circle, color: c)),
+        const SizedBox(width: 4),
+        Text(status.toUpperCase(),
+            style: TextStyle(
+              color: c, fontSize: 8, fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            )),
+      ]),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String     label;
+  final bool       selected;
+  final VoidCallback onTap;
+  const _FilterChip(
+      {required this.label, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: selected
                 ? AppPalette.gold.withValues(alpha: 0.15)
                 : AppPalette.abyss2,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected
-                  ? AppPalette.gold
-                  : AppPalette.abyssStroke,
+              color: selected ? AppPalette.gold : AppPalette.abyssStroke,
               width: selected ? 1.2 : 0.8,
             ),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: selected
-                  ? AppPalette.gold
-                  : AppPalette.textGrey,
+              color: selected ? AppPalette.gold : AppPalette.textGrey,
               fontSize: 11,
-              fontWeight: selected
-                  ? FontWeight.w700
-                  : FontWeight.w500,
+              fontWeight:
+                  selected ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
         ),
       );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Level Bar (fallback when no trend data)
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LevelBar extends StatelessWidget {
   final double fill;
-  final Color color;
+  final Color  color;
   const _LevelBar({required this.fill, required this.color});
 
   @override
@@ -509,23 +827,18 @@ class _LevelBar extends StatelessWidget {
       );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Risk Badge
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _RiskBadge extends StatelessWidget {
   final String label;
-  final Color color;
+  final Color  color;
   const _RiskBadge({required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.10),
+          color:        color.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withValues(alpha: 0.28)),
+          border:       Border.all(color: color.withValues(alpha: 0.28)),
         ),
         child: Text(label,
             style: TextStyle(
@@ -534,10 +847,6 @@ class _RiskBadge extends StatelessWidget {
                 fontWeight: FontWeight.w900)),
       );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Empty state
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _EmptyStations extends StatelessWidget {
   final String label;

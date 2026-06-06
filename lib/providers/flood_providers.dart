@@ -1,6 +1,7 @@
 // lib/providers/flood_providers.dart
-// Riverpod 3 — ChangeNotifierProvider is removed.
-// We wrap RealTimeService in a Notifier so notifyListeners() drives UI rebuilds.
+// Riverpod 3 — RealTimeNotifier wraps the singleton correctly.
+// Fix: ref.invalidateSelf() forces rebuild when RealTimeService notifies
+//      (same object reference would be skipped by Riverpod identity check).
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,11 +15,19 @@ class RealTimeNotifier extends Notifier<RealTimeService> {
   @override
   RealTimeService build() {
     final service = RealTimeService();
-    service.addListener(() => state = service);
+    // Use invalidateSelf() so Riverpod re-runs build() on every data update.
+    // Assigning state = service (same singleton object) is silently ignored
+    // by Riverpod's identity check — invalidateSelf() bypasses that.
+    service.addListener(_onServiceChange);
+    ref.onDispose(() {
+      service.removeListener(_onServiceChange);
+      // Do NOT call service.dispose() here — it is a singleton used app-wide.
+    });
     Future.microtask(() => service.startPolling());
-    ref.onDispose(service.dispose);
     return service;
   }
+
+  void _onServiceChange() => ref.invalidateSelf();
 }
 
 final realTimeProvider =
@@ -92,7 +101,7 @@ final cityTrendProvider =
   return ref.watch(realTimeProvider).trendForCity(city);
 });
 
-// ── Per-state providers (used by CityDetailScreen) ────────────────────────────
+// ── Per-state providers ────────────────────────────────────────────────────────
 
 /// IMD alerts filtered to a specific state name.
 final stateImdAlertsProvider =
@@ -117,7 +126,6 @@ final stateNdmaAdvisoriesProvider =
 });
 
 /// Emergency contacts for a specific state.
-/// Delegates to RealTimeService; returns empty list if not available.
 final stateEmergencyContactsProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {
   try {
