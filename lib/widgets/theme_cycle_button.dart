@@ -26,8 +26,10 @@ class ThemeCycleButton extends ConsumerWidget {
     return Tooltip(
       message: 'Hold for theme picker',
       child: GestureDetector(
-        onTap:      () => notifier.cycle(),
-        onLongPress: () => showPremiumThemeSheet(context),
+        onTap:       () => notifier.cycle(),
+        // Fixed: showPremiumThemeSheet() free function doesn't exist;
+        // PremiumThemeSheet.show() is the static method.
+        onLongPress: () => PremiumThemeSheet.show(context),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Icon(icon, color: rc.accent, size: 24),
