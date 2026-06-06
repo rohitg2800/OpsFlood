@@ -189,7 +189,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
 
-    final liveBirpur = birpurAsync.valueOrNull;
+    // .value returns null when loading/error in Riverpod 3.x (no valueOrNull)
+    final liveBirpur = birpurAsync.value;
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
