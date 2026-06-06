@@ -1,15 +1,5 @@
-// lib/screens/predict_screen.dart  v2
+// lib/screens/predict_screen.dart  v3
 // Phase 4 — full dark-theme polish + route-arg pre-fill + rich result card
-//
-// Route args (optional Map<String, dynamic>):
-//   'city'        → pre-fills state field label
-//   'river_level' → pre-fills peak level field
-//
-// Result card shows:
-//   - Risk level label with colour + icon
-//   - Animated gauge arc (risk %)
-//   - Confidence pill
-//   - "View city live data" CTA if city was passed in
 library;
 
 import 'dart:convert';
@@ -33,7 +23,7 @@ class PredictScreen extends StatefulWidget {
 
 class _PredictScreenState extends State<PredictScreen>
     with SingleTickerProviderStateMixin {
-  final _formKey      = GlobalKey<FormState>();
+  final _formKey       = GlobalKey<FormState>();
   final _peakLevelCtrl = TextEditingController();
   final _rainfallCtrl  = TextEditingController();
   final _dischargeCtrl = TextEditingController();
@@ -46,7 +36,6 @@ class _PredictScreenState extends State<PredictScreen>
   _PredictResult? _result;
   String?         _error;
 
-  // gauge animation
   late final AnimationController _gaugeCtrl;
   late final Animation<double>    _gaugeAnim;
 
@@ -68,13 +57,8 @@ class _PredictScreenState extends State<PredictScreen>
     if (args is Map<String, dynamic>) {
       final city  = args['city']  as String?;
       final level = args['river_level'] as double?;
-      if (city  != null) {
-        _stateCtrl.text = city;
-        _city = city;
-      }
-      if (level != null) {
-        _peakLevelCtrl.text = level.toStringAsFixed(2);
-      }
+      if (city  != null) { _stateCtrl.text = city; _city = city; }
+      if (level != null) { _peakLevelCtrl.text = level.toStringAsFixed(2); }
     }
   }
 
@@ -89,7 +73,8 @@ class _PredictScreenState extends State<PredictScreen>
   }
 
   Future<void> _predict() async {
-    if (!_formKey.currentState!.validate()) return;
+    // currentState is guaranteed non-null because the Form widget is mounted
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     HapticFeedback.lightImpact();
     setState(() { _loading = true; _result = null; _error = null; });
     _gaugeCtrl.reset();
@@ -98,8 +83,7 @@ class _PredictScreenState extends State<PredictScreen>
       'state':          _stateCtrl.text.trim(),
       'peak_level_m':   double.parse(_peakLevelCtrl.text.trim()),
       'rainfall_7d_mm': double.parse(_rainfallCtrl.text.trim()),
-      'discharge_m3s':
-          double.tryParse(_dischargeCtrl.text.trim()) ?? 0.0,
+      'discharge_m3s':  double.tryParse(_dischargeCtrl.text.trim()) ?? 0.0,
     };
 
     try {
@@ -116,8 +100,7 @@ class _PredictScreenState extends State<PredictScreen>
                 body['riskLevel'] ??
                 'UNKNOWN')
             .toString();
-        final prob = (body['probability'] ?? body['confidence'])
-            as num?;
+        final prob = (body['probability'] ?? body['confidence']) as num?;
         setState(() {
           _result = _PredictResult(
             riskLevel:  level,
@@ -126,8 +109,8 @@ class _PredictScreenState extends State<PredictScreen>
         });
         _gaugeCtrl.forward();
       } else {
-        setState(() => _error =
-            'Backend returned HTTP ${res.statusCode}\n${res.body}');
+        setState(() =>
+            _error = 'Backend returned HTTP ${res.statusCode}\n${res.body}');
       }
     } catch (e) {
       setState(() => _error = e.toString());
@@ -145,7 +128,6 @@ class _PredictScreenState extends State<PredictScreen>
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── App bar ───────────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             backgroundColor: AppPalette.abyss0,
@@ -166,14 +148,12 @@ class _PredictScreenState extends State<PredictScreen>
                       color: Colors.white, size: 17),
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  s.tabPredict,
-                  style: const TextStyle(
-                    color: AppPalette.textWhite,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                Text(s.tabPredict,
+                    style: const TextStyle(
+                      color: AppPalette.textWhite,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    )),
                 if (_city != null) ...[
                   const SizedBox(width: 8),
                   Container(
@@ -185,79 +165,77 @@ class _PredictScreenState extends State<PredictScreen>
                       border: Border.all(
                           color: AppPalette.cyan.withValues(alpha: 0.4)),
                     ),
-                    child: Text(
-                      _city!,
-                      style: const TextStyle(
-                          color: AppPalette.cyan,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700),
-                    ),
+                    child: Text(_city!,
+                        style: const TextStyle(
+                            color: AppPalette.cyan,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700)),
                   ),
                 ],
               ],
             ),
-            iconTheme:
-                const IconThemeData(color: AppPalette.textWhite),
+            iconTheme: const IconThemeData(color: AppPalette.textWhite),
           ),
 
-          // ── Form ──────────────────────────────────────────────────────
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // Context banner when launched from CityDetailScreen
-                if (_city != null)
-                  _ContextBanner(city: _city!),
+                // ── Form wraps ALL validated fields ──────────────────
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_city != null) _ContextBanner(city: _city!),
+                      const SizedBox(height: 8),
+                      _DarkField(
+                        ctrl:  _stateCtrl,
+                        label: 'State / City',
+                        hint:  'e.g. Bihar',
+                        icon:  Icons.location_on_rounded,
+                      ),
+                      const SizedBox(height: 12),
+                      _DarkField(
+                        ctrl:    _peakLevelCtrl,
+                        label:   '${s.riverLevel} (${s.meters})',
+                        hint:    'e.g. 12.5',
+                        icon:    Icons.water_rounded,
+                        numeric: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _DarkField(
+                        ctrl:    _rainfallCtrl,
+                        label:   '${s.rainfall} 7d (${s.mmRainfall})',
+                        hint:    'e.g. 450',
+                        icon:    Icons.thunderstorm_rounded,
+                        numeric: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _DarkField(
+                        ctrl:     _dischargeCtrl,
+                        label:    '${s.discharge} (${s.cumecs})',
+                        hint:     'e.g. 8500  (optional)',
+                        icon:     Icons.waves_rounded,
+                        numeric:  true,
+                        required: false,
+                      ),
+                      const SizedBox(height: 22),
+                      _RunButton(
+                        loading: _loading,
+                        label:   s.forecast,
+                        onTap:   _predict,
+                      ),
+                    ],
+                  ),
+                ),
 
-                // Input fields
-                const SizedBox(height: 8),
-                _DarkField(
-                  ctrl:  _stateCtrl,
-                  label: 'State / City',
-                  hint:  'e.g. Bihar',
-                  icon:  Icons.location_on_rounded,
-                ),
-                const SizedBox(height: 12),
-                _DarkField(
-                  ctrl:    _peakLevelCtrl,
-                  label:   '${s.riverLevel} (${s.meters})',
-                  hint:    'e.g. 12.5',
-                  icon:    Icons.water_rounded,
-                  numeric: true,
-                ),
-                const SizedBox(height: 12),
-                _DarkField(
-                  ctrl:    _rainfallCtrl,
-                  label:   '${s.rainfall} 7d (${s.mmRainfall})',
-                  hint:    'e.g. 450',
-                  icon:    Icons.thunderstorm_rounded,
-                  numeric: true,
-                ),
-                const SizedBox(height: 12),
-                _DarkField(
-                  ctrl:     _dischargeCtrl,
-                  label:    '${s.discharge} (${s.cumecs})',
-                  hint:     'e.g. 8500  (optional)',
-                  icon:     Icons.waves_rounded,
-                  numeric:  true,
-                  required: false,
-                ),
-                const SizedBox(height: 22),
-
-                // Run button
-                _RunButton(
-                  loading:  _loading,
-                  label:    s.forecast,
-                  onTap:    _predict,
-                ),
-
-                // Result or error
                 if (_result != null) ...[
                   const SizedBox(height: 20),
                   _ResultCard(
-                    result:   _result!,
+                    result:    _result!,
                     gaugeAnim: _gaugeAnim,
-                    city:     _city,
+                    city:      _city,
                   ),
                 ],
                 if (_error != null) ...[
@@ -324,8 +302,7 @@ class _ContextBanner extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppPalette.cyan.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: AppPalette.cyan.withValues(alpha: 0.25)),
+          border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
         ),
         child: Row(
           children: [
@@ -336,9 +313,7 @@ class _ContextBanner extends StatelessWidget {
               child: Text(
                 'Pre-filled from $city live gauge — adjust as needed.',
                 style: const TextStyle(
-                    color: AppPalette.cyan,
-                    fontSize: 11,
-                    height: 1.4),
+                    color: AppPalette.cyan, fontSize: 11, height: 1.4),
               ),
             ),
           ],
@@ -368,20 +343,16 @@ class _DarkField extends StatelessWidget {
     final s = context.l10n;
     return TextFormField(
       controller:   ctrl,
-      style: const TextStyle(
-          color: AppPalette.textWhite, fontSize: 14),
+      style: const TextStyle(color: AppPalette.textWhite, fontSize: 14),
       keyboardType: numeric
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.text,
       decoration: InputDecoration(
         labelText:  label,
-        labelStyle: const TextStyle(
-            color: AppPalette.textGrey, fontSize: 13),
-        hintText:  hint,
-        hintStyle: const TextStyle(
-            color: AppPalette.textDim, fontSize: 12),
-        prefixIcon: Icon(icon,
-            color: AppPalette.textGrey, size: 18),
+        labelStyle: const TextStyle(color: AppPalette.textGrey, fontSize: 13),
+        hintText:   hint,
+        hintStyle:  const TextStyle(color: AppPalette.textDim, fontSize: 12),
+        prefixIcon: Icon(icon, color: AppPalette.textGrey, size: 18),
         filled:     true,
         fillColor:  AppPalette.abyss2,
         border: OutlineInputBorder(
@@ -390,14 +361,12 @@ class _DarkField extends StatelessWidget {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-              color: AppPalette.abyssStroke, width: 1),
+          borderSide: BorderSide(color: AppPalette.abyssStroke, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-              color: AppPalette.cyan.withValues(alpha: 0.6),
-              width: 1.5),
+              color: AppPalette.cyan.withValues(alpha: 0.6), width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -408,8 +377,7 @@ class _DarkField extends StatelessWidget {
             horizontal: 14, vertical: 14),
       ),
       validator: required
-          ? (v) =>
-              (v == null || v.trim().isEmpty) ? s.noData : null
+          ? (v) => (v == null || v.trim().isEmpty) ? s.noData : null
           : null,
     );
   }
@@ -418,13 +386,11 @@ class _DarkField extends StatelessWidget {
 // ─── Run button ───────────────────────────────────────────────────────────────
 
 class _RunButton extends StatelessWidget {
-  final bool     loading;
-  final String   label;
+  final bool       loading;
+  final String     label;
   final VoidCallback onTap;
   const _RunButton(
-      {required this.loading,
-      required this.label,
-      required this.onTap});
+      {required this.loading, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -451,25 +417,21 @@ class _RunButton extends StatelessWidget {
           child: Center(
             child: loading
                 ? const SizedBox(
-                    width: 22,
-                    height: 22,
+                    width: 22, height: 22,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppPalette.cyan))
+                        strokeWidth: 2.5, color: AppPalette.cyan))
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.analytics_rounded,
                           color: Colors.white, size: 18),
                       const SizedBox(width: 8),
-                      Text(
-                        label,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            letterSpacing: 0.3),
-                      ),
+                      Text(label,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              letterSpacing: 0.3)),
                     ],
                   ),
           ),
@@ -480,19 +442,15 @@ class _RunButton extends StatelessWidget {
 // ─── Result card with animated gauge arc ──────────────────────────────────────
 
 class _ResultCard extends StatelessWidget {
-  final _PredictResult   result;
+  final _PredictResult    result;
   final Animation<double> gaugeAnim;
-  final String?          city;
-  const _ResultCard({
-    required this.result,
-    required this.gaugeAnim,
-    this.city,
-  });
+  final String?           city;
+  const _ResultCard(
+      {required this.result, required this.gaugeAnim, this.city});
 
   @override
   Widget build(BuildContext context) {
     final c = result.color;
-
     return Container(
       decoration: BoxDecoration(
         color: AppPalette.abyss2,
@@ -511,20 +469,17 @@ class _ResultCard extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                // Animated arc gauge
                 SizedBox(
                   width: 90, height: 90,
                   child: AnimatedBuilder(
                     animation: gaugeAnim,
                     builder: (_, __) => CustomPaint(
                       painter: _GaugePainter(
-                        fraction: result.riskFraction *
-                            gaugeAnim.value,
+                        fraction: result.riskFraction * gaugeAnim.value,
                         color: c,
                       ),
                       child: Center(
-                        child: Icon(result.icon, color: c, size: 26),
-                      ),
+                          child: Icon(result.icon, color: c, size: 26)),
                     ),
                   ),
                 ),
@@ -535,17 +490,14 @@ class _ResultCard extends StatelessWidget {
                     children: [
                       const Text('Flood Risk',
                           style: TextStyle(
-                              color: AppPalette.textGrey,
-                              fontSize: 11)),
+                              color: AppPalette.textGrey, fontSize: 11)),
                       const SizedBox(height: 4),
-                      Text(
-                        result.riskLevel,
-                        style: TextStyle(
-                            color: c,
-                            fontSize: 26,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5),
-                      ),
+                      Text(result.riskLevel,
+                          style: TextStyle(
+                              color: c,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5)),
                       if (result.confidence != null) ...[
                         const SizedBox(height: 6),
                         Container(
@@ -572,7 +524,6 @@ class _ResultCard extends StatelessWidget {
               ],
             ),
           ),
-          // City drill-through CTA
           if (city != null)
             InkWell(
               onTap: () => Navigator.pushNamed(
@@ -581,7 +532,7 @@ class _ResultCard extends StatelessWidget {
                 arguments: city,
               ),
               borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(20),
+                bottomLeft:  Radius.circular(20),
                 bottomRight: Radius.circular(20),
               ),
               child: Container(
@@ -591,10 +542,9 @@ class _ResultCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: c.withValues(alpha: 0.07),
                   border: Border(
-                      top: BorderSide(
-                          color: c.withValues(alpha: 0.18))),
+                      top: BorderSide(color: c.withValues(alpha: 0.18))),
                   borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(20),
+                    bottomLeft:  Radius.circular(20),
                     bottomRight: Radius.circular(20),
                   ),
                 ),
@@ -603,13 +553,11 @@ class _ResultCard extends StatelessWidget {
                   children: [
                     Icon(Icons.sensors_rounded, color: c, size: 14),
                     const SizedBox(width: 7),
-                    Text(
-                      'View $city live gauge  →',
-                      style: TextStyle(
-                          color: c,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700),
-                    ),
+                    Text('View $city live gauge  →',
+                        style: TextStyle(
+                            color: c,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -629,35 +577,24 @@ class _GaugePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r  = math.min(cx, cy) - 6;
+    final cx   = size.width / 2;
+    final cy   = size.height / 2;
+    final r    = math.min(cx, cy) - 6;
     final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
 
-    // track
-    canvas.drawArc(
-      rect,
-      math.pi * 0.75,
-      math.pi * 1.5,
-      false,
-      Paint()
-        ..color = color.withValues(alpha: 0.12)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 7
-        ..strokeCap = StrokeCap.round,
-    );
-    // fill
-    canvas.drawArc(
-      rect,
-      math.pi * 0.75,
-      math.pi * 1.5 * fraction,
-      false,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 7
-        ..strokeCap = StrokeCap.round,
-    );
+    canvas.drawArc(rect, math.pi * 0.75, math.pi * 1.5, false,
+        Paint()
+          ..color = color.withValues(alpha: 0.12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round);
+
+    canvas.drawArc(rect, math.pi * 0.75, math.pi * 1.5 * fraction, false,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round);
   }
 
   @override
@@ -687,13 +624,11 @@ class _ErrorCard extends StatelessWidget {
                 color: AppPalette.critical, size: 18),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 12,
-                    height: 1.5),
-              ),
+              child: Text(message,
+                  style: const TextStyle(
+                      color: AppPalette.textGrey,
+                      fontSize: 12,
+                      height: 1.5)),
             ),
           ],
         ),
