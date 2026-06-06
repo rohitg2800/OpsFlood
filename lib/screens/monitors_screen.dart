@@ -1,7 +1,6 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — Monitor screen (inner tab shell)
+// OpsFlood — Monitor screen (inner tab shell) v2 — RiverColors migration
 // Tabs: AI Predict | Alerts/News | SOS
-// Live tab removed — accessible via main nav > More > Stations
 library;
 
 import 'package:flutter/material.dart';
@@ -31,18 +30,16 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
+        backgroundColor: t.scaffoldBg,
         body: IndexedStack(
           index: _tab,
           children: const [
-            // Tab 0 — AI Flood Prediction
             PredictionScreen(),
-            // Tab 1 — NDMA / IMD / WRD News Feed
             NewsFeedScreen(),
-            // Tab 2 — Emergency SOS
             SosScreen(),
           ],
         ),
@@ -58,8 +55,6 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen> {
     );
   }
 }
-
-// ── Bottom nav bar ──────────────────────────────────────────────────────
 
 class _TabItem {
   final IconData icon;
@@ -78,62 +73,64 @@ class _BottomBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-        height: 64 + MediaQuery.of(context).padding.bottom,
-        decoration: BoxDecoration(
-          color: AppPalette.abyss1,
-          border: Border(
-            top: BorderSide(
-                color: AppPalette.abyssStroke, width: 1)),
-        ),
-        child: Row(
-          children: tabs.asMap().entries.map((e) {
-            final i      = e.key;
-            final tab    = e.value;
-            final active = i == currentIndex;
-            // SOS is always the last tab — keep it red
-            final col = i == tabs.length - 1
-                ? AppPalette.critical
-                : AppPalette.cyan;
-            return Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onTap(i),
-                child: Padding(
-                  padding: EdgeInsets.only(
-                      bottom: MediaQuery.of(context).padding.bottom),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width:  active ? 42 : 36,
-                        height: active ? 42 : 36,
-                        decoration: BoxDecoration(
-                          color: active
-                              ? col.withValues(alpha: 0.14)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: Icon(tab.icon,
-                            color: active ? col : AppPalette.textDim,
-                            size: active ? 22 : 19),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      height: 64 + MediaQuery.of(context).padding.bottom,
+      decoration: BoxDecoration(
+        color: t.navBg,
+        border: Border(
+          top: BorderSide(color: t.stroke, width: 1)),
+      ),
+      child: Row(
+        children: tabs.asMap().entries.map((e) {
+          final i      = e.key;
+          final tab    = e.value;
+          final active = i == currentIndex;
+          // SOS last tab stays red; others use theme accent
+          final col = i == tabs.length - 1
+              ? AppPalette.critical
+              : t.accent;
+          return Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onTap(i),
+              child: Padding(
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).padding.bottom),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      width:  active ? 42 : 36,
+                      height: active ? 42 : 36,
+                      decoration: BoxDecoration(
+                        color: active
+                            ? col.withValues(alpha: 0.14)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(13),
                       ),
-                      const SizedBox(height: 2),
-                      Text(tab.label,
-                          style: TextStyle(
-                            color: active ? col : AppPalette.textDim,
-                            fontSize: 9.5,
-                            fontWeight: active
-                                ? FontWeight.w800
-                                : FontWeight.w500,
-                          )),
-                    ],
-                  ),
+                      child: Icon(tab.icon,
+                          color: active ? col : t.stroke,
+                          size: active ? 22 : 19),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(tab.label,
+                        style: TextStyle(
+                          color: active ? col : t.stroke,
+                          fontSize: 9.5,
+                          fontWeight: active
+                              ? FontWeight.w800
+                              : FontWeight.w500,
+                        )),
+                  ],
                 ),
               ),
-            );
-          }).toList(),
-        ),
-      );
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
 }

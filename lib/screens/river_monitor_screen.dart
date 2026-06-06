@@ -1,9 +1,7 @@
-// lib/screens/river_monitor_screen.dart  v8
-// Change: every _CwcCard now has a live AI monitoring strip at the bottom
-// using predictionProvider(station.site). Shows severity + monitoring level
-// text + confidence inline — no tap required.
-// Birpur banner guard relaxed: shows whenever liveBirpur != null (incl. SEED)
-// but marks SEED data with a dim badge so user can tell.
+// lib/screens/river_monitor_screen.dart  v9
+// Change: Full RiverColors token migration — all AppPalette.abyss*/text*/cyan/gold/abyssStroke
+// replaced with RiverColors.of(context) tokens.
+// Semantic severity colors (critical/danger/warning/safe/amber) kept as-is.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -145,6 +143,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t           = RiverColors.of(context);
     final cwcAsync    = ref.watch(cwcStationsWithBirpurProvider);
     final birpurAsync = ref.watch(kosiBirpurProvider);
     final rt          = ref.watch(realTimeServiceProvider);
@@ -168,17 +167,16 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
 
-    // Show banner for ANY live Birpur reading (even SEED — but SEED is badged)
     final liveBirpur = birpurAsync.value;
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: t.scaffoldBg,
       floatingActionButton: AnimatedScale(
         scale: _showFab ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
         child: FloatingActionButton.small(
-          backgroundColor: AppPalette.gold,
-          foregroundColor: AppPalette.abyss0,
+          backgroundColor: t.accent,
+          foregroundColor: t.scaffoldBg,
           onPressed: () => _scrollCtrl.animateTo(
             0,
             duration: const Duration(milliseconds: 400),
@@ -196,7 +194,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             pinned: true,
             floating: false,
             expandedHeight: 110,
-            backgroundColor: AppPalette.abyss0,
+            backgroundColor: t.scaffoldBg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             actions: [
@@ -233,13 +231,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                     ),
                   ),
                 ),
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(14),
+                loading: () => Padding(
+                  padding: const EdgeInsets.all(14),
                   child: SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
-                        strokeWidth: 1.5, color: AppPalette.cyan),
+                        strokeWidth: 1.5, color: t.accent),
                   ),
                 ),
                 error: (_, __) => const Icon(Icons.cloud_off_rounded,
@@ -248,17 +246,17 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               if (_severityFilter != null)
                 TextButton.icon(
                   onPressed: () => setState(() => _severityFilter = null),
-                  icon: const Icon(Icons.close_rounded, size: 14,
-                      color: AppPalette.gold),
-                  label: const Text('Clear',
+                  icon: Icon(Icons.close_rounded, size: 14,
+                      color: t.accent),
+                  label: Text('Clear',
                       style: TextStyle(
-                          color: AppPalette.gold,
+                          color: t.accent,
                           fontSize: 11,
                           fontWeight: FontWeight.w700)),
                 ),
               IconButton(
                 icon: const Icon(Icons.palette_outlined, size: 20),
-                color: AppPalette.gold,
+                color: t.accent,
                 tooltip: 'Theme',
                 onPressed: () => ThemePickerSheet.show(context),
               ),
@@ -269,13 +267,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.waves_rounded,
-                      color: AppPalette.gold, size: 18),
+                  Icon(Icons.waves_rounded,
+                      color: t.accent, size: 18),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     'River Monitor',
                     style: TextStyle(
-                      color: AppPalette.textWhite,
+                      color: t.textPrimary,
                       fontWeight: FontWeight.w800,
                       fontSize: 18,
                       letterSpacing: -0.4,
@@ -288,7 +286,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Birpur banner — now shows for ANY reading incl. SEED ──────────
           if (liveBirpur != null)
             SliverToBoxAdapter(
               child: _KosiBirpurBanner(
@@ -309,18 +306,18 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
               child: TextField(
-                style: const TextStyle(
-                    color: AppPalette.textWhite, fontSize: 14),
+                style: TextStyle(
+                    color: t.textPrimary, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search site, river or district…',
-                  hintStyle: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 13),
-                  prefixIcon: const Icon(Icons.search_rounded,
-                      color: AppPalette.gold, size: 20),
+                  hintStyle: TextStyle(
+                      color: t.textSecondary, fontSize: 13),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      color: t.accent, size: 20),
                   suffixIcon: _query.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(Icons.close_rounded,
-                              size: 18, color: AppPalette.textGrey),
+                          icon: Icon(Icons.close_rounded,
+                              size: 18, color: t.textSecondary),
                           onPressed: () => setState(() => _query = ''),
                         )
                       : null,
@@ -339,19 +336,19 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.filter_list_rounded,
-                        size: 13, color: AppPalette.gold),
+                    Icon(Icons.filter_list_rounded,
+                        size: 13, color: t.accent),
                     const SizedBox(width: 5),
                     Text('Showing: $_activeFilterLabel',
-                        style: const TextStyle(
-                            color: AppPalette.gold,
+                        style: TextStyle(
+                            color: t.accent,
                             fontSize: 12,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(width: 6),
                     GestureDetector(
                       onTap: () => setState(() => _severityFilter = null),
-                      child: const Icon(Icons.close_rounded,
-                          size: 13, color: AppPalette.textGrey),
+                      child: Icon(Icons.close_rounded,
+                          size: 13, color: t.textSecondary),
                     ),
                   ],
                 ),
@@ -410,7 +407,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                           : 'Tap again to clear',
                       style: TextStyle(
                           fontSize: 10,
-                          color: AppPalette.textGrey
+                          color: t.textSecondary
                               .withValues(alpha: 0.6)),
                     ),
                   ],
@@ -434,9 +431,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                     }
                     return _countHeader(cwcStations.length, legacy.length);
                   }(),
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
-                      color: AppPalette.textGrey,
+                      color: t.textSecondary,
                       fontWeight: FontWeight.w500),
                 ),
               ),
@@ -449,17 +446,17 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
           else if (filteredCwc.isNotEmpty) ...[
             if (_query.isEmpty && _severityFilter == null)
-              const SliverToBoxAdapter(
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                   child: Row(
                     children: [
                       Icon(Icons.sensors_rounded,
-                          color: AppPalette.cyan, size: 12),
-                      SizedBox(width: 6),
+                          color: t.accent, size: 12),
+                      const SizedBox(width: 6),
                       Text('CWC Bihar — Live',
                           style: TextStyle(
-                              color: AppPalette.cyan,
+                              color: t.accent,
                               fontSize: 10,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5)),
@@ -496,17 +493,17 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
           if (filteredLegacy.isNotEmpty) ...[
             if (_query.isEmpty && _severityFilter == null)
-              const SliverToBoxAdapter(
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                   child: Row(
                     children: [
                       Icon(Icons.language_rounded,
-                          color: AppPalette.gold, size: 12),
-                      SizedBox(width: 6),
+                          color: t.accent, size: 12),
+                      const SizedBox(width: 6),
                       Text('All India — Live',
                           style: TextStyle(
-                              color: AppPalette.gold,
+                              color: t.accent,
                               fontSize: 10,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5)),
@@ -537,7 +534,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                           : Icons.search_off_rounded,
                       color: _severityFilter != null
                           ? AppPalette.safe
-                          : AppPalette.textDim,
+                          : t.textSecondary,
                       size: 48,
                     ),
                     const SizedBox(height: 12),
@@ -547,8 +544,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                           : _query.isEmpty
                               ? 'No live data available.'
                               : 'No results for "$_query".',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 14),
+                      style: TextStyle(
+                          color: t.textSecondary, fontSize: 14),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
@@ -557,11 +554,11 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                         _severityFilter = null;
                         _query = '';
                       }),
-                      icon: const Icon(Icons.clear_all_rounded,
-                          size: 16, color: AppPalette.gold),
-                      label: const Text('Clear filters',
+                      icon: Icon(Icons.clear_all_rounded,
+                          size: 16, color: t.accent),
+                      label: Text('Clear filters',
                           style: TextStyle(
-                              color: AppPalette.gold,
+                              color: t.accent,
                               fontWeight: FontWeight.w600)),
                     ),
                   ],
@@ -579,8 +576,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI Monitoring Strip  — shown at the bottom of every CWC card
-// Consumes predictionProvider live; shows severity + monitoring label
+// AI Monitoring Strip
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AiMonitoringStrip extends ConsumerWidget {
@@ -589,21 +585,22 @@ class _AiMonitoringStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t     = RiverColors.of(context);
     final async = ref.watch(predictionProvider(site));
     return async.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.fromLTRB(14, 0, 14, 10),
+      loading: () => Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
         child: Row(
           children: [
             SizedBox(
               width: 10, height: 10,
               child: CircularProgressIndicator(
-                  strokeWidth: 1.5, color: AppPalette.cyan),
+                  strokeWidth: 1.5, color: t.accent),
             ),
-            SizedBox(width: 6),
+            const SizedBox(width: 6),
             Text('AI loading…',
                 style: TextStyle(
-                    color: AppPalette.textGrey, fontSize: 10)),
+                    color: t.textSecondary, fontSize: 10)),
           ],
         ),
       ),
@@ -640,10 +637,8 @@ class _AiMonitoringStrip extends ConsumerWidget {
           ),
           child: Row(
             children: [
-              // Radar icon
               Icon(Icons.radar_rounded, color: col, size: 13),
               const SizedBox(width: 6),
-              // Monitoring label
               Expanded(
                 child: Text(
                   '$icon  $label',
@@ -656,36 +651,33 @@ class _AiMonitoringStrip extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              // Confidence
               Text(
                 '${pred.confidencePct.toStringAsFixed(0)}% conf',
-                style: const TextStyle(
-                    color: AppPalette.textGrey, fontSize: 9),
+                style: TextStyle(
+                    color: t.textSecondary, fontSize: 9),
               ),
               const SizedBox(width: 6),
-              // CWC risk if present
               if (pred.cwcRiskScore != null)
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 1),
                   decoration: BoxDecoration(
-                    color: AppPalette.cyan.withValues(alpha: 0.10),
+                    color: t.accent.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     'CWC ${pred.cwcRiskScore!.toStringAsFixed(0)}%',
-                    style: const TextStyle(
-                        color: AppPalette.cyan,
+                    style: TextStyle(
+                        color: t.accent,
                         fontSize: 8,
                         fontWeight: FontWeight.w700),
                   ),
                 ),
-              // Model version micro-badge
               const SizedBox(width: 4),
               Text(
                 pred.modelVersion,
-                style: const TextStyle(
-                    color: AppPalette.textDim, fontSize: 8),
+                style: TextStyle(
+                    color: t.stroke, fontSize: 8),
               ),
             ],
           ),
@@ -706,6 +698,7 @@ class _KosiBirpurBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t       = RiverColors.of(context);
     final isSeed  = reading.source == 'SEED';
     final isStale = DateTime.now().difference(reading.observedAt).inHours >= 2;
     final Color statusColor;
@@ -751,17 +744,17 @@ class _KosiBirpurBanner extends StatelessWidget {
                       Text(
                         'Danger: ${reading.dangerLevel.toStringAsFixed(2)} m  '
                         '·  Gap: ${reading.gap.toStringAsFixed(2)} m',
-                        style: const TextStyle(
-                            color: AppPalette.textGrey, fontSize: 11),
+                        style: TextStyle(
+                            color: t.textSecondary, fontSize: 11),
                       ),
                       if (reading.dischargeCumecs != null) ...[
-                        const Text('  ·  ',
+                        Text('  ·  ',
                             style: TextStyle(
-                                color: AppPalette.textGrey, fontSize: 11)),
+                                color: t.textSecondary, fontSize: 11)),
                         Text(
                           'Q: ${reading.dischargeCumecs!.toStringAsFixed(0)} m³/s',
-                          style: const TextStyle(
-                              color: AppPalette.textGrey, fontSize: 11),
+                          style: TextStyle(
+                              color: t.textSecondary, fontSize: 11),
                         ),
                       ],
                     ],
@@ -773,7 +766,6 @@ class _KosiBirpurBanner extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Show SEED badge when data is seeded
                 isSeed
                     ? _SourceBadge(source: 'SEED', dim: true)
                     : _SourceBadge(source: reading.source, dim: false),
@@ -789,13 +781,13 @@ class _KosiBirpurBanner extends StatelessWidget {
                     DateFormat('HH:mm').format(reading.observedAt),
                     style: TextStyle(
                         color: isSeed
-                            ? AppPalette.textDim
-                            : AppPalette.textGrey,
+                            ? t.stroke
+                            : t.textSecondary,
                         fontSize: 9),
                   ),
                 const SizedBox(height: 4),
-                const Icon(Icons.chevron_right_rounded,
-                    size: 14, color: AppPalette.textGrey),
+                Icon(Icons.chevron_right_rounded,
+                    size: 14, color: t.textSecondary),
               ],
             ),
           ],
@@ -812,26 +804,27 @@ class _SourceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     final Color bg;
     final Color fg;
     if (dim) {
-      bg = AppPalette.textGrey.withValues(alpha: 0.08);
-      fg = AppPalette.textDim;
+      bg = t.textSecondary.withValues(alpha: 0.08);
+      fg = t.stroke;
     } else {
       switch (source) {
         case 'CWC-FFS':
-          bg = AppPalette.cyan.withValues(alpha: 0.12);
-          fg = AppPalette.cyan;
+          bg = t.accent.withValues(alpha: 0.12);
+          fg = t.accent;
         case 'befiqr.in':
           bg = AppPalette.safe.withValues(alpha: 0.12);
           fg = AppPalette.safe;
         case 'India-WRIS':
         case 'India-WRIS (Q→H)':
-          bg = AppPalette.gold.withValues(alpha: 0.12);
-          fg = AppPalette.gold;
+          bg = t.accent.withValues(alpha: 0.12);
+          fg = t.accent;
         default:
-          bg = AppPalette.textGrey.withValues(alpha: 0.12);
-          fg = AppPalette.textGrey;
+          bg = t.textSecondary.withValues(alpha: 0.12);
+          fg = t.textSecondary;
       }
     }
     return Container(
@@ -849,7 +842,7 @@ class _SourceBadge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC Station Card  (tappable + live AI monitoring strip)
+// CWC Station Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CwcCard extends StatelessWidget {
@@ -871,6 +864,7 @@ class _CwcCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t         = RiverColors.of(context);
     final color     = _statusColor;
     final riskScore = BefiqrCwcService.riskScore(station);
     final pct       = station.fillFraction;
@@ -882,7 +876,7 @@ class _CwcCard extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         decoration: BoxDecoration(
-          color: AppPalette.abyss1,
+          color: t.cardBg,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isBirpur
@@ -922,27 +916,27 @@ class _CwcCard extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 station.site,
-                                style: const TextStyle(
-                                    color: AppPalette.textWhite,
+                                style: TextStyle(
+                                    color: t.textPrimary,
                                     fontSize: 17,
                                     fontWeight: FontWeight.w700),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const Icon(Icons.chevron_right_rounded,
-                                size: 16, color: AppPalette.textGrey),
+                            Icon(Icons.chevron_right_rounded,
+                                size: 16, color: t.textSecondary),
                           ],
                         ),
                         const SizedBox(height: 3),
                         Row(
                           children: [
-                            const Icon(Icons.waves_rounded,
-                                size: 13, color: AppPalette.gold),
+                            Icon(Icons.waves_rounded,
+                                size: 13, color: t.accent),
                             const SizedBox(width: 4),
                             Text('${station.river}  ·  Bihar',
-                                style: const TextStyle(
-                                    color: AppPalette.textGrey,
+                                style: TextStyle(
+                                    color: t.textSecondary,
                                     fontSize: 12)),
                           ],
                         ),
@@ -958,20 +952,20 @@ class _CwcCard extends StatelessWidget {
                             ),
                             _Badge(
                               label: 'Risk ${riskScore.toStringAsFixed(0)}%',
-                              bg: AppPalette.gold.withValues(alpha: 0.10),
-                              fg: AppPalette.gold,
+                              bg: t.accent.withValues(alpha: 0.10),
+                              fg: t.accent,
                             ),
                             if (isBirpur)
                               _Badge(
                                 label: birpurReading!.source,
-                                bg: AppPalette.cyan.withValues(alpha: 0.10),
-                                fg: AppPalette.cyan,
+                                bg: t.accent.withValues(alpha: 0.10),
+                                fg: t.accent,
                               )
                             else
                               _Badge(
                                 label: 'CWC',
-                                bg: AppPalette.cyan.withValues(alpha: 0.08),
-                                fg: AppPalette.cyan,
+                                bg: t.accent.withValues(alpha: 0.08),
+                                fg: t.accent,
                               ),
                           ],
                         ),
@@ -981,8 +975,8 @@ class _CwcCard extends StatelessWidget {
                           Text(
                             'Discharge: ${birpurReading!.dischargeCumecs!.toStringAsFixed(0)} m³/s'
                             '  ·  Danger: ${kBirpurDangerDischarge.toStringAsFixed(0)} m³/s',
-                            style: const TextStyle(
-                                color: AppPalette.textGrey, fontSize: 11),
+                            style: TextStyle(
+                                color: t.textSecondary, fontSize: 11),
                           ),
                         ],
                       ],
@@ -993,7 +987,7 @@ class _CwcCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Divider(
-                color: AppPalette.abyssStroke,
+                color: t.stroke,
                 height: 1,
                 indent: 14,
                 endIndent: 14),
@@ -1037,25 +1031,22 @@ class _CwcCard extends StatelessWidget {
                 color:   color,
               ),
             ),
-
-            // ── LIVE AI MONITORING STRIP ─────────────────────────────────
             _AiMonitoringStrip(site: station.site),
-
             if (isBirpur)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    const Icon(Icons.access_time_rounded,
-                        size: 10, color: AppPalette.textGrey),
+                    Icon(Icons.access_time_rounded,
+                        size: 10, color: t.textSecondary),
                     const SizedBox(width: 3),
                     Text(
                       'Observed: '
                       '${DateFormat('dd MMM HH:mm').format(birpurReading!.observedAt)}'
                       '  ·  ${birpurReading!.source}',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 9),
+                      style: TextStyle(
+                          color: t.textSecondary, fontSize: 9),
                     ),
                   ],
                 ),
@@ -1079,6 +1070,7 @@ class _RiverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t        = RiverColors.of(context);
     final severity = FloodSeverityHelper.fromString(data.status);
     final color    = FloodSeverityHelper.color(severity);
     final pct      = (data.capacityPercent / 100).clamp(0.0, 1.0);
@@ -1089,7 +1081,7 @@ class _RiverCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: AppPalette.abyss1,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
             color: FloodSeverityHelper.cardBorder(severity), width: 1),
@@ -1120,8 +1112,8 @@ class _RiverCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(data.city,
-                          style: const TextStyle(
-                              color: AppPalette.textWhite,
+                          style: TextStyle(
+                              color: t.textPrimary,
                               fontSize: 18,
                               fontWeight: FontWeight.w700),
                           maxLines: 1,
@@ -1129,14 +1121,14 @@ class _RiverCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          const Icon(Icons.waves_rounded,
-                              size: 13, color: AppPalette.gold),
+                          Icon(Icons.waves_rounded,
+                              size: 13, color: t.accent),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
                               '${data.riverName ?? 'N/A'}  ·  ${data.state}',
-                              style: const TextStyle(
-                                  color: AppPalette.textGrey, fontSize: 12),
+                              style: TextStyle(
+                                  color: t.textSecondary, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1154,8 +1146,8 @@ class _RiverCard extends StatelessWidget {
                           ),
                           _Badge(
                             label: data.status,
-                            bg: AppPalette.gold.withValues(alpha: 0.10),
-                            fg: AppPalette.gold,
+                            bg: t.accent.withValues(alpha: 0.10),
+                            fg: t.accent,
                           ),
                           if (data.imdSeverity != null)
                             _Badge(
@@ -1174,7 +1166,7 @@ class _RiverCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Divider(
-              color: AppPalette.abyssStroke,
+              color: t.stroke,
               height: 1,
               indent: 14,
               endIndent: 14),
@@ -1200,7 +1192,7 @@ class _RiverCard extends StatelessWidget {
                     label: 'Rain 24h',
                     value:
                         '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
-                    accent: AppPalette.gold),
+                    accent: t.accent),
               ],
             ),
           ),
@@ -1223,13 +1215,13 @@ class _RiverCard extends StatelessWidget {
                         : 'N/A',
                     accent: data.flowRate != null
                         ? AppPalette.safe
-                        : AppPalette.textGrey),
+                        : t.textSecondary),
                 const SizedBox(width: 8),
                 _StatChip(
                     icon: Icons.access_time_rounded,
                     label: 'Updated',
                     value: _timeAgo(data.lastUpdated),
-                    accent: AppPalette.textGrey),
+                    accent: t.textSecondary),
               ],
             ),
           ),
@@ -1283,43 +1275,48 @@ class _ArcGauge extends StatelessWidget {
     required this.subLabel,
   });
   @override
-  Widget build(BuildContext context) => SizedBox(
-        width: size,
-        height: size,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            CustomPaint(
-              size: Size(size, size),
-              painter: _ArcPainter(
-                  percent: percent, warnAt: warnAt, color: color),
-            ),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(centerLabel,
-                    style: TextStyle(
-                        color: color,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1)),
-                Text(subLabel,
-                    style: const TextStyle(
-                        color: AppPalette.textGrey,
-                        fontSize: 9,
-                        letterSpacing: 0.5)),
-              ],
-            ),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CustomPaint(
+            size: Size(size, size),
+            painter: _ArcPainter(
+                percent: percent, warnAt: warnAt, color: color,
+                trackColor: t.cardBgElevated),
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(centerLabel,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1)),
+              Text(subLabel,
+                  style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 9,
+                      letterSpacing: 0.5)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ArcPainter extends CustomPainter {
   final double percent, warnAt;
-  final Color  color;
+  final Color  color, trackColor;
   const _ArcPainter(
-      {required this.percent, required this.warnAt, required this.color});
+      {required this.percent, required this.warnAt,
+       required this.color,   required this.trackColor});
   static const _start = math.pi * 0.75;
   static const _sweep = math.pi * 1.5;
   @override
@@ -1333,7 +1330,7 @@ class _ArcPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 8
           ..strokeCap = StrokeCap.round
-          ..color = AppPalette.abyss2);
+          ..color = trackColor);
     if (percent > 0) {
       canvas.drawArc(
           rect, _start, _sweep * percent.clamp(0, 1), false,
@@ -1374,7 +1371,7 @@ class _ArcPainter extends CustomPainter {
   }
   @override
   bool shouldRepaint(_ArcPainter o) =>
-      o.percent != percent || o.color != color;
+      o.percent != percent || o.color != color || o.trackColor != trackColor;
 }
 
 class _StatChip extends StatelessWidget {
@@ -1388,37 +1385,40 @@ class _StatChip extends StatelessWidget {
     required this.accent,
   });
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: accent.withValues(alpha: 0.18), width: 0.8),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 13, color: accent),
-              const SizedBox(height: 3),
-              Text(value,
-                  style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      height: 1.1),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-              Text(label,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey,
-                      fontSize: 9,
-                      height: 1.2)),
-            ],
-          ),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: accent.withValues(alpha: 0.18), width: 0.8),
         ),
-      );
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 13, color: accent),
+            const SizedBox(height: 3),
+            Text(value,
+                style: TextStyle(
+                    color: accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+            Text(label,
+                style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: 9,
+                    height: 1.2)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Badge extends StatelessWidget {
@@ -1450,6 +1450,7 @@ class _LevelBar extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
+    final t    = RiverColors.of(context);
     final pct  = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
     final wPct = danger > 0 ? (warning / danger).clamp(0.0, 1.0) : 0.65;
     return Column(
@@ -1462,7 +1463,7 @@ class _LevelBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   height: 10,
-                  color: AppPalette.abyss2,
+                  color: t.cardBgElevated,
                   child: FractionallySizedBox(
                     widthFactor: pct,
                     alignment: Alignment.centerLeft,
@@ -1500,8 +1501,8 @@ class _LevelBar extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('${current.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                    fontSize: 10, color: AppPalette.textGrey)),
+                style: TextStyle(
+                    fontSize: 10, color: t.textSecondary)),
             Text('⚠ ${warning.toStringAsFixed(1)} m',
                 style:
                     TextStyle(fontSize: 10, color: AppPalette.warning)),
