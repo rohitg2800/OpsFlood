@@ -104,7 +104,9 @@ class SettingsScreen extends ConsumerWidget {
                     icon:    _modeIcon(appMode),
                     label:   'Theme',
                     sublabel: _modeLabel(appMode),
-                    onTap:   () => showPremiumThemeSheet(context),
+                    // Fixed: showPremiumThemeSheet() free function doesn't exist;
+                    // PremiumThemeSheet.show() is the correct static method.
+                    onTap:   () => PremiumThemeSheet.show(context),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

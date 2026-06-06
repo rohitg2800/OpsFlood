@@ -184,7 +184,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         backgroundColor: AppPalette.abyss0,
-        // ── Banner Ad at the very bottom ──────────────────────────────
         bottomNavigationBar: _bannerLoaded && _bannerAd != null
             ? SafeArea(
                 child: SizedBox(
@@ -364,7 +363,7 @@ class _AlertEvent {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// COMMAND HEADER  — title changed to EQUINOX-BR05
+// COMMAND HEADER
 // ═══════════════════════════════════════════════════════════════════════
 class _CommandHeader extends StatelessWidget {
   final Animation<double> pulseAnim;
@@ -389,7 +388,6 @@ class _CommandHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Logo mark
           AnimatedBuilder(
             animation: shimmerAnim,
             builder: (_, __) {
@@ -507,7 +505,9 @@ class _CommandHeader extends StatelessWidget {
           Tooltip(
             message: 'Hold for theme picker',
             child: GestureDetector(
-              onTap: () => showPremiumThemeSheet(context),
+              // Fixed: showPremiumThemeSheet() free function doesn't exist;
+              // PremiumThemeSheet.show() is the correct static method.
+              onTap: () => PremiumThemeSheet.show(context),
               child: Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
@@ -550,7 +550,7 @@ class _CommandHeader extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// HERO SECTION — Arc gauge + bento KPI grid + alert ticker
+// HERO SECTION
 // ═══════════════════════════════════════════════════════════════════════
 class _HeroSection extends StatelessWidget {
   final Animation<double> arcAnim;
@@ -695,7 +695,7 @@ class _QuickItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// FLOOD HOTSPOT CAROUSEL (top 3 cities)
+// FLOOD HOTSPOT CAROUSEL
 // ═══════════════════════════════════════════════════════════════════════
 class _HotspotCarousel extends StatelessWidget {
   final List<FloodData> cities;
@@ -1159,7 +1159,7 @@ class _Stat {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// EXISTING INNER WIDGETS (unchanged)
+// EXISTING INNER WIDGETS
 // ═══════════════════════════════════════════════════════════════════════
 class _ArcGauge extends StatelessWidget {
   final Animation<double> anim;
@@ -1546,351 +1546,4 @@ class _RiverPulseCard extends StatelessWidget {
                   ? col.withValues(alpha: isActive ? 0.40 : (0.15 + 0.12 * pulseAnim.value))
                   : AppPalette.abyssStroke,
               width: isActive ? 1.5 : 1,
-            ),
-            boxShadow: (isActive || isCrit) ? [
-              BoxShadow(
-                color: col.withValues(alpha: isActive ? 0.14 : 0.06 * pulseAnim.value),
-                blurRadius: 18, offset: const Offset(0, 4),
-              ),
-            ] : null,
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: col.withValues(alpha: 0.10),
-                      border: Border.all(
-                        color: col.withValues(alpha: isCrit
-                            ? 0.20 + 0.20 * pulseAnim.value : 0.25),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Icon(_iconFor(data.riskLevel), color: col, size: 18),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Flexible(
-                            child: Text(data.city,
-                                style: const TextStyle(
-                                  color: AppPalette.textWhite, fontSize: 14,
-                                  fontWeight: FontWeight.w800, letterSpacing: -0.2,
-                                ),
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                          const SizedBox(width: 6),
-                          _chip(data.riskLevel, col),
-                          if (isAboveDanger) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: AppPalette.critical.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(5),
-                                border: Border.all(
-                                    color: AppPalette.critical.withValues(alpha: 0.4)),
-                              ),
-                              child: const Text('▲ DANGER',
-                                  style: TextStyle(
-                                    color: AppPalette.critical, fontSize: 7,
-                                    fontWeight: FontWeight.w900,
-                                  )),
-                            ),
-                          ],
-                        ]),
-                        const SizedBox(height: 2),
-                        Text(_subLabel, style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 10),
-                          overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _trendArrow(),
-                          const SizedBox(width: 4),
-                          Text('${data.currentLevel.toStringAsFixed(2)} m',
-                              style: TextStyle(
-                                color: col, fontSize: 18, fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
-                              )),
-                        ],
-                      ),
-                      Text('${data.capacityPercent.toStringAsFixed(0)}% cap',
-                          style: const TextStyle(
-                            color: AppPalette.textGrey, fontSize: 9,
-                          )),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Stack(
-                children: [
-                  Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: AppPalette.abyss4,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  if (data.dangerLevel > 0 && data.warningLevel > 0)
-                    Positioned(
-                      left: (data.warningLevel / data.dangerLevel).clamp(0.0, 1.0)
-                          * (MediaQuery.of(context).size.width - 76),
-                      top: 0, bottom: 0,
-                      child: Container(
-                          width: 2, color: AppPalette.amber.withValues(alpha: 0.7)),
-                    ),
-                  FractionallySizedBox(
-                    widthFactor: fillPct,
-                    child: Container(
-                      height: 8,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [col.withValues(alpha: 0.45), col],
-                        ),
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: [
-                          BoxShadow(color: col.withValues(alpha: 0.45), blurRadius: 6),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _miniLabel('W ${data.warningLevel.toStringAsFixed(1)} m', AppPalette.amber),
-                  if (data.riverName != null)
-                    _miniLabel(data.riverName!, AppPalette.textDim),
-                  _miniLabel('D ${data.dangerLevel.toStringAsFixed(1)} m', AppPalette.danger),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String get _subLabel {
-    final p = <String>[];
-    if ((data.riverName ?? '').isNotEmpty) p.add(data.riverName!);
-    if (data.district.isNotEmpty)          p.add(data.district);
-    if (data.state.isNotEmpty)             p.add(data.state);
-    return p.join('  ·  ');
-  }
-  IconData _iconFor(String r) {
-    switch (r) {
-      case 'CRITICAL': return Icons.crisis_alert_rounded;
-      case 'SEVERE':   return Icons.error_outline_rounded;
-      case 'MODERATE': return Icons.warning_amber_rounded;
-      default:         return Icons.check_circle_outline_rounded;
-    }
-  }
-  Widget _chip(String label, Color c) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: c.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: c.withValues(alpha: 0.30)),
-    ),
-    child: Text(label, style: TextStyle(
-      color: c, fontSize: 8, fontWeight: FontWeight.w900)),
-  );
-  Widget _miniLabel(String t, Color c) => Text(t,
-      style: TextStyle(color: c, fontSize: 9, fontWeight: FontWeight.w600));
-}
-
-class _TrendCard extends StatelessWidget {
-  final RealTimeService _service;
-  final FloodData? selected;
-  const _TrendCard({required RealTimeService service, required this.selected})
-      : _service = service;
-  @override
-  Widget build(BuildContext context) {
-    if (selected == null) return const SizedBox.shrink();
-    final d   = selected!;
-    final col = d.priorityColor;
-    final snapshots = _service.trendForCity(d.city);
-    final history   = snapshots.map((s) => s.level).toList();
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [col.withValues(alpha: 0.05), AppPalette.abyss2],
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: col.withValues(alpha: 0.20), width: 1.5),
-        boxShadow: [
-          BoxShadow(color: col.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(d.city, style: const TextStyle(
-                color: AppPalette.textWhite, fontSize: 14,
-                fontWeight: FontWeight.w800, letterSpacing: -0.3,
-              )),
-              if (d.district.isNotEmpty)
-                Text('${d.riverName ?? ''}  ·  ${d.district}',
-                    style: const TextStyle(color: AppPalette.textGrey, fontSize: 10)),
-            ]),
-            const Spacer(),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('${d.currentLevel.toStringAsFixed(2)} m',
-                  style: TextStyle(
-                    color: col, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.8,
-                  )),
-              Text(d.riskLevel, style: TextStyle(
-                color: col, fontSize: 9, fontWeight: FontWeight.w800)),
-            ]),
-          ]),
-          const SizedBox(height: 14),
-          if (history.isEmpty)
-            Container(
-              height: 90, alignment: Alignment.center,
-              child: Text('Building trend for ${d.city}…',
-                  style: const TextStyle(color: AppPalette.textDim, fontSize: 11)),
             )
-          else
-            OpsAreaChart(
-              values:   history,
-              labels:   snapshots.asMap().entries
-                  .map((e) => e.key % 4 == 0
-                      ? DateFormat('HH:mm').format(snapshots[e.key].timestamp.toLocal())
-                      : '')
-                  .toList(),
-              lineColor: col, warningY: d.warningLevel,
-              dangerY: d.dangerLevel, yUnit: ' m', height: 120,
-            ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _LevelPill(
-                label: 'Safe', value: '${d.safeLevel.toStringAsFixed(1)} m',
-                color: AppPalette.safe,
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: _LevelPill(
-                label: 'Warning', value: '${d.warningLevel.toStringAsFixed(1)} m',
-                color: AppPalette.amber,
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: _LevelPill(
-                label: 'Danger', value: '${d.dangerLevel.toStringAsFixed(1)} m',
-                color: AppPalette.critical,
-              )),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LevelPill extends StatelessWidget {
-  final String label, value;
-  final Color  color;
-  const _LevelPill({required this.label, required this.value, required this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: color.withValues(alpha: 0.20)),
-    ),
-    child: Column(
-      children: [
-        Text(value, style: TextStyle(
-          color: color, fontSize: 11, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(
-          color: AppPalette.textDim, fontSize: 8)),
-      ],
-    ),
-  );
-}
-
-class _CapacityChart extends StatelessWidget {
-  final List<FloodData> data;
-  const _CapacityChart({required this.data});
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-    padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-    decoration: BoxDecoration(
-      color: AppPalette.abyss2,
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: AppPalette.abyssStroke),
-    ),
-    child: Column(
-      children: [
-        OpsBarChart(
-          values: data.map((d) => d.capacityPercent.clamp(0.0, 100.0)).toList(),
-          labels: data.map((d) => d.city).toList(),
-          maxY: 100, yUnit: '%', barWidth: 18, height: 150,
-        ),
-        const SizedBox(height: 6),
-        Row(children: [
-          _ldot(AppPalette.safe,     'Safe <35%'),
-          const SizedBox(width: 10),
-          _ldot(AppPalette.warning,  '35–60%'),
-          const SizedBox(width: 10),
-          _ldot(AppPalette.danger,   '60–85%'),
-          const SizedBox(width: 10),
-          _ldot(AppPalette.critical, '>85% Critical'),
-        ]),
-      ],
-    ),
-  );
-
-  Widget _ldot(Color c, String t) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(width: 7, height: 7,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
-      const SizedBox(width: 4),
-      Text(t, style: const TextStyle(fontSize: 7.5, color: AppPalette.textGrey)),
-    ],
-  );
-}
-
-class _EmptyState extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Icon(Icons.water_damage_outlined,
-              color: AppPalette.cyan.withValues(alpha: 0.3), size: 56),
-          const SizedBox(height: 16),
-          const Text('Loading flood data…',
-              style: TextStyle(color: AppPalette.textGrey, fontSize: 14)),
-        ],
-      ),
-    ),
-  );
-}
