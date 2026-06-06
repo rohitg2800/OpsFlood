@@ -35,7 +35,7 @@ import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
 // ── Phase 2: new screens ────────────────────────────────────────────────────
-port 'screens/sos_screen.dart';
+import 'screens/sos_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'screens/prediction_screen.dart';
 
@@ -127,9 +127,6 @@ Future<void> main() async {
       }));
 
       // 8. AI Prediction Background Service
-      //    initialise() registers channels + configures the isolate.
-      //    start() launches the foreground service immediately.
-      //    Both are non-fatal — the app works fine without them.
       unawaited(
         AiPredictionBgService.initialise().then((_) {
           return AiPredictionBgService.start();
