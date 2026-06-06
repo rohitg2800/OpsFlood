@@ -1,47 +1,53 @@
 // lib/providers/location_provider.dart
-// OpsFlood — GPS location provider (geolocator)
+// Riverpod 3.x compatible — uses Notifier + NotifierProvider
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
+// ── State ─────────────────────────────────────────────────────────────────────
 class LocationState {
   final double? lat;
   final double? lon;
-  final bool    hasLocation;
+  final bool isLoading;
   final String? error;
-  const LocationState({this.lat, this.lon, this.hasLocation = false, this.error});
+
+  const LocationState({
+    this.lat,
+    this.lon,
+    this.isLoading = false,
+    this.error,
+  });
 }
 
-class LocationNotifier extends StateNotifier<LocationState> {
-  LocationNotifier() : super(const LocationState()) {
-    _init();
+// ── Notifier (Riverpod 3.x) ───────────────────────────────────────────────────
+class LocationNotifier extends Notifier<LocationState> {
+  @override
+  LocationState build() {
+    Future.microtask(fetchLocation);
+    return const LocationState(isLoading: true);
   }
 
-  Future<void> _init() async {
+  Future<void> fetchLocation() async {
     try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.deniedForever ||
-          permission == LocationPermission.denied) {
-        state = const LocationState(
-            error: 'Location permission denied');
+      if (perm == LocationPermission.deniedForever) {
+        state = const LocationState(error: 'Location permission denied');
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium);
-      state = LocationState(
-          lat: pos.latitude, lon: pos.longitude, hasLocation: true);
+        desiredAccuracy: LocationAccuracy.medium,
+      );
+      state = LocationState(lat: pos.latitude, lon: pos.longitude);
     } catch (e) {
       state = LocationState(error: e.toString());
     }
   }
-
-  Future<void> refresh() => _init();
 }
 
+// ── Provider ──────────────────────────────────────────────────────────────────
 final locationProvider =
-    StateNotifierProvider<LocationNotifier, LocationState>(
-        (_) => LocationNotifier());
+    NotifierProvider<LocationNotifier, LocationState>(LocationNotifier.new);

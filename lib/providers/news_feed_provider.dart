@@ -1,136 +1,129 @@
 // lib/providers/news_feed_provider.dart
-// Fetches NDMA + IMD + Bihar WRD bulletins from our backend proxy.
+// Riverpod 3.x compatible — uses Notifier + NotifierProvider
 library;
 
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+// ── State model ──────────────────────────────────────────────────────────────
 class NewsItem {
-  final String  title;
-  final String  source;
-  final String? summary;
-  final String? url;
-  final String? severity;   // RED / ORANGE / YELLOW / null
-  final DateTime publishedAt;
+  final String title;
+  final String source;
+  final String severity;   // RED | ORANGE | YELLOW | INFO
+  final String url;
+  final String publishedAt;
+
   const NewsItem({
     required this.title,
     required this.source,
+    required this.severity,
+    required this.url,
     required this.publishedAt,
-    this.summary,
-    this.url,
-    this.severity,
   });
 
   factory NewsItem.fromJson(Map<String, dynamic> j) => NewsItem(
-    title:       j['title'] as String,
-    source:      j['source'] as String,
-    publishedAt: DateTime.parse(j['published_at'] as String),
-    summary:     j['summary'] as String?,
-    url:         j['url'] as String?,
-    severity:    j['severity'] as String?,
-  );
+        title:       j['title']       as String? ?? '',
+        source:      j['source']      as String? ?? 'Unknown',
+        severity:    j['severity']    as String? ?? 'INFO',
+        url:         j['url']         as String? ?? '',
+        publishedAt: j['published_at'] as String? ?? '',
+      );
 }
 
 class NewsFeedState {
   final List<NewsItem> items;
-  final bool           isLoading;
-  final String?        error;
+  final bool isLoading;
+  final String? error;
+
   const NewsFeedState({
-    this.items = const [],
+    this.items    = const [],
     this.isLoading = false,
     this.error,
   });
-  NewsFeedState copyWith({List<NewsItem>? items, bool? isLoading, String? error}) =>
-      NewsFeedState(
+
+  NewsFeedState copyWith({
+    List<NewsItem>? items,
+    bool? isLoading,
+    String? error,
+  }) => NewsFeedState(
         items:     items     ?? this.items,
         isLoading: isLoading ?? this.isLoading,
         error:     error,
       );
 }
 
-class NewsFeedNotifier extends StateNotifier<NewsFeedState> {
-  NewsFeedNotifier() : super(const NewsFeedState(isLoading: true)) {
-    refresh();
+// ── Notifier (Riverpod 3.x) ──────────────────────────────────────────────────
+class NewsFeedNotifier extends Notifier<NewsFeedState> {
+  static const _backendBase = 'https://opsflood-backend.onrender.com';
+
+  @override
+  NewsFeedState build() {
+    // Auto-fetch on first build
+    Future.microtask(fetch);
+    return const NewsFeedState(isLoading: true);
   }
 
-  static const _base = String.fromEnvironment(
-      'BACKEND_URL', defaultValue: 'https://opsflood-api.onrender.com');
-
-  Future<void> refresh() async {
+  Future<void> fetch() async {
     state = state.copyWith(isLoading: true);
     try {
       final res = await http
-          .get(Uri.parse('$_base/api/news?state=bihar'))
-          .timeout(const Duration(seconds: 15));
+          .get(Uri.parse('$_backendBase/api/news?state=bihar'))
+          .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as List;
-        final items = data
+        final List<dynamic> raw = jsonDecode(res.body) as List<dynamic>;
+        final items = raw
             .map((e) => NewsItem.fromJson(e as Map<String, dynamic>))
             .toList();
         state = NewsFeedState(items: items);
       } else {
         state = NewsFeedState(
-            items: _fallbackItems(),
-            error: 'Server error ${res.statusCode}. Showing cached alerts.');
+          items: _offlineFallback(),
+          error: 'Backend returned ${res.statusCode}',
+        );
       }
     } catch (e) {
-      // Offline fallback — show static critical alerts so users aren't left blank
       state = NewsFeedState(
-          items: _fallbackItems(),
-          error: 'Could not reach server. Showing last known alerts.');
+        items: _offlineFallback(),
+        error: e.toString(),
+      );
     }
   }
 
-  /// Static fallback alerts shown when API is unreachable.
-  List<NewsItem> _fallbackItems() => [
+  List<NewsItem> _offlineFallback() => const [
     NewsItem(
-      title: 'IMD issues Red Alert for North Bihar — Heavy to Very Heavy Rainfall expected',
-      source: 'IMD',
-      publishedAt: DateTime.now().subtract(const Duration(hours: 3)),
-      severity: 'RED',
-      summary: 'Districts: Sitamarhi, Madhubani, Supaul, Araria, Kishanganj. '
-               'Residents in low-lying areas advised to evacuate.',
+      title: 'IMD: Heavy to very heavy rainfall likely over North Bihar in next 48h',
+      source: 'IMD', severity: 'ORANGE',
       url: 'https://mausam.imd.gov.in',
+      publishedAt: 'Latest bulletin',
     ),
     NewsItem(
-      title: 'Bihar WRD Flood Bulletin: Kosi at Birpur above Danger Level',
-      source: 'WRD Bihar',
-      publishedAt: DateTime.now().subtract(const Duration(hours: 6)),
-      severity: 'ORANGE',
-      summary: 'Kosi at Birpur reading 74.74 m (DL: 74.70 m). '
-               'Embankment patrol intensified on both banks.',
-      url: 'https://www.fmiscwrdbihar.gov.in/bulletin/',
+      title: 'CWC: Kosi at Birpur above danger level — embankment patrolling activated',
+      source: 'CWC', severity: 'RED',
+      url: 'https://cwc.gov.in',
+      publishedAt: 'Latest bulletin',
     ),
     NewsItem(
-      title: 'NDMA activates NDRF teams for Bihar — 2 columns deployed to Supaul',
-      source: 'NDMA',
-      publishedAt: DateTime.now().subtract(const Duration(hours: 10)),
-      severity: 'RED',
-      summary: '4 NDRF teams with boats and medical kits pre-positioned '
-               'at Supaul and Madhubani for rapid response.',
+      title: 'NDMA: Pre-positioning of NDRF teams in Supaul, Madhubani, Darbhanga',
+      source: 'NDMA', severity: 'ORANGE',
       url: 'https://ndma.gov.in',
+      publishedAt: 'Latest bulletin',
     ),
     NewsItem(
-      title: 'Bagmati Dheng Bridge approaches Danger Level — Sitamarhi on alert',
-      source: 'WRD Bihar',
-      publishedAt: DateTime.now().subtract(const Duration(hours: 14)),
-      severity: 'ORANGE',
-      summary: 'Dheng Bridge (Sitamarhi) at 70.85 m, Danger Level 71.00 m. '
-               'Nepal catchment rainfall 180mm in 24h.',
+      title: 'Bihar WRD: Gandak at Dumariaghat approaching warning level',
+      source: 'Bihar WRD', severity: 'YELLOW',
+      url: 'https://fmiscwrdbihar.gov.in',
+      publishedAt: 'Latest bulletin',
     ),
     NewsItem(
-      title: 'CWC 48-hour Flood Forecast: Ganga to rise at Gandhighat',
-      source: 'CWC',
-      publishedAt: DateTime.now().subtract(const Duration(hours: 20)),
-      severity: 'YELLOW',
-      summary: 'Ganga expected to touch Warning Level (47.50 m) at Gandhighat '
-               'within 48 hours based on Farakka upstream readings.',
-      url: 'https://beams.fmiscwrdbihar.gov.in',
+      title: 'BSDMA: 12 districts on flood alert — evacuation centres activated',
+      source: 'BSDMA', severity: 'RED',
+      url: 'https://bsdma.org',
+      publishedAt: 'Latest bulletin',
     ),
   ];
 }
 
+// ── Provider ─────────────────────────────────────────────────────────────────
 final newsFeedProvider =
-    StateNotifierProvider<NewsFeedNotifier, NewsFeedState>(
-        (_) => NewsFeedNotifier());
+    NotifierProvider<NewsFeedNotifier, NewsFeedState>(NewsFeedNotifier.new);
