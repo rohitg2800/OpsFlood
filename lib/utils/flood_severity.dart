@@ -1,5 +1,6 @@
 // lib/utils/flood_severity.dart
-// Resolves issue #9: FloodSeverityLevel enum + color/label helpers
+// Canonical definition of FloodSeverity enum + color helpers.
+// flood_severity_helper.dart re-exports this — do not redefine enum there.
 import 'package:flutter/material.dart';
 import '../theme/river_theme.dart';
 
@@ -66,10 +67,13 @@ enum FloodSeverity {
 
   static FloodSeverity fromString(String? s) {
     switch ((s ?? '').toUpperCase()) {
-      case 'NORMAL':   return FloodSeverity.normal;
+      case 'NORMAL':
+      case 'SAFE':     return FloodSeverity.normal;
       case 'WATCH':    return FloodSeverity.watch;
-      case 'WARNING':  return FloodSeverity.warning;
-      case 'DANGER':   return FloodSeverity.danger;
+      case 'WARNING':
+      case 'WARN':     return FloodSeverity.warning;
+      case 'DANGER':
+      case 'FLOOD':    return FloodSeverity.danger;
       case 'EXTREME':
       case 'CRITICAL': return FloodSeverity.extreme;
       default:         return FloodSeverity.normal;
@@ -81,22 +85,26 @@ enum FloodSeverity {
 class FloodSeverityColor {
   const FloodSeverityColor._();
 
-  // Static color fields (used by risk_score_gauge.dart CustomPainter)
   static const Color normal  = AppPalette.safe;
   static const Color watch   = AppPalette.cyan;
   static const Color warning = AppPalette.warning;
   static const Color danger  = AppPalette.danger;
   static const Color extreme = AppPalette.critical;
-
-  // Offline alias — used by legacy station_status_strip if ever reverted
+  // Offline alias — used by legacy callers
   static const Color offline = AppPalette.textGrey;
 
-  // Method-style helpers
   static Color forSeverity(FloodSeverity s) => s.color;
   static Color glowForSeverity(FloodSeverity s) => s.glowColor;
   static Color forLevel(double current, double warnLvl, double dangerLvl) =>
       FloodSeverity.fromLevel(current, warnLvl, dangerLvl).color;
 }
 
-// Backward-compat typedef
+// ── Backward-compat aliases ─────────────────────────────────────────────────
+// FloodSeverityLevel is used by station_status_provider.dart as a typedef.
 typedef FloodSeverityLevel = FloodSeverity;
+
+/// Extension on FloodSeverityLevel / FloodSeverity used by
+/// station_status_provider.dart: FloodSeverityLevelExtension.fromString(raw)
+extension FloodSeverityLevelExtension on FloodSeverity {
+  static FloodSeverity fromString(String? raw) => FloodSeverity.fromString(raw);
+}

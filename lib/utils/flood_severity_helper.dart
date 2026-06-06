@@ -1,77 +1,41 @@
-// ─────────────────────────────────────────────────────────────────────────────
-//  FloodSeverityHelper  —  Single source of truth for flood severity
-//  Integrates with existing AppPalette from river_theme.dart
-// ─────────────────────────────────────────────────────────────────────────────
+// lib/utils/flood_severity_helper.dart
+// ───────────────────────────────────────────────────────────────────
+// FloodSeverityHelper — single source of truth for flood severity.
+// IMPORTANT: FloodSeverity enum is defined in flood_severity.dart.
+// This file re-exports it so callers only need one import.
+// ───────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
 import '../theme/river_theme.dart';
+// Re-export the canonical enum — do NOT redefine it here.
+export 'flood_severity.dart' show FloodSeverity, FloodSeverityLevel, FloodSeverityColor;
+import 'flood_severity.dart';
 
-/// Five-level severity scale used across all CWC stations.
-enum FloodSeverity { normal, watch, warning, danger, extreme }
-
-/// Trend direction for a station's water level over the last hour.
+/// Trend direction for a station’s water level over the last hour.
 enum WaterLevelTrend { rising, falling, stable, unknown }
 
 class FloodSeverityHelper {
   FloodSeverityHelper._();
 
-  // ── Parse from raw string (API / CWC response) ──────────────────────────
-  static FloodSeverity fromString(String? raw) {
-    switch ((raw ?? '').toUpperCase().trim()) {
-      case 'NORMAL':
-      case 'SAFE':
-        return FloodSeverity.normal;
-      case 'WATCH':
-        return FloodSeverity.watch;
-      case 'WARNING':
-      case 'WARN':
-        return FloodSeverity.warning;
-      case 'DANGER':
-      case 'FLOOD':
-        return FloodSeverity.danger;
-      case 'EXTREME':
-      case 'CRITICAL':
-        return FloodSeverity.extreme;
-      default:
-        return FloodSeverity.normal;
-    }
-  }
+  // ── Parse from raw string ───────────────────────────────────────────────
+  static FloodSeverity fromString(String? raw) =>
+      FloodSeverity.fromString(raw);
 
-  // ── Derive severity from water level vs thresholds ───────────────────────
+  // ── Derive from level thresholds ───────────────────────────────────────
   static FloodSeverity fromLevels({
     required double current,
     required double warningLevel,
     required double dangerLevel,
-  }) {
-    if (current >= dangerLevel * 1.15) return FloodSeverity.extreme;
-    if (current >= dangerLevel)        return FloodSeverity.danger;
-    if (current >= warningLevel)       return FloodSeverity.warning;
-    if (current >= warningLevel * 0.9) return FloodSeverity.watch;
-    return FloodSeverity.normal;
-  }
+  }) =>
+      FloodSeverity.fromLevel(current, warningLevel, dangerLevel);
 
-  // ── Color ────────────────────────────────────────────────────────────────
-  static Color color(FloodSeverity s) {
-    switch (s) {
-      case FloodSeverity.normal:  return AppPalette.safe;
-      case FloodSeverity.watch:   return const Color(0xFFFFD700);
-      case FloodSeverity.warning: return AppPalette.warning;
-      case FloodSeverity.danger:  return AppPalette.danger;
-      case FloodSeverity.extreme: return AppPalette.critical;
-    }
-  }
+  // ── Color ────────────────────────────────────────────────────────────
+  static Color color(FloodSeverity s) => s.color;
+  static Color glowColor(FloodSeverity s) => s.glowColor;
+  static Color cardFill(FloodSeverity s) => s.color.withValues(alpha: 0.08);
+  static Color cardBorder(FloodSeverity s) => s.color.withValues(alpha: 0.35);
 
-  static Color glowColor(FloodSeverity s) {
-    switch (s) {
-      case FloodSeverity.normal:  return AppPalette.safeGlow;
-      case FloodSeverity.watch:   return const Color(0x28FFD700);
-      case FloodSeverity.warning: return AppPalette.warnGlow;
-      case FloodSeverity.danger:  return AppPalette.dangerGlow;
-      case FloodSeverity.extreme: return AppPalette.critGlow;
-    }
-  }
-
-  // ── Icon ─────────────────────────────────────────────────────────────────
+  // ── Icon ──────────────────────────────────────────────────────────────
   static IconData icon(FloodSeverity s) {
     switch (s) {
       case FloodSeverity.normal:  return Icons.check_circle_outline_rounded;
@@ -82,18 +46,9 @@ class FloodSeverityHelper {
     }
   }
 
-  // ── Short label ──────────────────────────────────────────────────────────
-  static String label(FloodSeverity s) {
-    switch (s) {
-      case FloodSeverity.normal:  return 'Normal';
-      case FloodSeverity.watch:   return 'Watch';
-      case FloodSeverity.warning: return 'Warning';
-      case FloodSeverity.danger:  return 'Danger';
-      case FloodSeverity.extreme: return 'Extreme';
-    }
-  }
+  // ── Label ──────────────────────────────────────────────────────────────
+  static String label(FloodSeverity s) => s.label;
 
-  // ── Hindi label ──────────────────────────────────────────────────────────
   static String labelHindi(FloodSeverity s) {
     switch (s) {
       case FloodSeverity.normal:  return 'सामान्य';
@@ -104,11 +59,7 @@ class FloodSeverityHelper {
     }
   }
 
-  // ── Background fill for cards (semi-transparent) ─────────────────────────
-  static Color cardFill(FloodSeverity s) => color(s).withValues(alpha: 0.08);
-  static Color cardBorder(FloodSeverity s) => color(s).withValues(alpha: 0.35);
-
-  // ── Trend helpers ─────────────────────────────────────────────────────────
+  // ── Trend helpers ───────────────────────────────────────────────────────
   static WaterLevelTrend trendFromDelta(double deltaMeters) {
     if (deltaMeters > 0.1)  return WaterLevelTrend.rising;
     if (deltaMeters < -0.1) return WaterLevelTrend.falling;
