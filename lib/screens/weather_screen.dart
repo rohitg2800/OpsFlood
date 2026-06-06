@@ -1,5 +1,5 @@
 // lib/screens/weather_screen.dart
-// OpsFlood — WeatherScreen v6  — fully restored + theme-aware
+// OpsFlood — WeatherScreen v7  — GPS location + theme-aware
 library;
 
 import 'dart:math' as math;
@@ -87,6 +87,22 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
       ..forward();
   }
 
+  void _onLocationTap() {
+    HapticFeedback.mediumImpact();
+    // Close search if open
+    if (_searchOpen) {
+      setState(() => _searchOpen = false);
+      _searchBarCtrl.reverse();
+      _searchFocus.unfocus();
+      _searchCtrl.clear();
+      ref.read(weatherProvider.notifier).clearSearch();
+    }
+    _contentCtrl.reset();
+    ref.read(weatherProvider.notifier).useDeviceLocation().then((_) {
+      _contentCtrl.forward();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final t  = RiverColors.of(context);
@@ -100,9 +116,11 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
           child: Column(
             children: [
               _WeatherHeader(
-                cityName:    ws.cityName,
-                searchOpen:  _searchOpen,
-                onSearchTap: _toggleSearch,
+                cityName:       ws.cityName,
+                searchOpen:     _searchOpen,
+                locating:       ws.locating,
+                onSearchTap:    _toggleSearch,
+                onLocationTap:  _onLocationTap,
                 onRefresh: () {
                   HapticFeedback.mediumImpact();
                   _contentCtrl.reset();
@@ -167,15 +185,12 @@ class _LoadingView extends StatelessWidget {
           const SizedBox(
             width: 48, height: 48,
             child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: AppPalette.cyan,
+              strokeWidth: 2.5, color: AppPalette.cyan,
             ),
           ),
           const SizedBox(height: 18),
-          Text(
-            'Fetching weather…',
-            style: TextStyle(color: t.textSecondary, fontSize: 13),
-          ),
+          Text('Fetching weather…',
+              style: TextStyle(color: t.textSecondary, fontSize: 13)),
         ],
       ),
     );
@@ -192,10 +207,8 @@ class _ErrorView extends StatelessWidget {
   final int?         retryInSeconds;
   final VoidCallback onRetry;
   const _ErrorView({
-    required this.message,
-    required this.isRateLimited,
-    required this.retryInSeconds,
-    required this.onRetry,
+    required this.message, required this.isRateLimited,
+    required this.retryInSeconds, required this.onRetry,
   });
 
   @override
@@ -211,35 +224,27 @@ class _ErrorView extends StatelessWidget {
               isRateLimited
                   ? Icons.hourglass_top_rounded
                   : Icons.cloud_off_rounded,
-              color: AppPalette.amber,
-              size: 52,
+              color: AppPalette.amber, size: 52,
             ),
             const SizedBox(height: 16),
             Text(
-              isRateLimited
-                  ? 'Rate limited — please wait'
-                  : 'Weather unavailable',
+              isRateLimited ? 'Rate limited — please wait' : 'Weather unavailable',
               style: TextStyle(
-                color: t.textPrimary,
-                fontSize: 16, fontWeight: FontWeight.w700,
-              ),
+                  color: t.textPrimary, fontSize: 16,
+                  fontWeight: FontWeight.w700),
               textAlign: TextAlign.center,
             ),
             if (message != null && message!.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(
-                message!,
-                style: TextStyle(color: t.textSecondary, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
+              Text(message!,
+                  style: TextStyle(color: t.textSecondary, fontSize: 12),
+                  textAlign: TextAlign.center),
             ],
             if (retryInSeconds != null && retryInSeconds! > 0) ...[
               const SizedBox(height: 8),
-              Text(
-                'Retry in ${retryInSeconds}s',
-                style: const TextStyle(
-                    color: AppPalette.amber, fontSize: 11),
-              ),
+              Text('Retry in ${retryInSeconds}s',
+                  style: const TextStyle(
+                      color: AppPalette.amber, fontSize: 11)),
             ],
             const SizedBox(height: 20),
             TextButton.icon(
@@ -257,20 +262,23 @@ class _ErrorView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Header
+// Header  — now with 📍 location button
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _WeatherHeader extends StatelessWidget {
   final String              cityName;
   final bool                searchOpen;
+  final bool                locating;
   final VoidCallback        onSearchTap;
+  final VoidCallback        onLocationTap;
   final VoidCallback        onRefresh;
   final AnimationController rotateCtrl;
   final WeatherStatus       status;
   const _WeatherHeader({
-    required this.cityName,    required this.searchOpen,
-    required this.onSearchTap, required this.onRefresh,
-    required this.rotateCtrl,  required this.status,
+    required this.cityName,       required this.searchOpen,
+    required this.locating,       required this.onSearchTap,
+    required this.onLocationTap,  required this.onRefresh,
+    required this.rotateCtrl,     required this.status,
   });
 
   @override
@@ -286,6 +294,7 @@ class _WeatherHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // Icon badge
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
@@ -299,22 +308,25 @@ class _WeatherHeader extends StatelessWidget {
               ),
               border: Border.all(
                   color: AppPalette.cyan.withValues(alpha: 0.28), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: AppPalette.cyan.withValues(alpha: 0.14),
-                  blurRadius: 14,
-                ),
-              ],
+              boxShadow: [BoxShadow(
+                color: AppPalette.cyan.withValues(alpha: 0.14),
+                blurRadius: 14,
+              )],
             ),
-            child: status == WeatherStatus.loading
+            child: status == WeatherStatus.loading || locating
                 ? RotationTransition(
                     turns: rotateCtrl,
-                    child: const Icon(Icons.radar_rounded,
-                        color: AppPalette.cyan, size: 22))
+                    child: Icon(
+                      locating
+                          ? Icons.my_location_rounded
+                          : Icons.radar_rounded,
+                      color: AppPalette.cyan, size: 22,
+                    ))
                 : const Icon(Icons.cloud_rounded,
                     color: AppPalette.cyan, size: 22),
           ),
           const SizedBox(width: 12),
+          // City name
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,16 +344,52 @@ class _WeatherHeader extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  cityName,
+                  locating ? 'Locating…' : cityName,
                   style: TextStyle(
                     fontSize: 9.5,
-                    color: t.textSecondary.withValues(alpha: 0.65),
+                    color: t.textSecondary.withValues(
+                        alpha: locating ? 0.85 : 0.65),
+                    fontStyle: locating
+                        ? FontStyle.italic
+                        : FontStyle.normal,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
+          // 📍 Location button
+          GestureDetector(
+            onTap: onLocationTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: locating
+                    ? AppPalette.cyan.withValues(alpha: 0.14)
+                    : t.cardBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: locating
+                      ? AppPalette.cyan.withValues(alpha: 0.45)
+                      : t.stroke,
+                ),
+              ),
+              child: locating
+                  ? const Padding(
+                      padding: EdgeInsets.all(9),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5, color: AppPalette.cyan,
+                      ),
+                    )
+                  : Icon(
+                      Icons.my_location_rounded,
+                      color: t.textSecondary, size: 18,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 🔍 Search button
           GestureDetector(
             onTap: () {
               HapticFeedback.selectionClick();
@@ -371,6 +419,7 @@ class _WeatherHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          // 🔄 Refresh button
           GestureDetector(
             onTap: onRefresh,
             child: Container(
@@ -421,12 +470,10 @@ class _SearchBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                   color: AppPalette.cyan.withValues(alpha: 0.28), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: AppPalette.cyan.withValues(alpha: 0.08),
-                  blurRadius: 12,
-                ),
-              ],
+              boxShadow: [BoxShadow(
+                color: AppPalette.cyan.withValues(alpha: 0.08),
+                blurRadius: 12,
+              )],
             ),
             child: TextField(
               controller: ctrl,
@@ -445,8 +492,7 @@ class _SearchBar extends StatelessWidget {
                         child: SizedBox(
                           width: 16, height: 16,
                           child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: AppPalette.cyan,
+                            strokeWidth: 1.5, color: AppPalette.cyan,
                           ),
                         ),
                       )
@@ -465,13 +511,10 @@ class _SearchBar extends StatelessWidget {
                 color: t.cardBg,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: t.stroke),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.30),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+                boxShadow: [BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.30),
+                  blurRadius: 20, offset: const Offset(0, 6),
+                )],
               ),
               child: Column(
                 children: results.map((city) => GestureDetector(
@@ -483,11 +526,9 @@ class _SearchBar extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
-                      border: Border(
-                        bottom: results.last == city
-                            ? BorderSide.none
-                            : BorderSide(color: t.stroke, width: 1),
-                      ),
+                      border: Border(bottom: results.last == city
+                          ? BorderSide.none
+                          : BorderSide(color: t.stroke, width: 1)),
                     ),
                     child: Row(
                       children: [
@@ -495,20 +536,14 @@ class _SearchBar extends StatelessWidget {
                             color: AppPalette.cyan, size: 14),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(
-                            city.displayName,
+                          child: Text(city.displayName,
+                              style: TextStyle(
+                                color: t.textPrimary, fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                        ),
+                        Text(city.country,
                             style: TextStyle(
-                              color: t.textPrimary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          city.country,
-                          style: TextStyle(
-                              color: t.textSecondary, fontSize: 10),
-                        ),
+                                color: t.textSecondary, fontSize: 10)),
                       ],
                     ),
                   ),
@@ -536,8 +571,7 @@ class _WeatherContent extends StatelessWidget {
       opacity: contentAnim,
       child: SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0, 0.04),
-          end:   Offset.zero,
+          begin: const Offset(0, 0.04), end: Offset.zero,
         ).animate(contentAnim),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
@@ -649,12 +683,10 @@ class _HeroCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: col.withValues(alpha: 0.30), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: col.withValues(alpha: 0.12),
-            blurRadius: 24, offset: const Offset(0, 6),
-          ),
-        ],
+        boxShadow: [BoxShadow(
+          color: col.withValues(alpha: 0.12),
+          blurRadius: 24, offset: const Offset(0, 6),
+        )],
       ),
       child: Row(
         children: [
@@ -671,11 +703,9 @@ class _HeroCard extends StatelessWidget {
                         fontSize: 58, fontWeight: FontWeight.w900,
                         color: t.textPrimary, height: 1.0,
                         letterSpacing: -3,
-                        shadows: [
-                          Shadow(
-                              color: col.withValues(alpha: 0.5),
-                              blurRadius: 20),
-                        ],
+                        shadows: [Shadow(
+                            color: col.withValues(alpha: 0.5),
+                            blurRadius: 20)],
                       ),
                     ),
                     Padding(
@@ -683,8 +713,7 @@ class _HeroCard extends StatelessWidget {
                       child: Text('°C',
                           style: TextStyle(
                             fontSize: 18, color: t.textSecondary,
-                            fontWeight: FontWeight.w600,
-                          )),
+                            fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ),
@@ -715,23 +744,19 @@ class _HeroCard extends StatelessWidget {
           ),
           Column(
             children: [
-              Text(_wxEmoji(wc),
-                  style: const TextStyle(fontSize: 56)),
+              Text(_wxEmoji(wc), style: const TextStyle(fontSize: 56)),
               const SizedBox(height: 4),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: col.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: col.withValues(alpha: 0.25)),
+                  border: Border.all(color: col.withValues(alpha: 0.25)),
                 ),
                 child: Text(
                   _wxLabel(wc),
                   style: TextStyle(
-                      color: col,
-                      fontSize: 9,
+                      color: col, fontSize: 9,
                       fontWeight: FontWeight.w800),
                 ),
               ),
@@ -788,31 +813,30 @@ class _HeroPill extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color:        color.withValues(alpha: 0.09),
-          borderRadius: BorderRadius.circular(10),
-          border:       Border.all(color: color.withValues(alpha: 0.22)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: color, size: 12),
-          const SizedBox(width: 5),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value,
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800)),
-              Text(label,
-                  style: TextStyle(
-                      color: RiverColors.of(context).textSecondary,
-                      fontSize: 8)),
-            ],
-          ),
-        ]),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color:        color.withValues(alpha: 0.09),
+      borderRadius: BorderRadius.circular(10),
+      border:       Border.all(color: color.withValues(alpha: 0.22)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: color, size: 12),
+      const SizedBox(width: 5),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value,
+              style: TextStyle(
+                  color: color, fontSize: 11,
+                  fontWeight: FontWeight.w800)),
+          Text(label,
+              style: TextStyle(
+                  color: RiverColors.of(context).textSecondary,
+                  fontSize: 8)),
+        ],
+      ),
+    ]),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -833,12 +857,9 @@ class _MonitorShareRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
             color: AppPalette.cyan.withValues(alpha: 0.18), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: AppPalette.cyan.withValues(alpha: 0.05),
-            blurRadius: 16,
-          ),
-        ],
+        boxShadow: [BoxShadow(
+          color: AppPalette.cyan.withValues(alpha: 0.05), blurRadius: 16,
+        )],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -848,24 +869,18 @@ class _MonitorShareRow extends StatelessWidget {
               Container(
                 width: 6, height: 6,
                 decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppPalette.safe,
-                ),
+                    shape: BoxShape.circle, color: AppPalette.safe),
               ),
               const SizedBox(width: 6),
-              const Text(
-                'MONITOR FEED',
-                style: TextStyle(
-                  color: AppPalette.cyan,
-                  fontSize: 9, fontWeight: FontWeight.w900,
-                  letterSpacing: 1.0,
-                ),
-              ),
+              const Text('MONITOR FEED',
+                  style: TextStyle(
+                    color: AppPalette.cyan,
+                    fontSize: 9, fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                  )),
               const SizedBox(width: 4),
-              Text(
-                '· shared with station monitor',
-                style: TextStyle(color: t.textSecondary, fontSize: 9),
-              ),
+              Text('· shared with station monitor',
+                  style: TextStyle(color: t.textSecondary, fontSize: 9)),
             ],
           ),
           const SizedBox(height: 12),
@@ -977,15 +992,13 @@ class _MetricCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(value,
               style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 12,
+                  color: t.textPrimary, fontSize: 12,
                   fontWeight: FontWeight.w900)),
           if (sub.isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(sub,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 8.5,
+                    color: color, fontSize: 8.5,
                     fontWeight: FontWeight.w700)),
           ],
           const SizedBox(height: 2),
@@ -998,12 +1011,10 @@ class _MetricCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Rainfall bar chart (7-day)
+// 7-day rainfall bar chart
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Helper: parse WeatherDay.date (String "YYYY-MM-DD") → DateTime
-DateTime _parseDate(String s) =>
-    DateTime.tryParse(s) ?? DateTime.now();
+DateTime _parseDate(String s) => DateTime.tryParse(s) ?? DateTime.now();
 
 class _RainfallChart extends StatelessWidget {
   final List<WeatherDay> forecast;
@@ -1014,13 +1025,11 @@ class _RainfallChart extends StatelessWidget {
     final t       = RiverColors.of(context);
     final maxRain = forecast.map((d) => d.rainMm).fold(0.0, math.max);
     final scale   = maxRain > 0 ? maxRain : 1.0;
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:        t.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border:       Border.all(color: t.stroke),
+        color: t.cardBg, borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1030,14 +1039,10 @@ class _RainfallChart extends StatelessWidget {
               const Icon(Icons.bar_chart_rounded,
                   color: AppPalette.cyan, size: 15),
               const SizedBox(width: 6),
-              Text(
-                '7-Day Rainfall',
-                style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              Text('7-Day Rainfall',
+                  style: TextStyle(
+                    color: t.textSecondary, fontSize: 11,
+                    fontWeight: FontWeight.w700)),
             ],
           ),
           const SizedBox(height: 16),
@@ -1046,10 +1051,10 @@ class _RainfallChart extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: forecast.map((day) {
-                final frac      = (day.rainMm / scale).clamp(0.0, 1.0);
-                final isHeavy   = day.rainMm > 20;
-                final barColor  = isHeavy ? AppPalette.danger : AppPalette.cyan;
-                final dateTime  = _parseDate(day.date);
+                final frac     = (day.rainMm / scale).clamp(0.0, 1.0);
+                final isHeavy  = day.rainMm > 20;
+                final barColor = isHeavy ? AppPalette.danger : AppPalette.cyan;
+                final dateTime = _parseDate(day.date);
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -1058,11 +1063,9 @@ class _RainfallChart extends StatelessWidget {
                       children: [
                         Text(
                           day.rainMm >= 1
-                              ? day.rainMm.toStringAsFixed(0)
-                              : '',
+                              ? day.rainMm.toStringAsFixed(0) : '',
                           style: TextStyle(
-                              color: barColor,
-                              fontSize: 8,
+                              color: barColor, fontSize: 8,
                               fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 2),
@@ -1087,11 +1090,9 @@ class _RainfallChart extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          DateFormat('E').format(dateTime),
-                          style: TextStyle(
-                              color: t.textSecondary, fontSize: 8),
-                        ),
+                        Text(DateFormat('E').format(dateTime),
+                            style: TextStyle(
+                                color: t.textSecondary, fontSize: 8)),
                       ],
                     ),
                   ),
@@ -1118,9 +1119,8 @@ class _ForecastList extends StatelessWidget {
     final t = RiverColors.of(context);
     return Container(
       decoration: BoxDecoration(
-        color:        t.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border:       Border.all(color: t.stroke),
+        color: t.cardBg, borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         children: List.generate(forecast.length, (i) {
@@ -1137,10 +1137,8 @@ class _ForecastList extends StatelessWidget {
             padding: const EdgeInsets.symmetric(
                 horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              border: isLast
-                  ? null
-                  : Border(bottom: BorderSide(
-                      color: t.stroke, width: 0.8)),
+              border: isLast ? null : Border(bottom: BorderSide(
+                  color: t.stroke, width: 0.8)),
             ),
             child: Row(
               children: [
@@ -1151,39 +1149,28 @@ class _ForecastList extends StatelessWidget {
                         ? 'Today'
                         : DateFormat('E').format(dateTime),
                     style: TextStyle(
-                      color: isToday
-                          ? AppPalette.cyan
-                          : t.textSecondary,
+                      color: isToday ? AppPalette.cyan : t.textSecondary,
                       fontSize: 11,
                       fontWeight: isToday
-                          ? FontWeight.w800
-                          : FontWeight.w500,
+                          ? FontWeight.w800 : FontWeight.w500,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  _wxEmoji(day.weatherCode),
-                  style: const TextStyle(fontSize: 18),
-                ),
+                Text(_wxEmoji(day.weatherCode),
+                    style: const TextStyle(fontSize: 18)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        DateFormat('MMM d').format(dateTime),
-                        style: TextStyle(
-                            color: t.textSecondary, fontSize: 9),
-                      ),
-                      Text(
-                        _wxLabel(day.weatherCode),
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text(DateFormat('MMM d').format(dateTime),
+                          style: TextStyle(
+                              color: t.textSecondary, fontSize: 9)),
+                      Text(_wxLabel(day.weatherCode),
+                          style: TextStyle(
+                            color: t.textPrimary, fontSize: 11,
+                            fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -1195,22 +1182,17 @@ class _ForecastList extends StatelessWidget {
                         Icon(Icons.water_drop_rounded,
                             color: rainColor, size: 10),
                         const SizedBox(width: 3),
-                        Text(
-                          '${day.rainMm.toStringAsFixed(1)} mm',
-                          style: TextStyle(
-                              color: rainColor,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700),
-                        ),
+                        Text('${day.rainMm.toStringAsFixed(1)} mm',
+                            style: TextStyle(
+                                color: rainColor, fontSize: 10,
+                                fontWeight: FontWeight.w700)),
                       ],
                     ),
                     const SizedBox(height: 2),
-                    // Use maxC / minC — actual WeatherDay field names
                     Text(
                       '${day.maxC.toStringAsFixed(0)}° / ${day.minC.toStringAsFixed(0)}°',
                       style: TextStyle(
-                          color: t.textSecondary, fontSize: 10),
-                    ),
+                          color: t.textSecondary, fontSize: 10)),
                   ],
                 ),
               ],
