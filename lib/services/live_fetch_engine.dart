@@ -77,11 +77,9 @@ class LiveFetchEngine {
   static const _pollInterval     = Duration(seconds: 45);
   static const _httpTimeout      = Duration(seconds: 20);
   static const _glofasTimeout    = Duration(seconds: 8);
-  /// Max snapshots kept per city for the sparkline (≈6 min of history at 45s)
   static const _maxTrendPoints   = 8;
 
   final Map<String, LiveCityData>              _cache = {};
-  /// Rolling window of level readings per city key.
   final Map<String, List<RiverLevelSnapshot>>  _trend = {};
 
   DateTime?  _lastFetch;
@@ -206,9 +204,6 @@ class LiveFetchEngine {
     );
   }
 
-  /// Returns the rolling sparkline history for [city] (oldest → newest).
-  /// Returns an empty list when fewer than 2 readings have been recorded
-  /// (sparklines need at least 2 points to draw a line).
   List<RiverLevelSnapshot> trendForCity(String city) {
     final key      = city.toLowerCase().trim();
     final snaps    = _trend[key];
@@ -248,8 +243,6 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  /// Appends a snapshot to the rolling window for [key], keeping at most
-  /// [_maxTrendPoints] entries (oldest is dropped when full).
   void _appendTrend(String key, double level, DateTime ts) {
     final list = _trend.putIfAbsent(key, () => []);
     list.add(RiverLevelSnapshot(level: level, timestamp: ts));
@@ -266,7 +259,6 @@ class LiveFetchEngine {
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
     final now  = DateTime.now();
 
-    // ── 1. WRD Bihar (primary, fast) ─────────────────────────────────────────
     final wrdStations = await _wrd.fetch();
     final wrdByKey = <String, WrdStation>{};
     for (final s in wrdStations) {
@@ -302,7 +294,6 @@ class LiveFetchEngine {
         hasLiveLevel: wrdMatch?.currentLevel != null,
       );
 
-      // ── Record snapshot into rolling trend window ────────────────────────
       final lvl = wrdMatch?.currentLevel;
       if (lvl != null) _appendTrend(key, lvl, now);
     }
@@ -311,16 +302,12 @@ class LiveFetchEngine {
     final matched = _cache.values.where((v) => v.hasLiveLevel).length;
     _log('WRD done — ${_cache.length} cities ($matched live). Notifying UI.');
 
-    // ── EARLY NOTIFY ─────────────────────────────────────────────────────────
     _isLoading = false;
     _notify();
 
-    // ── 2. GloFAS + Open-Meteo in background (best-effort, silent) ───────────
     unawaited(_overlayGloFAS(biharCities, lats, lons));
   }
 
-  /// Fetches GloFAS river flow and Open-Meteo rainfall and overlays them onto
-  /// the existing cache entries. Notifies once complete. Never throws.
   Future<void> _overlayGloFAS(
     List<Map<String, dynamic>> biharCities,
     String lats,
@@ -375,7 +362,8 @@ class LiveFetchEngine {
       '&forecast_days=1&models=seamless_v4',
     );
     final res = await http.get(uri).timeout(_glofasTimeout);
-    if (res.statusCode != 200) throw Exception('GloFAS HTTP \${res.statusCode}');
+    // ✅ Fixed: was \${res.statusCode} (escaped, printed literally)
+    if (res.statusCode != 200) throw Exception('GloFAS HTTP ${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
     final cities = IndiaGeodata.monitoredCities
@@ -400,7 +388,8 @@ class LiveFetchEngine {
       '&forecast_days=1&timezone=Asia%2FKolkata',
     );
     final res = await http.get(uri).timeout(_glofasTimeout);
-    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP \${res.statusCode}');
+    // ✅ Fixed: was \${res.statusCode} (escaped, printed literally)
+    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP ${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
     final cities = IndiaGeodata.monitoredCities
@@ -464,5 +453,4 @@ class LiveFetchEngine {
   }
 }
 
-// Dart ≥3 — suppress unawaited future lint for fire-and-forget calls
 void unawaited(Future<void> f) {}
