@@ -1,48 +1,49 @@
-// lib/widgets/offline_banner.dart
-// OpsFlood — OfflineBanner widget
-library;
-
 import 'package:flutter/material.dart';
-import '../services/app_state_service.dart';
+import '../services/offline_cache_service.dart';
 
+/// Resolves issue #26: Offline Mode Banner
 class OfflineBanner extends StatelessWidget {
-  const OfflineBanner({super.key, required this.child});
+  final DateTime? lastSyncTime;
 
-  final Widget child;
+  const OfflineBanner({super.key, this.lastSyncTime});
+
+  String _formatLastSync() {
+    if (lastSyncTime == null) return 'Never synced';
+    final diff = DateTime.now().difference(lastSyncTime!);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: AppStateService.instance,
-      builder: (context, _) {
-        final isOnline = AppStateService.instance.isOnline;
-        return Column(
-          children: [
-            if (!isOnline)
-              Material(
-                color: Colors.orange.shade800,
-                child: const SafeArea(
-                  bottom: false,
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                      child: Row(
-                        children: [
-                          Icon(Icons.wifi_off, color: Colors.white, size: 16),
-                          SizedBox(width: 8),
-                          Text(
-                            'No internet connection — showing cached data',
-                            style: TextStyle(color: Colors.white, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+    return StreamBuilder<bool>(
+      stream: OfflineCacheService().connectivityStream,
+      builder: (context, snapshot) {
+        final isOnline = snapshot.data ?? true;
+        if (isOnline) return const SizedBox.shrink();
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: double.infinity,
+          color: Colors.orange.shade700,
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Row(
+            children: [
+              const Icon(Icons.wifi_off, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Offline Mode — Showing cached data · Last synced: ${_formatLastSync()}',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
                 ),
               ),
-            Expanded(child: child),
-          ],
+            ],
+          ),
         );
       },
     );
