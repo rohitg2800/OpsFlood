@@ -42,7 +42,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   WidgetsBinding.instance.deferFirstFrame();
 
-  // Riverpod container needed early for CwcAlertWatcher
   final container = ProviderContainer();
 
   try {
@@ -116,25 +115,15 @@ Future<void> main() async {
       await LocalCacheService.instance.init().catchError((e) {
         if (kDebugMode) debugPrint('⚠️  LocalCacheService.init failed: $e');
       });
-
-      unawaited(
-        FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
-        }),
-      );
-
-      unawaited(
-        ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
-        }),
-      );
-
-      // 8. CWC alert watcher — polls every 15 min, fires local notifs
-      unawaited(
-        CwcAlertWatcher.instance.start(container).catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
-        }),
-      );
+      unawaited(FcmService.instance.init().catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
+      }));
+      unawaited(ThresholdAlertService.instance.start().catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
+      }));
+      unawaited(CwcAlertWatcher.instance.start(container).catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
+      }));
     }
   } finally {
     WidgetsBinding.instance.allowFirstFrame();
@@ -154,22 +143,34 @@ class EquinoxBHApp extends ConsumerWidget {
     final AppThemeMode appMode = ref.watch(themeModeProvider);
     final locale               = ref.watch(localeProvider);
 
+    // ── Resolve ThemeData per AppThemeMode ───────────────────────────────
+    // Each mode gets its own ThemeData with the correct scaffold background,
+    // accent colour, card colour, nav colour and text colours.
+    final ThemeData resolvedTheme = switch (appMode) {
+      AppThemeMode.light  => RiverColors.lightTheme(),
+      AppThemeMode.sunset => RiverColors.sunsetTheme(),
+      AppThemeMode.ocean  => RiverColors.oceanTheme(),
+      _                   => RiverColors.darkTheme(),   // dark + system
+    };
+
+    // ThemeMode for system-level dark/light detection
     final ThemeMode flutterMode = switch (appMode) {
       AppThemeMode.system => ThemeMode.system,
       AppThemeMode.light  => ThemeMode.light,
-      AppThemeMode.dark   => ThemeMode.dark,
-      AppThemeMode.sunset => ThemeMode.light,
-      AppThemeMode.ocean  => ThemeMode.dark,
+      _                   => ThemeMode.dark,
     };
 
     return MaterialApp(
       title:                      'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
-      themeMode:                  flutterMode,
-      theme:                      RiverColors.lightTheme(),
-      darkTheme:                  RiverColors.darkTheme(),
-      locale:                     locale,
-      supportedLocales:           kSupportedLocales,
+      // For system mode: use standard dark/light split.
+      // For all other modes: force the resolved theme as both theme + darkTheme
+      // so MaterialApp always uses it regardless of device brightness.
+      themeMode: flutterMode,
+      theme:     appMode == AppThemeMode.system ? RiverColors.lightTheme() : resolvedTheme,
+      darkTheme: appMode == AppThemeMode.system ? RiverColors.darkTheme()  : resolvedTheme,
+      locale:    locale,
+      supportedLocales: kSupportedLocales,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -178,7 +179,6 @@ class EquinoxBHApp extends ConsumerWidget {
       ],
       home:   const SplashScreen(),
       routes: {
-        // ── Existing routes ────────────────────────────────────────────────
         AlertsScreen.route:             (_) => const AlertsScreen(),
         '/live_stations':               (_) => const LiveStationsScreen(),
         '/weather':                     (_) => const WeatherScreen(),
@@ -189,14 +189,12 @@ class EquinoxBHApp extends ConsumerWidget {
         '/settings':                    (_) => const SettingsScreen(),
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
-        // FIX: dashboard pushes '/bihar_map' — register alias pointing to same screen
-        '/bihar_map':                   (_) => const BiharRiverMapScreen(),
+        '/bihar_map':                   (_) => const BiharRiverMapScreen(), // alias
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
         CityDetailScreen.route: (ctx) {
           final city = ModalRoute.of(ctx)!.settings.arguments as String;
           return CityDetailScreen(cityName: city);
         },
-        // ── Phase 2 ────────────────────────────────────────────────────────
         '/sos':        (_) => const SosScreen(),
         '/news':       (_) => const NewsFeedScreen(),
         '/ai_predict': (_) => const PredictionScreen(),
