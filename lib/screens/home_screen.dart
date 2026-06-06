@@ -1,12 +1,7 @@
 // lib/screens/home_screen.dart
-// EQUINOX-BH — HomeScreen v9
-// Phase 6 upgrades over v8:
-//  - Alerts tab shows live red badge from criticalCountProvider
-//  - Offline dot on nav bar (isOfflineProvider)
-//  - Nav items grouped: primary 5 (visible) + secondary tray (overflow sheet)
-//  - PageView with keepAlive so tabs don't rebuild on switch
-//  - Entry FadeTransition per tab swap
-//  - Bottom safe-area handles gesture nav bar properly
+// EQUINOX-BH — HomeScreen v10
+// Change: Alerts removed from primary nav; Monitor promoted to primary tab.
+//         Alerts moved into the secondary More sheet.
 library;
 
 import 'dart:ui';
@@ -32,36 +27,44 @@ class _Tab {
   const _Tab(this.label, this.icon, this.activeIcon, {this.badgeProvider});
   final String   label;
   final IconData icon, activeIcon;
-  // Optional: provider index into [_badgeValues] resolved at build time
   final int?     badgeProvider;
 }
 
 // Primary nav (always visible) — 5 items
+// Index 2 is now Monitor (was Alerts)
 const _primary = [
-  _Tab('Home',     Icons.dashboard_outlined,     Icons.dashboard_rounded),
-  _Tab('Rivers',   Icons.water_outlined,          Icons.water_rounded),
+  _Tab('Home',    Icons.dashboard_outlined,       Icons.dashboard_rounded),
+  _Tab('Rivers',  Icons.water_outlined,            Icons.water_rounded),
+  _Tab('Monitor', Icons.monitor_heart_outlined,    Icons.monitor_heart_rounded),
+  _Tab('Weather', Icons.cloud_outlined,            Icons.cloud_rounded),
+  _Tab('Predict', Icons.model_training_outlined,   Icons.model_training_rounded),
+];
+
+// Secondary nav (More sheet) — Alerts promoted here, Stations & Settings remain
+const _secondary = [
+  _Tab('Stations', Icons.sensors_outlined,        Icons.sensors_rounded),
   _Tab('Alerts',   Icons.notifications_outlined,  Icons.notifications_rounded,
        badgeProvider: 0),
-  _Tab('Weather',  Icons.cloud_outlined,           Icons.cloud_rounded),
-  _Tab('Predict',  Icons.model_training_outlined,  Icons.model_training_rounded),
+  _Tab('Settings', Icons.settings_outlined,       Icons.settings_rounded),
 ];
 
-// Secondary nav (tray / «More» sheet) — overflow items
-const _secondary = [
-  _Tab('Stations', Icons.sensors_outlined,         Icons.sensors_rounded),
-  _Tab('Monitor',  Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
-  _Tab('Settings', Icons.settings_outlined,        Icons.settings_rounded),
-];
-
-// All screens in index order (primary 0-4, secondary 5-7)
+// Screen index map:
+//  0 → Dashboard
+//  1 → RiverMonitor
+//  2 → Monitors  (was AlertsScreen)
+//  3 → Weather
+//  4 → Predict
+//  5 → LiveStations
+//  6 → Alerts    (moved from primary slot 2)
+//  7 → Settings
 Widget _buildScreen(int i) => switch (i) {
   0 => const DashboardScreen(),
   1 => const RiverMonitorScreen(),
-  2 => const AlertsScreen(),
+  2 => const MonitorsScreen(),
   3 => const WeatherScreen(),
   4 => const PredictScreen(),
   5 => const LiveStationsScreen(),
-  6 => const MonitorsScreen(),
+  6 => const AlertsScreen(),
   7 => const SettingsScreen(),
   _ => const DashboardScreen(),
 };
@@ -78,12 +81,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   int _idx = 0;
 
-  // glow pulse for active tab icon
   late final AnimationController _glowCtrl;
   late final Animation<double>    _glow;
-
-  // keep screens alive
-  late final List<Widget> _screens;
+  late final List<Widget>         _screens;
 
   @override
   void initState() {
@@ -95,7 +95,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _glow = Tween<double>(begin: 0.3, end: 1.0)
         .animate(CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut));
 
-    // kick providers warm
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(realTimeProvider);
     });
@@ -115,13 +114,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _showMoreSheet() {
     final offline  = ref.read(isOfflineProvider);
+    final critical = ref.read(criticalCountProvider);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => _MoreSheet(
-        current:   _idx,
-        offline:   offline,
-        onSelect:  (i) {
+        current:       _idx,
+        offline:       offline,
+        criticalCount: critical,
+        onSelect:      (i) {
           Navigator.pop(context);
           _go(i);
         },
@@ -134,7 +135,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final criticalCount = ref.watch(criticalCountProvider);
     final offline       = ref.watch(isOfflineProvider);
 
-    // badge values indexed by _Tab.badgeProvider
     final badgeValues = [criticalCount];
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -142,7 +142,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           .copyWith(systemNavigationBarColor: AppPalette.abyss0),
       child: Scaffold(
         backgroundColor: AppPalette.abyss0,
-        // IndexedStack keeps all screens mounted & alive
         body: IndexedStack(
           index: _idx,
           children: _screens,
@@ -206,7 +205,6 @@ class _NavBar extends StatelessWidget {
             padding: EdgeInsets.only(bottom: pad),
             child: Row(
               children: [
-                // Primary tabs
                 ...List.generate(primary.length, (i) {
                   final active = i == current;
                   final badge  = primary[i].badgeProvider != null
@@ -219,10 +217,10 @@ class _NavBar extends StatelessWidget {
                       child: AnimatedBuilder(
                         animation: glow,
                         builder: (_, __) => _NavItem(
-                          tab:      primary[i],
-                          active:   active,
-                          glowVal:  active ? glow.value : 0,
-                          badge:    badge,
+                          tab:     primary[i],
+                          active:  active,
+                          glowVal: active ? glow.value : 0,
+                          badge:   badge,
                         ),
                       ),
                     ),
@@ -296,7 +294,6 @@ class _NavItem extends StatelessWidget {
                 color: c,
               ),
             ),
-            // badge
             if (badge > 0)
               Positioned(
                 top: -4, right: -4,
@@ -370,7 +367,6 @@ class _MoreButton extends StatelessWidget {
                 size: 16, color: c,
               ),
             ),
-            // offline dot
             if (offline)
               Positioned(
                 top: -3, right: -3,
@@ -405,24 +401,25 @@ class _MoreButton extends StatelessWidget {
 // ── More bottom sheet ─────────────────────────────────────────────────────────
 
 class _MoreSheet extends StatelessWidget {
-  final int                       current;
-  final bool                      offline;
-  final ValueChanged<int>         onSelect;
+  final int              current;
+  final bool             offline;
+  final int              criticalCount;
+  final ValueChanged<int> onSelect;
   const _MoreSheet({
     required this.current,
     required this.offline,
+    required this.criticalCount,
     required this.onSelect,
   });
 
-  // secondary items map to global screen index starting at 5
-  static const _items = [
-    (idx: 5, label: 'Stations', icon: Icons.sensors_rounded,       sub: 'Live gauge stations'),
-    (idx: 6, label: 'Monitor',  icon: Icons.monitor_heart_rounded,  sub: 'Multi-location watch'),
-    (idx: 7, label: 'Settings', icon: Icons.settings_rounded,       sub: 'App preferences'),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final items = [
+      (idx: 5, label: 'Stations', icon: Icons.sensors_rounded,      sub: 'Live gauge stations',      badge: 0),
+      (idx: 6, label: 'Alerts',   icon: Icons.notifications_rounded, sub: 'Flood & risk alerts',      badge: criticalCount),
+      (idx: 7, label: 'Settings', icon: Icons.settings_rounded,      sub: 'App preferences',          badge: 0),
+    ];
+
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF060F1C),
@@ -437,7 +434,6 @@ class _MoreSheet extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // handle
               Container(
                 width: 36, height: 3,
                 margin: const EdgeInsets.only(bottom: 18),
@@ -470,13 +466,14 @@ class _MoreSheet extends StatelessWidget {
                     ],
                   ),
                 ),
-              for (final item in _items)
+              for (final item in items)
                 _SheetRow(
-                  label:    item.label,
-                  icon:     item.icon,
-                  sub:      item.sub,
-                  active:   current == item.idx,
-                  onTap:    () => onSelect(item.idx),
+                  label:  item.label,
+                  icon:   item.icon,
+                  sub:    item.sub,
+                  badge:  item.badge,
+                  active: current == item.idx,
+                  onTap:  () => onSelect(item.idx),
                 ),
               const SizedBox(height: 8),
             ],
@@ -490,12 +487,13 @@ class _MoreSheet extends StatelessWidget {
 class _SheetRow extends StatelessWidget {
   final String   label, sub;
   final IconData icon;
+  final int      badge;
   final bool     active;
   final VoidCallback onTap;
   const _SheetRow({
     required this.label, required this.icon,
     required this.sub,   required this.active,
-    required this.onTap,
+    required this.onTap, this.badge = 0,
   });
 
   @override
@@ -546,7 +544,24 @@ class _SheetRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (active)
+            // badge for Alerts
+            if (badge > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppPalette.critical,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  badge > 9 ? '9+' : '$badge',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900),
+                ),
+              )
+            else if (active)
               Container(
                 width: 6, height: 6,
                 decoration: const BoxDecoration(
