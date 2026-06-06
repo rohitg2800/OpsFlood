@@ -33,7 +33,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
   String    _query       = '';
   _SortMode _sort        = _SortMode.severity;
   String?   _stateFilter;
-  String?   _expanded;   // city name of currently expanded card
+  String?   _expanded;
 
   @override
   void initState() {
@@ -115,7 +115,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
         body: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // ── App Bar ──────────────────────────────────────────────────
+            // ── App Bar ─────────────────────────────────────────────────────
             SliverAppBar(
               pinned: true,
               floating: false,
@@ -140,7 +140,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
               ),
             ),
 
-            // ── Search bar ───────────────────────────────────────────────
+            // ── Search bar ────────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -167,7 +167,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
               ),
             ),
 
-            // ── Sort + State filter chips ─────────────────────────────────
+            // ── Sort + State filter chips ────────────────────────────────────────
             SliverToBoxAdapter(
               child: SizedBox(
                 height: 36,
@@ -205,7 +205,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
               ),
             ),
 
-            // ── Station count ─────────────────────────────────────────────
+            // ── Station count ───────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -220,10 +220,11 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
               ),
             ),
 
-            // ── List / empty ──────────────────────────────────────────────
+            // ── List / empty ────────────────────────────────────────────────────
             stations.isEmpty
-                ? SliverFillRemaining(
-                    child: _EmptyStations(label: s.noStationsFound),
+                ? const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyStations(),
                   )
                 : SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
@@ -263,9 +264,9 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Collapsible Station Card
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _StationCard extends ConsumerWidget {
   final FloodData    data;
@@ -391,7 +392,7 @@ class _StationCard extends ConsumerWidget {
 
             const SizedBox(height: 9),
 
-            // ── Sparkline OR level bar ────────────────────────────────────
+            // ── Sparkline OR level bar ──────────────────────────────────
             if (hasTrend)
               SparklineChart(
                 snapshots:    trend,
@@ -405,7 +406,7 @@ class _StationCard extends ConsumerWidget {
 
             const SizedBox(height: 7),
 
-            // ── Collapsed stats row ───────────────────────────────────────
+            // ── Collapsed stats row ─────────────────────────────────────────
             if (!isExpanded)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -426,7 +427,7 @@ class _StationCard extends ConsumerWidget {
                 ],
               ),
 
-            // ── Expand panel ──────────────────────────────────────────────
+            // ── Expand panel ──────────────────────────────────────────────────
             AnimatedSize(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
@@ -439,7 +440,7 @@ class _StationCard extends ConsumerWidget {
                   : const SizedBox.shrink(),
             ),
 
-            // ── Chevron ───────────────────────────────────────────────────
+            // ── Chevron ─────────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Center(
@@ -465,9 +466,9 @@ class _StationCard extends ConsumerWidget {
           color: c, fontSize: 9, fontWeight: FontWeight.w600));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Expand Panel
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _ExpandPanel extends StatelessWidget {
   final FloodData    data;
@@ -486,7 +487,6 @@ class _ExpandPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Gradient divider
           Container(
             height: 1,
             margin: const EdgeInsets.only(bottom: 12),
@@ -498,8 +498,6 @@ class _ExpandPanel extends StatelessWidget {
               ]),
             ),
           ),
-
-          // ── Threshold pills ──────────────────────────────────────────
           Row(children: [
             Expanded(child: _ThresholdPill(
                 label: 'Safe',
@@ -517,8 +515,6 @@ class _ExpandPanel extends StatelessWidget {
                 color: AppPalette.danger)),
           ]),
           const SizedBox(height: 8),
-
-          // ── Info tiles ───────────────────────────────────────────────
           Row(children: [
             Expanded(child: _InfoTile(
               icon:  Icons.grain_rounded,
@@ -536,15 +532,11 @@ class _ExpandPanel extends StatelessWidget {
             )),
           ]),
           const SizedBox(height: 8),
-
-          // ── Gap-to-danger bar ─────────────────────────────────────────
           _GapBar(
               current: data.currentLevel,
               danger:  data.dangerLevel,
               color:   color),
           const SizedBox(height: 10),
-
-          // ── Full Details button ───────────────────────────────────────
           GestureDetector(
             onTap: onDetailTap,
             child: Container(
@@ -572,8 +564,6 @@ class _ExpandPanel extends StatelessWidget {
               ),
             ),
           ),
-
-          // ── Status badge + timestamp ──────────────────────────────────
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Row(
@@ -595,9 +585,9 @@ class _ExpandPanel extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Sub-widgets
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _ThresholdPill extends StatelessWidget {
   final String label, value;
@@ -848,37 +838,65 @@ class _RiskBadge extends StatelessWidget {
       );
 }
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Empty State  —  safe in any amount of remaining space
+// ────────────────────────────────────────────────────────────────────────────────
+
 class _EmptyStations extends StatelessWidget {
-  final String label;
-  const _EmptyStations({required this.label});
+  const _EmptyStations();
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 72, height: 72,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  AppPalette.gold.withValues(alpha: 0.10),
-                  AppPalette.abyss2,
-                ]),
-                border: Border.all(
-                    color: AppPalette.gold.withValues(alpha: 0.20)),
+  Widget build(BuildContext context) {
+    // LayoutBuilder lets the icon shrink when vertical space is tight
+    // (e.g. SliverFillRemaining with only ~68 px after the search/filter rows).
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availH  = constraints.maxHeight;
+        // Show icon only when there's enough room; always show text
+        final showIcon = availH > 80;
+        final iconSize = (availH * 0.35).clamp(24.0, 72.0);
+        final boxSize  = iconSize + 16;
+
+        return Center(
+          child: SingleChildScrollView(
+            physics: const NeverScrollableScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (showIcon) ...[
+                    Container(
+                      width: boxSize, height: boxSize,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(colors: [
+                          AppPalette.gold.withValues(alpha: 0.10),
+                          AppPalette.abyss2,
+                        ]),
+                        border: Border.all(
+                            color: AppPalette.gold.withValues(alpha: 0.20)),
+                      ),
+                      child: Icon(Icons.sensors_off_rounded,
+                          color: AppPalette.gold, size: iconSize * 0.48),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(
+                    context.l10n.noStationsFound,
+                    style: const TextStyle(
+                      color: AppPalette.textGrey,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              child: const Icon(Icons.sensors_off_rounded,
-                  color: AppPalette.gold, size: 32),
             ),
-            const SizedBox(height: 16),
-            Text(label,
-                style: const TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                )),
-          ],
-        ),
-      );
+          ),
+        );
+      },
+    );
+  }
 }
