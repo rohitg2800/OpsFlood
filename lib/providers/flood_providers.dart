@@ -1,13 +1,11 @@
 // lib/providers/flood_providers.dart
-// Riverpod 3 — stable RealTimeNotifier.
+// Riverpod 3.x — RealTimeService is a singleton ChangeNotifier.
 //
-// Problem: RealTimeService is a singleton (factory => _instance).
-//   • state = service  → Riverpod identity check skips rebuild (same ref)
-//   • invalidateSelf() → re-runs build(), re-adds listener + re-starts polling
-//
-// Solution: wrap in a plain ChangeNotifierProvider so Riverpod owns
-// the ChangeNotifier lifecycle directly and fires rebuilds on every
-// notifyListeners() automatically — no custom Notifier needed.
+// Strategy: a stable _serviceInstance field is set once in initState().
+// A separate _tickProvider (StateProvider<int>) is incremented on every
+// notifyListeners(). All data providers watch _tickProvider so they
+// rebuild on each fetch cycle — no identity-check problem, no duplicate
+// listener registration, no re-startPolling.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,16 +14,31 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Core provider ─────────────────────────────────────────────────────────────
-// ChangeNotifierProvider listens to notifyListeners() automatically.
-// RealTimeService is a singleton so we get the same instance every time,
-// and Riverpod will rebuild all watchers on each notifyListeners() call.
-final realTimeProvider =
-    ChangeNotifierProvider<RealTimeService>((_) {
+// ── Internal tick — increments on every RealTimeService.notifyListeners() ────
+final _tickProvider = StateProvider<int>((_) => 0);
+
+// ── Bootstrap provider — runs once, wires listener, starts polling ─────────
+final _serviceBootProvider = Provider<RealTimeService>((ref) {
   final service = RealTimeService();
-  // startPolling is idempotent — safe to call; engine guards against double-start
+
+  void onUpdate() {
+    ref.read(_tickProvider.notifier).update((t) => t + 1);
+  }
+
+  service.addListener(onUpdate);
+  ref.onDispose(() => service.removeListener(onUpdate));
+
   Future.microtask(() => service.startPolling());
   return service;
+});
+
+// ── Public providers ─────────────────────────────────────────────────────────
+
+/// Exposes the singleton RealTimeService. Watching this provider rebuilds
+/// on every fetch because _tickProvider is also watched.
+final realTimeProvider = Provider<RealTimeService>((ref) {
+  ref.watch(_tickProvider);          // rebuild when tick changes
+  return ref.watch(_serviceBootProvider); // stable singleton
 });
 
 /// Alias kept for backward compatibility.
