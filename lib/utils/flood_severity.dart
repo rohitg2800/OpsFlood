@@ -1,12 +1,8 @@
 // lib/utils/flood_severity.dart
 // Resolves issue #9: FloodSeverityLevel enum + color/label helpers
-// Golden Ops Design Language v6
 import 'package:flutter/material.dart';
 import '../theme/river_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Primary enum used throughout the app
-// ─────────────────────────────────────────────────────────────────────────────
 enum FloodSeverity {
   normal,
   watch,
@@ -81,20 +77,23 @@ enum FloodSeverity {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FloodSeverityColor — static helper used by widgets
-// ─────────────────────────────────────────────────────────────────────────────
+/// Static color helpers — both instance method and static field access patterns
 class FloodSeverityColor {
   const FloodSeverityColor._();
 
+  // Static color fields (used by risk_score_gauge.dart CustomPainter)
+  static const Color normal  = AppPalette.safe;
+  static const Color watch   = AppPalette.cyan;
+  static const Color warning = AppPalette.warning;
+  static const Color danger  = AppPalette.danger;
+  static const Color extreme = AppPalette.critical;
+
+  // Method-style helpers
   static Color forSeverity(FloodSeverity s) => s.color;
   static Color glowForSeverity(FloodSeverity s) => s.glowColor;
-
-  static Color forLevel(double current, double warning, double danger) =>
-      FloodSeverity.fromLevel(current, warning, danger).color;
+  static Color forLevel(double current, double warnLvl, double dangerLvl) =>
+      FloodSeverity.fromLevel(current, warnLvl, dangerLvl).color;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FloodSeverityLevel — backward-compat alias for old code
-// ─────────────────────────────────────────────────────────────────────────────
+// Backward-compat typedef
 typedef FloodSeverityLevel = FloodSeverity;
