@@ -5,7 +5,7 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+    id("com.google.gms.google-services")  // Google services plugin
 }
 
 val localProperties = Properties()
@@ -74,8 +74,15 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
+
+    // Firebase BoM — controls all Firebase library versions
+    implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
+
+    // Firebase Analytics (no version needed when using BoM)
     implementation("com.google.firebase:firebase-analytics")
+
+    // Firebase Cloud Messaging — needed for push notification support
+    implementation("com.google.firebase:firebase-messaging")
 }
 
 flutter {
