@@ -1,5 +1,6 @@
 // lib/providers/theme_provider.dart
-// Resolves issue #8: Theme persistence — ChangeNotifier + Riverpod StateNotifier
+// Riverpod v3 — StateNotifier/StateNotifierProvider removed in v3.
+// Migrated to Notifier<T> + NotifierProvider.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/app_theme.dart';
 
-// ───────────────────────────────────────────────────────────────────
+// ── AppThemeMode enum ─────────────────────────────────────────────────────
 enum AppThemeMode {
   system,
   light,
@@ -52,12 +53,18 @@ enum AppThemeMode {
   }
 }
 
-// ── Riverpod StateNotifier ────────────────────────────────────────────────────
-class ThemeModeNotifier extends StateNotifier<AppThemeMode> {
-  ThemeModeNotifier() : super(AppThemeMode.system);
-
-  Future<void> init() async {
-    state = await AppThemeMode.load();
+// ── Riverpod v3: Notifier<AppThemeMode> ─────────────────────────────────────────
+// ThemeCycleButton calls: ref.watch(themeModeProvider)
+//                         ref.read(themeModeProvider.notifier).cycle()
+class ThemeModeNotifier extends Notifier<AppThemeMode> {
+  @override
+  AppThemeMode build() {
+    // Load persisted value asynchronously after first build
+    Future.microtask(() async {
+      final saved = await AppThemeMode.load();
+      state = saved;
+    });
+    return AppThemeMode.system;
   }
 
   Future<void> set(AppThemeMode mode) async {
@@ -74,14 +81,13 @@ class ThemeModeNotifier extends StateNotifier<AppThemeMode> {
 }
 
 final themeModeProvider =
-    StateNotifierProvider<ThemeModeNotifier, AppThemeMode>(
-  (ref) => ThemeModeNotifier()..init(),
+    NotifierProvider<ThemeModeNotifier, AppThemeMode>(
+  ThemeModeNotifier.new,
 );
 
-// ── Legacy ChangeNotifier ───────────────────────────────────────────────────
+// ── Legacy ChangeNotifier (used by MaterialApp builder) ─────────────────────
 class ThemeProvider extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
-
   ThemeMode get themeMode => _themeMode;
 
   Future<void> init() async {
@@ -96,10 +102,8 @@ class ThemeProvider extends ChangeNotifier {
   }
 
   void toggleTheme() {
-    if (_themeMode == ThemeMode.dark) {
-      setThemeMode(ThemeMode.light);
-    } else {
-      setThemeMode(ThemeMode.dark);
-    }
+    setThemeMode(
+      _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark,
+    );
   }
 }

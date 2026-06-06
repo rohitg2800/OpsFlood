@@ -1,13 +1,11 @@
 // lib/providers/alerts_provider.dart
 //
-// OpsFlood — AlertsProvider (Riverpod)
+// OpsFlood — AlertsProvider (Riverpod v3)
 //
-// Manages BOTH:
-//   • CWC gauge breach alerts  (ThresholdAlertService)
-//   • IMD weather alerts       (LiveFetchEngine → imdAlertsProvider)
-//
-// IMD alerts are injected via ingestImdAlerts() which is called from the
-// imdAlertsProvider watcher inside alertsProvider itself.
+// Riverpod v3 removed ChangeNotifierProvider.
+// Migrated to a plain ChangeNotifier exposed via ChangeNotifierProvider
+// shim — but since that's also gone, we use a Notifier<AlertsState>
+// pattern with a thin facade for backward-compat getters.
 library;
 
 import 'dart:async';
@@ -19,142 +17,131 @@ import '../models/imd_alert.dart';
 import '../services/threshold_alert_service.dart';
 import 'flood_providers.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Top-level Riverpod providers
-// ─────────────────────────────────────────────────────────────────────────────
+// ── State model ──────────────────────────────────────────────────────────────
+class AlertsState {
+  final List<ThresholdAlert> cwcAlerts;
+  final List<ImdAlert>       imdAlerts;
+  final bool                 loading;
+  final String?              error;
 
-/// Primary provider — exposes the full AlertsProvider notifier.
-final alertsProvider = ChangeNotifierProvider<AlertsProvider>((ref) {
-  final provider = AlertsProvider();
-  Future.microtask(() => ThresholdAlertService.instance.start());
-
-  // Whenever raw IMD data changes in LiveFetchEngine, push it into AlertsProvider.
-  ref.listen<List<dynamic>>(imdAlertsProvider, (_, rawList) {
-    provider.ingestImdAlerts(rawList);
+  const AlertsState({
+    this.cwcAlerts = const [],
+    this.imdAlerts = const [],
+    this.loading   = false,
+    this.error,
   });
 
-  return provider;
-});
+  AlertsState copyWith({
+    List<ThresholdAlert>? cwcAlerts,
+    List<ImdAlert>?       imdAlerts,
+    bool?                 loading,
+    String?               error,
+  }) => AlertsState(
+    cwcAlerts: cwcAlerts ?? this.cwcAlerts,
+    imdAlerts: imdAlerts ?? this.imdAlerts,
+    loading:   loading   ?? this.loading,
+    error:     error,
+  );
 
-/// Derived: all active (non-normal) CWC gauge alerts, sorted severe-first.
-final activeAlertsProvider = Provider<List<ThresholdAlert>>((ref) {
-  return ref.watch(alertsProvider).active;
-});
+  List<ThresholdAlert> get active   => cwcAlerts.where((a) => a.level != AlertLevel.normal).toList();
+  List<ThresholdAlert> get critical => cwcAlerts.where((a) => a.level.requiresEmergency).toList();
+  int get badgeCount => ThresholdAlertService.instance.unreadCount;
+}
 
-/// Derived: only danger + extreme CWC alerts.
-final criticalAlertsRiverProvider = Provider<List<ThresholdAlert>>((ref) {
-  return ref.watch(alertsProvider).critical;
-});
-
-/// Derived: unread badge count (CWC only).
-final alertBadgeCountProvider = Provider<int>((ref) {
-  return ref.watch(alertsProvider).badgeCount;
-});
-
-/// Derived: loading state.
-final alertsLoadingProvider = Provider<bool>((ref) {
-  return ref.watch(alertsProvider).loading;
-});
-
-/// Derived: parsed IMD alerts list.
-final parsedImdAlertsProvider = Provider<List<ImdAlert>>((ref) {
-  return ref.watch(alertsProvider).imdAlerts;
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AlertsProvider — ChangeNotifier
-// ─────────────────────────────────────────────────────────────────────────────
-
-class AlertsProvider extends ChangeNotifier {
-  AlertsProvider() {
-    _sub = ThresholdAlertService.instance.stream.listen(_onAlerts);
-    _cwcAlerts = List.of(ThresholdAlertService.instance.currentAlerts);
-  }
-
+// ── Notifier ───────────────────────────────────────────────────────────────────
+class AlertsNotifier extends Notifier<AlertsState> {
   StreamSubscription<List<ThresholdAlert>>? _sub;
 
-  // ── CWC gauge alerts ──────────────────────────────────────────────────────
-  List<ThresholdAlert> _cwcAlerts = [];
-  bool    _loading = false;
-  String? _error;
+  @override
+  AlertsState build() {
+    Future.microtask(() => ThresholdAlertService.instance.start());
 
-  List<ThresholdAlert> get all      => _cwcAlerts;
-  List<ThresholdAlert> get active   => _cwcAlerts.where((a) => a.level != AlertLevel.normal).toList();
-  List<ThresholdAlert> get critical => _cwcAlerts.where((a) => a.level.requiresEmergency).toList();
-  int                  get badgeCount => ThresholdAlertService.instance.unreadCount;
-  bool                 get loading  => _loading;
-  String?              get error    => _error;
+    _sub = ThresholdAlertService.instance.stream.listen((alerts) {
+      state = state.copyWith(cwcAlerts: alerts, loading: false);
+    });
 
-  // ── Filter state (CWC tab) ────────────────────────────────────────────────
-  AlertLevel? _filterLevel;
-  String?     _filterState;
+    // Watch imdAlertsProvider and push into state
+    ref.listen<List<dynamic>>(imdAlertsProvider, (_, rawList) {
+      ingestImdAlerts(rawList);
+    });
 
-  AlertLevel? get filterLevel => _filterLevel;
-  String?     get filterState => _filterState;
+    ref.onDispose(() => _sub?.cancel());
 
-  List<ThresholdAlert> get filtered => _cwcAlerts.where((a) {
-    if (_filterLevel != null && a.level != _filterLevel) return false;
-    if (_filterState != null && a.state != _filterState) return false;
-    return true;
-  }).toList();
+    return AlertsState(
+      cwcAlerts: List.of(ThresholdAlertService.instance.currentAlerts),
+    );
+  }
 
-  void setFilterLevel(AlertLevel? level) { _filterLevel = level; notifyListeners(); }
-  void setFilterState(String? state)     { _filterState = state; notifyListeners(); }
-  void clearFilters()                    { _filterLevel = null; _filterState = null; notifyListeners(); }
-
-  // ── IMD weather alerts ────────────────────────────────────────────────────
-  List<ImdAlert> _imdAlerts = [];
-  List<ImdAlert> get imdAlerts => _imdAlerts;
-
-  /// Called by the Riverpod listener in alertsProvider whenever
-  /// LiveFetchEngine publishes a fresh imdAlerts list.
   void ingestImdAlerts(List<dynamic> rawList) {
     if (rawList.isEmpty) return;
     final parsed = rawList.map(ImdAlert.fromRaw).toList()
       ..sort((a, b) => b.severity.order.compareTo(a.severity.order));
-    // Deduplicate by id; mark existing as not-new.
-    final existing = { for (final a in _imdAlerts) a.id: a };
-    _imdAlerts = parsed.map((a) {
+    final existing = {for (final a in state.imdAlerts) a.id: a};
+    final merged   = parsed.map((a) {
       final old = existing[a.id];
       return old != null ? a.copyWith(isNew: false) : a;
     }).toList();
-    notifyListeners();
+    state = state.copyWith(imdAlerts: merged);
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
   Future<void> refresh() async {
-    _loading = true;
-    _error   = null;
-    notifyListeners();
+    state = state.copyWith(loading: true);
     try {
       await ThresholdAlertService.instance.refresh();
     } catch (e) {
-      _error = e.toString();
-      if (kDebugMode) debugPrint('[AlertsProvider] refresh error: $e');
-    } finally {
-      _loading = false;
-      notifyListeners();
+      state = state.copyWith(loading: false, error: e.toString());
+      if (kDebugMode) debugPrint('[AlertsNotifier] refresh error: $e');
     }
   }
 
   Future<void> markAllSeen() async {
     await ThresholdAlertService.instance.markAllSeen();
-    _imdAlerts = _imdAlerts.map((a) => a.copyWith(isNew: false)).toList();
-    notifyListeners();
+    state = state.copyWith(
+      imdAlerts: state.imdAlerts.map((a) => a.copyWith(isNew: false)).toList(),
+    );
   }
 
-  // ── Internal stream listener ───────────────────────────────────────────────
+  // ── Filter helpers (CWC tab) ───────────────────────────────────────────────
+  AlertLevel? _filterLevel;
+  String?     _filterState;
+  void setFilterLevel(AlertLevel? l) { _filterLevel = l; state = state.copyWith(); }
+  void setFilterState(String? s)     { _filterState = s; state = state.copyWith(); }
+  void clearFilters()                { _filterLevel = null; _filterState = null; state = state.copyWith(); }
 
-  void _onAlerts(List<ThresholdAlert> alerts) {
-    _cwcAlerts = List.of(alerts);
-    _loading   = false;
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
+  List<ThresholdAlert> get filtered => state.cwcAlerts.where((a) {
+    if (_filterLevel != null && a.level != _filterLevel) return false;
+    if (_filterState != null && a.state != _filterState) return false;
+    return true;
+  }).toList();
 }
+
+// ── Providers ──────────────────────────────────────────────────────────────────
+final alertsProvider =
+    NotifierProvider<AlertsNotifier, AlertsState>(AlertsNotifier.new);
+
+final activeAlertsProvider = Provider<List<ThresholdAlert>>((ref) {
+  return ref.watch(alertsProvider).active;
+});
+
+final criticalAlertsRiverProvider = Provider<List<ThresholdAlert>>((ref) {
+  return ref.watch(alertsProvider).critical;
+});
+
+final alertBadgeCountProvider = Provider<int>((ref) {
+  return ref.watch(alertsProvider).badgeCount;
+});
+
+final alertsLoadingProvider = Provider<bool>((ref) {
+  return ref.watch(alertsProvider).loading;
+});
+
+final parsedImdAlertsProvider = Provider<List<ImdAlert>>((ref) {
+  return ref.watch(alertsProvider).imdAlerts;
+});
+
+// ── Backward-compat facade so callers using .active/.badgeCount still work ──
+// Any file that does: ref.watch(alertsProvider).active
+// still works because AlertsState exposes .active etc.
+
+/// Legacy type alias so screens that typed AlertsProvider still compile.
+typedef AlertsProvider = AlertsNotifier;
