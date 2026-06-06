@@ -1,5 +1,7 @@
 // lib/screens/river_monitor_screen.dart
-// RiverMonitorScreen v3 — wired to live CWC befiqr data
+// RiverMonitorScreen v4
+// Fix: deduplicate legacy (All India) list against CWC Bihar stations
+//      so cities that exist in both sources only appear once (CWC wins).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -43,6 +45,25 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     super.dispose();
   }
 
+  // ── Deduplication ─────────────────────────────────────────────────────────
+  // CWC Bihar stations are the authoritative source. Remove any legacy entry
+  // whose city name matches a CWC site name (case-insensitive) to avoid
+  // showing the same station twice.
+  List<FloodData> _deduplicateLegacy(
+      List<FloodData> legacy, List<CwcStation> cwc) {
+    final cwcSiteNames = cwc
+        .map((s) => s.site.toLowerCase().trim())
+        .toSet();
+    // Also match against city part of compound names like "Sikandarpur (Muzzafarpur)"
+    final cwcCityKeys = cwc
+        .map((s) => s.site.toLowerCase().split('(').first.trim())
+        .toSet();
+    return legacy.where((fd) {
+      final city = fd.city.toLowerCase().trim();
+      return !cwcSiteNames.contains(city) && !cwcCityKeys.contains(city);
+    }).toList();
+  }
+
   List<CwcStation> _filteredCwc(List<CwcStation> stations) {
     if (_query.isEmpty) return stations;
     final q = _query.toLowerCase();
@@ -81,8 +102,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   }
 
   FloodSeverity _cwcSeverity(CwcStation s) {
-    if (s.isDanger) return FloodSeverity.danger;
-    if (s.isWarning) return FloodSeverity.warning;
+    if (s.isDanger)   return FloodSeverity.danger;
+    if (s.isWarning)  return FloodSeverity.warning;
     if (s.isElevated) return FloodSeverity.watch;
     return FloodSeverity.normal;
   }
@@ -90,38 +111,36 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   List<CwcStation> _cwcAlerts(List<CwcStation> stations) =>
       stations.where((s) => s.isDanger || s.isWarning).take(3).toList();
 
-  // ── Count header string ──────────────────────────────────────────────
-  // Shows: "31 CWC Bihar  ·  15 All India"
-  // If legacy is 0 (still loading / empty): "31 CWC Bihar"
   String _countHeader(int cwc, int india) {
-    if (india > 0) {
-      return '$cwc CWC Bihar  ·  $india All India';
-    }
+    if (india > 0) return '$cwc CWC Bihar  ·  $india All India';
     return '$cwc CWC Bihar';
   }
 
   @override
   Widget build(BuildContext context) {
     final cwcAsync = ref.watch(cwcStationsProvider);
-    final rt = ref.watch(realTimeServiceProvider);
-    final legacy = rt.liveLevels;
+    final rt       = ref.watch(realTimeServiceProvider);
+    final rawLegacy = rt.liveLevels;
 
     final List<CwcStation> cwcStations = cwcAsync.when(
-      data: (list) => list,
+      data:    (list) => list,
       loading: () => const [],
-      error: (_, __) => const [],
+      error:   (_, __) => const [],
     );
 
+    // Deduplicate: drop legacy entries already covered by CWC Bihar
+    final legacy = _deduplicateLegacy(rawLegacy, cwcStations);
+
     final isLoading =
-        rt.isLoading && legacy.isEmpty && cwcAsync is AsyncLoading;
+        rt.isLoading && rawLegacy.isEmpty && cwcAsync is AsyncLoading;
 
     final List<CwcStation> sortedCwc = List<CwcStation>.from(cwcStations)
-      ..sort((a, b) => BefiqrCwcService.riskScore(b)
-          .compareTo(BefiqrCwcService.riskScore(a)));
+      ..sort((a, b) =>
+          BefiqrCwcService.riskScore(b).compareTo(BefiqrCwcService.riskScore(a)));
 
-    final filteredCwc = _filteredCwc(sortedCwc);
+    final filteredCwc    = _filteredCwc(sortedCwc);
     final filteredLegacy = _filteredLegacy(legacy);
-    final totalCount = filteredCwc.length + filteredLegacy.length;
+    final totalCount     = filteredCwc.length + filteredLegacy.length;
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -143,7 +162,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
         controller: _scrollCtrl,
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── Sliver AppBar ──────────────────────────────────────────────
+          // ── Sliver AppBar ────────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             floating: false,
@@ -229,7 +248,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Search bar ────────────────────────────────────────────────
+          // ── Search bar ───────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -255,7 +274,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Status strip ───────────────────────────────────────────────
+          // ── Status strip ─────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: StationStatusStrip(
               counts: isLoading ? {} : _counts(sortedCwc, legacy),
@@ -266,7 +285,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── CWC alert banners ─────────────────────────────────────────
+          // ── CWC alert banners ────────────────────────────────────────────
           if (!isLoading && _query.isEmpty && cwcStations.isNotEmpty)
             SliverToBoxAdapter(
               child: LiveAlertBannerStack(
@@ -283,7 +302,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Legend ─────────────────────────────────────────────────────
+          // ── Legend ───────────────────────────────────────────────────────
           if (!isLoading)
             SliverToBoxAdapter(
               child: Padding(
@@ -305,7 +324,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Count header ───────────────────────────────────────────────
+          // ── Count header ─────────────────────────────────────────────────
           if (!isLoading && totalCount > 0)
             SliverToBoxAdapter(
               child: Padding(
@@ -322,13 +341,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Shimmer ───────────────────────────────────────────────────
+          // ── Shimmer ──────────────────────────────────────────────────────
           if (isLoading)
             SliverToBoxAdapter(
               child: ShimmerLoader.stationList(count: 6),
             )
 
-          // ── CWC stations (primary) ───────────────────────────────────
+          // ── CWC stations (primary — authoritative Bihar data) ────────────
           else if (filteredCwc.isNotEmpty) ...[
             if (_query.isEmpty)
               const SliverToBoxAdapter(
@@ -360,7 +379,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ],
 
-          // ── Legacy stations (secondary) ──────────────────────────────
+          // ── Legacy stations (secondary — non-Bihar / non-duplicate) ──────
           if (filteredLegacy.isNotEmpty) ...[
             if (_query.isEmpty)
               const SliverToBoxAdapter(
@@ -435,18 +454,18 @@ class _CwcCard extends StatelessWidget {
   const _CwcCard({required this.station});
 
   Color get _statusColor {
-    if (station.isDanger) return AppPalette.critical;
-    if (station.isWarning) return AppPalette.danger;
+    if (station.isDanger)   return AppPalette.critical;
+    if (station.isWarning)  return AppPalette.danger;
     if (station.isElevated) return AppPalette.amber;
     return AppPalette.safe;
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor;
+    final color     = _statusColor;
     final riskScore = BefiqrCwcService.riskScore(station);
-    final pct = station.fillFraction;
-    const warnPct = 0.97;
+    final pct       = station.fillFraction;
+    const warnPct   = 0.97;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -558,8 +577,9 @@ class _CwcCard extends StatelessWidget {
                   icon: Icons.trending_down_rounded,
                   label: 'Gap',
                   value: '${station.gap.toStringAsFixed(2)} m',
-                  accent:
-                      station.isDanger ? AppPalette.critical : AppPalette.safe,
+                  accent: station.isDanger
+                      ? AppPalette.critical
+                      : AppPalette.safe,
                 ),
               ],
             ),
@@ -570,8 +590,8 @@ class _CwcCard extends StatelessWidget {
             child: _LevelBar(
               current: station.currentLevel,
               warning: station.dangerLevel * 0.97,
-              danger: station.dangerLevel,
-              color: color,
+              danger:  station.dangerLevel,
+              color:   color,
             ),
           ),
         ],
@@ -591,9 +611,9 @@ class _RiverCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final severity = FloodSeverityHelper.fromString(data.status);
-    final color = FloodSeverityHelper.color(severity);
-    final pct = (data.capacityPercent / 100).clamp(0.0, 1.0);
-    final warnPct = data.dangerLevel > 0
+    final color    = FloodSeverityHelper.color(severity);
+    final pct      = (data.capacityPercent / 100).clamp(0.0, 1.0);
+    final warnPct  = data.dangerLevel > 0
         ? (data.warningLevel / data.dangerLevel).clamp(0.0, 1.0)
         : 0.65;
 
@@ -750,8 +770,8 @@ class _RiverCard extends StatelessWidget {
             child: _LevelBar(
               current: data.currentLevel,
               warning: data.warningLevel,
-              danger: data.dangerLevel,
-              color: color,
+              danger:  data.dangerLevel,
+              color:   color,
             ),
           ),
         ],
@@ -761,22 +781,18 @@ class _RiverCard extends StatelessWidget {
 
   Color _imdColor(String s) {
     switch (s.toUpperCase()) {
-      case 'RED':
-        return AppPalette.critical;
-      case 'ORANGE':
-        return AppPalette.warning;
-      case 'YELLOW':
-        return const Color(0xFFFFEE58);
-      default:
-        return AppPalette.textGrey;
+      case 'RED':    return AppPalette.critical;
+      case 'ORANGE': return AppPalette.warning;
+      case 'YELLOW': return const Color(0xFFFFEE58);
+      default:       return AppPalette.textGrey;
     }
   }
 
   String _timeAgo(DateTime t) {
     final diff = DateTime.now().difference(t);
-    if (diff.inMinutes < 1) return 'now';
+    if (diff.inMinutes < 1)  return 'now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inHours < 24)   return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
 }
@@ -787,7 +803,7 @@ class _RiverCard extends StatelessWidget {
 
 class _ArcGauge extends StatelessWidget {
   final double percent, warnAt, size;
-  final Color color;
+  final Color  color;
   final String centerLabel, subLabel;
   const _ArcGauge({
     required this.percent,
@@ -806,8 +822,8 @@ class _ArcGauge extends StatelessWidget {
           children: [
             CustomPaint(
               size: Size(size, size),
-              painter:
-                  _ArcPainter(percent: percent, warnAt: warnAt, color: color),
+              painter: _ArcPainter(
+                  percent: percent, warnAt: warnAt, color: color),
             ),
             Column(
               mainAxisSize: MainAxisSize.min,
@@ -832,11 +848,9 @@ class _ArcGauge extends StatelessWidget {
 
 class _ArcPainter extends CustomPainter {
   final double percent, warnAt;
-  final Color color;
+  final Color  color;
   const _ArcPainter(
-      {required this.percent,
-      required this.warnAt,
-      required this.color});
+      {required this.percent, required this.warnAt, required this.color});
   static const _start = math.pi * 0.75;
   static const _sweep = math.pi * 1.5;
   @override
@@ -845,10 +859,7 @@ class _ArcPainter extends CustomPainter {
     final outer = size.width / 2 - 4;
     final rect = Rect.fromCircle(center: Offset(cx, cy), radius: outer);
     canvas.drawArc(
-        rect,
-        _start,
-        _sweep,
-        false,
+        rect, _start, _sweep, false,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 8
@@ -856,10 +867,7 @@ class _ArcPainter extends CustomPainter {
           ..color = AppPalette.abyss2);
     if (percent > 0) {
       canvas.drawArc(
-          rect,
-          _start,
-          _sweep * percent.clamp(0, 1),
-          false,
+          rect, _start, _sweep * percent.clamp(0, 1), false,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 8
@@ -871,12 +879,12 @@ class _ArcPainter extends CustomPainter {
             ).createShader(rect));
     }
     final wAngle = _start + _sweep * warnAt;
-    final tickR = outer + 3;
+    final tickR  = outer + 3;
     canvas.drawLine(
       Offset(cx + (outer - 10) * math.cos(wAngle),
           cy + (outer - 10) * math.sin(wAngle)),
-      Offset(
-          cx + tickR * math.cos(wAngle), cy + tickR * math.sin(wAngle)),
+      Offset(cx + tickR * math.cos(wAngle),
+          cy + tickR * math.sin(wAngle)),
       Paint()
         ..color = AppPalette.warning
         ..strokeWidth = 2.5
@@ -888,15 +896,13 @@ class _ArcPainter extends CustomPainter {
           cy + outer * math.sin(dAngle));
       canvas.drawCircle(dotC, 4, Paint()..color = color);
       canvas.drawCircle(
-          dotC,
-          4,
+          dotC, 4,
           Paint()
             ..color = Colors.white.withValues(alpha: 0.3)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5);
     }
   }
-
   @override
   bool shouldRepaint(_ArcPainter o) =>
       o.percent != percent || o.color != color;
@@ -904,8 +910,8 @@ class _ArcPainter extends CustomPainter {
 
 class _StatChip extends StatelessWidget {
   final IconData icon;
-  final String label, value;
-  final Color accent;
+  final String   label, value;
+  final Color    accent;
   const _StatChip({
     required this.icon,
     required this.label,
@@ -948,7 +954,7 @@ class _StatChip extends StatelessWidget {
 
 class _Badge extends StatelessWidget {
   final String label;
-  final Color bg, fg;
+  final Color  bg, fg;
   const _Badge({required this.label, required this.bg, required this.fg});
   @override
   Widget build(BuildContext context) => Container(
@@ -966,7 +972,7 @@ class _Badge extends StatelessWidget {
 
 class _LevelBar extends StatelessWidget {
   final double current, warning, danger;
-  final Color color;
+  final Color  color;
   const _LevelBar({
     required this.current,
     required this.warning,
@@ -975,7 +981,7 @@ class _LevelBar extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    final pct = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
+    final pct  = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
     final wPct = danger > 0 ? (warning / danger).clamp(0.0, 1.0) : 0.65;
     return Column(
       children: [
@@ -1028,7 +1034,8 @@ class _LevelBar extends StatelessWidget {
                 style: const TextStyle(
                     fontSize: 10, color: AppPalette.textGrey)),
             Text('⚠ ${warning.toStringAsFixed(1)} m',
-                style: TextStyle(fontSize: 10, color: AppPalette.warning)),
+                style:
+                    TextStyle(fontSize: 10, color: AppPalette.warning)),
             Text('🔴 ${danger.toStringAsFixed(1)} m',
                 style: TextStyle(fontSize: 10, color: AppPalette.danger)),
           ],

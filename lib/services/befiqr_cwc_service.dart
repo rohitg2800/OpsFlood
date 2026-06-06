@@ -2,7 +2,7 @@
 // Fetches live CWC Bihar station data from irrigation.befiqr.in
 // Strategy:
 //   1. Try live HTTP scrape of https://irrigation.befiqr.in/state/table/cwc-stations
-//   2. On failure / timeout → fall back to the embedded 31-station seed snapshot
+//   2. On failure / timeout → fall back to the embedded 32-station seed snapshot
 // The parsed data is exposed as a List<CwcStation> and fed into the
 // existing flood_providers so the whole app benefits automatically.
 library;
@@ -61,42 +61,44 @@ class CwcStation {
   );
 }
 
-// ── 31-station seed (snapshot from irrigation.befiqr.in, June 2026) ───────────
+// ── 32-station seed (snapshot from irrigation.befiqr.in + CWC official, June 2026) ─
 
 List<CwcStation> get _seedStations {
   final now = DateTime.now();
   return [
-    CwcStation(river: 'Adhwara',      site: 'Ekmighat',                 currentLevel: 40.62, dangerLevel: 46.94, fetchedAt: now),
-    CwcStation(river: 'Adhwara',      site: 'Kamtaul',                  currentLevel: 46.54, dangerLevel: 50.00, fetchedAt: now),
-    CwcStation(river: 'Adhwara',      site: 'Sonbarsa',                 currentLevel: 78.78, dangerLevel: 81.85, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Benibad',                  currentLevel: 46.25, dangerLevel: 48.68, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Dheng Bridge',             currentLevel: 68.35, dangerLevel: 71.00, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Hayaghat',                 currentLevel: 39.26, dangerLevel: 45.72, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Khagaria',                 currentLevel: 29.99, dangerLevel: 36.58, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Rosera',                   currentLevel: 36.31, dangerLevel: 42.63, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Samastipur',               currentLevel: 39.28, dangerLevel: 46.00, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Sikandarpur (Muzzafarpur)',currentLevel: 45.18, dangerLevel: 52.53, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Chatia',                   currentLevel: 64.99, dangerLevel: 69.15, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Dumariaghat',              currentLevel: 60.46, dangerLevel: 62.22, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Hajipur',                  currentLevel: 44.54, dangerLevel: 50.32, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Rewaghat',                 currentLevel: 51.12, dangerLevel: 54.41, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Bhagalpur',                currentLevel: 25.74, dangerLevel: 33.68, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Buxar',                    currentLevel: 49.19, dangerLevel: 60.30, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Dighaghat',                currentLevel: 43.05, dangerLevel: 50.45, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Gandhighat',               currentLevel: 42.61, dangerLevel: 48.60, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Hathidah',                 currentLevel: 34.60, dangerLevel: 41.76, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Kahalgaon',                currentLevel: 24.64, dangerLevel: 31.09, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Munger',                   currentLevel: 30.76, dangerLevel: 39.33, fetchedAt: now),
-    CwcStation(river: 'Ghaghra',      site: 'Darauli',                  currentLevel: 56.20, dangerLevel: 60.82, fetchedAt: now),
-    CwcStation(river: 'Ghaghra',      site: 'Gangpur Siswan',           currentLevel: 51.89, dangerLevel: 57.04, fetchedAt: now),
-    CwcStation(river: 'Kamalabalan', site: 'Jhanjharpur',              currentLevel: 48.15, dangerLevel: 50.00, fetchedAt: now),
-    CwcStation(river: 'Kamla',        site: 'Jainagar',                 currentLevel: 66.28, dangerLevel: 67.75, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Baltara',                  currentLevel: 31.28, dangerLevel: 33.85, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Basua',                    currentLevel: 45.82, dangerLevel: 47.75, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Kursela',                  currentLevel: 24.40, dangerLevel: 30.00, fetchedAt: now),
-    CwcStation(river: 'Mahananda',    site: 'Dhengraghat',              currentLevel: 33.30, dangerLevel: 35.65, fetchedAt: now),
-    CwcStation(river: 'Mahananda',    site: 'Taibpur',                  currentLevel: 63.72, dangerLevel: 66.00, fetchedAt: now),
-    CwcStation(river: 'Punpun',       site: 'Sripalpur',                currentLevel: 44.81, dangerLevel: 50.60, fetchedAt: now),
+    CwcStation(river: 'Adhwara',      site: 'Ekmighat',                  currentLevel: 40.62, dangerLevel: 46.94, fetchedAt: now),
+    CwcStation(river: 'Adhwara',      site: 'Kamtaul',                   currentLevel: 46.54, dangerLevel: 50.00, fetchedAt: now),
+    CwcStation(river: 'Adhwara',      site: 'Sonbarsa',                  currentLevel: 78.78, dangerLevel: 81.85, fetchedAt: now),
+    CwcStation(river: 'Bagmati',      site: 'Benibad',                   currentLevel: 46.25, dangerLevel: 48.68, fetchedAt: now),
+    CwcStation(river: 'Bagmati',      site: 'Dheng Bridge',              currentLevel: 68.35, dangerLevel: 71.00, fetchedAt: now),
+    CwcStation(river: 'Bagmati',      site: 'Hayaghat',                  currentLevel: 39.26, dangerLevel: 45.72, fetchedAt: now),
+    CwcStation(river: 'Burhi Gandak', site: 'Khagaria',                  currentLevel: 29.99, dangerLevel: 36.58, fetchedAt: now),
+    CwcStation(river: 'Burhi Gandak', site: 'Rosera',                    currentLevel: 36.31, dangerLevel: 42.63, fetchedAt: now),
+    CwcStation(river: 'Burhi Gandak', site: 'Samastipur',                currentLevel: 39.28, dangerLevel: 46.00, fetchedAt: now),
+    CwcStation(river: 'Burhi Gandak', site: 'Sikandarpur (Muzzafarpur)', currentLevel: 45.18, dangerLevel: 52.53, fetchedAt: now),
+    CwcStation(river: 'Gandak',       site: 'Chatia',                    currentLevel: 64.99, dangerLevel: 69.15, fetchedAt: now),
+    CwcStation(river: 'Gandak',       site: 'Dumariaghat',               currentLevel: 60.46, dangerLevel: 62.22, fetchedAt: now),
+    CwcStation(river: 'Gandak',       site: 'Hajipur',                   currentLevel: 44.54, dangerLevel: 50.32, fetchedAt: now),
+    CwcStation(river: 'Gandak',       site: 'Rewaghat',                  currentLevel: 51.12, dangerLevel: 54.41, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Bhagalpur',                 currentLevel: 25.74, dangerLevel: 33.68, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Buxar',                     currentLevel: 49.19, dangerLevel: 60.30, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Dighaghat',                 currentLevel: 43.05, dangerLevel: 50.45, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Gandhighat',                currentLevel: 42.61, dangerLevel: 48.60, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Hathidah',                  currentLevel: 34.60, dangerLevel: 41.76, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Kahalgaon',                 currentLevel: 24.64, dangerLevel: 31.09, fetchedAt: now),
+    CwcStation(river: 'Ganga',        site: 'Munger',                    currentLevel: 30.76, dangerLevel: 39.33, fetchedAt: now),
+    CwcStation(river: 'Ghaghra',      site: 'Darauli',                   currentLevel: 56.20, dangerLevel: 60.82, fetchedAt: now),
+    CwcStation(river: 'Ghaghra',      site: 'Gangpur Siswan',            currentLevel: 51.89, dangerLevel: 57.04, fetchedAt: now),
+    CwcStation(river: 'Kamalabalan',  site: 'Jhanjharpur',               currentLevel: 48.15, dangerLevel: 50.00, fetchedAt: now),
+    CwcStation(river: 'Kamla',        site: 'Jainagar',                  currentLevel: 66.28, dangerLevel: 67.75, fetchedAt: now),
+    // Kosi — 4 stations including Birpur barrage (CWC official danger: 214.00 m)
+    CwcStation(river: 'Kosi',         site: 'Baltara',                   currentLevel: 31.28, dangerLevel: 33.85, fetchedAt: now),
+    CwcStation(river: 'Kosi',         site: 'Basua',                     currentLevel: 45.82, dangerLevel: 47.75, fetchedAt: now),
+    CwcStation(river: 'Kosi',         site: 'Birpur',                    currentLevel: 212.05, dangerLevel: 214.00, fetchedAt: now),
+    CwcStation(river: 'Kosi',         site: 'Kursela',                   currentLevel: 24.40, dangerLevel: 30.00, fetchedAt: now),
+    CwcStation(river: 'Mahananda',    site: 'Dhengraghat',               currentLevel: 33.30, dangerLevel: 35.65, fetchedAt: now),
+    CwcStation(river: 'Mahananda',    site: 'Taibpur',                   currentLevel: 63.72, dangerLevel: 66.00, fetchedAt: now),
+    CwcStation(river: 'Punpun',       site: 'Sripalpur',                 currentLevel: 44.81, dangerLevel: 50.60, fetchedAt: now),
   ];
 }
 
@@ -131,8 +133,7 @@ class BefiqrCwcService {
     final stations = <CwcStation>[];
     final now = DateTime.now();
 
-    // Match <tr>...</tr> blocks (non-greedy)
-    final rowRe = RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true);
+    final rowRe  = RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true);
     final cellRe = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', dotAll: true);
     final tagRe  = RegExp(r'<[^>]+>');
 
@@ -144,7 +145,7 @@ class BefiqrCwcService {
           .toList();
 
       if (cells.length < 4) continue;
-      if (!headerSkipped) { headerSkipped = true; continue; } // skip header row
+      if (!headerSkipped) { headerSkipped = true; continue; }
 
       final current = double.tryParse(cells[2].replaceAll(',', ''));
       final danger  = double.tryParse(cells[3].replaceAll(',', ''));
@@ -162,8 +163,6 @@ class BefiqrCwcService {
   }
 
   // ── ML-style risk score (simple linear rule, 0-100) ───────────────────────
-  // score = (currentLevel / dangerLevel) * 100, clamped to 0-100
-  // Feeds the prediction engine as a real-time feature input.
   static double riskScore(CwcStation s) =>
       (s.currentLevel / s.dangerLevel * 100).clamp(0, 100);
 
