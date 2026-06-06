@@ -1,5 +1,6 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v5  (AdMob banner placed)
+// OpsFlood — SettingsScreen v6
+// Theme selector removed — it lives exclusively on the Dashboard palette button.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,24 +10,22 @@ import '../providers/locale_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/river_theme.dart';
 import '../widgets/ad_banner_widget.dart';
-import '../widgets/premium_theme_sheet.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final rc      = RiverColors.of(context);
-    final appMode = ref.watch(themeModeProvider);
-    final locale  = ref.watch(localeProvider);
+    final rc     = RiverColors.of(context);
+    final locale = ref.watch(localeProvider);
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: rc.scaffoldBg,
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // ── Header
+            // ── Header ──────────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
@@ -38,8 +37,7 @@ class SettingsScreen extends ConsumerWidget {
                         color: AppPalette.gold.withValues(alpha: 0.10),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: AppPalette.gold.withValues(alpha: 0.25),
-                        ),
+                          color: AppPalette.gold.withValues(alpha: 0.25)),
                       ),
                       child: const Icon(Icons.settings_rounded,
                           color: AppPalette.gold, size: 22),
@@ -48,19 +46,17 @@ class SettingsScreen extends ConsumerWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Settings',
+                        Text('Settings',
                           style: TextStyle(
-                            color:      AppPalette.textWhite,
-                            fontSize:   20,
+                            color: rc.textPrimary,
+                            fontSize: 20,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.5,
                           ),
                         ),
-                        Text(
-                          'Appearance & App Preferences',
+                        Text('App Preferences',
                           style: TextStyle(
-                            color:    AppPalette.textGrey.withValues(alpha: 0.7),
+                            color: rc.textSecondary.withValues(alpha: 0.7),
                             fontSize: 11,
                           ),
                         ),
@@ -71,26 +67,26 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
 
-            // ── Appearance section
+            // ── Appearance ─ Language only (theme lives on Dashboard) ───────
             SliverToBoxAdapter(
               child: _SectionCard(
                 title: 'Appearance',
-                icon:  Icons.palette_outlined,
+                icon: Icons.palette_outlined,
                 children: [
                   _SettingRow(
-                    icon:    Icons.language_rounded,
-                    label:   'Language',
+                    icon: Icons.language_rounded,
+                    label: 'Language',
                     sublabel: kLocaleLabels[locale.languageCode] ?? locale.languageCode,
-                    onTap:   () => _showLanguagePicker(context, ref),
+                    onTap: () => _showLanguagePicker(context, ref),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           kLocaleLabels[locale.languageCode] ?? locale.languageCode,
                           style: TextStyle(
-                            color:      rc.accent,
+                            color: rc.accent,
                             fontWeight: FontWeight.w700,
-                            fontSize:   13,
+                            fontSize: 13,
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -99,89 +95,44 @@ class SettingsScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  _Divider(),
-                  _SettingRow(
-                    icon:    _modeIcon(appMode),
-                    label:   'Theme',
-                    sublabel: _modeLabel(appMode),
-                    // Fixed: showPremiumThemeSheet() free function doesn't exist;
-                    // PremiumThemeSheet.show() is the correct static method.
-                    onTap:   () => PremiumThemeSheet.show(context),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_isPremium(appMode))
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(
-                              color: AppPalette.gold.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                  color: AppPalette.gold.withValues(alpha: 0.4)),
-                            ),
-                            child: const Text(
-                              'PREMIUM',
-                              style: TextStyle(
-                                color:      AppPalette.gold,
-                                fontSize:   8,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ),
-                        Text(
-                          _modeLabel(appMode),
-                          style: TextStyle(
-                            color:      rc.accent,
-                            fontWeight: FontWeight.w700,
-                            fontSize:   13,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.chevron_right_rounded,
-                            color: rc.textSecondary, size: 18),
-                      ],
-                    ),
+                  // NOTE: Theme selection is intentionally absent here.
+                  // Use the palette 🎨 button on the Dashboard to change themes.
+                  _InfoRow(
+                    icon: Icons.info_outline_rounded,
+                    message: 'Change theme via the 🎨 palette icon on the Dashboard.',
                   ),
                 ],
               ),
             ),
 
-            // ── About section
+            // ── About ──────────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: _SectionCard(
                 title: 'About',
-                icon:  Icons.info_outline_rounded,
+                icon: Icons.info_outline_rounded,
                 children: [
                   _SettingRow(
-                    icon:    Icons.water_drop_rounded,
-                    label:   'OpsFlood  ·  EQUINOX-BH',
+                    icon: Icons.water_drop_rounded,
+                    label: 'OpsFlood  ·  EQUINOX-BH',
                     sublabel: 'Flood Intelligence Platform',
-                    onTap:   null,
-                    trailing: Text(
-                      'v1.0',
-                      style: TextStyle(
-                        color:    rc.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
+                    onTap: null,
+                    trailing: Text('v1.0',
+                      style: TextStyle(color: rc.textSecondary, fontSize: 12)),
                   ),
                   _Divider(),
                   _SettingRow(
-                    icon:    Icons.source_rounded,
-                    label:   'Data Sources',
+                    icon: Icons.source_rounded,
+                    label: 'Data Sources',
                     sublabel: 'CWC · IMD · WRIS · GloFAS · Open-Meteo',
-                    onTap:   null,
+                    onTap: null,
                     trailing: const SizedBox.shrink(),
                   ),
                   _Divider(),
                   _SettingRow(
-                    icon:    Icons.location_on_rounded,
-                    label:   'Coverage',
+                    icon: Icons.location_on_rounded,
+                    label: 'Coverage',
                     sublabel: 'Bihar — 32 monitored cities',
-                    onTap:   null,
+                    onTap: null,
                     trailing: const SizedBox.shrink(),
                   ),
                 ],
@@ -193,14 +144,12 @@ class SettingsScreen extends ConsumerWidget {
               child: Center(child: AdBannerWidget()),
             ),
 
-            // ── Developer section ──────────────────────────────────────────
+            // ── Developer ──────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: _SectionCard(
                 title: 'Developer',
-                icon:  Icons.code_rounded,
-                children: [
-                  _DeveloperTile(),
-                ],
+                icon: Icons.code_rounded,
+                children: [_DeveloperTile()],
               ),
             ),
 
@@ -211,24 +160,24 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  // ── Language picker ─────────────────────────────────────────────────────
   void _showLanguagePicker(BuildContext context, WidgetRef ref) {
     final rc             = RiverColors.of(context);
     final localeNotifier = ref.read(localeProvider.notifier);
 
     showModalBottomSheet(
-      context:             context,
-      backgroundColor:     Colors.transparent,
-      isScrollControlled:  true,
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx) => Consumer(
         builder: (consumerCtx, sheetRef, _) {
           final locale = sheetRef.watch(localeProvider);
           return Container(
             decoration: BoxDecoration(
-              color:        AppPalette.abyss3,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-              border: Border(
-                top: BorderSide(color: AppPalette.abyssStroke),
-              ),
+              color: rc.cardBg,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border(top: BorderSide(color: rc.stroke)),
             ),
             child: SafeArea(
               top: false,
@@ -240,7 +189,7 @@ class SettingsScreen extends ConsumerWidget {
                     Container(
                       width: 40, height: 4,
                       decoration: BoxDecoration(
-                        color:        AppPalette.abyssStroke,
+                        color: rc.stroke,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -250,11 +199,10 @@ class SettingsScreen extends ConsumerWidget {
                         Icon(Icons.language_rounded,
                             color: AppPalette.gold, size: 20),
                         const SizedBox(width: 8),
-                        const Text(
-                          'Select Language',
+                        Text('Select Language',
                           style: TextStyle(
-                            color:      AppPalette.textWhite,
-                            fontSize:   16,
+                            color: rc.textPrimary,
+                            fontSize: 16,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -266,7 +214,7 @@ class SettingsScreen extends ConsumerWidget {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Material(
-                          color:        Colors.transparent,
+                          color: Colors.transparent,
                           borderRadius: BorderRadius.circular(16),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
@@ -276,18 +224,18 @@ class SettingsScreen extends ConsumerWidget {
                             },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
-                              curve:    Curves.easeOutCubic,
+                              curve: Curves.easeOutCubic,
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 14),
                               decoration: BoxDecoration(
                                 color: isActive
                                     ? AppPalette.gold.withValues(alpha: 0.15)
-                                    : AppPalette.abyss2,
+                                    : rc.chipBg,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
                                   color: isActive
                                       ? AppPalette.gold.withValues(alpha: 0.5)
-                                      : AppPalette.abyssStroke,
+                                      : rc.stroke,
                                   width: isActive ? 2 : 1,
                                 ),
                               ),
@@ -298,9 +246,9 @@ class SettingsScreen extends ConsumerWidget {
                                     style: TextStyle(
                                       color: isActive
                                           ? AppPalette.gold
-                                          : AppPalette.textWhite,
+                                          : rc.textPrimary,
                                       fontWeight: FontWeight.w700,
-                                      fontSize:   15,
+                                      fontSize: 15,
                                     ),
                                   ),
                                   const Spacer(),
@@ -309,8 +257,7 @@ class SettingsScreen extends ConsumerWidget {
                                         color: AppPalette.gold, size: 20)
                                   else
                                     Icon(Icons.circle_outlined,
-                                        color: AppPalette.abyssStroke,
-                                        size: 20),
+                                        color: rc.stroke, size: 20),
                                 ],
                               ),
                             ),
@@ -330,11 +277,44 @@ class SettingsScreen extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Info row (non-tappable hint)
+// ─────────────────────────────────────────────────────────────────────────────
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  const _InfoRow({required this.icon, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Row(
+        children: [
+          Icon(icon, color: rc.textSecondary.withValues(alpha: 0.5), size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message,
+              style: TextStyle(
+                color: rc.textSecondary.withValues(alpha: 0.6),
+                fontSize: 11,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Developer tile
 // ─────────────────────────────────────────────────────────────────────────────
 class _DeveloperTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
@@ -350,12 +330,11 @@ class _DeveloperTile extends StatelessWidget {
               ),
               boxShadow: AppPalette.glowShadow(AppPalette.gold, blur: 14),
             ),
-            child: const Center(
-              child: Text(
-                'R',
+            child: Center(
+              child: Text('R',
                 style: TextStyle(
-                  color:      AppPalette.abyss0,
-                  fontSize:   20,
+                  color: rc.scaffoldBg,
+                  fontSize: 20,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5,
                 ),
@@ -369,11 +348,10 @@ class _DeveloperTile extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'Rohit28',
+                    Text('Rohit28',
                       style: TextStyle(
-                        color:      AppPalette.textWhite,
-                        fontSize:   15,
+                        color: rc.textPrimary,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
                       ),
@@ -386,16 +364,13 @@ class _DeveloperTile extends StatelessWidget {
                         color: AppPalette.gold.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: AppPalette.gold.withValues(alpha: 0.45),
-                          width: 1,
-                        ),
+                          color: AppPalette.gold.withValues(alpha: 0.45)),
                       ),
-                      child: const Text(
-                        'DEV',
+                      child: const Text('DEV',
                         style: TextStyle(
-                          color:         AppPalette.gold,
-                          fontSize:      8,
-                          fontWeight:    FontWeight.w800,
+                          color: AppPalette.gold,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w800,
                           letterSpacing: 1.0,
                         ),
                       ),
@@ -403,13 +378,9 @@ class _DeveloperTile extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  'Developer  ·  OpsFlood',
+                Text('Developer  ·  OpsFlood',
                   style: TextStyle(
-                    color:    AppPalette.textGrey,
-                    fontSize: 11,
-                  ),
-                ),
+                    color: rc.textSecondary, fontSize: 11)),
               ],
             ),
           ),
@@ -421,9 +392,8 @@ class _DeveloperTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helpers: _isPremium / _modeLabel / _modeIcon kept for future use
 // ─────────────────────────────────────────────────────────────────────────────
-
 bool _isPremium(AppThemeMode m) =>
     m == AppThemeMode.sunset || m == AppThemeMode.ocean;
 
@@ -443,14 +413,17 @@ IconData _modeIcon(AppThemeMode m) => switch (m) {
   AppThemeMode.ocean  => Icons.water,
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared sub-widgets
+// ─────────────────────────────────────────────────────────────────────────────
 class _SectionCard extends StatelessWidget {
   const _SectionCard({
     required this.title,
     required this.icon,
     required this.children,
   });
-  final String      title;
-  final IconData    icon;
+  final String title;
+  final IconData icon;
   final List<Widget> children;
 
   @override
@@ -467,13 +440,12 @@ class _SectionCard extends StatelessWidget {
               children: [
                 Icon(icon, color: rc.textSecondary, size: 14),
                 const SizedBox(width: 6),
-                Text(
-                  title.toUpperCase(),
+                Text(title.toUpperCase(),
                   style: TextStyle(
-                    color:          rc.textSecondary,
-                    fontSize:       10,
-                    fontWeight:     FontWeight.w700,
-                    letterSpacing:  1.2,
+                    color: rc.textSecondary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
                   ),
                 ),
               ],
@@ -481,9 +453,9 @@ class _SectionCard extends StatelessWidget {
           ),
           Container(
             decoration: BoxDecoration(
-              color:        AppPalette.abyss2,
+              color: rc.cardBg,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppPalette.abyssStroke),
+              border: Border.all(color: rc.stroke),
             ),
             child: Column(children: children),
           ),
@@ -501,20 +473,20 @@ class _SettingRow extends StatelessWidget {
     required this.onTap,
     required this.trailing,
   });
-  final IconData  icon;
-  final String    label;
-  final String    sublabel;
+  final IconData icon;
+  final String label;
+  final String sublabel;
   final VoidCallback? onTap;
-  final Widget    trailing;
+  final Widget trailing;
 
   @override
   Widget build(BuildContext context) {
     final rc = RiverColors.of(context);
     return Material(
-      color:        Colors.transparent,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
-        onTap:        onTap,
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -523,7 +495,7 @@ class _SettingRow extends StatelessWidget {
               Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
-                  color:        rc.accent.withValues(alpha: 0.10),
+                  color: rc.accent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: Icon(icon, color: rc.accent, size: 18),
@@ -534,16 +506,16 @@ class _SettingRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(label,
-                        style: TextStyle(
-                          color:      rc.textPrimary,
-                          fontWeight: FontWeight.w600,
-                          fontSize:   14,
-                        )),
+                      style: TextStyle(
+                        color: rc.textPrimary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      )),
                     Text(sublabel,
-                        style: TextStyle(
-                          color:    rc.textSecondary,
-                          fontSize: 11,
-                        )),
+                      style: TextStyle(
+                        color: rc.textSecondary,
+                        fontSize: 11,
+                      )),
                   ],
                 ),
               ),
@@ -558,11 +530,12 @@ class _SettingRow extends StatelessWidget {
 
 class _Divider extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => Divider(
-        height: 1,
-        thickness: 1,
-        indent: 16,
-        endIndent: 16,
-        color: AppPalette.abyssStroke,
-      );
+  Widget build(BuildContext context) {
+    final rc = RiverColors.of(context);
+    return Divider(
+      height: 1, thickness: 1,
+      indent: 16, endIndent: 16,
+      color: rc.stroke,
+    );
+  }
 }
