@@ -88,6 +88,9 @@ class FloodSeverityColor {
   static const Color danger  = AppPalette.danger;
   static const Color extreme = AppPalette.critical;
 
+  // Offline alias — used by legacy station_status_strip if ever reverted
+  static const Color offline = AppPalette.textGrey;
+
   // Method-style helpers
   static Color forSeverity(FloodSeverity s) => s.color;
   static Color glowForSeverity(FloodSeverity s) => s.glowColor;
