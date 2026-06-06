@@ -5,7 +5,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/river_theme.dart';
@@ -38,15 +37,21 @@ class NewsFeedScreen extends ConsumerWidget {
                         color: AppPalette.cyan),
                   ),
                 )
-              else if (state.error != null)
+              else if (state.error != null && state.items.isEmpty)
                 Expanded(child: _ErrorState(message: state.error!))
               else
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: state.items.length,
-                    itemBuilder: (_, i) => _NewsCard(item: state.items[i]),
+                  child: RefreshIndicator(
+                    color: AppPalette.cyan,
+                    onRefresh: () =>
+                        ref.read(newsFeedProvider.notifier).refresh(),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: state.items.length,
+                      itemBuilder: (_, i) =>
+                          _NewsCard(item: state.items[i]),
+                    ),
                   ),
                 ),
             ],
@@ -57,6 +62,7 @@ class NewsFeedScreen extends ConsumerWidget {
   }
 }
 
+// ── Header ───────────────────────────────────────────────────────────────────────
 class _Header extends StatelessWidget {
   final VoidCallback onRefresh;
   const _Header({required this.onRefresh});
@@ -124,6 +130,7 @@ class _Header extends StatelessWidget {
       );
 }
 
+// ── Card ──────────────────────────────────────────────────────────────────────────
 class _NewsCard extends StatelessWidget {
   final NewsItem item;
   const _NewsCard({required this.item});
@@ -133,8 +140,8 @@ class _NewsCard extends StatelessWidget {
     final col = _sourceColor(item.source);
     return GestureDetector(
       onTap: () async {
-        if (item.url != null) {
-          final uri = Uri.parse(item.url!);
+        final uri = Uri.tryParse(item.url);
+        if (uri != null && uri.hasScheme) {
           if (await canLaunchUrl(uri)) {
             launchUrl(uri, mode: LaunchMode.externalApplication);
           }
@@ -151,50 +158,41 @@ class _NewsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ─ Top row: source badge | severity | date string ─
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: col.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: col.withValues(alpha: 0.28)),
-                  ),
-                  child: Text(item.source.toUpperCase(),
-                      style: TextStyle(
-                        color: col, fontSize: 8, fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      )),
-                ),
+                _SourceBadge(source: item.source, color: col),
                 const SizedBox(width: 8),
-                if (item.severity != null)
-                  _SeverityBadge(severity: item.severity!),
+                _SeverityBadge(severity: item.severity),
                 const Spacer(),
+                // publishedAt is a String — display directly, no DateTime parse
                 Text(
-                  DateFormat('dd MMM · HH:mm')
-                      .format(item.publishedAt.toLocal()),
+                  item.publishedAt,
                   style: const TextStyle(
                       color: AppPalette.textDim, fontSize: 9),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(item.title,
-                style: const TextStyle(
-                  color: AppPalette.textWhite, fontSize: 13,
-                  fontWeight: FontWeight.w700, height: 1.35,
-                )),
+            Text(
+              item.title,
+              style: const TextStyle(
+                color: AppPalette.textWhite, fontSize: 13,
+                fontWeight: FontWeight.w700, height: 1.35,
+              ),
+            ),
             if (item.summary != null) ...[
               const SizedBox(height: 6),
-              Text(item.summary!,
-                  style: const TextStyle(
-                    color: AppPalette.textGrey, fontSize: 11,
-                    height: 1.5,
-                  ),
-                  maxLines: 3, overflow: TextOverflow.ellipsis),
+              Text(
+                item.summary!,
+                style: const TextStyle(
+                  color: AppPalette.textGrey, fontSize: 11, height: 1.5,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
-            if (item.url != null) ...[
+            if (item.url.isNotEmpty) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -216,12 +214,35 @@ class _NewsCard extends StatelessWidget {
   }
 
   Color _sourceColor(String src) {
-    if (src.contains('NDMA') || src.contains('ndma')) return AppPalette.critical;
-    if (src.contains('IMD')  || src.contains('imd'))  return AppPalette.amber;
-    if (src.contains('WRD')  || src.contains('wrd'))  return AppPalette.cyan;
-    if (src.contains('CWC')  || src.contains('cwc'))  return const Color(0xFF4CAF50);
+    final s = src.toUpperCase();
+    if (s.contains('NDMA') || s.contains('BSDMA')) return AppPalette.critical;
+    if (s.contains('IMD'))                         return AppPalette.amber;
+    if (s.contains('CWC'))                         return const Color(0xFF4CAF50);
+    if (s.contains('WRD'))                         return AppPalette.cyan;
     return AppPalette.textGrey;
   }
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  final Color  color;
+  const _SourceBadge({required this.source, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha: 0.28)),
+        ),
+        child: Text(
+          source.toUpperCase(),
+          style: TextStyle(
+            color: color, fontSize: 8,
+            fontWeight: FontWeight.w900, letterSpacing: 0.5,
+          ),
+        ),
+      );
 }
 
 class _SeverityBadge extends StatelessWidget {
@@ -241,10 +262,13 @@ class _SeverityBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: col.withValues(alpha: 0.28)),
       ),
-      child: Text('${severity.toUpperCase()} ALERT',
-          style: TextStyle(
-            color: col, fontSize: 8, fontWeight: FontWeight.w900,
-            letterSpacing: 0.5)),
+      child: Text(
+        '${severity.toUpperCase()} ALERT',
+        style: TextStyle(
+          color: col, fontSize: 8,
+          fontWeight: FontWeight.w900, letterSpacing: 0.5,
+        ),
+      ),
     );
   }
 }

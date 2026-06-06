@@ -1,5 +1,5 @@
 // lib/widgets/danger_proximity_banner.dart
-// Shows a red animated banner if user is within 80 km of a CRITICAL/SEVERE gauge.
+// Shows animated danger/warning banner when user is within 80 km of a flood gauge.
 library;
 
 import 'dart:math';
@@ -24,7 +24,7 @@ class DangerProximityBanner extends ConsumerWidget {
     }
 
     BiharGauge? nearest;
-    double      minDist      = double.infinity;
+    double      minDist       = double.infinity;
     String      nearestStatus = '';
 
     for (final gauge in kBiharGauges) {
@@ -34,14 +34,14 @@ class DangerProximityBanner extends ConsumerWidget {
       );
       if (d > 80.0) continue;
 
-      // Match gauge to live flood data by station name prefix
+      // Match gauge to live FloodData by city name (FloodData has .city not .station)
       final live = stations.firstWhere(
-        (s) => s.station.toLowerCase().contains(
+        (s) => s.city.toLowerCase().contains(
                    gauge.station.toLowerCase().split(' ').first),
-        orElse: () => stations.isNotEmpty ? stations.first : null as dynamic,
+        orElse: () => stations.isNotEmpty ? stations.first : _emptyFlood(),
       );
 
-      final level  = (live?.currentLevel ?? 0.0) as double;
+      final level  = live.currentLevel;
       final status = level >= gauge.dangerLevel  ? 'DANGER'
                    : level >= gauge.warningLevel ? 'WARNING'
                    : 'SAFE';
@@ -62,13 +62,23 @@ class DangerProximityBanner extends ConsumerWidget {
     );
   }
 
+  // Lightweight empty FloodData so orElse never throws
+  static FloodData _emptyFlood() => FloodData(
+    city: '', district: '', state: '',
+    currentLevel: 0, warningLevel: 0, dangerLevel: 0,
+    safeLevel: 0, capacityPercent: 0,
+    riskLevel: 'LOW', status: 'ESTIMATED',
+    effectiveRainfallMm: 0,
+    lastUpdated: DateTime.now(),
+  );
+
   double _haversine(double lat1, double lon1, double lat2, double lon2) {
-    const r   = 6371.0;
+    const r    = 6371.0;
     final dLat = (lat2 - lat1) * pi / 180;
     final dLon = (lon2 - lon1) * pi / 180;
-    final a   = sin(dLat / 2) * sin(dLat / 2) +
-                cos(lat1 * pi / 180) * cos(lat2 * pi / 180) *
-                sin(dLon / 2) * sin(dLon / 2);
+    final a    = sin(dLat / 2) * sin(dLat / 2) +
+                 cos(lat1 * pi / 180) * cos(lat2 * pi / 180) *
+                 sin(dLon / 2) * sin(dLon / 2);
     return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 }
@@ -98,7 +108,7 @@ class _BannerWidgetState extends State<_BannerWidget>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
@@ -117,7 +127,8 @@ class _BannerWidgetState extends State<_BannerWidget>
       builder: (_, __) => Container(
         width:   double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        color:   Color.lerp(baseColor, baseColor.withValues(alpha: 0.7), _anim.value),
+        color:   Color.lerp(
+            baseColor, baseColor.withValues(alpha: 0.7), _anim.value),
         child: Row(
           children: [
             Icon(
