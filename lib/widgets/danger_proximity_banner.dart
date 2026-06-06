@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/bihar_rivers.dart';
-import '../providers/flood_providers.dart';   // liveLevelsProvider
+import '../models/flood_data.dart';              // ← FloodData
+import '../providers/flood_providers.dart';      // liveLevelsProvider
 import '../providers/location_provider.dart';
 import '../theme/river_theme.dart';
 
@@ -34,7 +35,6 @@ class DangerProximityBanner extends ConsumerWidget {
       );
       if (d > 80.0) continue;
 
-      // Match gauge to live FloodData by city name (FloodData has .city not .station)
       final live = stations.firstWhere(
         (s) => s.city.toLowerCase().contains(
                    gauge.station.toLowerCase().split(' ').first),
@@ -62,7 +62,6 @@ class DangerProximityBanner extends ConsumerWidget {
     );
   }
 
-  // Lightweight empty FloodData so orElse never throws
   static FloodData _emptyFlood() => FloodData(
     city: '', district: '', state: '',
     currentLevel: 0, warningLevel: 0, dangerLevel: 0,
