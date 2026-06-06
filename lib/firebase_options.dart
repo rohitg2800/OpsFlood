@@ -6,17 +6,12 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
-/// SECURITY: API keys have been redacted from version control.
-/// Run `flutterfire configure` locally to regenerate this file,
-/// or set keys via environment variables / CI secrets.
+/// Package: com.equinox_bh.android
+/// Firebase project: device-streaming-e762727d
 ///
-/// Example:
-/// ```dart
-/// import 'firebase_options.dart';
-/// await Firebase.initializeApp(
-///   options: DefaultFirebaseOptions.currentPlatform,
-/// );
-/// ```
+/// NOTE: After registering com.equinox_bh.android in the Firebase console,
+/// download the new google-services.json and run `flutterfire configure`
+/// to regenerate this file with the new appId for the new package.
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -53,8 +48,6 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // SECURITY: Replace FIREBASE_API_KEY and FIREBASE_APP_ID with your actual
-
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU',
     appId: '1:1071864126219:android:5751e3c0e5e4c59be7e00e',
@@ -62,6 +55,4 @@ class DefaultFirebaseOptions {
     projectId: 'device-streaming-e762727d',
     storageBucket: 'device-streaming-e762727d.firebasestorage.app',
   );
-
-  // values from the Firebase console. Never commit real keys to git.
 }
