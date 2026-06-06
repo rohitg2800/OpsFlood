@@ -1,7 +1,5 @@
 // lib/screens/home_screen.dart
-// EQUINOX-BH — HomeScreen v11
-// More sheet now has only Settings.
-// Stations and Alerts screens removed from navigation entirely.
+// EQUINOX-BH — HomeScreen v12  — FULLY THEME-AWARE (RiverColors)
 library;
 
 import 'dart:ui';
@@ -19,15 +17,12 @@ import 'river_monitor_screen.dart';
 import 'settings_screen.dart';
 import 'weather_screen.dart';
 
-// ── tab descriptors ───────────────────────────────────────────────────────────
-
 class _Tab {
   const _Tab(this.label, this.icon, this.activeIcon);
   final String   label;
   final IconData icon, activeIcon;
 }
 
-// Primary nav (always visible) — 5 items
 const _primary = [
   _Tab('Home',    Icons.dashboard_outlined,      Icons.dashboard_rounded),
   _Tab('Rivers',  Icons.water_outlined,           Icons.water_rounded),
@@ -36,7 +31,6 @@ const _primary = [
   _Tab('Predict', Icons.model_training_outlined,  Icons.model_training_rounded),
 ];
 
-// Screen index map: 0-4 primary, 5 = Settings (only overflow)
 Widget _buildScreen(int i) => switch (i) {
   0 => const DashboardScreen(),
   1 => const RiverMonitorScreen(),
@@ -46,8 +40,6 @@ Widget _buildScreen(int i) => switch (i) {
   5 => const SettingsScreen(),
   _ => const DashboardScreen(),
 };
-
-// ── screen ────────────────────────────────────────────────────────────────────
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -108,13 +100,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    final t       = RiverColors.of(context);
     final offline = ref.watch(isOfflineProvider);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light
-          .copyWith(systemNavigationBarColor: AppPalette.abyss0),
+          .copyWith(systemNavigationBarColor: t.navBg),
       child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
+        backgroundColor: t.scaffoldBg,
         body: IndexedStack(
           index: _idx,
           children: _screens,
@@ -153,6 +146,7 @@ class _NavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
     final pad = MediaQuery.of(context).padding.bottom;
     return ClipRect(
       child: BackdropFilter(
@@ -160,12 +154,12 @@ class _NavBar extends StatelessWidget {
         child: Container(
           height: 62 + pad,
           decoration: BoxDecoration(
-            color: const Color(0xD0010810),
-            border: const Border(
-                top: BorderSide(color: Color(0x1800C6FF), width: 1)),
+            color: t.navBg.withValues(alpha: 0.85),
+            border: Border(
+                top: BorderSide(color: t.stroke.withValues(alpha: 0.18), width: 1)),
             boxShadow: [
               BoxShadow(
-                color: AppPalette.cyan.withValues(alpha: 0.04),
+                color: t.accent.withValues(alpha: 0.04),
                 blurRadius: 20,
                 offset: const Offset(0, -4)),
             ],
@@ -191,7 +185,6 @@ class _NavBar extends StatelessWidget {
                     ),
                   );
                 }),
-                // «More» → only Settings now
                 Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -225,7 +218,8 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = active ? AppPalette.cyan : const Color(0xFF2E3E55);
+    final t = RiverColors.of(context);
+    final c = active ? t.navActive : t.navInactive;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -234,11 +228,11 @@ class _NavItem extends StatelessWidget {
           width: 36, height: 26,
           decoration: active
               ? BoxDecoration(
-                  color: AppPalette.cyan.withValues(alpha: 0.10 * glowVal),
+                  color: t.navActive.withValues(alpha: 0.10 * glowVal),
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: [
                     BoxShadow(
-                      color: AppPalette.cyan.withValues(alpha: 0.22 * glowVal),
+                      color: t.navActive.withValues(alpha: 0.22 * glowVal),
                       blurRadius: 16,
                     ),
                   ],
@@ -274,7 +268,8 @@ class _MoreButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = active ? AppPalette.cyan : const Color(0xFF2E3E55);
+    final t = RiverColors.of(context);
+    final c = active ? t.navActive : t.navInactive;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -286,7 +281,7 @@ class _MoreButton extends StatelessWidget {
               width: 36, height: 26,
               decoration: active
                   ? BoxDecoration(
-                      color: AppPalette.cyan.withValues(alpha: 0.10),
+                      color: t.navActive.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(10),
                     )
                   : null,
@@ -304,7 +299,7 @@ class _MoreButton extends StatelessWidget {
                     shape: BoxShape.circle,
                     color: AppPalette.amber,
                     border: Border.all(
-                        color: AppPalette.abyss0, width: 1.2),
+                        color: t.navBg, width: 1.2),
                   ),
                 ),
               ),
@@ -340,12 +335,13 @@ class _MoreSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF060F1C),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(
-            top: BorderSide(color: Color(0x2200C6FF), width: 1.5)),
+            top: BorderSide(color: t.stroke.withValues(alpha: 0.22), width: 1.5)),
       ),
       child: SafeArea(
         child: Padding(
@@ -357,7 +353,7 @@ class _MoreSheet extends StatelessWidget {
                 width: 36, height: 3,
                 margin: const EdgeInsets.only(bottom: 18),
                 decoration: BoxDecoration(
-                  color: AppPalette.abyssStroke,
+                  color: t.stroke,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -414,7 +410,8 @@ class _SheetRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = active ? AppPalette.cyan : AppPalette.textWhite;
+    final t = RiverColors.of(context);
+    final c = active ? t.accent : t.textPrimary;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -423,13 +420,13 @@ class _SheetRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: active
-              ? AppPalette.cyan.withValues(alpha: 0.08)
-              : AppPalette.abyss2,
+              ? t.accent.withValues(alpha: 0.08)
+              : t.cardBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: active
-                ? AppPalette.cyan.withValues(alpha: 0.35)
-                : AppPalette.abyssStroke,
+                ? t.accent.withValues(alpha: 0.35)
+                : t.stroke,
           ),
         ),
         child: Row(
@@ -453,17 +450,18 @@ class _SheetRow extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           fontSize: 13)),
                   Text(sub,
-                      style: const TextStyle(
-                          color: AppPalette.textDim, fontSize: 10)),
+                      style: TextStyle(
+                          color: t.textSecondary.withValues(alpha: 0.6),
+                          fontSize: 10)),
                 ],
               ),
             ),
             if (active)
               Container(
                 width: 6, height: 6,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppPalette.cyan,
+                  color: t.accent,
                 ),
               ),
           ],

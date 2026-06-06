@@ -1,6 +1,5 @@
 // lib/screens/live_stations_screen.dart
-// LiveStationsScreen v5  —  collapsible cards + FloodSeverityHelper + sparkline
-// AdMob interstitial (ca-app-pub-6001698589023170/6530780174) shown on back-press
+// LiveStationsScreen v6  — FULLY THEME-AWARE (RiverColors)
 library;
 
 import 'package:flutter/material.dart';
@@ -98,6 +97,7 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t        = RiverColors.of(context);
     final s        = context.l10n;
     final all      = ref.watch(liveLevelsProvider);
     final stations = _process(all);
@@ -111,52 +111,46 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
         if (shouldPop && context.mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
+        backgroundColor: t.scaffoldBg,
         body: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // ── App Bar ─────────────────────────────────────────────────────
             SliverAppBar(
               pinned: true,
               floating: false,
               expandedHeight: 100,
-              backgroundColor: AppPalette.abyss0,
+              backgroundColor: t.navBg,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
-              iconTheme: const IconThemeData(color: AppPalette.textWhite),
+              iconTheme: IconThemeData(color: t.textPrimary),
               flexibleSpace: FlexibleSpaceBar(
                 titlePadding: const EdgeInsets.only(left: 56, bottom: 14),
                 title: Text(
                   s.liveData,
-                  style: const TextStyle(
-                    color: AppPalette.textWhite,
+                  style: TextStyle(
+                    color: t.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                background: Container(
-                  decoration: AppPalette.scaffoldDecoration(),
-                ),
+                background: Container(color: t.navBg),
               ),
             ),
-
-            // ── Search bar ────────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
                 child: TextField(
-                  style: const TextStyle(
-                      color: AppPalette.textWhite, fontSize: 14),
+                  style: TextStyle(color: t.textPrimary, fontSize: 14),
                   decoration: InputDecoration(
                     hintText: 'Search city, district, river…',
-                    hintStyle: const TextStyle(
-                        color: AppPalette.textGrey, fontSize: 13),
-                    prefixIcon: const Icon(Icons.search_rounded,
-                        color: AppPalette.gold, size: 20),
+                    hintStyle: TextStyle(
+                        color: t.textSecondary, fontSize: 13),
+                    prefixIcon: Icon(Icons.search_rounded,
+                        color: t.accent, size: 20),
                     suffixIcon: _query.isNotEmpty
                         ? IconButton(
-                            icon: const Icon(Icons.close_rounded,
-                                size: 18, color: AppPalette.textGrey),
+                            icon: Icon(Icons.close_rounded,
+                                size: 18, color: t.textSecondary),
                             onPressed: () =>
                                 setState(() => _query = ''),
                           )
@@ -166,8 +160,6 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                 ),
               ),
             ),
-
-            // ── Sort + State filter chips ────────────────────────────────────────
             SliverToBoxAdapter(
               child: SizedBox(
                 height: 36,
@@ -184,8 +176,8 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                           onTap: () => setState(() => _sort = mode),
                         ),
                       ),
-                    const VerticalDivider(
-                        width: 16, color: AppPalette.abyssStroke),
+                    VerticalDivider(
+                        width: 16, color: t.stroke),
                     _FilterChip(
                       label: 'All States',
                       selected: _stateFilter == null,
@@ -204,23 +196,19 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
                 ),
               ),
             ),
-
-            // ── Station count ───────────────────────────────────────────────────
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Text(
                   '${stations.length} station${stations.length == 1 ? '' : 's'}'
                   '${_stateFilter != null ? ' in $_stateFilter' : ''}',
-                  style: const TextStyle(
-                      color: AppPalette.textGrey,
+                  style: TextStyle(
+                      color: t.textSecondary,
                       fontSize: 11,
                       fontWeight: FontWeight.w500),
                 ),
               ),
             ),
-
-            // ── List / empty ────────────────────────────────────────────────────
             stations.isEmpty
                 ? const SliverFillRemaining(
                     hasScrollBody: false,
@@ -264,10 +252,6 @@ class _LiveStationsScreenState extends ConsumerState<LiveStationsScreen> {
   };
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Collapsible Station Card
-// ────────────────────────────────────────────────────────────────────────────────
-
 class _StationCard extends ConsumerWidget {
   final FloodData    data;
   final bool         isExpanded;
@@ -282,6 +266,7 @@ class _StationCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t      = RiverColors.of(context);
     final sev    = FloodSeverityHelper.fromString(data.status);
     final color  = FloodSeverityHelper.color(sev);
     final fill   = (data.capacityPercent / 100).clamp(0.0, 1.0);
@@ -301,12 +286,12 @@ class _StationCard extends ConsumerWidget {
         decoration: BoxDecoration(
           color: isExpanded
               ? color.withValues(alpha: 0.06)
-              : AppPalette.abyss2,
+              : t.cardBg,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: isExpanded || isCrit
                 ? color.withValues(alpha: isExpanded ? 0.40 : 0.20)
-                : AppPalette.abyssStroke,
+                : t.stroke,
             width: isExpanded ? 1.5 : 0.9,
           ),
           boxShadow: (isExpanded || isCrit)
@@ -322,7 +307,6 @@ class _StationCard extends ConsumerWidget {
         ),
         child: Column(
           children: [
-            // ── Top row ──────────────────────────────────────────────────
             Row(
               children: [
                 Container(
@@ -343,8 +327,8 @@ class _StationCard extends ConsumerWidget {
                     children: [
                       Text(
                         data.city,
-                        style: const TextStyle(
-                          color: AppPalette.textWhite,
+                        style: TextStyle(
+                          color: t.textPrimary,
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
                         ),
@@ -360,8 +344,8 @@ class _StationCard extends ConsumerWidget {
                           else if (data.state.isNotEmpty)
                             data.state,
                         ].join(' · '),
-                        style: const TextStyle(
-                          color: AppPalette.textGrey,
+                        style: TextStyle(
+                          color: t.textSecondary,
                           fontSize: 10,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -389,10 +373,7 @@ class _StationCard extends ConsumerWidget {
                 ),
               ],
             ),
-
             const SizedBox(height: 9),
-
-            // ── Sparkline OR level bar ──────────────────────────────────
             if (hasTrend)
               SparklineChart(
                 snapshots:    trend,
@@ -403,10 +384,7 @@ class _StationCard extends ConsumerWidget {
               )
             else
               _LevelBar(fill: fill, color: color),
-
             const SizedBox(height: 7),
-
-            // ── Collapsed stats row ─────────────────────────────────────────
             if (!isExpanded)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -421,13 +399,12 @@ class _StationCard extends ConsumerWidget {
                   Text(
                     DateFormat('HH:mm')
                         .format(data.lastUpdated.toLocal()),
-                    style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 9),
+                    style: TextStyle(
+                        color: t.textSecondary.withValues(alpha: 0.5),
+                        fontSize: 9),
                   ),
                 ],
               ),
-
-            // ── Expand panel ──────────────────────────────────────────────────
             AnimatedSize(
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
@@ -439,8 +416,6 @@ class _StationCard extends ConsumerWidget {
                     )
                   : const SizedBox.shrink(),
             ),
-
-            // ── Chevron ─────────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Center(
@@ -449,7 +424,7 @@ class _StationCard extends ConsumerWidget {
                   duration: const Duration(milliseconds: 260),
                   child: Icon(
                     Icons.expand_more_rounded,
-                    color: AppPalette.textDim.withValues(alpha: 0.55),
+                    color: t.textSecondary.withValues(alpha: 0.45),
                     size: 16,
                   ),
                 ),
@@ -461,14 +436,10 @@ class _StationCard extends ConsumerWidget {
     );
   }
 
-  Widget _mini(String t, Color c) => Text(t,
+  Widget _mini(String tx, Color c) => Text(tx,
       style: TextStyle(
           color: c, fontSize: 9, fontWeight: FontWeight.w600));
 }
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Expand Panel
-// ────────────────────────────────────────────────────────────────────────────────
 
 class _ExpandPanel extends StatelessWidget {
   final FloodData    data;
@@ -482,6 +453,7 @@ class _ExpandPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Column(
@@ -573,8 +545,9 @@ class _ExpandPanel extends StatelessWidget {
                 Text(
                   DateFormat('dd MMM HH:mm')
                       .format(data.lastUpdated.toLocal()),
-                  style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9.5),
+                  style: TextStyle(
+                      color: t.textSecondary.withValues(alpha: 0.5),
+                      fontSize: 9.5),
                 ),
               ],
             ),
@@ -585,17 +558,15 @@ class _ExpandPanel extends StatelessWidget {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Sub-widgets
-// ────────────────────────────────────────────────────────────────────────────────
-
 class _ThresholdPill extends StatelessWidget {
   final String label, value;
   final Color  color;
   const _ThresholdPill(
       {required this.label, required this.value, required this.color});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
         padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
         decoration: BoxDecoration(
           color:        color.withValues(alpha: 0.07),
@@ -609,10 +580,10 @@ class _ThresholdPill extends StatelessWidget {
               overflow: TextOverflow.ellipsis),
           const SizedBox(height: 2),
           Text(label,
-              style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 8)),
-        ]),
-      );
+              style: TextStyle(
+                  color: t.textSecondary.withValues(alpha: 0.5), fontSize: 8)),
+        ]));
+  }
 }
 
 class _InfoTile extends StatelessWidget {
@@ -623,12 +594,14 @@ class _InfoTile extends StatelessWidget {
       {required this.icon, required this.label,
        required this.value, required this.color});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
         decoration: BoxDecoration(
-          color:        AppPalette.abyss4,
+          color:        t.chipBg,
           borderRadius: BorderRadius.circular(10),
-          border:       Border.all(color: AppPalette.abyssStroke),
+          border:       Border.all(color: t.stroke),
         ),
         child: Row(children: [
           Icon(icon, color: color, size: 13),
@@ -638,19 +611,20 @@ class _InfoTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(value,
-                    style: const TextStyle(
-                        color: AppPalette.textWhite,
+                    style: TextStyle(
+                        color: t.textPrimary,
                         fontSize: 11,
                         fontWeight: FontWeight.w800),
                     overflow: TextOverflow.ellipsis),
                 Text(label,
-                    style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 8.5)),
+                    style: TextStyle(
+                        color: t.textSecondary.withValues(alpha: 0.6),
+                        fontSize: 8.5)),
               ],
             ),
           ),
-        ]),
-      );
+        ]));
+  }
 }
 
 class _GapBar extends StatelessWidget {
@@ -660,14 +634,15 @@ class _GapBar extends StatelessWidget {
       {required this.current, required this.danger, required this.color});
   @override
   Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
     final gap     = (danger - current).clamp(0.0, danger);
     final isAbove = current >= danger;
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color:        AppPalette.abyss4,
+        color:        t.chipBg,
         borderRadius: BorderRadius.circular(10),
-        border:       Border.all(color: AppPalette.abyssStroke),
+        border:       Border.all(color: t.stroke),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -678,7 +653,7 @@ class _GapBar extends StatelessWidget {
                 : '${gap.toStringAsFixed(2)} m to danger level',
             style: TextStyle(
               fontSize: 10,
-              color: isAbove ? AppPalette.critical : AppPalette.textGrey,
+              color: isAbove ? AppPalette.critical : t.textSecondary,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -687,7 +662,7 @@ class _GapBar extends StatelessWidget {
             Container(
                 height: 5,
                 decoration: BoxDecoration(
-                    color: AppPalette.abyssStroke,
+                    color: t.stroke,
                     borderRadius: BorderRadius.circular(3))),
             FractionallySizedBox(
               widthFactor:
@@ -721,7 +696,7 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLive = ['LIVE', 'REAL', 'CRITICAL', 'DANGER', 'WARNING', 'SAFE']
         .contains(status.toUpperCase());
-    final c = isLive ? AppPalette.safe : AppPalette.textDim;
+    final c = isLive ? AppPalette.safe : RiverColors.of(context).textSecondary.withValues(alpha: 0.4);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -753,32 +728,34 @@ class _FilterChip extends StatelessWidget {
       {required this.label, required this.selected, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: selected
-                ? AppPalette.gold.withValues(alpha: 0.15)
-                : AppPalette.abyss2,
+                ? t.accent.withValues(alpha: 0.15)
+                : t.cardBg,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? AppPalette.gold : AppPalette.abyssStroke,
+              color: selected ? t.accent : t.stroke,
               width: selected ? 1.2 : 0.8,
             ),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? AppPalette.gold : AppPalette.textGrey,
+              color: selected ? t.accent : t.textSecondary,
               fontSize: 11,
               fontWeight:
                   selected ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
-        ),
-      );
+        ));
+  }
 }
 
 class _LevelBar extends StatelessWidget {
@@ -787,12 +764,14 @@ class _LevelBar extends StatelessWidget {
   const _LevelBar({required this.fill, required this.color});
 
   @override
-  Widget build(BuildContext context) => Stack(
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Stack(
         children: [
           Container(
             height: 5,
             decoration: BoxDecoration(
-              color: AppPalette.abyss4,
+              color: t.chipBg,
               borderRadius: BorderRadius.circular(3),
             ),
           ),
@@ -813,8 +792,8 @@ class _LevelBar extends StatelessWidget {
               ),
             ),
           ),
-        ],
-      );
+        ]);
+  }
 }
 
 class _RiskBadge extends StatelessWidget {
@@ -838,21 +817,15 @@ class _RiskBadge extends StatelessWidget {
       );
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Empty State  —  safe in any amount of remaining space
-// ────────────────────────────────────────────────────────────────────────────────
-
 class _EmptyStations extends StatelessWidget {
   const _EmptyStations();
 
   @override
   Widget build(BuildContext context) {
-    // LayoutBuilder lets the icon shrink when vertical space is tight
-    // (e.g. SliverFillRemaining with only ~68 px after the search/filter rows).
+    final t = RiverColors.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final availH  = constraints.maxHeight;
-        // Show icon only when there's enough room; always show text
         final showIcon = availH > 80;
         final iconSize = (availH * 0.35).clamp(24.0, 72.0);
         final boxSize  = iconSize + 16;
@@ -871,21 +844,21 @@ class _EmptyStations extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: RadialGradient(colors: [
-                          AppPalette.gold.withValues(alpha: 0.10),
-                          AppPalette.abyss2,
+                          t.accent.withValues(alpha: 0.10),
+                          t.cardBg,
                         ]),
                         border: Border.all(
-                            color: AppPalette.gold.withValues(alpha: 0.20)),
+                            color: t.accent.withValues(alpha: 0.20)),
                       ),
                       child: Icon(Icons.sensors_off_rounded,
-                          color: AppPalette.gold, size: iconSize * 0.48),
+                          color: t.accent, size: iconSize * 0.48),
                     ),
                     const SizedBox(height: 12),
                   ],
                   Text(
                     context.l10n.noStationsFound,
-                    style: const TextStyle(
-                      color: AppPalette.textGrey,
+                    style: TextStyle(
+                      color: t.textSecondary,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),

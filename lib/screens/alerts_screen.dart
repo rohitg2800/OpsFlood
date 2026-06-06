@@ -1,10 +1,4 @@
-// lib/screens/alerts_screen.dart  v3
-// Phase 4 upgrade:
-//  - TabBar: ALL | IMD | NDMA tabs with live count badges
-//  - Severity sort: CRITICAL → HIGH → MODERATE → LOW (stable)
-//  - Each card has a "→ City Detail" CTA when alert.city is present
-//  - Pull-to-refresh calls realTimeProvider.refreshData()
-//  - Animated empty-state for clean tab experience
+// lib/screens/alerts_screen.dart  v4  — FULLY THEME-AWARE (RiverColors)
 library;
 
 import 'package:flutter/material.dart';
@@ -16,7 +10,6 @@ import '../providers/flood_providers.dart';
 import '../screens/city_detail_screen.dart';
 import '../theme/river_theme.dart';
 
-// ── severity sort order ───────────────────────────────────────────────────────
 int _severityRank(dynamic raw) {
   final sev = (_field(raw, 'severity') +
       _field(raw, 'alert_level'))
@@ -44,8 +37,6 @@ Color _severityColor(dynamic raw) {
   if (rank == 2) return AppPalette.amber;
   return AppPalette.safe;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 class AlertsScreen extends ConsumerStatefulWidget {
   static const route = '/alerts';
@@ -84,6 +75,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final t          = RiverColors.of(context);
     final s          = context.l10n;
     final imd        = ref.watch(imdAlertsProvider);
     final ndma       = ref.watch(ndmaAdvisoriesProvider);
@@ -99,20 +91,20 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
         .length;
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: t.scaffoldBg,
       body: NestedScrollView(
         headerSliverBuilder: (ctx, _) => [
           SliverAppBar(
             pinned: true,
-            backgroundColor: AppPalette.abyss0,
+            backgroundColor: t.navBg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             title: Row(
               children: [
                 Text(
                   s.floodAlerts,
-                  style: const TextStyle(
-                    color: AppPalette.textWhite,
+                  style: TextStyle(
+                    color: t.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
@@ -142,14 +134,14 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
             actions: [
               IconButton(
                 icon: _refreshing
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: AppPalette.cyan))
-                    : const Icon(Icons.refresh_rounded,
-                        color: AppPalette.textGrey, size: 20),
+                            color: t.accent))
+                    : Icon(Icons.refresh_rounded,
+                        color: t.textSecondary, size: 20),
                 onPressed: _refresh,
               ),
             ],
@@ -157,16 +149,16 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
               preferredSize: const Size.fromHeight(48),
               child: TabBar(
                 controller: _tab,
-                labelColor: AppPalette.cyan,
-                unselectedLabelColor: AppPalette.textGrey,
-                indicatorColor: AppPalette.cyan,
+                labelColor: t.accent,
+                unselectedLabelColor: t.textSecondary,
+                indicatorColor: t.accent,
                 indicatorWeight: 2,
                 labelStyle: const TextStyle(
                     fontSize: 12, fontWeight: FontWeight.w700),
                 tabs: [
-                  _CountTab('ALL', all.length),
-                  _CountTab('IMD', imd.length),
-                  _CountTab('NDMA', ndma.length),
+                  _CountTab('ALL', all.length, t),
+                  _CountTab('IMD', imd.length, t),
+                  _CountTab('NDMA', ndma.length, t),
                 ],
               ),
             ),
@@ -185,12 +177,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
   }
 }
 
-// ── tab label with count pill ─────────────────────────────────────────────────
-
 class _CountTab extends StatelessWidget {
-  final String label;
-  final int    count;
-  const _CountTab(this.label, this.count);
+  final String      label;
+  final int         count;
+  final RiverColors t;
+  const _CountTab(this.label, this.count, this.t);
 
   @override
   Widget build(BuildContext context) => Tab(
@@ -204,13 +195,13 @@ class _CountTab extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppPalette.cyan.withValues(alpha: 0.18),
+                  color: t.accent.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text('$count',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 9,
-                        color: AppPalette.cyan,
+                        color: t.accent,
                         fontWeight: FontWeight.w800)),
               ),
             ],
@@ -219,21 +210,20 @@ class _CountTab extends StatelessWidget {
       );
 }
 
-// ── scrollable alert list per tab ─────────────────────────────────────────────
-
 class _AlertList extends StatelessWidget {
-  final List<dynamic>       alerts;
-  final Future<void> Function() onRefresh;
+  final List<dynamic>            alerts;
+  final Future<void> Function()  onRefresh;
   const _AlertList({required this.alerts, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     if (alerts.isEmpty) {
       return const _EmptyAlerts();
     }
     return RefreshIndicator(
-      color: AppPalette.cyan,
-      backgroundColor: AppPalette.abyss2,
+      color: t.accent,
+      backgroundColor: t.cardBg,
       onRefresh: onRefresh,
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(
@@ -246,14 +236,13 @@ class _AlertList extends StatelessWidget {
   }
 }
 
-// ─── Alert Card v3 ───────────────────────────────────────────────────────────
-
 class _AlertCard extends StatelessWidget {
   final dynamic raw;
   const _AlertCard({required this.raw});
 
   @override
   Widget build(BuildContext context) {
+    final t      = RiverColors.of(context);
     final col    = _severityColor(raw);
     final title  = _orElse(raw, ['title', 'headline'], 'Alert');
     final desc   = _orElse(raw, ['description', 'message', 'advisory'], '');
@@ -277,7 +266,7 @@ class _AlertCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: col.withValues(alpha: 0.28)),
         boxShadow: [
@@ -289,7 +278,6 @@ class _AlertCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // ── main content ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -298,7 +286,6 @@ class _AlertCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // severity icon circle
                     Container(
                       width: 38, height: 38,
                       decoration: BoxDecoration(
@@ -315,8 +302,8 @@ class _AlertCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(title,
-                              style: const TextStyle(
-                                color: AppPalette.textWhite,
+                              style: TextStyle(
+                                color: t.textPrimary,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                                 height: 1.3,
@@ -325,12 +312,12 @@ class _AlertCard extends StatelessWidget {
                             const SizedBox(height: 2),
                             Row(
                               children: [
-                                const Icon(Icons.location_on_rounded,
-                                    color: AppPalette.textDim, size: 10),
+                                Icon(Icons.location_on_rounded,
+                                    color: t.textSecondary.withValues(alpha: 0.5), size: 10),
                                 const SizedBox(width: 3),
                                 Text(area,
-                                    style: const TextStyle(
-                                        color: AppPalette.textGrey,
+                                    style: TextStyle(
+                                        color: t.textSecondary,
                                         fontSize: 10)),
                               ],
                             ),
@@ -338,7 +325,6 @@ class _AlertCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // severity badge + date stacked
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -361,8 +347,8 @@ class _AlertCard extends StatelessWidget {
                         if (dateStr.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(dateStr,
-                              style: const TextStyle(
-                                  color: AppPalette.textDim,
+                              style: TextStyle(
+                                  color: t.textSecondary.withValues(alpha: 0.5),
                                   fontSize: 8.5)),
                         ],
                       ],
@@ -375,13 +361,13 @@ class _AlertCard extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppPalette.abyss4,
+                      color: t.chipBg,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppPalette.abyssStroke),
+                      border: Border.all(color: t.stroke),
                     ),
                     child: Text(desc,
-                        style: const TextStyle(
-                            color: AppPalette.textGrey,
+                        style: TextStyle(
+                            color: t.textSecondary,
                             fontSize: 11,
                             height: 1.5)),
                   ),
@@ -389,12 +375,12 @@ class _AlertCard extends StatelessWidget {
                 if (source.isNotEmpty && source != '—') ...[
                   const SizedBox(height: 8),
                   Row(children: [
-                    const Icon(Icons.source_rounded,
-                        color: AppPalette.textDim, size: 11),
+                    Icon(Icons.source_rounded,
+                        color: t.textSecondary.withValues(alpha: 0.5), size: 11),
                     const SizedBox(width: 4),
                     Text(source,
-                        style: const TextStyle(
-                            color: AppPalette.textDim,
+                        style: TextStyle(
+                            color: t.textSecondary.withValues(alpha: 0.5),
                             fontSize: 9.5,
                             fontWeight: FontWeight.w600)),
                   ]),
@@ -402,7 +388,6 @@ class _AlertCard extends StatelessWidget {
               ],
             ),
           ),
-          // ── city drill-through CTA ────────────────────────────────────
           if (city.isNotEmpty)
             InkWell(
               onTap: () => Navigator.pushNamed(
@@ -449,8 +434,7 @@ class _AlertCard extends StatelessWidget {
     );
   }
 
-  String _orElse(
-      dynamic raw, List<String> keys, String fallback) {
+  String _orElse(dynamic raw, List<String> keys, String fallback) {
     for (final k in keys) {
       final v = _field(raw, k);
       if (v.isNotEmpty) return v;
@@ -466,45 +450,46 @@ class _AlertCard extends StatelessWidget {
   }
 }
 
-// ── empty state ───────────────────────────────────────────────────────────────
-
 class _EmptyAlerts extends StatelessWidget {
   const _EmptyAlerts();
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 76, height: 76,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  AppPalette.safe.withValues(alpha: 0.13),
-                  AppPalette.abyss2,
-                ]),
-                border: Border.all(
-                    color: AppPalette.safe.withValues(alpha: 0.22)),
-              ),
-              child: const Icon(Icons.notifications_off_outlined,
-                  color: AppPalette.safe, size: 34),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 76, height: 76,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(colors: [
+                AppPalette.safe.withValues(alpha: 0.13),
+                t.cardBg,
+              ]),
+              border: Border.all(
+                  color: AppPalette.safe.withValues(alpha: 0.22)),
             ),
-            const SizedBox(height: 16),
-            Text(
-              context.l10n.noAlerts,
-              style: const TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Pull down to refresh',
-              style: TextStyle(
-                  color: AppPalette.textDim, fontSize: 11),
-            ),
-          ],
-        ),
-      );
+            child: const Icon(Icons.notifications_off_outlined,
+                color: AppPalette.safe, size: 34),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            context.l10n.noAlerts,
+            style: TextStyle(
+                color: t.textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Pull down to refresh',
+            style: TextStyle(
+                color: t.textSecondary.withValues(alpha: 0.5), fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
 }
