@@ -6,12 +6,8 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
-/// Package: com.equinox_bh.android
-/// Firebase project: device-streaming-e762727d
-///
-/// NOTE: After registering com.equinox_bh.android in the Firebase console,
-/// download the new google-services.json and run `flutterfire configure`
-/// to regenerate this file with the new appId for the new package.
+/// Package:  com.equinox_bh.android
+/// Firebase: device-streaming-e762727d
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -50,7 +46,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU',
-    appId: '1:1071864126219:android:5751e3c0e5e4c59be7e00e',
+    appId: '1:1071864126219:android:5f5149d0b9bed892e7e00e',
     messagingSenderId: '1071864126219',
     projectId: 'device-streaming-e762727d',
     storageBucket: 'device-streaming-e762727d.firebasestorage.app',
