@@ -27,6 +27,7 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/state_matrix_screen.dart';
 import 'screens/weather_screen.dart';
+import 'services/ai_prediction_background_service.dart';
 import 'services/cwc_alert_watcher.dart';
 import 'services/fcm_service.dart';
 import 'services/local_cache_service.dart';
@@ -34,7 +35,7 @@ import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
 // ── Phase 2: new screens ────────────────────────────────────────────────────
-import 'screens/sos_screen.dart';
+port 'screens/sos_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'screens/prediction_screen.dart';
 
@@ -124,6 +125,20 @@ Future<void> main() async {
       unawaited(CwcAlertWatcher.instance.start(container).catchError((e) {
         if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
       }));
+
+      // 8. AI Prediction Background Service
+      //    initialise() registers channels + configures the isolate.
+      //    start() launches the foreground service immediately.
+      //    Both are non-fatal — the app works fine without them.
+      unawaited(
+        AiPredictionBgService.initialise().then((_) {
+          return AiPredictionBgService.start();
+        }).catchError((Object e) {
+          if (kDebugMode) {
+            debugPrint('⚠️  AiPredictionBgService init/start failed (non-fatal): $e');
+          }
+        }),
+      );
     }
   } finally {
     WidgetsBinding.instance.allowFirstFrame();
@@ -143,17 +158,13 @@ class EquinoxBHApp extends ConsumerWidget {
     final AppThemeMode appMode = ref.watch(themeModeProvider);
     final locale               = ref.watch(localeProvider);
 
-    // ── Resolve ThemeData per AppThemeMode ───────────────────────────────
-    // Each mode gets its own ThemeData with the correct scaffold background,
-    // accent colour, card colour, nav colour and text colours.
     final ThemeData resolvedTheme = switch (appMode) {
       AppThemeMode.light  => RiverColors.lightTheme(),
       AppThemeMode.sunset => RiverColors.sunsetTheme(),
       AppThemeMode.ocean  => RiverColors.oceanTheme(),
-      _                   => RiverColors.darkTheme(),   // dark + system
+      _                   => RiverColors.darkTheme(),
     };
 
-    // ThemeMode for system-level dark/light detection
     final ThemeMode flutterMode = switch (appMode) {
       AppThemeMode.system => ThemeMode.system,
       AppThemeMode.light  => ThemeMode.light,
@@ -163,9 +174,6 @@ class EquinoxBHApp extends ConsumerWidget {
     return MaterialApp(
       title:                      'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
-      // For system mode: use standard dark/light split.
-      // For all other modes: force the resolved theme as both theme + darkTheme
-      // so MaterialApp always uses it regardless of device brightness.
       themeMode: flutterMode,
       theme:     appMode == AppThemeMode.system ? RiverColors.lightTheme() : resolvedTheme,
       darkTheme: appMode == AppThemeMode.system ? RiverColors.darkTheme()  : resolvedTheme,
@@ -189,7 +197,7 @@ class EquinoxBHApp extends ConsumerWidget {
         '/settings':                    (_) => const SettingsScreen(),
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
-        '/bihar_map':                   (_) => const BiharRiverMapScreen(), // alias
+        '/bihar_map':                   (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
         CityDetailScreen.route: (ctx) {
           final city = ModalRoute.of(ctx)!.settings.arguments as String;
