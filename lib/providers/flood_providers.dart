@@ -60,19 +60,15 @@ final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) =>
 final criticalCountProvider = Provider<int>((ref) =>
     ref.watch(realTimeProvider).criticalCount);
 
-// ── THE FIX: use allFloodData so every fetched city appears in Monitors ──────
-// Previously liveLevels returned only WRD-gauge-matched cities (hasLiveLevel=true),
-// which was almost always 0 because WRD name matching failed for most cities.
-// allFloodData returns ALL cities once the fetch cycle has run, with status
-// 'ESTIMATED' for cities without a WRD gauge match and actual risk levels
-// for matched ones. The card UI already handles 'ESTIMATED' status gracefully.
-final liveLevelsProvider = Provider<List<FloodData>>((ref) {
-  final rt = ref.watch(realTimeProvider);
-  // Prefer live-matched data; fall back to all estimated data if none matched
-  final live = rt.liveLevels;         // only hasLiveLevel==true
-  if (live.isNotEmpty) return live;
-  return rt.allFloodData;             // all cities post-fetch (estimated)
-});
+// ── liveLevelsProvider ────────────────────────────────────────────────────────
+// Always returns allFloodData so every city in the cache is visible in
+// All Stations, Monitors, etc. — regardless of whether it has a live WRD
+// gauge reading. Cities without a gauge show status 'ESTIMATED'.
+// Previously this toggled between liveFloodData (hasLiveLevel==true only)
+// and allFloodData, which meant non-gauge cities vanished the moment any
+// single city got a live reading.
+final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
+    ref.watch(realTimeProvider).allFloodData);
 
 final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) =>
     ref.watch(realTimeProvider).monitoringData);
@@ -81,21 +77,17 @@ final monitoredCitiesProvider = Provider<List<String>>((ref) =>
     ref.watch(liveLevelsProvider).map((fd) => fd.city).toList());
 
 // ── Per-city ──────────────────────────────────────────────────────────────────
-
+// Uses rt.dataForCity() which hits the engine cache directly — guaranteed
+// to find the entry as long as the city was fetched, regardless of whether
+// it has hasLiveLevel==true or false.
 final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
-  final rt         = ref.watch(realTimeProvider);
-  final normalised = city.trim().toLowerCase();
-
-  // 1. Try liveLevels first (has real gauge readings)
-  final fromLive = rt.liveLevels.cast<FloodData?>().firstWhere(
-    (fd) => fd!.city.trim().toLowerCase() == normalised,
-    orElse: () => null,
-  );
-  if (fromLive != null) return fromLive;
-
-  // 2. Fall back to allFloodData (estimated / non-gauge cities)
+  final rt = ref.watch(realTimeProvider);
+  // Direct cache lookup via the engine — most reliable path
+  final direct = rt.dataForCity(city);
+  if (direct != null) return direct;
+  // Fallback: linear scan of allFloodData (handles edge cases)
   return rt.allFloodData.cast<FloodData?>().firstWhere(
-    (fd) => fd!.city.trim().toLowerCase() == normalised,
+    (fd) => fd!.city.trim().toLowerCase() == city.trim().toLowerCase(),
     orElse: () => null,
   );
 });
