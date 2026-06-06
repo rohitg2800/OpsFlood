@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v3.2 — early notify after WRD)
+// lib/services/live_fetch_engine.dart  (v3.3 — silent background GloFAS)
 library;
 
 import 'dart:async';
@@ -76,7 +76,6 @@ class LiveFetchEngine {
   static const _cacheTtl      = Duration(minutes: 15);
   static const _pollInterval  = Duration(seconds: 45);
   static const _httpTimeout   = Duration(seconds: 20);
-  // GloFAS is best-effort context — fail fast so it never blocks the screen
   static const _glofasTimeout = Duration(seconds: 8);
 
   final Map<String, LiveCityData> _cache = {};
@@ -119,7 +118,6 @@ class LiveFetchEngine {
 
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
-  /// Only WRD-matched cities (hasLiveLevel == true)
   List<FloodData> get liveFloodData {
     return _cache.entries
         .where((e) => e.value.hasLiveLevel)
@@ -131,10 +129,10 @@ class LiveFetchEngine {
             orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
           );
           return data.toFloodData(
-            mc['city']     as String,
-            mc['state']    as String,
-            riverName:  mc['river']    as String?,
-            district:  (mc['district'] as String?) ?? '',
+            mc['city']  as String,
+            mc['state'] as String,
+            riverName: mc['river']    as String?,
+            district: (mc['district'] as String?) ?? '',
           );
         }).toList()
         ..sort((a, b) {
@@ -146,7 +144,6 @@ class LiveFetchEngine {
         });
   }
 
-  /// All cities post-fetch including estimated (no WRD match)
   List<FloodData> get allFloodData {
     return _cache.entries.map((e) {
       final city = e.key;
@@ -156,10 +153,10 @@ class LiveFetchEngine {
         orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
       );
       return data.toFloodData(
-        mc['city']     as String,
-        mc['state']    as String,
-        riverName:  mc['river']    as String?,
-        district:  (mc['district'] as String?) ?? '',
+        mc['city']  as String,
+        mc['state'] as String,
+        riverName: mc['river']    as String?,
+        district: (mc['district'] as String?) ?? '',
       );
     }).toList();
   }
@@ -197,10 +194,10 @@ class LiveFetchEngine {
       orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
     );
     return d.toFloodData(
-      mc['city']     as String,
-      mc['state']    as String,
-      riverName:  mc['river']    as String?,
-      district:  (mc['district'] as String?) ?? '',
+      mc['city']  as String,
+      mc['state'] as String,
+      riverName: mc['river']    as String?,
+      district: (mc['district'] as String?) ?? '',
     );
   }
 
@@ -237,11 +234,6 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  // ---------------------------------------------------------------------------
-  // PRIMARY fetch: WRD gauge levels first, then GloFAS + rainfall in parallel
-  // KEY CHANGE: notify UI as soon as WRD data is written so screen never waits
-  //             for the 20-second GloFAS timeout.
-  // ---------------------------------------------------------------------------
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
@@ -252,14 +244,13 @@ class LiveFetchEngine {
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
     final now  = DateTime.now();
 
-    // ── 1. WRD Bihar gauged levels (primary, fast ~1-2 s) ──────────────────
+    // ── 1. WRD Bihar (primary, fast) ─────────────────────────────────────────
     final wrdStations = await _wrd.fetch();
     final wrdByKey = <String, WrdStation>{};
     for (final s in wrdStations) {
       wrdByKey[s.site.toLowerCase().trim()] = s;
     }
 
-    // Write WRD data into cache immediately so the screen can show data now
     for (int i = 0; i < biharCities.length; i++) {
       final mc       = biharCities[i];
       final cityName = mc['city']          as String;
@@ -277,37 +268,41 @@ class LiveFetchEngine {
         } catch (_) { wrdMatch = null; }
       }
 
-      final wrdLevel = wrdMatch?.currentLevel;
-      final wrdDL    = wrdMatch?.dangerLevel   ?? dl;
-      final wrdWL    = wrdMatch?.warningLevel  ?? wl;
-      final wrdRisk  = wrdMatch?.riskLabel;
-      final hasLive  = wrdLevel != null;
-
-      // Preserve existing GloFAS flow/rain if already cached
       final existing = _cache[key];
-
       _cache[key] = LiveCityData(
-        currentLevel: wrdLevel,
-        warningLevel: wrdWL,
-        dangerLevel:  wrdDL,
-        flowRate:     existing?.flowRate,    // keep old value until GloFAS updates
+        currentLevel: wrdMatch?.currentLevel,
+        warningLevel: wrdMatch?.warningLevel  ?? wl,
+        dangerLevel:  wrdMatch?.dangerLevel   ?? dl,
+        flowRate:     existing?.flowRate,
         rainfall24h:  existing?.rainfall24h,
-        riskLevel:    wrdRisk ?? existing?.riskLevel,
+        riskLevel:    wrdMatch?.riskLabel ?? existing?.riskLevel,
         lastUpdated:  now,
-        hasLiveLevel: hasLive,
+        hasLiveLevel: wrdMatch?.currentLevel != null,
       );
     }
     _lastFetch = now;
 
     final matched = _cache.values.where((v) => v.hasLiveLevel).length;
-    _log('WRD done — ${_cache.length} cities ($matched live). Notifying UI now.');
+    _log('WRD done — ${_cache.length} cities ($matched live). Notifying UI.');
 
-    // ── EARLY NOTIFY: push WRD data to screen immediately ──────────────────
+    // ── EARLY NOTIFY: screen shows data now, _isLoading stays false ──────────
+    // Do NOT set _isLoading=true again — that was the bug causing the screen
+    // to stay on the loading spinner even after data arrived.
     _isLoading = false;
     _notify();
-    _isLoading = true; // mark loading again while GloFAS fetches
 
-    // ── 2. GloFAS + Open-Meteo in parallel, best-effort, short timeout ─────
+    // ── 2. GloFAS + Open-Meteo in background (best-effort, silent) ───────────
+    // Runs after the screen has already updated. Any errors are swallowed.
+    unawaited(_overlayGloFAS(biharCities, lats, lons));
+  }
+
+  /// Fetches GloFAS river flow and Open-Meteo rainfall and overlays them onto
+  /// the existing cache entries. Notifies once complete. Never throws.
+  Future<void> _overlayGloFAS(
+    List<Map<String, dynamic>> biharCities,
+    String lats,
+    String lons,
+  ) async {
     var dischargeMap = <String, List<double?>>{};
     var meanMap      = <String, List<double?>>{};
     var rainMap      = <String, double?>{};
@@ -321,20 +316,15 @@ class LiveFetchEngine {
           .catchError((e) { _log('Open-Meteo skipped: $e'); }),
     ]);
 
-    // ── 3. Overlay GloFAS context onto existing WRD cache entries ──────────
     final updateNow = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
-      final mc       = biharCities[i];
-      final cityName = mc['city'] as String;
-      final key      = cityName.toLowerCase().trim();
+      final key      = (biharCities[i]['city'] as String).toLowerCase().trim();
       final existing = _cache[key];
       if (existing == null) continue;
 
-      final discharge = dischargeMap[key]?.firstOrNull;
-      final mean      = meanMap[key]?.firstOrNull;
-      final rain      = rainMap[key];
-
-      // Only update flow/rain; preserve WRD level and risk
+      final discharge   = dischargeMap[key]?.firstOrNull;
+      final mean        = meanMap[key]?.firstOrNull;
+      final rain        = rainMap[key];
       final derivedRisk = existing.riskLevel ?? _deriveRisk(discharge, mean);
 
       _cache[key] = LiveCityData(
@@ -349,7 +339,8 @@ class LiveFetchEngine {
       );
     }
     _lastFetch = updateNow;
-    _log('GloFAS overlay done — cache fully updated.');
+    _log('GloFAS overlay done.');
+    _notify(); // silent background update — cards refresh with flow+rain data
   }
 
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
@@ -360,7 +351,7 @@ class LiveFetchEngine {
       '&daily=river_discharge,river_discharge_mean'
       '&forecast_days=1&models=seamless_v4',
     );
-    final res = await http.get(uri).timeout(_glofasTimeout);  // short timeout
+    final res = await http.get(uri).timeout(_glofasTimeout);
     if (res.statusCode != 200) throw Exception('GloFAS HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
@@ -385,7 +376,7 @@ class LiveFetchEngine {
       '&daily=precipitation_sum'
       '&forecast_days=1&timezone=Asia%2FKolkata',
     );
-    final res = await http.get(uri).timeout(_glofasTimeout);  // short timeout
+    final res = await http.get(uri).timeout(_glofasTimeout);
     if (res.statusCode != 200) throw Exception('Open-Meteo HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
@@ -449,3 +440,6 @@ class LiveFetchEngine {
     if (kDebugMode) debugPrint('[LiveFetchEngine] $msg');
   }
 }
+
+// Dart ≥3 — suppress unawaited future lint for fire-and-forget calls
+void unawaited(Future<void> f) {}
