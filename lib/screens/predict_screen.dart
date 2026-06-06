@@ -1,8 +1,4 @@
-// lib/screens/predict_screen.dart  v5
-// Fully integrated with lib/ml/flood_engine.dart — no backend, no HTTP calls.
-// Inputs: city/state, river level, 7-day rainfall (daily breakdown), discharge.
-// Engine: runOnDeviceEngine() → FloodResult with probabilities, risk score,
-//         monitoring advice, proximity-to-danger, and ensemble confidence.
+// lib/screens/predict_screen.dart  v6  (full RiverColors token migration)
 library;
 
 import 'dart:math' as math;
@@ -87,16 +83,11 @@ class _PredictScreenState extends State<PredictScreen>
     super.dispose();
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────
-
-  /// Splits total 7-day rainfall evenly across t1d–t7d (engine requires them).
-  /// In a future version, daily values can be captured individually.
   List<double> _splitRainfall(double total) {
     final daily = total / 7.0;
     return List.filled(7, daily);
   }
 
-  /// Resolve the "state" from city name via IndiaGeodata lookup.
   String _resolveState(String input) {
     final key = input.trim().toLowerCase();
     final match = IndiaGeodata.monitoredCities
@@ -106,7 +97,6 @@ class _PredictScreenState extends State<PredictScreen>
           orElse: () => null,
         );
     if (match != null) return match['state'] as String;
-    // Check if input is itself a state name
     final stateMatch = IndiaGeodata.states
         .firstWhere(
           (s) => s.toLowerCase() == key,
@@ -120,11 +110,10 @@ class _PredictScreenState extends State<PredictScreen>
     HapticFeedback.mediumImpact();
     _gaugeCtrl.reset();
 
-    final stateOrCity = _stateCtrl.text.trim();
+    final stateOrCity   = _stateCtrl.text.trim();
     final resolvedState = _resolveState(stateOrCity);
-
-    final rainfall = double.tryParse(_rainfallCtrl.text.trim()) ?? 0;
-    final dailyRain = _splitRainfall(rainfall);
+    final rainfall      = double.tryParse(_rainfallCtrl.text.trim()) ?? 0;
+    final dailyRain     = _splitRainfall(rainfall);
 
     final input = FloodInput(
       state:              resolvedState,
@@ -143,19 +132,18 @@ class _PredictScreenState extends State<PredictScreen>
     _gaugeCtrl.forward();
   }
 
-  // ── build ───────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final s = context.l10n;
+    final t = RiverColors.of(context);
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: t.scaffoldBg,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverAppBar(
             pinned: true,
-            backgroundColor: AppPalette.abyss0,
+            backgroundColor: t.navBg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             title: Row(
@@ -164,8 +152,8 @@ class _PredictScreenState extends State<PredictScreen>
                 Container(
                   width: 30, height: 30,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                        colors: [Color(0xFF005C6E), AppPalette.cyan]),
+                    gradient: LinearGradient(
+                        colors: [t.cardBgElevated, t.accent]),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.psychology_rounded,
@@ -173,17 +161,17 @@ class _PredictScreenState extends State<PredictScreen>
                 ),
                 const SizedBox(width: 10),
                 Text(s.tabPredict,
-                    style: const TextStyle(
-                        color: AppPalette.textWhite,
+                    style: TextStyle(
+                        color: t.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.w700)),
                 if (_city != null) ...[
                   const SizedBox(width: 8),
-                  _Chip(label: _city!, color: AppPalette.cyan),
+                  _Chip(label: _city!, color: t.accent),
                 ],
               ],
             ),
-            iconTheme: const IconThemeData(color: AppPalette.textWhite),
+            iconTheme: IconThemeData(color: t.textPrimary),
           ),
 
           SliverPadding(
@@ -198,7 +186,6 @@ class _PredictScreenState extends State<PredictScreen>
                       if (_city != null) _ContextBanner(city: _city!),
                       const SizedBox(height: 8),
 
-                      // ─ Core inputs ─────────────────────────────────────────────────
                       _DarkField(
                         ctrl:  _stateCtrl,
                         label: 'City / State',
@@ -231,7 +218,6 @@ class _PredictScreenState extends State<PredictScreen>
                         required: false,
                       ),
 
-                      // ─ Advanced toggle ────────────────────────────────────────────
                       const SizedBox(height: 10),
                       GestureDetector(
                         onTap: () => setState(() => _showAdvanced = !_showAdvanced),
@@ -241,15 +227,14 @@ class _PredictScreenState extends State<PredictScreen>
                               _showAdvanced
                                   ? Icons.expand_less_rounded
                                   : Icons.expand_more_rounded,
-                              color: AppPalette.textGrey, size: 18,
+                              color: t.textSecondary, size: 18,
                             ),
                             const SizedBox(width: 6),
                             Text(
                               _showAdvanced
                                   ? 'Hide event parameters'
                                   : 'Flood event parameters (optional — improves accuracy)',
-                              style: const TextStyle(
-                                  color: AppPalette.textGrey, fontSize: 12),
+                              style: TextStyle(color: t.textSecondary, fontSize: 12),
                             ),
                           ],
                         ),
@@ -347,12 +332,13 @@ class _ResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = _color;
+    final t     = RiverColors.of(context);
+    final c     = _color;
     final probs = result.probabilities;
 
     return Container(
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: c.withValues(alpha: 0.35)),
         boxShadow: [
@@ -365,7 +351,6 @@ class _ResultCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─ header gauge + label ───────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(20),
             child: Row(
@@ -387,17 +372,14 @@ class _ResultCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Flood Risk',
-                          style: TextStyle(
-                              color: AppPalette.textGrey, fontSize: 11)),
+                      Text('Flood Risk',
+                          style: TextStyle(color: t.textSecondary, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         '${result.alert}  ${result.severity}',
                         style: TextStyle(
-                            color: c,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5),
+                            color: c, fontSize: 24,
+                            fontWeight: FontWeight.w900, letterSpacing: -0.5),
                       ),
                       const SizedBox(height: 6),
                       Row(
@@ -420,17 +402,16 @@ class _ResultCard extends StatelessWidget {
             ),
           ),
 
-          const _Divider(),
+          _Divider(),
 
-          // ─ Probability bar chart ───────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Probability Distribution',
+                Text('Probability Distribution',
                     style: TextStyle(
-                        color: AppPalette.textGrey,
+                        color: t.textSecondary,
                         fontSize: 11,
                         fontWeight: FontWeight.w700)),
                 const SizedBox(height: 10),
@@ -444,9 +425,8 @@ class _ResultCard extends StatelessWidget {
             ),
           ),
 
-          const _Divider(),
+          _Divider(),
 
-          // ─ Monitoring advice ─────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
             child: Column(
@@ -459,38 +439,32 @@ class _ResultCard extends StatelessWidget {
                     Text(
                       result.monitoringLevel,
                       style: TextStyle(
-                          color: c,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5),
+                          color: c, fontSize: 12,
+                          fontWeight: FontWeight.w800, letterSpacing: 0.5),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
                   result.monitoringAction,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey,
-                      fontSize: 12,
-                      height: 1.45),
+                  style: TextStyle(color: t.textSecondary, fontSize: 12, height: 1.45),
                 ),
               ],
             ),
           ),
 
-          const _Divider(),
+          _Divider(),
 
-          // ─ Stats row ──────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _StatBox(
-                  label:  'Proximity to\nDanger Level',
-                  value:  '${result.proximityToDangerM >= 0 ? '' : '−'}'  // sign
-                          '${result.proximityToDangerM.abs().toStringAsFixed(2)} m',
-                  color:  result.proximityToDangerM <= 0 ? AppPalette.critical : c,
+                  label: 'Proximity to\nDanger Level',
+                  value: '${result.proximityToDangerM >= 0 ? '' : '−'}'
+                         '${result.proximityToDangerM.abs().toStringAsFixed(2)} m',
+                  color: result.proximityToDangerM <= 0 ? AppPalette.critical : c,
                 ),
                 _StatBox(
                   label: 'Threshold\nSeverity',
@@ -500,13 +474,12 @@ class _ResultCard extends StatelessWidget {
                 _StatBox(
                   label: 'Algorithm',
                   value: 'Ensemble v1.2',
-                  color: AppPalette.textGrey,
+                  color: t.textSecondary,
                 ),
               ],
             ),
           ),
 
-          // ─ Live gauge link ─────────────────────────────────────────────
           if (city != null)
             InkWell(
               onTap: () => Navigator.pushNamed(
@@ -517,13 +490,10 @@ class _ResultCard extends StatelessWidget {
               ),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 18, vertical: 11),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
                 decoration: BoxDecoration(
                   color: c.withValues(alpha: 0.07),
-                  border: Border(
-                      top: BorderSide(
-                          color: c.withValues(alpha: 0.18))),
+                  border: Border(top: BorderSide(color: c.withValues(alpha: 0.18))),
                   borderRadius: const BorderRadius.only(
                     bottomLeft:  Radius.circular(20),
                     bottomRight: Radius.circular(20),
@@ -536,9 +506,7 @@ class _ResultCard extends StatelessWidget {
                     const SizedBox(width: 7),
                     Text('View $city live gauge  →',
                         style: TextStyle(
-                            color: c,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700)),
+                            color: c, fontSize: 12, fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -568,7 +536,8 @@ class _ProbRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = _barColor;
+    final t    = RiverColors.of(context);
+    final c    = _barColor;
     final frac = (percent / 100.0).clamp(0.0, 1.0);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -579,7 +548,7 @@ class _ProbRow extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(
-                  color: highlight ? c : AppPalette.textGrey,
+                  color: highlight ? c : t.textSecondary,
                   fontSize: 10,
                   fontWeight: highlight ? FontWeight.w800 : FontWeight.w500),
             ),
@@ -614,7 +583,7 @@ class _ProbRow extends StatelessWidget {
               '${percent.toStringAsFixed(1)}%',
               textAlign: TextAlign.right,
               style: TextStyle(
-                  color: highlight ? c : AppPalette.textDim,
+                  color: highlight ? c : t.stroke,
                   fontSize: 10,
                   fontWeight: highlight ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -625,7 +594,7 @@ class _ProbRow extends StatelessWidget {
   }
 }
 
-// ─── Stat box ───────────────────────────────────────────────────────────────────
+// ─── Stat box ─────────────────────────────────────────────────────────────────
 
 class _StatBox extends StatelessWidget {
   final String label, value;
@@ -633,23 +602,22 @@ class _StatBox extends StatelessWidget {
   const _StatBox({required this.label, required this.value, required this.color});
 
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Text(value,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800)),
-          const SizedBox(height: 3),
-          Text(label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 9.5, height: 1.3)),
-        ],
-      );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Column(
+      children: [
+        Text(value,
+            style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 3),
+        Text(label,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: t.stroke, fontSize: 9.5, height: 1.3)),
+      ],
+    );
+  }
 }
 
-// ─── Shared small widgets ─────────────────────────────────────────────────────────
+// ─── Shared small widgets ─────────────────────────────────────────────────────
 
 class _Chip extends StatelessWidget {
   final String label;
@@ -673,11 +641,10 @@ class _Chip extends StatelessWidget {
 class _Divider extends StatelessWidget {
   const _Divider();
   @override
-  Widget build(BuildContext context) => Divider(
-        height: 1,
-        thickness: 1,
-        color: AppPalette.abyssStroke,
-      );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Divider(height: 1, thickness: 1, color: t.stroke);
+  }
 }
 
 class _ContextBanner extends StatelessWidget {
@@ -685,29 +652,30 @@ class _ContextBanner extends StatelessWidget {
   const _ContextBanner({required this.city});
 
   @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 14, top: 6),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        decoration: BoxDecoration(
-          color: AppPalette.cyan.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.info_outline_rounded,
-                color: AppPalette.cyan, size: 14),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Pre-filled from $city live gauge — adjust as needed.',
-                style: const TextStyle(
-                    color: AppPalette.cyan, fontSize: 11, height: 1.4),
-              ),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14, top: 6),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: t.accent.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.accent.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, color: t.accent, size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Pre-filled from $city live gauge — adjust as needed.',
+              style: TextStyle(color: t.accent, fontSize: 11, height: 1.4),
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DarkField extends StatelessWidget {
@@ -728,40 +696,38 @@ class _DarkField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.l10n;
+    final t = RiverColors.of(context);
     return TextFormField(
       controller:   ctrl,
-      style: const TextStyle(color: AppPalette.textWhite, fontSize: 14),
+      style: TextStyle(color: t.textPrimary, fontSize: 14),
       keyboardType: numeric
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.text,
       decoration: InputDecoration(
         labelText:  label,
-        labelStyle: const TextStyle(color: AppPalette.textGrey, fontSize: 13),
+        labelStyle: TextStyle(color: t.textSecondary, fontSize: 13),
         hintText:   hint,
-        hintStyle:  const TextStyle(color: AppPalette.textDim, fontSize: 12),
-        prefixIcon: Icon(icon, color: AppPalette.textGrey, size: 18),
+        hintStyle:  TextStyle(color: t.stroke, fontSize: 12),
+        prefixIcon: Icon(icon, color: t.textSecondary, size: 18),
         filled:     true,
-        fillColor:  AppPalette.abyss2,
+        fillColor:  t.cardBg,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppPalette.abyssStroke, width: 1),
+          borderSide: BorderSide(color: t.stroke, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-              color: AppPalette.cyan.withValues(alpha: 0.6), width: 1.5),
+          borderSide: BorderSide(color: t.accent.withValues(alpha: 0.6), width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-              color: AppPalette.critical.withValues(alpha: 0.5)),
+          borderSide: BorderSide(color: AppPalette.critical.withValues(alpha: 0.5)),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
       validator: required
           ? (v) => (v == null || v.trim().isEmpty) ? s.noData : null
@@ -776,42 +742,43 @@ class _RunButton extends StatelessWidget {
   const _RunButton({required this.label, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-                colors: [Color(0xFF005C6E), AppPalette.cyan]),
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                  color: AppPalette.cyan.withValues(alpha: 0.25),
-                  blurRadius: 16,
-                  spreadRadius: 1),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [t.cardBgElevated, t.accent]),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+                color: t.accentGlow,
+                blurRadius: 16,
+                spreadRadius: 1),
+          ],
+        ),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.analytics_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      letterSpacing: 0.3)),
             ],
           ),
-          child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.analytics_rounded,
-                    color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text(label,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        letterSpacing: 0.3)),
-              ],
-            ),
-          ),
         ),
-      );
+      ),
+    );
+  }
 }
 
-// ─── Arc gauge ───────────────────────────────────────────────────────────────────
+// ─── Arc gauge ────────────────────────────────────────────────────────────────
 
 class _GaugePainter extends CustomPainter {
   final double fraction;
