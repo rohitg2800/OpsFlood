@@ -39,7 +39,7 @@ dependencies:
   # i18n
   intl: ^0.20.2
 
-  # Links
+  # Links / SOS calls
   url_launcher: ^6.3.0
 
   # Local notifications
@@ -53,6 +53,10 @@ dependencies:
 
   # Icons
   cupertino_icons: ^1.0.6
+
+  # ── NEW (Phase 2) ────────────────────────────────────────────────
+  # GPS — "Am I in danger?" proximity banner
+  geolocator: ^13.0.4
 
 dev_dependencies:
   flutter_test:

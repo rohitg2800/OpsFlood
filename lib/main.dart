@@ -32,6 +32,11 @@ import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
+// ── Phase 2: new screens ────────────────────────────────────────────────────
+import 'screens/sos_screen.dart';
+import 'screens/news_feed_screen.dart';
+import 'screens/prediction_screen.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -160,6 +165,7 @@ class EquinoxBHApp extends ConsumerWidget {
       ],
       home:   const SplashScreen(),
       routes: {
+        // ── Existing routes ────────────────────────────────────────────────
         AlertsScreen.route:             (_) => const AlertsScreen(),
         '/live_stations':               (_) => const LiveStationsScreen(),
         '/weather':                     (_) => const WeatherScreen(),
@@ -171,11 +177,16 @@ class EquinoxBHApp extends ConsumerWidget {
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
-        // ── Phase 3 — city detail with named-route + arg pass-through ──────
+        // city detail with arg pass-through
         CityDetailScreen.route: (ctx) {
           final city = ModalRoute.of(ctx)!.settings.arguments as String;
           return CityDetailScreen(cityName: city);
         },
+
+        // ── Phase 2: new routes ─────────────────────────────────────────────
+        '/sos':        (_) => const SosScreen(),
+        '/news':       (_) => const NewsFeedScreen(),
+        '/ai_predict': (_) => const PredictionScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
