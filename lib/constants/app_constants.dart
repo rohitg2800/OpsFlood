@@ -54,24 +54,39 @@ class AppConstants {
   static const String storageKeyPredictions  = 'cached_predictions';
   static const String storageKeySourcePolicy = 'source_policy';
 
-  // ── Flood thresholds (used by cwc_live_provider + real_time_river_service) ───
-  /// Default warning level in metres when station-specific value is unavailable
+  // ── Flood thresholds ────────────────────────────────────────────────────
   static const double defaultWarningLevel = 7.0;
-
-  /// Default danger level in metres when station-specific value is unavailable
   static const double defaultDangerLevel  = 9.0;
 
-  // ── Monitored cities list (used by cwc_live_provider + real_time_river_service)
-  /// Bihar district headquarters monitored by EQUINOX-BH
-  static const List<String> monitoredCities = [
-    'Patna', 'Bhagalpur', 'Muzaffarpur', 'Darbhanga', 'Samastipur',
-    'Sitamarhi', 'Supaul', 'Katihar', 'Purnia', 'Saharsa',
-    'Madhubani', 'Gopalganj', 'Siwan', 'Saran', 'Vaishali',
-    'Begusarai', 'Khagaria', 'Kishanganj', 'Araria', 'East Champaran',
-    'West Champaran', 'Sheohar',
-  ];
+  // ── Backend base URL alias ───────────────────────────────────────────────
+  static const String baseUrl = 'https://equinox-bh.onrender.com';
 
-  // ── Backend base URL alias (used by prediction_service.dart) ──────────────
-  static const String baseUrl =
-      'https://equinox-bh.onrender.com';
+  // ── Monitored cities ────────────────────────────────────────────────────
+  // List<Map<String,dynamic>> — each entry has city, state, river,
+  // warning_level (metres), danger_level (metres).
+  // Used by RealTimeRiverService, CwcLiveProvider, StationStatusProvider.
+  static const List<Map<String, dynamic>> monitoredCities = [
+    {'city': 'Patna',          'state': 'Bihar', 'river': 'Ganga',      'warning_level': 49.27, 'danger_level': 50.27},
+    {'city': 'Bhagalpur',      'state': 'Bihar', 'river': 'Ganga',      'warning_level': 32.23, 'danger_level': 33.23},
+    {'city': 'Muzaffarpur',    'state': 'Bihar', 'river': 'Burhi Gandak','warning_level': 48.11, 'danger_level': 49.11},
+    {'city': 'Darbhanga',      'state': 'Bihar', 'river': 'Kamla',      'warning_level': 51.68, 'danger_level': 52.68},
+    {'city': 'Samastipur',     'state': 'Bihar', 'river': 'Burhi Gandak','warning_level': 42.60, 'danger_level': 43.60},
+    {'city': 'Sitamarhi',      'state': 'Bihar', 'river': 'Bagmati',    'warning_level': 73.37, 'danger_level': 74.37},
+    {'city': 'Supaul',         'state': 'Bihar', 'river': 'Kosi',       'warning_level': 67.50, 'danger_level': 68.50},
+    {'city': 'Katihar',        'state': 'Bihar', 'river': 'Ganga',      'warning_level': 27.44, 'danger_level': 28.44},
+    {'city': 'Purnia',         'state': 'Bihar', 'river': 'Saura',      'warning_level': 34.00, 'danger_level': 35.00},
+    {'city': 'Saharsa',        'state': 'Bihar', 'river': 'Kosi',       'warning_level': 39.62, 'danger_level': 40.62},
+    {'city': 'Madhubani',      'state': 'Bihar', 'river': 'Adhwara',    'warning_level': 59.00, 'danger_level': 60.00},
+    {'city': 'Gopalganj',      'state': 'Bihar', 'river': 'Gandak',     'warning_level': 62.00, 'danger_level': 63.00},
+    {'city': 'Siwan',          'state': 'Bihar', 'river': 'Gandak',     'warning_level': 60.50, 'danger_level': 61.50},
+    {'city': 'Saran',          'state': 'Bihar', 'river': 'Ganga',      'warning_level': 48.00, 'danger_level': 49.00},
+    {'city': 'Vaishali',       'state': 'Bihar', 'river': 'Ganga',      'warning_level': 49.00, 'danger_level': 50.00},
+    {'city': 'Begusarai',      'state': 'Bihar', 'river': 'Burhi Gandak','warning_level': 39.00, 'danger_level': 40.00},
+    {'city': 'Khagaria',       'state': 'Bihar', 'river': 'Kosi',       'warning_level': 32.00, 'danger_level': 33.00},
+    {'city': 'Kishanganj',     'state': 'Bihar', 'river': 'Mahananda',  'warning_level': 35.00, 'danger_level': 36.00},
+    {'city': 'Araria',         'state': 'Bihar', 'river': 'Bakra',      'warning_level': 52.00, 'danger_level': 53.00},
+    {'city': 'East Champaran', 'state': 'Bihar', 'river': 'Gandak',     'warning_level': 75.00, 'danger_level': 76.00},
+    {'city': 'West Champaran', 'state': 'Bihar', 'river': 'Gandak',     'warning_level': 80.00, 'danger_level': 81.00},
+    {'city': 'Sheohar',        'state': 'Bihar', 'river': 'Bagmati',    'warning_level': 65.00, 'danger_level': 66.00},
+  ];
 }
