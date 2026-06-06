@@ -1,8 +1,9 @@
-// lib/screens/river_monitor_screen.dart
-// RiverMonitorScreen v7
-// Change: every _CwcCard is now tappable → pushes CwcStationDetailScreen.
-// Birpur card passes live KosiBirpurReading so the detail screen shows
-// discharge, source, observed-at, warning/danger discharge thresholds.
+// lib/screens/river_monitor_screen.dart  v8
+// Change: every _CwcCard now has a live AI monitoring strip at the bottom
+// using predictionProvider(station.site). Shows severity + monitoring level
+// text + confidence inline — no tap required.
+// Birpur banner guard relaxed: shows whenever liveBirpur != null (incl. SEED)
+// but marks SEED data with a dim badge so user can tell.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../models/flood_data.dart';
 import '../providers/cwc_provider.dart';
 import '../providers/flood_providers.dart';
 import '../providers/kosi_birpur_provider.dart';
+import '../providers/prediction_provider.dart';
 import '../screens/cwc_station_detail_screen.dart';
 import '../services/befiqr_cwc_service.dart';
 import '../services/kosi_birpur_service.dart';
@@ -166,6 +168,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
 
+    // Show banner for ANY live Birpur reading (even SEED — but SEED is badged)
     final liveBirpur = birpurAsync.value;
 
     return Scaffold(
@@ -285,7 +288,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          if (liveBirpur != null && liveBirpur.source != 'SEED')
+          // ── Birpur banner — now shows for ANY reading incl. SEED ──────────
+          if (liveBirpur != null)
             SliverToBoxAdapter(
               child: _KosiBirpurBanner(
                 reading: liveBirpur,
@@ -468,7 +472,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (ctx, i) {
-                    final s = filteredCwc[i];
+                    final s  = filteredCwc[i];
                     final bp = _isBirpur(s) ? liveBirpur : null;
                     return _CwcCard(
                       station:       s,
@@ -575,7 +579,124 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Kosi Birpur Live Banner  (now tappable)
+// AI Monitoring Strip  — shown at the bottom of every CWC card
+// Consumes predictionProvider live; shows severity + monitoring label
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AiMonitoringStrip extends ConsumerWidget {
+  final String site;
+  const _AiMonitoringStrip({required this.site});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(predictionProvider(site));
+    return async.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.fromLTRB(14, 0, 14, 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 10, height: 10,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.5, color: AppPalette.cyan),
+            ),
+            SizedBox(width: 6),
+            Text('AI loading…',
+                style: TextStyle(
+                    color: AppPalette.textGrey, fontSize: 10)),
+          ],
+        ),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (pred) {
+        final pct = pred.dangerLevel > 0
+            ? pred.currentLevel / pred.dangerLevel
+            : 0.0;
+        final String sev;
+        final Color   col;
+        final String  label;
+        final String  icon;
+        if (pct >= 1.00) {
+          sev = 'CRITICAL'; col = AppPalette.critical;
+          label = 'EMERGENCY MONITORING'; icon = '🔴';
+        } else if (pct >= 0.97) {
+          sev = 'SEVERE';   col = AppPalette.danger;
+          label = 'HIGH ALERT'; icon = '🟠';
+        } else if (pct >= 0.85) {
+          sev = 'MODERATE'; col = AppPalette.amber;
+          label = 'ACTIVE WATCH'; icon = '🟡';
+        } else {
+          sev = 'LOW';      col = AppPalette.safe;
+          label = 'ROUTINE MONITORING'; icon = '🟢';
+        }
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: col.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: col.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            children: [
+              // Radar icon
+              Icon(Icons.radar_rounded, color: col, size: 13),
+              const SizedBox(width: 6),
+              // Monitoring label
+              Expanded(
+                child: Text(
+                  '$icon  $label',
+                  style: TextStyle(
+                      color: col,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Confidence
+              Text(
+                '${pred.confidencePct.toStringAsFixed(0)}% conf',
+                style: const TextStyle(
+                    color: AppPalette.textGrey, fontSize: 9),
+              ),
+              const SizedBox(width: 6),
+              // CWC risk if present
+              if (pred.cwcRiskScore != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppPalette.cyan.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'CWC ${pred.cwcRiskScore!.toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                        color: AppPalette.cyan,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              // Model version micro-badge
+              const SizedBox(width: 4),
+              Text(
+                pred.modelVersion,
+                style: const TextStyle(
+                    color: AppPalette.textDim, fontSize: 8),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kosi Birpur Live Banner
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _KosiBirpurBanner extends StatelessWidget {
@@ -585,6 +706,7 @@ class _KosiBirpurBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isSeed  = reading.source == 'SEED';
     final isStale = DateTime.now().difference(reading.observedAt).inHours >= 2;
     final Color statusColor;
     if (reading.isDanger)        statusColor = AppPalette.critical;
@@ -598,13 +720,17 @@ class _KosiBirpurBanner extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: statusColor.withValues(alpha: 0.08),
+          color: statusColor.withValues(alpha: isSeed ? 0.04 : 0.08),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+          border: Border.all(
+            color: statusColor.withValues(alpha: isSeed ? 0.18 : 0.35),
+          ),
         ),
         child: Row(
           children: [
-            Icon(Icons.water_rounded, color: statusColor, size: 20),
+            Icon(Icons.water_rounded,
+                color: statusColor.withValues(alpha: isSeed ? 0.5 : 1.0),
+                size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -614,7 +740,8 @@ class _KosiBirpurBanner extends StatelessWidget {
                     'Kosi @ Birpur  ·  ${reading.levelM.toStringAsFixed(2)} m'
                     '  (${reading.statusLabel})',
                     style: TextStyle(
-                        color: statusColor,
+                        color: statusColor
+                            .withValues(alpha: isSeed ? 0.6 : 1.0),
                         fontSize: 13,
                         fontWeight: FontWeight.w700),
                   ),
@@ -646,9 +773,12 @@ class _KosiBirpurBanner extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                _SourceBadge(source: reading.source),
+                // Show SEED badge when data is seeded
+                isSeed
+                    ? _SourceBadge(source: 'SEED', dim: true)
+                    : _SourceBadge(source: reading.source, dim: false),
                 const SizedBox(height: 4),
-                if (isStale)
+                if (isStale && !isSeed)
                   const Text('STALE',
                       style: TextStyle(
                           color: AppPalette.amber,
@@ -657,8 +787,11 @@ class _KosiBirpurBanner extends StatelessWidget {
                 else
                   Text(
                     DateFormat('HH:mm').format(reading.observedAt),
-                    style: const TextStyle(
-                        color: AppPalette.textGrey, fontSize: 9),
+                    style: TextStyle(
+                        color: isSeed
+                            ? AppPalette.textDim
+                            : AppPalette.textGrey,
+                        fontSize: 9),
                   ),
                 const SizedBox(height: 4),
                 const Icon(Icons.chevron_right_rounded,
@@ -674,26 +807,32 @@ class _KosiBirpurBanner extends StatelessWidget {
 
 class _SourceBadge extends StatelessWidget {
   final String source;
-  const _SourceBadge({required this.source});
+  final bool   dim;
+  const _SourceBadge({required this.source, this.dim = false});
 
   @override
   Widget build(BuildContext context) {
     final Color bg;
     final Color fg;
-    switch (source) {
-      case 'CWC-FFS':
-        bg = AppPalette.cyan.withValues(alpha: 0.12);
-        fg = AppPalette.cyan;
-      case 'befiqr.in':
-        bg = AppPalette.safe.withValues(alpha: 0.12);
-        fg = AppPalette.safe;
-      case 'India-WRIS':
-      case 'India-WRIS (Q→H)':
-        bg = AppPalette.gold.withValues(alpha: 0.12);
-        fg = AppPalette.gold;
-      default:
-        bg = AppPalette.textGrey.withValues(alpha: 0.12);
-        fg = AppPalette.textGrey;
+    if (dim) {
+      bg = AppPalette.textGrey.withValues(alpha: 0.08);
+      fg = AppPalette.textDim;
+    } else {
+      switch (source) {
+        case 'CWC-FFS':
+          bg = AppPalette.cyan.withValues(alpha: 0.12);
+          fg = AppPalette.cyan;
+        case 'befiqr.in':
+          bg = AppPalette.safe.withValues(alpha: 0.12);
+          fg = AppPalette.safe;
+        case 'India-WRIS':
+        case 'India-WRIS (Q→H)':
+          bg = AppPalette.gold.withValues(alpha: 0.12);
+          fg = AppPalette.gold;
+        default:
+          bg = AppPalette.textGrey.withValues(alpha: 0.12);
+          fg = AppPalette.textGrey;
+      }
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -710,13 +849,13 @@ class _SourceBadge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC Station Card  (now tappable via onTap)
+// CWC Station Card  (tappable + live AI monitoring strip)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CwcCard extends StatelessWidget {
-  final CwcStation        station;
+  final CwcStation         station;
   final KosiBirpurReading? birpurReading;
-  final VoidCallback      onTap;          // ← NEW
+  final VoidCallback       onTap;
   const _CwcCard({
     required this.station,
     required this.onTap,
@@ -766,12 +905,12 @@ class _CwcCard extends StatelessWidget {
               child: Row(
                 children: [
                   _ArcGauge(
-                    percent: pct,
-                    warnAt: warnPct,
-                    color: color,
-                    size: 72,
+                    percent:     pct,
+                    warnAt:      warnPct,
+                    color:       color,
+                    size:        72,
                     centerLabel: '${(pct * 100).toStringAsFixed(0)}%',
-                    subLabel: 'fill',
+                    subLabel:    'fill',
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -791,7 +930,6 @@ class _CwcCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            // Tap hint chevron
                             const Icon(Icons.chevron_right_rounded,
                                 size: 16, color: AppPalette.textGrey),
                           ],
@@ -865,23 +1003,23 @@ class _CwcCard extends StatelessWidget {
               child: Row(
                 children: [
                   _StatChip(
-                    icon: Icons.height_rounded,
-                    label: 'Level',
-                    value: '${station.currentLevel.toStringAsFixed(2)} m',
+                    icon:   Icons.height_rounded,
+                    label:  'Level',
+                    value:  '${station.currentLevel.toStringAsFixed(2)} m',
                     accent: color,
                   ),
                   const SizedBox(width: 8),
                   _StatChip(
-                    icon: Icons.stream_rounded,
-                    label: 'Danger',
-                    value: '${station.dangerLevel.toStringAsFixed(2)} m',
+                    icon:   Icons.stream_rounded,
+                    label:  'Danger',
+                    value:  '${station.dangerLevel.toStringAsFixed(2)} m',
                     accent: AppPalette.danger,
                   ),
                   const SizedBox(width: 8),
                   _StatChip(
-                    icon: Icons.trending_down_rounded,
-                    label: 'Gap',
-                    value: '${station.gap.toStringAsFixed(2)} m',
+                    icon:   Icons.trending_down_rounded,
+                    label:  'Gap',
+                    value:  '${station.gap.toStringAsFixed(2)} m',
                     accent: station.isDanger
                         ? AppPalette.critical
                         : AppPalette.safe,
@@ -891,7 +1029,7 @@ class _CwcCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
               child: _LevelBar(
                 current: station.currentLevel,
                 warning: station.dangerLevel * 0.97,
@@ -899,6 +1037,10 @@ class _CwcCard extends StatelessWidget {
                 color:   color,
               ),
             ),
+
+            // ── LIVE AI MONITORING STRIP ─────────────────────────────────
+            _AiMonitoringStrip(site: station.site),
+
             if (isBirpur)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
@@ -917,7 +1059,9 @@ class _CwcCard extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
+              )
+            else
+              const SizedBox(height: 2),
           ],
         ),
       ),
@@ -963,12 +1107,12 @@ class _RiverCard extends StatelessWidget {
             child: Row(
               children: [
                 _ArcGauge(
-                  percent: pct,
-                  warnAt: warnPct,
-                  color: color,
-                  size: 72,
+                  percent:     pct,
+                  warnAt:      warnPct,
+                  color:       color,
+                  size:        72,
                   centerLabel: '${data.capacityPercent.toStringAsFixed(0)}%',
-                  subLabel: 'fill',
+                  subLabel:    'fill',
                 ),
                 const SizedBox(width: 14),
                 Expanded(
