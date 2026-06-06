@@ -29,7 +29,7 @@
 #              backend/ml/saved_models/bihar_generic.keras  (trained on all stations)
 #
 # REQUIREMENTS
-#   pip install tensorflow>=2.15 pandas numpy scikit-learn matplotlib tqdm joblib
+#   pip install "tensorflow-macos>=2.15" "tensorflow-metal" pandas numpy scikit-learn matplotlib tqdm joblib
 # =============================================================================
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-ROOT_DIR    = Path(__file__).parents[2]          # project root
+ROOT_DIR    = Path(__file__).parents[2]
 DATA_DIR    = ROOT_DIR / 'data'
 RAW_DIR     = DATA_DIR / 'raw'
 PROC_DIR    = DATA_DIR / 'processed'
@@ -58,9 +58,9 @@ SCALER_DIR  = Path(__file__).parent / 'scalers'
 for d in [RAW_DIR, PROC_DIR, MODEL_DIR, SCALER_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# ── Hyper-parameters ───────────────────────────────────────────────────────────
-SEQ_LEN     = 12    # 12 × 3h = 36-hour look-back window
-FORECAST_H  = 72    # predict next 72 hours
+# ── Hyper-parameters ──────────────────────────────────────────────────────────
+SEQ_LEN     = 12
+FORECAST_H  = 72
 FEATURES    = [
     'level_m',
     'rain_1h',
@@ -68,19 +68,18 @@ FEATURES    = [
     'rain_7d',
     'upstream_level',
     'forecast_mm',
-    'day_sin',      # sin/cos encoding of day_of_year (seasonality)
+    'day_sin',
     'day_cos',
 ]
 N_FEATURES  = len(FEATURES)
 
 BATCH_SIZE  = 64
 EPOCHS      = 80
-PATIENCE    = 12          # early-stopping patience
+PATIENCE    = 12
 LR          = 1e-3
 LSTM_UNITS  = 64
 DROPOUT     = 0.20
 
-# All Bihar CWC gauge stations
 ALL_STATIONS = [
     'Gandhighat', 'Dighaghat', 'Hathidah', 'Munger', 'Kahalgaon',
     'Bhagalpur', 'Buxar', 'Birpur (CWC)', 'Baltara', 'Basua', 'Kursela',
@@ -96,17 +95,6 @@ ALL_STATIONS = [
 # =============================================================================
 
 def load_raw_data(station: Optional[str] = None) -> pd.DataFrame:
-    """
-    Load and merge CWC gauge + IMD rainfall + IMD forecast CSVs.
-
-    Expected CSV schemas
-    --------------------
-    cwc_gauges.csv   : date (ISO8601), station (str), level_m (float)
-    imd_rainfall.csv : date (ISO8601), station (str), rain_1h, rain_3d, rain_7d (float)
-    imd_forecast.csv : date (ISO8601), station (str), forecast_mm (float)
-
-    If the real CSVs are missing, synthetic data is generated for development.
-    """
     gauge_path    = RAW_DIR / 'cwc_gauges.csv'
     rainfall_path = RAW_DIR / 'imd_rainfall.csv'
     forecast_path = RAW_DIR / 'imd_forecast.csv'
@@ -121,7 +109,7 @@ def load_raw_data(station: Optional[str] = None) -> pd.DataFrame:
 
     df = gauge.merge(rainfall, on=['date', 'station'], how='left')
     df = df.merge(forecast,   on=['date', 'station'], how='left')
-    df = df.fillna(method='ffill').fillna(0)
+    df = df.ffill().fillna(0)
 
     if station and station != 'all':
         df = df[df['station'] == station].copy()
@@ -134,30 +122,22 @@ def load_raw_data(station: Optional[str] = None) -> pd.DataFrame:
 
 
 def _generate_synthetic_data(station: Optional[str]) -> pd.DataFrame:
-    """
-    Generates ~4 years of 3-hourly synthetic data for one or all stations.
-    Uses a realistic seasonal monsoon pattern + random noise.
-    Only used when real CWC CSVs are unavailable.
-    """
     rng    = np.random.default_rng(42)
     dates  = pd.date_range('2020-01-01', '2024-10-31', freq='3h')
-    n      = len(dates)
     stations = [station] if (station and station != 'all') else ALL_STATIONS[:5]
 
     rows = []
     for stn in stations:
-        # Base level varies by station (use Gandhighat-like range ~44–50m)
-        base     = rng.uniform(44.0, 46.0)
-        for i, d in enumerate(dates):
-            doy      = d.timetuple().tm_yday
-            # Monsoon peak Jun–Sep  (doy 152–273)
-            monsoon  = 3.0 * max(0, np.sin(np.pi * (doy - 100) / 200))
-            noise    = rng.normal(0, 0.15)
-            level    = base + monsoon + noise
-            rain_1h  = max(0, rng.exponential(2)  * (1 + monsoon / 3))
-            rain_3d  = max(0, rng.exponential(15) * (1 + monsoon / 3))
-            rain_7d  = max(0, rng.exponential(40) * (1 + monsoon / 3))
-            fcst_mm  = max(0, rain_1h * rng.uniform(0.8, 1.2))
+        base = rng.uniform(44.0, 46.0)
+        for d in dates:
+            doy     = d.timetuple().tm_yday
+            monsoon = 3.0 * max(0, np.sin(np.pi * (doy - 100) / 200))
+            noise   = rng.normal(0, 0.15)
+            level   = base + monsoon + noise
+            rain_1h = max(0, rng.exponential(2)  * (1 + monsoon / 3))
+            rain_3d = max(0, rng.exponential(15) * (1 + monsoon / 3))
+            rain_7d = max(0, rng.exponential(40) * (1 + monsoon / 3))
+            fcst_mm = max(0, rain_1h * rng.uniform(0.8, 1.2))
             rows.append(dict(
                 date=d, station=stn, level_m=round(level, 3),
                 rain_1h=round(rain_1h, 2), rain_3d=round(rain_3d, 2),
@@ -174,19 +154,15 @@ def _generate_synthetic_data(station: Optional[str]) -> pd.DataFrame:
 # =============================================================================
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add cyclical time encodings and upstream fallback."""
     df = df.copy()
-    # Cyclical day-of-year encoding (captures monsoon seasonality)
-    doy         = df['date'].dt.dayofyear
+    doy           = df['date'].dt.dayofyear
     df['day_sin'] = np.sin(2 * np.pi * doy / 365)
     df['day_cos'] = np.cos(2 * np.pi * doy / 365)
 
-    # Upstream fallback: if missing, use current level − 0.3m
     if 'upstream_level' not in df.columns:
         df['upstream_level'] = df['level_m'] - 0.3
     df['upstream_level'] = df['upstream_level'].fillna(df['level_m'] - 0.3)
 
-    # Fill remaining NaNs
     for col in ['rain_1h', 'rain_3d', 'rain_7d', 'forecast_mm']:
         if col not in df.columns:
             df[col] = 0.0
@@ -205,17 +181,11 @@ def build_sequences(
     scaler_y: MinMaxScaler,
     fit_scalers: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Build (X, y) arrays for LSTM training.
-      X : (N, SEQ_LEN, N_FEATURES)  — normalised input sequences
-      y : (N, FORECAST_H)            — normalised future gauge levels
-    """
     X_list, y_list = [], []
-    # FORECAST_H is in hours but our data is 3-hourly, so target steps = FORECAST_H // 3
-    target_steps = FORECAST_H // 3   # = 24 steps × 3h = 72h
+    target_steps   = FORECAST_H // 3
 
     for station, grp in df.groupby('station'):
-        grp = grp.sort_values('date').reset_index(drop=True)
+        grp    = grp.sort_values('date').reset_index(drop=True)
         vals_x = grp[FEATURES].values.astype(np.float32)
         vals_y = grp['level_m'].values.astype(np.float32)
 
@@ -244,37 +214,26 @@ def build_sequences(
 # =============================================================================
 
 def build_model(output_steps: int) -> 'tf.keras.Model':
-    """
-    Stacked LSTM with dropout + residual-style skip connection.
-    Input  : (batch, SEQ_LEN, N_FEATURES)
-    Output : (batch, output_steps)  — next N 3-hourly gauge levels
-    """
     import tensorflow as tf
     from tensorflow.keras import layers, Model, Input
 
-    inp   = Input(shape=(SEQ_LEN, N_FEATURES), name='gauge_sequence')
+    # ── Use legacy Adam on Apple Silicon (avoids slow-optimizer warning) ──
+    try:
+        optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=LR)
+    except AttributeError:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=LR)
 
-    # Layer 1 LSTM
-    x     = layers.LSTM(LSTM_UNITS, return_sequences=True,
-                        name='lstm_1')(inp)
-    x     = layers.Dropout(DROPOUT, name='drop_1')(x)
-
-    # Layer 2 LSTM
-    x     = layers.LSTM(LSTM_UNITS, return_sequences=False,
-                        name='lstm_2')(x)
-    x     = layers.Dropout(DROPOUT, name='drop_2')(x)
-
-    # Dense head
-    x     = layers.Dense(128, activation='relu', name='dense_1')(x)
-    x     = layers.Dense(64,  activation='relu', name='dense_2')(x)
-    out   = layers.Dense(output_steps, name='forecast')(x)
+    inp = Input(shape=(SEQ_LEN, N_FEATURES), name='gauge_sequence')
+    x   = layers.LSTM(LSTM_UNITS, return_sequences=True,  name='lstm_1')(inp)
+    x   = layers.Dropout(DROPOUT,                          name='drop_1')(x)
+    x   = layers.LSTM(LSTM_UNITS, return_sequences=False,  name='lstm_2')(x)
+    x   = layers.Dropout(DROPOUT,                          name='drop_2')(x)
+    x   = layers.Dense(128, activation='relu',             name='dense_1')(x)
+    x   = layers.Dense(64,  activation='relu',             name='dense_2')(x)
+    out = layers.Dense(output_steps,                       name='forecast')(x)
 
     model = Model(inputs=inp, outputs=out, name='OpsFlood_LSTM')
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=LR),
-        loss='huber',            # robust to outliers (better than MSE for floods)
-        metrics=['mae'],
-    )
+    model.compile(optimizer=optimizer, loss='huber', metrics=['mae'])
     return model
 
 
@@ -283,9 +242,9 @@ def build_model(output_steps: int) -> 'tf.keras.Model':
 # =============================================================================
 
 def train(
-    station:    str  = 'all',
-    save_name:  Optional[str] = None,
-    plot:       bool = False,
+    station:   str           = 'all',
+    save_name: Optional[str] = None,
+    plot:      bool          = False,
 ) -> None:
     import tensorflow as tf
 
@@ -293,37 +252,30 @@ def train(
     print(f'  OpsFlood LSTM Trainer   |   station = {station}')
     print(f'{"═" * 60}')
 
-    # ── 1. Load data
     print('\n[1/6] Loading data…')
     df = load_raw_data(station)
     df = engineer_features(df)
     print(f'       Rows: {len(df):,}  |  Stations: {df["station"].nunique()}')
 
-    # ── 2. Scalers
     print('[2/6] Fitting scalers…')
     scaler_x = MinMaxScaler(feature_range=(0, 1))
     scaler_y = MinMaxScaler(feature_range=(0, 1))
     X, y = build_sequences(df, scaler_x, scaler_y, fit_scalers=True)
 
-    # Save scalers for inference
     scaler_name = save_name or (station.lower().replace(' ', '_'))
     joblib.dump(scaler_x, SCALER_DIR / f'{scaler_name}_x.pkl')
     joblib.dump(scaler_y, SCALER_DIR / f'{scaler_name}_y.pkl')
     print(f'       Scalers saved → {SCALER_DIR}')
 
-    # ── 3. Train / val split (chronological — no shuffle to prevent leakage)
     print('[3/6] Splitting train/val…')
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.15, shuffle=False)
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15, shuffle=False)
     print(f'       Train: {X_train.shape[0]:,}  |  Val: {X_val.shape[0]:,}')
 
-    # ── 4. Build model
     print('[4/6] Building model…')
     target_steps = FORECAST_H // 3
     model = build_model(output_steps=target_steps)
     model.summary()
 
-    # ── 5. Train
     print('[5/6] Training…')
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
@@ -345,32 +297,26 @@ def train(
         verbose=1,
     )
 
-    # ── 6. Save final model
     print('[6/6] Saving model…')
-    model_path = MODEL_DIR / f'{scaler_name}.keras'
-    model.save(str(model_path))
-    print(f'  ✅  Model saved → {model_path}')
-
-    # Save a generic copy as fallback
+    model_path   = MODEL_DIR / f'{scaler_name}.keras'
     generic_path = MODEL_DIR / 'bihar_generic.keras'
+    model.save(str(model_path))
     model.save(str(generic_path))
+    print(f'  ✅  Model saved → {model_path}')
     print(f'  ✅  Generic fallback → {generic_path}')
 
-    # ── Metrics summary
     val_mae  = min(history.history['val_mae'])
     val_loss = min(history.history['val_loss'])
     print(f'\n  Best val MAE  : {val_mae:.4f}  (normalised)')
     print(f'  Best val loss : {val_loss:.4f}  (Huber)')
 
-    # Estimate real-world MAE in metres
     level_range = scaler_y.data_range_[0] if hasattr(scaler_y, 'data_range_') else 10.0
     mae_m = val_mae * level_range
     print(f'  Est. real MAE : ±{mae_m:.3f} m  (flood prediction accuracy)')
 
-    # ── Save training metadata
     meta = {
         'station':       station,
-        'model_version': 'v2.1-lstm',
+        'model_version': 'v2.2-lstm',
         'seq_len':       SEQ_LEN,
         'forecast_h':    FORECAST_H,
         'features':      FEATURES,
@@ -387,13 +333,12 @@ def train(
         _plot_training(history, scaler_name)
 
     print(f'\n{"═" * 60}')
-    print('  Training complete! Drop the .keras file onto your Render')
-    print('  instance at:  backend/ml/saved_models/<station>.keras')
+    print('  Training complete! Push backend/ml/saved_models/ to deploy.')
     print(f'{"═" * 60}\n')
 
 
 # =============================================================================
-# 6. OPTIONAL: TRAINING PLOT
+# 6. PLOT
 # =============================================================================
 
 def _plot_training(history, name: str) -> None:
@@ -403,8 +348,8 @@ def _plot_training(history, name: str) -> None:
         ax1.plot(history.history['loss'],     label='train loss')
         ax1.plot(history.history['val_loss'], label='val loss')
         ax1.set_title('Huber Loss'); ax1.legend(); ax1.grid(True)
-        ax2.plot(history.history['mae'],      label='train MAE')
-        ax2.plot(history.history['val_mae'],  label='val MAE')
+        ax2.plot(history.history['mae'],     label='train MAE')
+        ax2.plot(history.history['val_mae'], label='val MAE')
         ax2.set_title('MAE'); ax2.legend(); ax2.grid(True)
         plt.suptitle(f'OpsFlood LSTM — {name}', fontweight='bold')
         plt.tight_layout()
@@ -417,14 +362,10 @@ def _plot_training(history, name: str) -> None:
 
 
 # =============================================================================
-# 7. EVALUATION HELPER
+# 7. EVALUATION
 # =============================================================================
 
 def evaluate(station: str = 'Gandhighat') -> None:
-    """
-    Load a saved model and print prediction vs actual for last 72 hours.
-    Run: python -m backend.ml.model_train --eval --station Gandhighat
-    """
     import tensorflow as tf
 
     scaler_name = station.lower().replace(' ', '_')
@@ -440,13 +381,13 @@ def evaluate(station: str = 'Gandhighat') -> None:
     scaler_x = joblib.load(sx_path)
     scaler_y = joblib.load(sy_path)
 
-    df   = load_raw_data(station)
-    df   = engineer_features(df)
-    grp  = df[df['station'] == station].sort_values('date').tail(SEQ_LEN + FORECAST_H // 3 + 10)
+    df  = load_raw_data(station)
+    df  = engineer_features(df)
+    grp = df[df['station'] == station].sort_values('date').tail(SEQ_LEN + FORECAST_H // 3 + 10)
 
-    vals_x = grp[FEATURES].values[-SEQ_LEN:].astype(np.float32)
+    vals_x   = grp[FEATURES].values[-SEQ_LEN:].astype(np.float32)
     vals_x_n = scaler_x.transform(vals_x)
-    X_eval = vals_x_n[np.newaxis, ...]          # shape (1, SEQ_LEN, N_FEATURES)
+    X_eval   = vals_x_n[np.newaxis, ...]
 
     pred_n = model.predict(X_eval, verbose=0)[0]
     pred   = scaler_y.inverse_transform(pred_n.reshape(-1, 1)).flatten()
@@ -474,24 +415,13 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  Train one station:
-    python -m backend.ml.model_train --station Gandhighat
-
-  Train generic Bihar model (all stations):
-    python -m backend.ml.model_train --station all
-
-  Train with plot output:
-    python -m backend.ml.model_train --station Gandhighat --plot
-
-  Evaluate saved model:
-    python -m backend.ml.model_train --eval --station Gandhighat
+  python -m backend.ml.model_train --station all
+  python -m backend.ml.model_train --station Gandhighat --plot
+  python -m backend.ml.model_train --eval --station Gandhighat
     ''')
-    parser.add_argument('--station', default='all',
-                        help='Station name or "all" for generic Bihar model')
-    parser.add_argument('--plot',    action='store_true',
-                        help='Save training loss/MAE plot as PNG')
-    parser.add_argument('--eval',    action='store_true',
-                        help='Run evaluation on saved model (no training)')
+    parser.add_argument('--station', default='all')
+    parser.add_argument('--plot',    action='store_true')
+    parser.add_argument('--eval',    action='store_true')
     args = parser.parse_args()
 
     if args.eval:
