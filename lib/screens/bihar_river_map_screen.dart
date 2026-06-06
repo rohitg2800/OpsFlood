@@ -1,5 +1,9 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v6.1 — fix ..._[ typo in river name row
+// BiharRiverMapScreen v6.2
+// Fixes:
+//  1. GeoJSON URL: Bihar.json (404) → bihar.geojson, branch main → master
+//  2. River polyline strokeWidth 2.5 → 3.5 so lines are visible over polygons
+//  3. District polygon fill alpha 0.04 → 0.10 (normal) so boundaries show on dark tile
 library;
 
 import 'dart:convert';
@@ -27,14 +31,13 @@ LatLng? _coordsFor(FloodData fd) {
   return BiharStationRegistry.forSite(fd.city)?.latLng;
 }
 
-/// Effective district: prefer fd.district; fall back to registry.
 String _districtFor(FloodData fd) {
   if (fd.district.isNotEmpty) return fd.district;
   return BiharStationRegistry.forSite(fd.city)?.district ?? '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// River colour lookup (for dot in sheet header)
+// River colour lookup
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kRiverColors = <String, Color>{
@@ -80,11 +83,12 @@ const _biharRivers = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GeoJSON provider
+// GeoJSON provider — FIXED URL: bihar.geojson on master branch
 // ─────────────────────────────────────────────────────────────────────────────
 
+// FIX 1: was 'Bihar.json' on 'main' — correct path is 'bihar.geojson' on 'master'
 const _biharGeoJsonUrl =
-    'https://cdn.jsdelivr.net/gh/udit-001/india-maps-data@main/geojson/states/Bihar.json';
+    'https://cdn.jsdelivr.net/gh/udit-001/india-maps-data@master/geojson/states/bihar.geojson';
 
 final _biharGeoJsonProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final res = await http.get(Uri.parse(_biharGeoJsonUrl));
@@ -128,7 +132,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
     final stations = ref.watch(liveLevelsProvider);
     final geoAsync = ref.watch(_biharGeoJsonProvider);
 
-    // District → worst FloodData (uses registry district as fallback)
     final Map<String, FloodData> districtData = {};
     for (final fd in stations) {
       final key = _districtFor(fd);
@@ -152,7 +155,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
       body: Stack(
         children: [
 
-          // ── MAP ──────────────────────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -169,6 +171,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                 maxZoom: 19,
               ),
 
+              // Districts — rendered first so rivers draw on top
               if (_showDistricts)
                 geoAsync.when(
                   data:    (geo) => _DistrictLayer(geoJson: geo, districtData: districtData),
@@ -176,10 +179,13 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                   error:   (_, __) => const SizedBox.shrink(),
                 ),
 
+              // FIX 2: strokeWidth 2.5 → 3.5, alpha 0.85 → 1.0 — always on top of polygons
               if (_showRivers)
                 PolylineLayer(
                   polylines: _biharRivers.map((r) => Polyline(
-                    points: r.points, color: r.color.withValues(alpha: 0.85), strokeWidth: 2.5,
+                    points: r.points,
+                    color: r.color,           // full opacity
+                    strokeWidth: 3.5,
                   )).toList(),
                 ),
 
@@ -193,9 +199,9 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                         decoration: BoxDecoration(
-                          color: r.color.withValues(alpha: 0.15),
+                          color: r.color.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: r.color.withValues(alpha: 0.35), width: 0.5),
+                          border: Border.all(color: r.color.withValues(alpha: 0.50), width: 0.6),
                         ),
                         child: Text(r.name,
                           style: TextStyle(color: r.color, fontSize: 8, fontWeight: FontWeight.w800,
@@ -240,7 +246,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ],
           ),
 
-          // ── App bar ───────────────────────────────────────────────────────────
+          // ── App bar
           Positioned(
             top: 0, left: 0, right: 0,
             child: SafeArea(
@@ -272,7 +278,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ── Layer toggles ─────────────────────────────────────────────────────
+          // ── Layer toggles
           Positioned(
             right: 12,
             bottom: _selected != null ? 290 : 120,
@@ -287,7 +293,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ── River legend (hidden when sheet open) ─────────────────────────────
+          // ── River legend
           if (_showRivers && _selected == null)
             Positioned(
               left: 12, bottom: 100,
@@ -314,7 +320,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
               ),
             ),
 
-          // ── Station sheet ─────────────────────────────────────────────────────
+          // ── Station sheet
           if (_selected != null)
             Positioned(
               left: 0, right: 0, bottom: 0,
@@ -329,7 +335,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
               ),
             ),
 
-          // ── GeoJSON spinner ───────────────────────────────────────────────────
+          // ── GeoJSON loading / error feedback
           if (geoAsync.isLoading)
             Positioned(
               top: 80, left: 0, right: 0,
@@ -348,6 +354,16 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                 ),
               ),
             ),
+          if (geoAsync.hasError)
+            Positioned(
+              top: 80, left: 0, right: 0,
+              child: Center(
+                child: _GlassCard(
+                  child: Text('District boundaries unavailable',
+                      style: TextStyle(color: AppPalette.danger, fontSize: 11)),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -356,6 +372,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // District polygon layer
+// FIX 3: normal-state fill alpha 0.04 → 0.10, border alpha 0.20 → 0.35
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DistrictLayer extends StatelessWidget {
@@ -374,6 +391,7 @@ class _DistrictLayer extends StatelessWidget {
 
     for (final feat in features) {
       final props    = feat['properties'] as Map? ?? {};
+      // This dataset uses 'district' key (lowercase)
       final name     = (props['district'] ?? props['District'] ?? props['NAME_2'] ?? props['name'] ?? '').toString();
       final geometry = feat['geometry'] as Map? ?? {};
       final type     = geometry['type'] as String? ?? '';
@@ -381,19 +399,23 @@ class _DistrictLayer extends StatelessWidget {
 
       final fd  = districtData[name];
       final sev = fd != null ? FloodSeverityHelper.fromString(fd.status) : FloodSeverity.normal;
-      final fillColor   = FloodSeverityHelper.color(sev).withValues(alpha: sev == FloodSeverity.normal ? 0.04 : 0.18);
-      final borderColor = FloodSeverityHelper.color(sev).withValues(alpha: sev == FloodSeverity.normal ? 0.20 : 0.50);
+      final isNormal    = sev == FloodSeverity.normal;
+      final fillColor   = FloodSeverityHelper.color(sev).withValues(alpha: isNormal ? 0.10 : 0.22);
+      final borderColor = FloodSeverityHelper.color(sev).withValues(alpha: isNormal ? 0.35 : 0.60);
 
       void addPolygon(List ring) {
         final pts = _ring(ring);
         if (pts.length < 3) return;
         polygons.add(Polygon(
-          points: pts, color: fillColor, borderColor: borderColor, borderStrokeWidth: 0.8,
+          points: pts,
+          color: fillColor,
+          borderColor: borderColor,
+          borderStrokeWidth: 1.0,
           label: name,
           labelStyle: TextStyle(
-            color: FloodSeverityHelper.color(sev).withValues(alpha: 0.70),
-            fontSize: 7, fontWeight: FontWeight.w700,
-            shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+            color: FloodSeverityHelper.color(sev).withValues(alpha: 0.80),
+            fontSize: 7.5, fontWeight: FontWeight.w700,
+            shadows: const [Shadow(color: Colors.black, blurRadius: 3)],
           ),
           labelPlacement: PolygonLabelPlacement.centroid,
           rotateLabel: false,
@@ -412,7 +434,7 @@ class _DistrictLayer extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station detail bottom sheet — district badge + covered-cities chips
+// Station detail bottom sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
@@ -451,7 +473,6 @@ class _StationSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 
-          // Drag handle
           Center(
             child: Container(
               width: 36, height: 4,
@@ -460,11 +481,9 @@ class _StationSheet extends StatelessWidget {
             ),
           ),
 
-          // ─ Header: icon + name + district + close
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Severity icon with river-colour border + dot
               Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -498,7 +517,6 @@ class _StationSheet extends StatelessWidget {
                     Text(data.city, style: TextStyle(
                         color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 3),
-                    // River name + district badge  ← FIX: was ..._[ now ...[
                     Row(
                       children: [
                         if (riverName.isNotEmpty) ...[
@@ -545,7 +563,6 @@ class _StationSheet extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // ─ Level stats
           Row(
             children: [
               _SheetStat('Level',   '${data.currentLevel.toStringAsFixed(2)} m', color),
@@ -558,7 +575,6 @@ class _StationSheet extends StatelessWidget {
 
           const SizedBox(height: 10),
 
-          // ─ Level bar
           _MiniLevelBar(
             current: data.currentLevel,
             warning: data.warningLevel,
@@ -566,7 +582,6 @@ class _StationSheet extends StatelessWidget {
             color:   color,
           ),
 
-          // ─ Covered cities chips
           if (cities.isNotEmpty) ...[
             const SizedBox(height: 10),
             Row(
@@ -596,7 +611,6 @@ class _StationSheet extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // ─ Detail button
           SizedBox(
             width: double.infinity,
             child: TextButton(
