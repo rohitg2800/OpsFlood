@@ -83,13 +83,21 @@ final monitoredCitiesProvider = Provider<List<String>>((ref) =>
 // ── Per-city ──────────────────────────────────────────────────────────────────
 
 final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
-  return ref
-      .watch(liveLevelsProvider)
-      .cast<FloodData?>()
-      .firstWhere(
-        (fd) => fd!.city.toLowerCase() == city.toLowerCase(),
-        orElse: () => null,
-      );
+  final rt         = ref.watch(realTimeProvider);
+  final normalised = city.trim().toLowerCase();
+
+  // 1. Try liveLevels first (has real gauge readings)
+  final fromLive = rt.liveLevels.cast<FloodData?>().firstWhere(
+    (fd) => fd!.city.trim().toLowerCase() == normalised,
+    orElse: () => null,
+  );
+  if (fromLive != null) return fromLive;
+
+  // 2. Fall back to allFloodData (estimated / non-gauge cities)
+  return rt.allFloodData.cast<FloodData?>().firstWhere(
+    (fd) => fd!.city.trim().toLowerCase() == normalised,
+    orElse: () => null,
+  );
 });
 
 final cityTrendProvider =
