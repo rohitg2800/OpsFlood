@@ -47,9 +47,10 @@ class AppConfig {
   static int get maxRetries    => 3;
   static String get env        => environment;
 
-  // ── Standard API endpoint paths ───────────────────────────────────────────────
+  // ── Standard API endpoint paths ────────────────────────────────────────────────────
   static String get epHealth              => '/health';
-  static String get epPredict             => '/predict/v2';
+  // FIX: /predict/v2 returns 404 on the live backend; use /predict instead
+  static String get epPredict             => '/predict';
   static String get epCwcFfs              => '/cwc/ffs';
   static String get epCwcStations         => '/cwc/stations';
   static String get epLiveTelemetry       => '/live/telemetry';
@@ -63,7 +64,7 @@ class AppConfig {
   static String get epNdmaAdvisories      => '/ndma/advisories';
   static String get epNdmaContacts        => '/ndma/contacts';
 
-  // ── Named aliases (used by tests + services) ────────────────────────────────
+  // ── Named aliases (used by tests + services) ─────────────────────────────────────
   static String get healthEndpoint            => epHealth;
   static String get liveTelemetryEndpoint     => epLiveTelemetry;
   static String get liveLevelsEndpoint        => epLiveLevels;
@@ -76,7 +77,7 @@ class AppConfig {
   static String get weatherCurrentEndpoint    => epWeatherCurrent;
   static String get weatherForecastEndpoint   => epWeatherForecast;
 
-  // ── Duration / interval aliases ────────────────────────────────────────────────
+  // ── Duration / interval aliases ──────────────────────────────────────────────────────
   static const Duration coldStartTimeout  = Duration(seconds: 45);
   static const Duration healthTimeout     = Duration(seconds: 10);
   static Duration get requestTimeout      => const Duration(seconds: 15);
