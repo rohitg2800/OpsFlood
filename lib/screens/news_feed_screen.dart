@@ -1,5 +1,6 @@
 // lib/screens/news_feed_screen.dart
 // OpsFlood — NDMA + IMD + WRD Bihar Alert Feed
+// Wired to CwcAlertWatcher.showNewsNotification() for push on new articles.
 library;
 
 import 'package:flutter/material.dart';
@@ -7,15 +8,54 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../theme/river_theme.dart';
 import '../providers/news_feed_provider.dart';
+import '../services/cwc_alert_watcher.dart';
+import '../theme/river_theme.dart';
 
-class NewsFeedScreen extends ConsumerWidget {
+class NewsFeedScreen extends ConsumerStatefulWidget {
   const NewsFeedScreen({super.key});
+  @override
+  ConsumerState<NewsFeedScreen> createState() => _NewsFeedScreenState();
+}
+
+class _NewsFeedScreenState extends ConsumerState<NewsFeedScreen> {
+  // Tracks titles we've already notified to avoid duplicates
+  final Set<String> _notified = {};
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    // Fire once for any articles already loaded when screen opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final state = ref.read(newsFeedProvider);
+      _notifyNew(state.items);
+    });
+  }
+
+  void _notifyNew(List<NewsItem> items) {
+    for (final item in items) {
+      if (_notified.contains(item.title)) continue;
+      _notified.add(item.title);
+      // Only notify for non-normal severity
+      if (item.severity.toUpperCase() == 'GREEN') continue;
+      CwcAlertWatcher.instance.showNewsNotification(
+        headline: item.title,
+        source: item.source,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // ref.listen fires whenever the provider state changes (e.g. after refresh)
+    ref.listen<NewsFeedState>(newsFeedProvider, (prev, next) {
+      if (!next.isLoading && next.error == null) {
+        _notifyNew(next.items);
+      }
+    });
+
     final state = ref.watch(newsFeedProvider);
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
@@ -33,8 +73,7 @@ class NewsFeedScreen extends ConsumerWidget {
                 const Expanded(
                   child: Center(
                     child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppPalette.cyan),
+                        strokeWidth: 2.5, color: AppPalette.cyan),
                   ),
                 )
               else if (state.error != null && state.items.isEmpty)
@@ -62,7 +101,7 @@ class NewsFeedScreen extends ConsumerWidget {
   }
 }
 
-// ── Header ───────────────────────────────────────────────────────────────────────
+// ── Header ────────────────────────────────────────────────────────────────────
 class _Header extends StatelessWidget {
   final VoidCallback onRefresh;
   const _Header({required this.onRefresh});
@@ -78,7 +117,8 @@ class _Header extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 color: AppPalette.cyan.withValues(alpha: 0.10),
@@ -100,8 +140,10 @@ class _Header extends StatelessWidget {
                     ).createShader(b),
                     child: const Text('ALERTS & NEWS',
                         style: TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.w900,
-                          color: Colors.white, letterSpacing: -0.5,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
                         )),
                   ),
                   Text('NDMA · IMD · Bihar WRD Bulletins',
@@ -115,7 +157,8 @@ class _Header extends StatelessWidget {
             GestureDetector(
               onTap: onRefresh,
               child: Container(
-                width: 36, height: 36,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: AppPalette.abyss2,
                   borderRadius: BorderRadius.circular(12),
@@ -130,7 +173,7 @@ class _Header extends StatelessWidget {
       );
 }
 
-// ── Card ──────────────────────────────────────────────────────────────────────────
+// ── Card ──────────────────────────────────────────────────────────────────────
 class _NewsCard extends StatelessWidget {
   final NewsItem item;
   const _NewsCard({required this.item});
@@ -158,14 +201,12 @@ class _NewsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ─ Top row: source badge | severity | date string ─
             Row(
               children: [
                 _SourceBadge(source: item.source, color: col),
                 const SizedBox(width: 8),
                 _SeverityBadge(severity: item.severity),
                 const Spacer(),
-                // publishedAt is a String — display directly, no DateTime parse
                 Text(
                   item.publishedAt,
                   style: const TextStyle(
@@ -177,8 +218,10 @@ class _NewsCard extends StatelessWidget {
             Text(
               item.title,
               style: const TextStyle(
-                color: AppPalette.textWhite, fontSize: 13,
-                fontWeight: FontWeight.w700, height: 1.35,
+                color: AppPalette.textWhite,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
               ),
             ),
             if (item.summary != null) ...[
@@ -186,7 +229,9 @@ class _NewsCard extends StatelessWidget {
               Text(
                 item.summary!,
                 style: const TextStyle(
-                  color: AppPalette.textGrey, fontSize: 11, height: 1.5,
+                  color: AppPalette.textGrey,
+                  fontSize: 11,
+                  height: 1.5,
                 ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -199,7 +244,8 @@ class _NewsCard extends StatelessWidget {
                 children: [
                   Text('Read more',
                       style: TextStyle(
-                        color: col, fontSize: 10,
+                        color: col,
+                        fontSize: 10,
                         fontWeight: FontWeight.w700,
                       )),
                   const SizedBox(width: 3),
@@ -223,6 +269,7 @@ class _NewsCard extends StatelessWidget {
   }
 }
 
+// ── Badges ────────────────────────────────────────────────────────────────────
 class _SourceBadge extends StatelessWidget {
   final String source;
   final Color  color;
@@ -238,8 +285,10 @@ class _SourceBadge extends StatelessWidget {
         child: Text(
           source.toUpperCase(),
           style: TextStyle(
-            color: color, fontSize: 8,
-            fontWeight: FontWeight.w900, letterSpacing: 0.5,
+            color: color,
+            fontSize: 8,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.5,
           ),
         ),
       );
@@ -265,14 +314,17 @@ class _SeverityBadge extends StatelessWidget {
       child: Text(
         '${severity.toUpperCase()} ALERT',
         style: TextStyle(
-          color: col, fontSize: 8,
-          fontWeight: FontWeight.w900, letterSpacing: 0.5,
+          color: col,
+          fontSize: 8,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
         ),
       ),
     );
   }
 }
 
+// ── Error state ───────────────────────────────────────────────────────────────
 class _ErrorState extends StatelessWidget {
   final String message;
   const _ErrorState({required this.message});
