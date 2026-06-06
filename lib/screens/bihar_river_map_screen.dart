@@ -1,7 +1,7 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v2  —  Interactive district risk grid + river pin list
-// No external map package needed — uses a custom CustomPainter district layout
-// plus a scrollable station list underneath.
+// BiharRiverMapScreen v3 — RiverColors token migration
+// All AppPalette.abyss*/text*/gold/abyssStroke replaced with RiverColors.of(context).
+// Semantic severity colors (critical/danger/warning/safe/amber) kept as-is.
 library;
 
 import 'package:flutter/material.dart';
@@ -26,9 +26,6 @@ class _BiharRiverMapScreenState
     extends ConsumerState<BiharRiverMapScreen> {
   String? _selectedDistrict;
 
-  // Bihar's 38 districts with approximate grid positions (col, row) in a
-  // 9-wide × 7-tall grid.  Positions are illustrative — enough to give a
-  // recognisable shape without an SVG asset.
   static const _grid = {
     'Pashchim Champaran': (0, 0),
     'Purba Champaran':    (1, 0),
@@ -72,9 +69,9 @@ class _BiharRiverMapScreenState
 
   @override
   Widget build(BuildContext context) {
+    final t        = RiverColors.of(context);
     final stations = ref.watch(liveLevelsProvider);
 
-    // Build district → worst FloodData map
     final Map<String, FloodData> districtData = {};
     for (final fd in stations) {
       final key = fd.district.isNotEmpty ? fd.district : fd.city;
@@ -98,26 +95,25 @@ class _BiharRiverMapScreenState
         : null;
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: t.scaffoldBg,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── App Bar ────────────────────────────────────────────────────
+          // ── App Bar ─────────────────────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
-            backgroundColor: AppPalette.abyss0,
+            backgroundColor: t.scaffoldBg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.map_rounded,
-                    color: AppPalette.gold, size: 20),
+                Icon(Icons.map_rounded, color: t.accent, size: 20),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Bihar River Map',
                   style: TextStyle(
-                    color: AppPalette.textWhite,
+                    color: t.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
@@ -129,14 +125,14 @@ class _BiharRiverMapScreenState
                 TextButton(
                   onPressed: () =>
                       setState(() => _selectedDistrict = null),
-                  child: const Text('Clear',
+                  child: Text('Clear',
                       style: TextStyle(
-                          color: AppPalette.gold, fontSize: 12)),
+                          color: t.accent, fontSize: 12)),
                 ),
             ],
           ),
 
-          // ── Legend strip ───────────────────────────────────────────────
+          // ── Legend strip ───────────────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding:
@@ -145,7 +141,7 @@ class _BiharRiverMapScreenState
             ),
           ),
 
-          // ── District grid map ──────────────────────────────────────────
+          // ── District grid map ─────────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -158,7 +154,7 @@ class _BiharRiverMapScreenState
             ),
           ),
 
-          // ── Selected district detail card ──────────────────────────────
+          // ── Selected district detail card ─────────────────────────────────────────
           if (selected != null)
             SliverToBoxAdapter(
               child: _DistrictDetailCard(
@@ -172,22 +168,22 @@ class _BiharRiverMapScreenState
               ),
             ),
 
-          // ── Section header ─────────────────────────────────────────────
+          // ── Section header ───────────────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding:
                   const EdgeInsets.fromLTRB(16, 16, 16, 6),
               child: Row(
                 children: [
-                  const Icon(Icons.sensors_rounded,
-                      color: AppPalette.gold, size: 14),
+                  Icon(Icons.sensors_rounded,
+                      color: t.accent, size: 14),
                   const SizedBox(width: 6),
                   Text(
                     biharStations.isEmpty
                         ? 'Bihar Stations'
                         : '${biharStations.length} Bihar Stations',
-                    style: const TextStyle(
-                      color: AppPalette.textGrey,
+                    style: TextStyle(
+                      color: t.textSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
@@ -197,14 +193,14 @@ class _BiharRiverMapScreenState
             ),
           ),
 
-          // ── Station list ───────────────────────────────────────────────
+          // ── Station list ─────────────────────────────────────────────────────────────
           biharStations.isEmpty
               ? SliverFillRemaining(
                   child: Center(
                     child: Text(
                       'No Bihar stations in live data',
-                      style: const TextStyle(
-                          color: AppPalette.textGrey, fontSize: 13),
+                      style: TextStyle(
+                          color: t.textSecondary, fontSize: 13),
                     ),
                   ),
                 )
@@ -252,6 +248,7 @@ class _DistrictGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return AspectRatio(
       aspectRatio: _cols / _rows,
       child: LayoutBuilder(builder: (_, box) {
@@ -259,12 +256,11 @@ class _DistrictGrid extends StatelessWidget {
         final ch = box.maxHeight / _rows;
         return Stack(
           children: [
-            // Background grid lines
             CustomPaint(
               size: Size(box.maxWidth, box.maxHeight),
-              painter: _GridLinePainter(cols: _cols, rows: _rows),
+              painter: _GridLinePainter(
+                  cols: _cols, rows: _rows, strokeColor: t.stroke),
             ),
-            // District cells
             ..._grid.entries.map((e) {
               final name = e.key;
               final (col, row) = e.value;
@@ -272,9 +268,9 @@ class _DistrictGrid extends StatelessWidget {
               final sev = fd != null
                   ? FloodSeverityHelper.fromString(fd.status)
                   : null;
-              final col_ = sev != null
+              final cellColor = sev != null
                   ? FloodSeverityHelper.color(sev)
-                  : AppPalette.abyss3;
+                  : t.cardBgElevated;
               final isSelected = selected == name;
 
               return Positioned(
@@ -287,20 +283,20 @@ class _DistrictGrid extends StatelessWidget {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
                     decoration: BoxDecoration(
-                      color: col_.withValues(
-                          alpha: sev != null ? 0.22 : 0.06),
+                      color: sev != null
+                          ? cellColor.withValues(alpha: 0.22)
+                          : t.cardBg,
                       borderRadius: BorderRadius.circular(5),
                       border: Border.all(
                         color: isSelected
-                            ? AppPalette.gold
-                            : col_.withValues(alpha: 0.45),
+                            ? t.accent
+                            : cellColor.withValues(alpha: 0.45),
                         width: isSelected ? 2 : 0.8,
                       ),
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color:
-                                    AppPalette.gold.withValues(alpha: 0.40),
+                                color: t.accent.withValues(alpha: 0.40),
                                 blurRadius: 8,
                               )
                             ]
@@ -308,11 +304,11 @@ class _DistrictGrid extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text(
-                        name.split(' ').last, // abbreviated
+                        name.split(' ').last,
                         style: TextStyle(
                           color: sev != null
-                              ? col_
-                              : AppPalette.textDim,
+                              ? cellColor
+                              : t.stroke,
                           fontSize: 7,
                           fontWeight: FontWeight.w700,
                         ),
@@ -333,13 +329,17 @@ class _DistrictGrid extends StatelessWidget {
 }
 
 class _GridLinePainter extends CustomPainter {
-  final int cols, rows;
-  const _GridLinePainter({required this.cols, required this.rows});
+  final int   cols, rows;
+  final Color strokeColor;
+  const _GridLinePainter({
+      required this.cols,
+      required this.rows,
+      required this.strokeColor});
 
   @override
   void paint(Canvas canvas, Size size) {
     final p = Paint()
-      ..color = AppPalette.abyssStroke
+      ..color = strokeColor
       ..strokeWidth = 0.4;
     final cw = size.width / cols;
     final ch = size.height / rows;
@@ -354,16 +354,16 @@ class _GridLinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GridLinePainter o) => false;
+  bool shouldRepaint(_GridLinePainter o) => o.strokeColor != strokeColor;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// District Detail Card (shown on tap)
+// District Detail Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DistrictDetailCard extends StatelessWidget {
-  final FloodData data;
-  final String districtName;
+  final FloodData    data;
+  final String       districtName;
   final VoidCallback onOpenDetail;
 
   const _DistrictDetailCard({
@@ -374,6 +374,7 @@ class _DistrictDetailCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t     = RiverColors.of(context);
     final sev   = FloodSeverityHelper.fromString(data.status);
     final color = FloodSeverityHelper.color(sev);
 
@@ -382,7 +383,7 @@ class _DistrictDetailCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: AppPalette.abyss1,
+          color: t.cardBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
               color: FloodSeverityHelper.cardBorder(sev), width: 1.2),
@@ -404,23 +405,22 @@ class _DistrictDetailCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     '$districtName  ·  ${data.city}',
-                    style: const TextStyle(
-                      color: AppPalette.textWhite,
+                    style: TextStyle(
+                      color: t.textPrimary,
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                _Chip(
-                    label: FloodSeverityHelper.label(sev), color: color),
+                _Chip(label: FloodSeverityHelper.label(sev), color: color),
               ],
             ),
             const SizedBox(height: 10),
             Row(
               children: [
                 _InfoTile('River',
-                    data.riverName ?? 'N/A', AppPalette.gold),
+                    data.riverName ?? 'N/A', t.accent),
                 const SizedBox(width: 8),
                 _InfoTile('Level',
                     '${data.currentLevel.toStringAsFixed(2)} m', color),
@@ -439,10 +439,10 @@ class _DistrictDetailCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 _InfoTile('Rain 24h',
                     '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
-                    AppPalette.gold),
+                    t.accent),
                 const SizedBox(width: 8),
                 _InfoTile('IMD',
-                    data.imdSeverity ?? '—', AppPalette.textGrey),
+                    data.imdSeverity ?? '—', t.textSecondary),
               ],
             ),
             const SizedBox(height: 12),
@@ -450,8 +450,7 @@ class _DistrictDetailCard extends StatelessWidget {
               width: double.infinity,
               child: TextButton(
                 style: TextButton.styleFrom(
-                  backgroundColor:
-                      color.withValues(alpha: 0.12),
+                  backgroundColor: color.withValues(alpha: 0.12),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 10),
@@ -473,39 +472,42 @@ class _DistrictDetailCard extends StatelessWidget {
 
 class _InfoTile extends StatelessWidget {
   final String label, value;
-  final Color color;
+  final Color  color;
   const _InfoTile(this.label, this.value, this.color);
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: Container(
-          padding:
-              const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: 0.18)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value,
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800)),
-              Text(label,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 9)),
-            ],
-          ),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Expanded(
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
         ),
-      );
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(value,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800)),
+            Text(label,
+                style: TextStyle(
+                    color: t.textSecondary, fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Chip extends StatelessWidget {
   final String label;
-  final Color color;
+  final Color  color;
   const _Chip({required this.label, required this.color});
   @override
   Widget build(BuildContext context) => Container(
@@ -564,16 +566,16 @@ class _LegendStrip extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _BiharStationTile extends StatelessWidget {
-  final FloodData data;
+  final FloodData    data;
   final VoidCallback onTap;
   const _BiharStationTile({required this.data, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final t     = RiverColors.of(context);
     final sev   = FloodSeverityHelper.fromString(data.status);
     final color = FloodSeverityHelper.color(sev);
-    final fill  =
-        (data.capacityPercent / 100).clamp(0.0, 1.0);
+    final fill  = (data.capacityPercent / 100).clamp(0.0, 1.0);
 
     return GestureDetector(
       onTap: onTap,
@@ -582,7 +584,7 @@ class _BiharStationTile extends StatelessWidget {
         padding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: AppPalette.abyss2,
+          color: t.cardBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
               color: FloodSeverityHelper.cardBorder(sev), width: 0.8),
@@ -606,8 +608,8 @@ class _BiharStationTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(data.city,
-                      style: const TextStyle(
-                        color: AppPalette.textWhite,
+                      style: TextStyle(
+                        color: t.textPrimary,
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -619,8 +621,8 @@ class _BiharStationTile extends StatelessWidget {
                         data.riverName!,
                       if (data.district.isNotEmpty) data.district,
                     ].join(' · '),
-                    style: const TextStyle(
-                        color: AppPalette.textGrey, fontSize: 10),
+                    style: TextStyle(
+                        color: t.textSecondary, fontSize: 10),
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 5),
@@ -630,7 +632,7 @@ class _BiharStationTile extends StatelessWidget {
                       Container(
                         height: 4,
                         decoration: BoxDecoration(
-                          color: AppPalette.abyss4,
+                          color: t.cardBgElevated,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
