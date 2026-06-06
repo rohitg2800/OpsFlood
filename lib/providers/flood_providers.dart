@@ -1,9 +1,5 @@
 // lib/providers/flood_providers.dart
 // Riverpod 3.x — RealTimeService is a singleton ChangeNotifier.
-//
-// Strategy: a stable _serviceBootProvider sets up the singleton once.
-// A _TickNotifier (Notifier<int>) is incremented on every notifyListeners().
-// All data providers watch _tickProvider so they rebuild on each fetch cycle.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,7 +8,7 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Tick notifier ───────────────────────────────────────────────────────────────
+// ── Tick notifier ────────────────────────────────────────────────────────────
 class _TickNotifier extends Notifier<int> {
   @override
   int build() => 0;
@@ -21,17 +17,12 @@ class _TickNotifier extends Notifier<int> {
 
 final _tickProvider = NotifierProvider<_TickNotifier, int>(_TickNotifier.new);
 
-// ── Bootstrap provider — runs once, wires listener, starts polling ─────────
+// ── Bootstrap provider ───────────────────────────────────────────────────────
 final _serviceBootProvider = Provider<RealTimeService>((ref) {
   final service = RealTimeService();
-
-  void onUpdate() {
-    ref.read(_tickProvider.notifier).increment();
-  }
-
+  void onUpdate() => ref.read(_tickProvider.notifier).increment();
   service.addListener(onUpdate);
   ref.onDispose(() => service.removeListener(onUpdate));
-
   Future.microtask(() => service.startPolling());
   return service;
 });
@@ -39,8 +30,8 @@ final _serviceBootProvider = Provider<RealTimeService>((ref) {
 // ── Public providers ─────────────────────────────────────────────────────────
 
 final realTimeProvider = Provider<RealTimeService>((ref) {
-  ref.watch(_tickProvider);               // rebuild when tick changes
-  return ref.watch(_serviceBootProvider); // stable singleton
+  ref.watch(_tickProvider);
+  return ref.watch(_serviceBootProvider);
 });
 
 /// Alias kept for backward compatibility.
@@ -48,51 +39,48 @@ final realTimeServiceProvider = realTimeProvider;
 
 // ── Derived providers ─────────────────────────────────────────────────────────
 
-final lastFetchTimeProvider = Provider<DateTime?>((ref) {
-  return ref.watch(realTimeProvider).lastFetchTime;
-});
+final lastFetchTimeProvider = Provider<DateTime?>((ref) =>
+    ref.watch(realTimeProvider).lastFetchTime);
 
-final isOfflineProvider = Provider<bool>((ref) {
-  return !ref.watch(realTimeProvider).isOnline;
-});
+final isOfflineProvider = Provider<bool>((ref) =>
+    !ref.watch(realTimeProvider).isOnline);
 
-final isWakingUpProvider = Provider<bool>((ref) {
-  return ref.watch(realTimeProvider).isWakingUp;
-});
+final isWakingUpProvider = Provider<bool>((ref) =>
+    ref.watch(realTimeProvider).isWakingUp);
 
-final errorMessageProvider = Provider<String?>((ref) {
-  return ref.watch(realTimeProvider).error;
-});
+final errorMessageProvider = Provider<String?>((ref) =>
+    ref.watch(realTimeProvider).error);
 
-final imdAlertsProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).imdAlerts;
-});
+final imdAlertsProvider = Provider<List<dynamic>>((ref) =>
+    ref.watch(realTimeProvider).imdAlerts);
 
-final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).ndmaAdvisories;
-});
+final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) =>
+    ref.watch(realTimeProvider).ndmaAdvisories);
 
-final criticalCountProvider = Provider<int>((ref) {
-  return ref.watch(realTimeProvider).criticalCount;
-});
+final criticalCountProvider = Provider<int>((ref) =>
+    ref.watch(realTimeProvider).criticalCount);
 
+// ── THE FIX: use allFloodData so every fetched city appears in Monitors ──────
+// Previously liveLevels returned only WRD-gauge-matched cities (hasLiveLevel=true),
+// which was almost always 0 because WRD name matching failed for most cities.
+// allFloodData returns ALL cities once the fetch cycle has run, with status
+// 'ESTIMATED' for cities without a WRD gauge match and actual risk levels
+// for matched ones. The card UI already handles 'ESTIMATED' status gracefully.
 final liveLevelsProvider = Provider<List<FloodData>>((ref) {
-  return ref.watch(realTimeProvider).liveLevels;
+  final rt = ref.watch(realTimeProvider);
+  // Prefer live-matched data; fall back to all estimated data if none matched
+  final live = rt.liveLevels;         // only hasLiveLevel==true
+  if (live.isNotEmpty) return live;
+  return rt.allFloodData;             // all cities post-fetch (estimated)
 });
 
-final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
-  return ref.watch(realTimeProvider).monitoringData;
-});
+final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) =>
+    ref.watch(realTimeProvider).monitoringData);
 
-final monitoredCitiesProvider = Provider<List<String>>((ref) {
-  return ref
-      .watch(realTimeProvider)
-      .liveLevels
-      .map((fd) => fd.city)
-      .toList();
-});
+final monitoredCitiesProvider = Provider<List<String>>((ref) =>
+    ref.watch(liveLevelsProvider).map((fd) => fd.city).toList());
 
-// ── Per-city ─────────────────────────────────────────────────────────────────
+// ── Per-city ──────────────────────────────────────────────────────────────────
 
 final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
   return ref
@@ -105,11 +93,10 @@ final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
 });
 
 final cityTrendProvider =
-    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
-  return ref.watch(realTimeProvider).trendForCity(city);
-});
+    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) =>
+        ref.watch(realTimeProvider).trendForCity(city));
 
-// ── Per-state ─────────────────────────────────────────────────────────────────
+// ── Per-state ──────────────────────────────────────────────────────────────────
 
 final stateImdAlertsProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {
