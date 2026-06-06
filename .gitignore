@@ -67,3 +67,6 @@ ios/Runner/GeneratedPluginRegistrant.m
 android/keystore.jks
 android/keystore.properties
 *.jks
+.venv311/
+.python-version
+*.zip
