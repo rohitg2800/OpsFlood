@@ -87,7 +87,8 @@ class _PredictScreenState extends State<PredictScreen>
     };
 
     try {
-      final uri = Uri.parse(AppConfig.epPredict);
+      // FIX: prepend baseUrl so the URI has a valid host
+      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epPredict}');
       final res = await http
           .post(uri,
               headers: {'Content-Type': 'application/json'},
@@ -181,7 +182,7 @@ class _PredictScreenState extends State<PredictScreen>
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // ── Form wraps ALL validated fields ──────────────────
+                // ── Form wraps ALL validated fields ────────────────────
                 Form(
                   key: _formKey,
                   child: Column(
@@ -251,7 +252,7 @@ class _PredictScreenState extends State<PredictScreen>
   }
 }
 
-// ─── Data class ───────────────────────────────────────────────────────────────
+// ─── Data class ────────────────────────────────────────────────────────────────────
 
 class _PredictResult {
   final String  riskLevel;
@@ -321,7 +322,7 @@ class _ContextBanner extends StatelessWidget {
       );
 }
 
-// ─── Dark-styled text field ───────────────────────────────────────────────────
+// ─── Dark-styled text field ─────────────────────────────────────────────────────────
 
 class _DarkField extends StatelessWidget {
   final TextEditingController ctrl;
@@ -383,7 +384,7 @@ class _DarkField extends StatelessWidget {
   }
 }
 
-// ─── Run button ───────────────────────────────────────────────────────────────
+// ─── Run button ────────────────────────────────────────────────────────────────────
 
 class _RunButton extends StatelessWidget {
   final bool       loading;
@@ -439,7 +440,7 @@ class _RunButton extends StatelessWidget {
       );
 }
 
-// ─── Result card with animated gauge arc ──────────────────────────────────────
+// ─── Result card with animated gauge arc ────────────────────────────────────────────
 
 class _ResultCard extends StatelessWidget {
   final _PredictResult    result;
@@ -568,7 +569,7 @@ class _ResultCard extends StatelessWidget {
   }
 }
 
-// ─── Arc gauge painter ────────────────────────────────────────────────────────
+// ─── Arc gauge painter ─────────────────────────────────────────────────────────────────
 
 class _GaugePainter extends CustomPainter {
   final double fraction;
@@ -602,7 +603,7 @@ class _GaugePainter extends CustomPainter {
       old.fraction != fraction || old.color != color;
 }
 
-// ─── Error card ───────────────────────────────────────────────────────────────
+// ─── Error card ────────────────────────────────────────────────────────────────────
 
 class _ErrorCard extends StatelessWidget {
   final String message;
