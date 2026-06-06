@@ -1,9 +1,7 @@
 // lib/services/ops_client.dart
 // EQUINOX-BH — Unified HTTP Client
-//
-// All outbound HTTP calls from the Flutter app go through this client.
-// PROXIED via the EQUINOX-BH backend. Zero direct external calls.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,30 +11,20 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../constants/app_constants.dart';
 
-/// Singleton HTTP client for all EQUINOX-BH backend calls.
 class OpsClient {
   OpsClient._();
   static final OpsClient instance = OpsClient._();
 
   http.Client _client = http.Client();
 
-  // ---------------------------------------------------------------------------
-  // Test injection: replaces the underlying http.Client without rebuilding
-  // the singleton. Called from test setUp() to inject a MockClient.
-  // ---------------------------------------------------------------------------
   static void overrideForTesting(http.Client client) {
     instance._client = client;
   }
 
-  // ---------------------------------------------------------------------------
-  // Core GET
-  // Accepts `query` (Map<String,String>) for query-string parameters.
-  // Also accepts legacy `queryParams` as an alias.
-  // ---------------------------------------------------------------------------
   Future<Map<String, dynamic>> get(
     String path, {
     Map<String, String>? query,
-    Map<String, String>? queryParams, // legacy alias
+    Map<String, String>? queryParams,
     Duration timeout = AppConstants.defaultTimeout,
     int retries = AppConstants.maxRetries,
   }) async {
@@ -48,9 +36,6 @@ class OpsClient {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Core POST
-  // ---------------------------------------------------------------------------
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
@@ -67,9 +52,6 @@ class OpsClient {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Health check
-  // ---------------------------------------------------------------------------
   Future<bool> isBackendReachable() async {
     try {
       final result =
@@ -80,9 +62,6 @@ class OpsClient {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Internals
-  // ---------------------------------------------------------------------------
   Uri _buildUri(String path, Map<String, String>? params) {
     final base     = AppConfig.baseUrl.replaceAll(RegExp(r'/+$'), '');
     final fullPath = path.startsWith('/') ? path : '/$path';
@@ -111,7 +90,6 @@ class OpsClient {
         final response = await call();
         _logResponse(label, response.statusCode);
 
-        // Fast-fail on 4xx (except 503 which is retried)
         if (response.statusCode == 503 && attempt < retries) {
           final delay = AppConstants.retryDelay * attempt;
           if (kDebugMode) debugPrint('[OpsClient] $label 503, retry $attempt in ${delay.inSeconds}s');
