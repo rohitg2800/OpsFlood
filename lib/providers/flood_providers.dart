@@ -1,7 +1,13 @@
 // lib/providers/flood_providers.dart
-// Riverpod 3 — RealTimeNotifier wraps the singleton correctly.
-// Fix: ref.invalidateSelf() forces rebuild when RealTimeService notifies
-//      (same object reference would be skipped by Riverpod identity check).
+// Riverpod 3 — stable RealTimeNotifier.
+//
+// Problem: RealTimeService is a singleton (factory => _instance).
+//   • state = service  → Riverpod identity check skips rebuild (same ref)
+//   • invalidateSelf() → re-runs build(), re-adds listener + re-starts polling
+//
+// Solution: wrap in a plain ChangeNotifierProvider so Riverpod owns
+// the ChangeNotifier lifecycle directly and fires rebuilds on every
+// notifyListeners() automatically — no custom Notifier needed.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,28 +16,17 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Notifier wrapper ──────────────────────────────────────────────────────────
-class RealTimeNotifier extends Notifier<RealTimeService> {
-  @override
-  RealTimeService build() {
-    final service = RealTimeService();
-    // Use invalidateSelf() so Riverpod re-runs build() on every data update.
-    // Assigning state = service (same singleton object) is silently ignored
-    // by Riverpod's identity check — invalidateSelf() bypasses that.
-    service.addListener(_onServiceChange);
-    ref.onDispose(() {
-      service.removeListener(_onServiceChange);
-      // Do NOT call service.dispose() here — it is a singleton used app-wide.
-    });
-    Future.microtask(() => service.startPolling());
-    return service;
-  }
-
-  void _onServiceChange() => ref.invalidateSelf();
-}
-
+// ── Core provider ─────────────────────────────────────────────────────────────
+// ChangeNotifierProvider listens to notifyListeners() automatically.
+// RealTimeService is a singleton so we get the same instance every time,
+// and Riverpod will rebuild all watchers on each notifyListeners() call.
 final realTimeProvider =
-    NotifierProvider<RealTimeNotifier, RealTimeService>(RealTimeNotifier.new);
+    ChangeNotifierProvider<RealTimeService>((_) {
+  final service = RealTimeService();
+  // startPolling is idempotent — safe to call; engine guards against double-start
+  Future.microtask(() => service.startPolling());
+  return service;
+});
 
 /// Alias kept for backward compatibility.
 final realTimeServiceProvider = realTimeProvider;
@@ -82,9 +77,8 @@ final monitoredCitiesProvider = Provider<List<String>>((ref) {
       .toList();
 });
 
-// ── Per-city providers (used by CityDetailScreen) ─────────────────────────────
+// ── Per-city providers ────────────────────────────────────────────────────────
 
-/// Returns the live [FloodData] for a specific city, or null if not found.
 final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
   return ref
       .watch(liveLevelsProvider)
@@ -95,15 +89,13 @@ final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
       );
 });
 
-/// Returns the 24-hr trend snapshots for a city from RealTimeService.
 final cityTrendProvider =
     Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
   return ref.watch(realTimeProvider).trendForCity(city);
 });
 
-// ── Per-state providers ────────────────────────────────────────────────────────
+// ── Per-state providers ───────────────────────────────────────────────────────
 
-/// IMD alerts filtered to a specific state name.
 final stateImdAlertsProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {
   final all = ref.watch(imdAlertsProvider);
@@ -114,7 +106,6 @@ final stateImdAlertsProvider =
   }).toList();
 });
 
-/// NDMA advisories filtered to a specific state name.
 final stateNdmaAdvisoriesProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {
   final all = ref.watch(ndmaAdvisoriesProvider);
@@ -125,7 +116,6 @@ final stateNdmaAdvisoriesProvider =
   }).toList();
 });
 
-/// Emergency contacts for a specific state.
 final stateEmergencyContactsProvider =
     Provider.family<List<dynamic>, String>((ref, stateName) {
   try {
@@ -135,7 +125,6 @@ final stateEmergencyContactsProvider =
   }
 });
 
-/// Live FloodData list for a specific state (used by StateMatrixScreen).
 final stateLiveLevelsProvider =
     Provider.family<List<FloodData>, String>((ref, stateName) {
   return ref
