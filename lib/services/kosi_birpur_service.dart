@@ -36,7 +36,7 @@ import 'package:http/http.dart' as http;
 
 import 'befiqr_cwc_service.dart';
 
-// ── Official CWC thresholds for Kosi @ Birpur ────────────────────────────────
+// ── Official CWC thresholds for Kosi @ Birpur ──────────────────────────────
 //
 // These numbers come from the CWC official flood monitoring bulletins:
 // https://ffs.india.gov.in  (Bihar sub-zone 1a)
@@ -68,7 +68,7 @@ class KosiBirpurReading {
     required this.source,
   });
 
-  // ── Derived status ──────────────────────────────────────────────────────
+  // ── Derived status ────────────────────────────────────────────────
 
   double get gap         => dangerLevel - levelM;
   bool   get isDanger   => levelM >= dangerLevel;
@@ -97,12 +97,12 @@ class KosiBirpurReading {
       );
 }
 
-// ── Service ───────────────────────────────────────────────────────────────────
+// ── Service ─────────────────────────────────────────────────────────────────────────
 
 class KosiBirpurService {
   static const _timeout = Duration(seconds: 10);
 
-  // ── Public entry point ──────────────────────────────────────────────────
+  // ── Public entry point ──────────────────────────────────────────────
 
   /// Returns the best available live reading for Kosi @ Birpur.
   /// Never throws — falls back to seed on every failure.
@@ -124,18 +124,9 @@ class KosiBirpurService {
   }
 
   // ── Source 1: CWC Flood Forecasting System ─────────────────────────────
-  //
-  // CWC publishes flood bulletin data via ffs.india.gov.in.
-  // The site has a JSON endpoint used by their own dashboard.
-  // Station code for Kosi @ Birpur = "BR-1" in CWC internal numbering.
-  // Payload fields we use:
-  //   current_level  → water level in m (AMSL)
-  //   danger_level   → verified against kBirpurDangerLevel
-  //   discharge      → cumecs (optional)
 
   Future<KosiBirpurReading?> _tryFFS() async {
     try {
-      // Primary URL tried first
       final uri = Uri.parse(
           'https://ffs.india.gov.in/flood_bulletin/getdata');
       final resp = await http
@@ -152,12 +143,10 @@ class KosiBirpurService {
 
       if (resp.statusCode == 200) {
         final body = jsonDecode(resp.body) as Map<String, dynamic>;
-        // The API may return a list under 'data' or top-level keys.
         final data = body['data'] as Map<String, dynamic>? ?? body;
         final level = _parseDouble(
             data['current_level'] ?? data['gauge_level'] ?? data['level']);
         if (level != null && level > 100) {
-          // Sanity: Birpur is ~210–215 m, anything way off is junk
           final discharge = _parseDouble(data['discharge']);
           final danger = _parseDouble(data['danger_level']) ?? kBirpurDangerLevel;
           debugPrint('[KosiBirpur] FFS: level=$level m, discharge=$discharge cumecs');
@@ -178,10 +167,8 @@ class KosiBirpurService {
   }
 
   // ── Source 2: irrigation.befiqr.in scrape ──────────────────────────────
-  //
-  // Same source BefiqrCwcService already uses.  We pull the full table
-  // then filter for the Kosi-Birpur row.  This means if the main app
-  // scrape already ran, we're reading cached data at no extra cost.
+  // Uses BefiqrCwcService.parseHtmlTable (now public) so we reuse
+  // the same battle-tested HTML parser without duplicating code.
 
   Future<KosiBirpurReading?> _tryBefiqr() async {
     try {
@@ -192,8 +179,8 @@ class KosiBirpurService {
           .timeout(_timeout);
 
       if (resp.statusCode == 200) {
-        final stations = BefiqrCwcService._parseHtmlTable(resp.body);
-        // Filter for Kosi river, site containing "birpur" (case-insensitive)
+        // ✓ public method — no longer a private _parseHtmlTable call
+        final stations = BefiqrCwcService.parseHtmlTable(resp.body);
         final birpur = stations.where((s) =>
             s.river.toLowerCase().contains('kosi') &&
             s.site.toLowerCase().contains('birpur')).toList();
@@ -215,19 +202,10 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Source 3: India-WRIS ───────────────────────────────────────────────
-  //
-  // India-WRIS (Water Resources Information System) is run by NHP/MoJS.
-  // Endpoint: https://indiawris.gov.in/api/groundWaterLevel
-  // We target the surface-water gauge for Birpur (CWC station G5).
-  // WRIS returns discharge in cumecs; we convert to approximate water level
-  // using the official Birpur stage-discharge relationship:
-  //   H(m) ≈ 205.0 + 0.000942 * Q^0.62  (fitted from CWC rating curve)
-  // This is an approximation — real rating curves are polynomial.
+  // ── Source 3: India-WRIS ─────────────────────────────────────────────────
 
   Future<KosiBirpurReading?> _tryWRIS() async {
     try {
-      // WRIS daily hydrograph for Kosi @ Birpur (station_id = 'GD_00441')
       final uri = Uri.parse(
           'https://indiawris.gov.in/wris/api/v1/hydrograph'
           '?station_id=GD_00441&parameter=WL&duration=1');
@@ -237,10 +215,8 @@ class KosiBirpurService {
 
       if (resp.statusCode == 200) {
         final body  = jsonDecode(resp.body);
-        // WRIS returns {"data":[{"date":"...","value":...}, ...]}
         final list  = (body['data'] as List?)?.cast<Map<String, dynamic>>();
         if (list != null && list.isNotEmpty) {
-          // Last entry = most recent
           final latest = list.last;
           final level  = _parseDouble(latest['value']);
           if (level != null && level > 100) {
@@ -256,8 +232,7 @@ class KosiBirpurService {
             );
           }
 
-          // WRIS sometimes returns discharge instead of WL —
-          // use stage-discharge approximation.
+          // WRIS sometimes returns discharge instead of WL
           final q = _parseDouble(latest['value']);
           if (q != null && q > 0) {
             final h = _dischargeToLevel(q);
@@ -281,27 +256,20 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Seed / fallback ────────────────────────────────────────────────────
-  //
-  // Returns a reading using official CWC thresholds with a
-  // typical pre-monsoon level. The fetchedAt timestamp is marked in the past
-  // so the UI can show "last updated: —" to signal staleness.
+  // ── Seed / fallback ────────────────────────────────────────────────────────
 
   KosiBirpurReading _seed() => KosiBirpurReading(
-        levelM:       210.80,           // typical June dry-season reading
+        levelM:       210.80,
         dangerLevel:  kBirpurDangerLevel,
         warningLevel: kBirpurWarningLevel,
         observedAt:   DateTime(2026, 6, 1), // intentionally old
         source:       'SEED',
       );
 
-  // ── Utilities ──────────────────────────────────────────────────────────
+  // ── Utilities ────────────────────────────────────────────────────────────
 
   /// Approximate stage-discharge for Birpur barrage.
   /// H(m) ≈ 205.0 + 9.0 * (Q / 27014)^0.62
-  /// Calibrated so:
-  ///   Q = 9500 cumecs → H ≈ 214.0 m  (danger)
-  ///   Q = 8500 cumecs → H ≈ 213.0 m  (warning)
   static double _dischargeToLevel(double q) {
     return 205.0 + 9.0 * (q.clamp(0, 27014) / 27014).toDouble().clamp(0.0, 1.0) *
         (q / 27014 < 1 ? (q / 27014) : 1.0);

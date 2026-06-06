@@ -36,11 +36,10 @@ final kosiBirpurStationProvider =
   return ref.watch(kosiBirpurProvider).whenData((r) => r.toCwcStation());
 });
 
-// ── 3. Combined: all Bihar CWC stations + live Birpur injected/replaced ───────
+// ── 3. Combined: all Bihar CWC stations + live Birpur injected/replaced ─────────
 //
 // This replaces the static Birpur seed inside cwcStationsProvider
 // with the live reading whenever it is available.
-// All screens that watch cwcStationsProvider now transparently get live Birpur.
 
 final cwcStationsWithBirpurProvider =
     Provider.autoDispose<AsyncValue<List<CwcStation>>>((ref) {
@@ -55,8 +54,8 @@ final cwcStationsWithBirpurProvider =
               s.site.toLowerCase().contains('birpur')))
         .toList();
 
-    // Inject live Birpur reading if available; otherwise keep seed
-    final liveBirpur = birpurAsync.valueOrNull;
+    // .value returns null when loading or error (Riverpod 3.x — no valueOrNull)
+    final liveBirpur = birpurAsync.value;
     if (liveBirpur != null) {
       filtered.add(liveBirpur);
     } else {
@@ -88,7 +87,7 @@ final cwcStationsWithBirpurProvider =
   });
 });
 
-// ── 4. Kosi-specific stations only (for a Kosi-focused widget/page) ───────────
+// ── 4. Kosi-specific stations only ───────────────────────────────────────────────
 
 final kosiStationsProvider =
     Provider.autoDispose<AsyncValue<List<CwcStation>>>((ref) {

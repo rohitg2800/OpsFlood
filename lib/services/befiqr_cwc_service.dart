@@ -11,7 +11,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-// ── model ─────────────────────────────────────────────────────────────────────
+// ── model ─────────────────────────────────────────────────────────────────────────────
 
 class CwcStation {
   final String river;
@@ -102,7 +102,7 @@ List<CwcStation> get _seedStations {
   ];
 }
 
-// ── service ───────────────────────────────────────────────────────────────────
+// ── service ─────────────────────────────────────────────────────────────────────────────
 
 class BefiqrCwcService {
   static const _url =
@@ -117,7 +117,7 @@ class BefiqrCwcService {
               headers: {'Accept': 'text/html,application/xhtml+xml'})
           .timeout(_timeout);
       if (resp.statusCode == 200) {
-        final parsed = _parseHtmlTable(resp.body);
+        final parsed = parseHtmlTable(resp.body);
         if (parsed.isNotEmpty) return parsed;
       }
     } catch (e) {
@@ -126,10 +126,11 @@ class BefiqrCwcService {
     return _seedStations;
   }
 
-  // ── HTML table parser ──────────────────────────────────────────────────────
+  // ── HTML table parser ─────────────────────────────────────────────────────
+  // Public so KosiBirpurService can reuse the same parser.
   // Parses <tr> rows from the CWC table on irrigation.befiqr.in.
   // Expected columns (0-indexed): 0=River, 1=Site, 2=CurrentLevel, 3=DangerLevel
-  static List<CwcStation> _parseHtmlTable(String html) {
+  static List<CwcStation> parseHtmlTable(String html) {
     final stations = <CwcStation>[];
     final now = DateTime.now();
 
@@ -162,7 +163,7 @@ class BefiqrCwcService {
     return stations;
   }
 
-  // ── ML-style risk score (simple linear rule, 0-100) ───────────────────────
+  // ── ML-style risk score (simple linear rule, 0-100) ─────────────────────
   static double riskScore(CwcStation s) =>
       (s.currentLevel / s.dangerLevel * 100).clamp(0, 100);
 
