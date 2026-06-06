@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 /// Resolves issue #23: Custom Alert Configuration
 /// Stores per-user alert configs in Firestore
+/// Note: FirebaseAuth removed — userId must be passed in by the caller.
 class AlertConfig {
   final String id;
   final String userId;
@@ -81,8 +81,8 @@ class AlertConfig {
 enum AlertType { above, below }
 
 class QuietHours {
-  final String start; // "22:00"
-  final String end; // "06:00"
+  final String start;
+  final String end;
 
   const QuietHours({required this.start, required this.end});
 
@@ -94,24 +94,24 @@ class QuietHours {
   bool get isActiveNow {
     final now = DateTime.now();
     final startParts = start.split(':');
-    final endParts = end.split(':');
-    final startMinutes =
-        int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
-    final endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
-    final currentMinutes = now.hour * 60 + now.minute;
-    // Handle overnight quiet hours (e.g., 22:00 to 06:00)
-    if (startMinutes > endMinutes) {
-      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    final endParts   = end.split(':');
+    final startMins  = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+    final endMins    = int.parse(endParts[0])   * 60 + int.parse(endParts[1]);
+    final currentMins = now.hour * 60 + now.minute;
+    if (startMins > endMins) {
+      return currentMins >= startMins || currentMins < endMins;
     }
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    return currentMins >= startMins && currentMins < endMins;
   }
 }
 
 class AlertConfigService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  String? get _userId => _auth.currentUser?.uid;
+  // userId must be injected — call setUserId() after auth resolves
+  String? _userId;
+  void setUserId(String? uid) => _userId = uid;
+  String? get currentUserId => _userId;
 
   CollectionReference<Map<String, dynamic>> get _collection =>
       _firestore.collection('alert_configs');
@@ -122,33 +122,66 @@ class AlertConfigService {
         .where('user_id', isEqualTo: _userId)
         .snapshots()
         .map((snap) => snap.docs
-            .map((doc) => AlertConfig.fromMap(doc.id, doc.data()))
+            .map((d) => AlertConfig.fromMap(d.id, d.data()))
             .toList());
   }
 
   Future<List<AlertConfig>> getAlertConfigs() async {
     if (_userId == null) return [];
-    final snap =
-        await _collection.where('user_id', isEqualTo: _userId).get();
-    return snap.docs
-        .map((doc) => AlertConfig.fromMap(doc.id, doc.data()))
-        .toList();
+    try {
+      final snap = await _collection
+          .where('user_id', isEqualTo: _userId)
+          .get();
+      return snap.docs
+          .map((d) => AlertConfig.fromMap(d.id, d.data()))
+          .toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AlertConfigService] getAlertConfigs: $e');
+      return [];
+    }
   }
 
-  Future<void> createAlertConfig(AlertConfig config) async {
-    await _collection.add(config.toMap());
-    debugPrint('AlertConfig created for station: ${config.stationId}');
+  Future<String?> createAlertConfig(AlertConfig config) async {
+    if (_userId == null) return null;
+    try {
+      final doc = await _collection.add(config.toMap());
+      return doc.id;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AlertConfigService] create: $e');
+      return null;
+    }
   }
 
-  Future<void> updateAlertConfig(AlertConfig config) async {
-    await _collection.doc(config.id).update(config.toMap());
+  Future<bool> updateAlertConfig(AlertConfig config) async {
+    try {
+      await _collection.doc(config.id).update(config.toMap());
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AlertConfigService] update: $e');
+      return false;
+    }
   }
 
-  Future<void> deleteAlertConfig(String configId) async {
-    await _collection.doc(configId).delete();
+  Future<bool> deleteAlertConfig(String configId) async {
+    try {
+      await _collection.doc(configId).delete();
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AlertConfigService] delete: $e');
+      return false;
+    }
   }
 
-  Future<void> toggleAlertConfig(String configId, bool enabled) async {
-    await _collection.doc(configId).update({'enabled': enabled});
+  Future<bool> toggleAlertConfig(String configId, bool enabled) async {
+    try {
+      await _collection.doc(configId).update({
+        'enabled': enabled,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AlertConfigService] toggle: $e');
+      return false;
+    }
   }
 }

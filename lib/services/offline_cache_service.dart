@@ -2,6 +2,7 @@
 // Resolves issue #26: Offline Data Access with Local Caching
 // connectivity_plus v7.x returns List<ConnectivityResult> — fixed here
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -15,19 +16,22 @@ class OfflineCacheService {
   bool _isOnline = true;
   bool get isOnline => _isOnline;
 
+  // Stream controller for connectivity state — used by OfflineBanner
+  final _connectivityController = StreamController<bool>.broadcast();
+  Stream<bool> get connectivityStream => _connectivityController.stream;
+
   static const Duration _defaultTtl = Duration(hours: 6);
 
   Future<void> initialize() async {
-    // connectivity_plus v7: onConnectivityChanged emits List<ConnectivityResult>
     Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
       _isOnline = results.isNotEmpty &&
           !results.every((r) => r == ConnectivityResult.none);
+      _connectivityController.add(_isOnline);
       if (kDebugMode) {
         debugPrint('[OfflineCacheService] online=$_isOnline results=$results');
       }
     });
 
-    // Check current connectivity
     final results = await Connectivity().checkConnectivity();
     _isOnline = results.isNotEmpty &&
         !results.every((r) => r == ConnectivityResult.none);
@@ -65,7 +69,6 @@ class OfflineCacheService {
       final age      = DateTime.now().difference(cachedAt);
 
       if (age.inMilliseconds > ttlMs) {
-        // Expired — remove and return null
         await prefs.remove('offline_cache_$key');
         return null;
       }
@@ -74,6 +77,31 @@ class OfflineCacheService {
     } catch (e) {
       if (kDebugMode) debugPrint('[OfflineCacheService] getCachedData error: $e');
       return null;
+    }
+  }
+
+  /// Returns a List from cached data (used by station_status_provider)
+  Future<List<Map<String, dynamic>>?> getCachedList(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('offline_list_$key');
+      if (raw == null) return null;
+      final list = jsonDecode(raw);
+      if (list is! List) return null;
+      return list.whereType<Map<String, dynamic>>().toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OfflineCacheService] getCachedList error: $e');
+      return null;
+    }
+  }
+
+  /// Cache a list (companion to getCachedList)
+  Future<void> cacheList(String key, List<Map<String, dynamic>> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('offline_list_$key', jsonEncode(data));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OfflineCacheService] cacheList error: $e');
     }
   }
 
@@ -93,7 +121,7 @@ class OfflineCacheService {
             await prefs.remove(key);
           }
         } catch (_) {
-          await prefs.remove(key); // corrupt entry — purge
+          await prefs.remove(key);
         }
       }
     } catch (e) {

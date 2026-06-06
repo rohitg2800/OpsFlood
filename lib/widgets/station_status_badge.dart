@@ -20,53 +20,49 @@ class StationStatusBadge extends StatelessWidget {
   IconData get _trendIcon {
     if (!isOnline) return Icons.signal_wifi_off;
     switch (trend) {
-      case StationTrend.rising: return Icons.trending_up;
+      case StationTrend.rising:  return Icons.trending_up;
       case StationTrend.falling: return Icons.trending_down;
-      case StationTrend.stable: return Icons.trending_flat;
+      case StationTrend.stable:  return Icons.trending_flat;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final effectiveSeverity =
-        isOnline ? severity : FloodSeverityLevel.offline;
-    final color = effectiveSeverity.color;
+    // Offline stations display as grey/normal — FloodSeverity has no .offline
+    final effectiveSeverity = isOnline ? severity : FloodSeverityLevel.normal;
+    final baseColor = effectiveSeverity.color;
+    // Offline: override to grey regardless of severity
+    final color = isOnline ? baseColor : const Color(0xFF9A8060); // AppPalette.textGrey
 
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 10,
-        vertical: compact ? 3 : 5,
+        vertical:   compact ? 3 : 5,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color:        color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border:       Border.all(color: color.withOpacity(0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: compact ? 6 : 8,
+            width:  compact ? 6 : 8,
             height: compact ? 6 : 8,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           SizedBox(width: compact ? 3 : 5),
-          if (!compact) ...[  
+          if (!compact) ...[
             Text(
-              effectiveSeverity.label,
+              isOnline ? effectiveSeverity.label : 'Offline',
               style: TextStyle(
-                fontSize: 11,
-                color: color,
-                fontWeight: FontWeight.w600,
+                fontSize: 11, color: color, fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(width: 4),
           ],
-          Icon(_trendIcon,
-              size: compact ? 10 : 13, color: color),
+          Icon(_trendIcon, size: compact ? 10 : 13, color: color),
         ],
       ),
     );
@@ -93,7 +89,7 @@ class PulsingStatusBadge extends StatefulWidget {
 class _PulsingStatusBadgeState extends State<PulsingStatusBadge>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _pulse;
+  late Animation<double>   _pulse;
 
   @override
   void initState() {
@@ -101,8 +97,7 @@ class _PulsingStatusBadgeState extends State<PulsingStatusBadge>
     final shouldPulse = widget.severity == FloodSeverityLevel.danger ||
         widget.severity == FloodSeverityLevel.extreme;
     _controller = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 900))
+        vsync: this, duration: const Duration(milliseconds: 900))
       ..repeat(reverse: true);
     _pulse = Tween<double>(begin: 0.7, end: 1.0).animate(
         CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
@@ -110,10 +105,7 @@ class _PulsingStatusBadgeState extends State<PulsingStatusBadge>
   }
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  void dispose() { _controller.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +115,7 @@ class _PulsingStatusBadgeState extends State<PulsingStatusBadge>
         opacity: _pulse.value,
         child: StationStatusBadge(
           severity: widget.severity,
-          trend: widget.trend,
+          trend:    widget.trend,
           isOnline: widget.isOnline,
         ),
       ),

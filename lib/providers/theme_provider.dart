@@ -1,9 +1,5 @@
 // lib/providers/theme_provider.dart
 // Resolves issue #8: Theme persistence — ChangeNotifier + Riverpod StateNotifier
-//
-// TWO parallel APIs (both supported):
-//   1. ThemeProvider (ChangeNotifier)  — used by MaterialApp builder
-//   2. themeModeProvider (Riverpod)    — used by settings/widgets that ref.watch
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,17 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/app_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AppThemeMode — 5-value enum used by settings, theme picker, theme cycle btn
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 enum AppThemeMode {
   system,
   light,
   dark,
-  sunset,  // warm gold — maps to light brightness
-  ocean;   // deep teal — maps to dark brightness
+  sunset,
+  ocean;
 
-  /// Display label shown in UI
   String get label {
     switch (this) {
       case AppThemeMode.system: return 'System Default';
@@ -32,7 +25,6 @@ enum AppThemeMode {
     }
   }
 
-  /// Maps AppThemeMode → Flutter ThemeMode for MaterialApp.themeMode
   ThemeMode get flutterMode {
     switch (this) {
       case AppThemeMode.system: return ThemeMode.system;
@@ -47,7 +39,7 @@ enum AppThemeMode {
 
   static Future<AppThemeMode> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final raw   = prefs.getString(_prefsKey);
     return AppThemeMode.values.firstWhere(
       (m) => m.name == raw,
       orElse: () => AppThemeMode.system,
@@ -60,9 +52,7 @@ enum AppThemeMode {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Riverpod StateNotifier  (used by widgets that call ref.watch(themeModeProvider))
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Riverpod StateNotifier ────────────────────────────────────────────────────
 class ThemeModeNotifier extends StateNotifier<AppThemeMode> {
   ThemeModeNotifier() : super(AppThemeMode.system);
 
@@ -88,9 +78,7 @@ final themeModeProvider =
   (ref) => ThemeModeNotifier()..init(),
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy ChangeNotifier (used by main.dart ThemeProvider().init() call)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Legacy ChangeNotifier ───────────────────────────────────────────────────
 class ThemeProvider extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
 
