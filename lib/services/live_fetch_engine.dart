@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v3.0 — WRD Bihar primary)
+// lib/services/live_fetch_engine.dart  (v3.1 — WRD Bihar primary)
 library;
 
 import 'dart:async';
@@ -20,6 +20,7 @@ class LiveCityData {
   final double?   rainfall24h;
   final String?   riskLevel;
   final DateTime  lastUpdated;
+  final bool      hasLiveLevel; // true = WRD gauge matched
 
   const LiveCityData({
     this.currentLevel,
@@ -29,12 +30,24 @@ class LiveCityData {
     this.rainfall24h,
     this.riskLevel,
     required this.lastUpdated,
+    this.hasLiveLevel = false,
   });
 
   @override
   String toString() =>
-      'LiveCityData(flow=$flowRate m\u00b3/s, risk=$riskLevel, '
-      'rain=${rainfall24h}mm, level=$currentLevel m)';
+      'LiveCityData(flow=$flowRate m³/s, risk=$riskLevel, '
+      'rain=${rainfall24h}mm, level=$currentLevel m, live=$hasLiveLevel)';
+
+  /// Maps our internal riskLevel string to the FloodData.status convention
+  /// expected by FloodSeverityHelper.
+  String get _statusFromRisk {
+    switch ((riskLevel ?? 'LOW').toUpperCase()) {
+      case 'CRITICAL': return 'CRITICAL';
+      case 'SEVERE':   return 'DANGER';
+      case 'MODERATE': return 'WARNING';
+      default:         return 'SAFE';
+    }
+  }
 
   FloodData toFloodData(String city, String state,
       {String? riverName, String district = ''}) {
@@ -53,7 +66,8 @@ class LiveCityData {
       safeLevel:           warningLevel * 0.8,
       capacityPercent:     capPct,
       riskLevel:           riskLevel ?? 'LOW',
-      status:              'ESTIMATED',
+      // status drives FloodSeverityHelper colours — must match its expected values
+      status:              hasLiveLevel ? _statusFromRisk : 'ESTIMATED',
       effectiveRainfallMm: rainfall24h ?? 0.0,
       flowRate:            flowRate,
       lastUpdated:         lastUpdated,
@@ -106,7 +120,37 @@ class LiveFetchEngine {
 
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
+  /// Only returns cities that have a real WRD gauge reading.
+  /// This is what Live Stations + Monitors screens should display.
   List<FloodData> get liveFloodData {
+    return _cache.entries
+        .where((e) => e.value.hasLiveLevel)
+        .map((e) {
+          final city = e.key;
+          final data = e.value;
+          final mc   = IndiaGeodata.monitoredCities.firstWhere(
+            (c) => (c['city'] as String).toLowerCase() == city,
+            orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
+          );
+          return data.toFloodData(
+            mc['city']     as String,
+            mc['state']    as String,
+            riverName:  mc['river']    as String?,
+            district:  (mc['district'] as String?) ?? '',
+          );
+        }).toList()
+        ..sort((a, b) {
+          // Sort: CRITICAL > SEVERE/DANGER > MODERATE/WARNING > SAFE
+          const order = ['CRITICAL', 'DANGER', 'WARNING', 'SAFE', 'ESTIMATED'];
+          final ai = order.indexOf(a.status);
+          final bi = order.indexOf(b.status);
+          if (ai != bi) return ai.compareTo(bi);
+          return b.currentLevel.compareTo(a.currentLevel);
+        });
+  }
+
+  /// All cities including those without a live WRD level (used by dashboard).
+  List<FloodData> get allFloodData {
     return _cache.entries.map((e) {
       final city = e.key;
       final data = e.value;
@@ -127,7 +171,7 @@ class LiveFetchEngine {
   List<dynamic> get criticalAlerts       => _buildCriticalAlerts();
   int           get criticalCount        => _buildCriticalAlerts().length;
   List<dynamic> get cwcStations          => liveFloodData;
-  bool          get hasCwcLiveData       => _cache.isNotEmpty;
+  bool          get hasCwcLiveData       => _cache.values.any((v) => v.hasLiveLevel);
 
   MultiLocationMonitoring get monitoringData => MultiLocationMonitoring(
     locations:   liveFloodData,
@@ -196,24 +240,24 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────────────────────
   // PRIMARY: fetch WRD actual gauge readings for every Bihar city,
   //          then overlay GloFAS flow + rainfall for context.
-  // ─────────────────────────────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────────────────────
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
         .toList();
     if (biharCities.isEmpty) return;
 
-    // ── 1. WRD Bihar actual gauged levels (primary) ──────────────────────
+    // ── 1. WRD Bihar actual gauged levels (primary) ────────────────────
     final wrdStations = await _wrd.fetch();
     final wrdByKey = <String, WrdStation>{};
     for (final s in wrdStations) {
       wrdByKey[s.site.toLowerCase().trim()] = s;
     }
 
-    // ── 2. GloFAS for river flow + rainfall context (secondary) ──────────
+    // ── 2. GloFAS for river flow + rainfall context (secondary) ────────
     final lats = biharCities.map((c) => '${c['lat']}').join(',');
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
 
@@ -230,7 +274,7 @@ class LiveFetchEngine {
       rainMap = await _fetchRainfall(lats, lons, biharCities.length);
     } catch (e) { _log('Open-Meteo rainfall fetch failed: $e'); }
 
-    // ── 3. Merge: WRD level takes priority; GloFAS fills context ─────────
+    // ── 3. Merge: WRD level takes priority; GloFAS fills context ────────
     final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
       final mc        = biharCities[i];
@@ -256,6 +300,7 @@ class LiveFetchEngine {
       final wrdDL       = wrdMatch?.dangerLevel   ?? dl;
       final wrdWL       = wrdMatch?.warningLevel  ?? wl;
       final wrdRisk     = wrdMatch?.riskLabel;
+      final hasLive     = wrdLevel != null;
 
       // GloFAS flow/rainfall for context
       final discharge   = dischargeMap[key]?.firstOrNull;
@@ -266,17 +311,18 @@ class LiveFetchEngine {
       final risk = wrdRisk ?? _deriveRisk(discharge, mean);
 
       _cache[key] = LiveCityData(
-        currentLevel: wrdLevel,   // ✅ REAL gauge reading, not estimated
+        currentLevel: wrdLevel,
         warningLevel: wrdWL,
         dangerLevel:  wrdDL,
-        flowRate:     discharge,  // GloFAS context
-        rainfall24h:  rain,       // Open-Meteo context
+        flowRate:     discharge,
+        rainfall24h:  rain,
         riskLevel:    risk,
         lastUpdated:  now,
+        hasLiveLevel: hasLive,   // ✔ flag drives status + visibility
       );
     }
     _lastFetch = now;
-    final matched = _cache.values.where((v) => v.currentLevel != null).length;
+    final matched = _cache.values.where((v) => v.hasLiveLevel).length;
     _log('Bihar cache updated — ${_cache.length} cities ($matched with WRD live level)');
   }
 
@@ -341,8 +387,9 @@ class LiveFetchEngine {
   List<Map<String, dynamic>> _buildCriticalAlerts() {
     return _cache.entries
         .where((e) =>
-            e.value.riskLevel == 'CRITICAL' ||
-            e.value.riskLevel == 'SEVERE')
+            e.value.hasLiveLevel &&
+            (e.value.riskLevel == 'CRITICAL' ||
+             e.value.riskLevel == 'SEVERE'))
         .map((e) => {
               'city':      e.key,
               'riskLevel': e.value.riskLevel,
