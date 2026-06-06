@@ -1,5 +1,5 @@
 // lib/screens/weather_screen.dart
-// OpsFlood — WeatherScreen v3  "Command Centre"
+// OpsFlood — WeatherScreen v4  "Command Centre" — FULLY THEME-AWARE (RiverColors)
 library;
 
 import 'dart:math' as math;
@@ -96,18 +96,19 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
 
   @override
   Widget build(BuildContext context) {
+    final t  = RiverColors.of(context);
     final ws = ref.watch(weatherProvider);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
+        backgroundColor: t.scaffoldBg,
         body: SafeArea(
           bottom: false,
           child: Column(
             children: [
               _WeatherHeader(
-                cityName:   ws.cityName,
-                searchOpen: _searchOpen,
+                cityName:    ws.cityName,
+                searchOpen:  _searchOpen,
                 onSearchTap: _toggleSearch,
                 onRefresh: () {
                   HapticFeedback.mediumImpact();
@@ -117,17 +118,17 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
                   _contentCtrl.forward();
                 },
                 rotateCtrl: _rotateCtrl,
-                status: ws.status,
+                status:     ws.status,
               ),
               SizeTransition(
                 sizeFactor: _searchBarAnim,
                 child: _SearchBar(
-                  ctrl:       _searchCtrl,
-                  focus:      _searchFocus,
-                  loading:    ws.searchLoading,
-                  results:    ws.searchResults,
-                  onChanged:  _onSearchChanged,
-                  onSelect:   _selectCity,
+                  ctrl:      _searchCtrl,
+                  focus:     _searchFocus,
+                  loading:   ws.searchLoading,
+                  results:   ws.searchResults,
+                  onChanged: _onSearchChanged,
+                  onSelect:  _selectCity,
                 ),
               ),
               Expanded(
@@ -161,12 +162,12 @@ class _WeatherScreenState extends ConsumerState<WeatherScreen>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _WeatherHeader extends StatelessWidget {
-  final String             cityName;
-  final bool               searchOpen;
-  final VoidCallback       onSearchTap;
-  final VoidCallback       onRefresh;
+  final String              cityName;
+  final bool                searchOpen;
+  final VoidCallback        onSearchTap;
+  final VoidCallback        onRefresh;
   final AnimationController rotateCtrl;
-  final WeatherStatus      status;
+  final WeatherStatus       status;
   const _WeatherHeader({
     required this.cityName,    required this.searchOpen,
     required this.onSearchTap, required this.onRefresh,
@@ -175,10 +176,11 @@ class _WeatherHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
       decoration: BoxDecoration(
-        color: AppPalette.abyss0,
+        color: t.navBg,
         border: Border(
           bottom: BorderSide(
               color: AppPalette.cyan.withValues(alpha: 0.10), width: 1)),
@@ -234,7 +236,7 @@ class _WeatherHeader extends StatelessWidget {
                   cityName,
                   style: TextStyle(
                     fontSize: 9.5,
-                    color: AppPalette.textGrey.withValues(alpha: 0.65),
+                    color: t.textSecondary.withValues(alpha: 0.65),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -252,17 +254,17 @@ class _WeatherHeader extends StatelessWidget {
               decoration: BoxDecoration(
                 color: searchOpen
                     ? AppPalette.cyan.withValues(alpha: 0.14)
-                    : AppPalette.abyss2,
+                    : t.cardBg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: searchOpen
                       ? AppPalette.cyan.withValues(alpha: 0.35)
-                      : AppPalette.abyssStroke,
+                      : t.stroke,
                 ),
               ),
               child: Icon(
                 searchOpen ? Icons.search_off_rounded : Icons.search_rounded,
-                color: searchOpen ? AppPalette.cyan : AppPalette.textGrey,
+                color: searchOpen ? AppPalette.cyan : t.textSecondary,
                 size: 18,
               ),
             ),
@@ -273,12 +275,12 @@ class _WeatherHeader extends StatelessWidget {
             child: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: AppPalette.abyss2,
+                color: t.cardBg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppPalette.abyssStroke),
+                border: Border.all(color: t.stroke),
               ),
-              child: const Icon(Icons.refresh_rounded,
-                  color: AppPalette.textGrey, size: 18),
+              child: Icon(Icons.refresh_rounded,
+                  color: t.textSecondary, size: 18),
             ),
           ),
         ],
@@ -292,11 +294,11 @@ class _WeatherHeader extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SearchBar extends StatelessWidget {
-  final TextEditingController  ctrl;
-  final FocusNode              focus;
-  final bool                   loading;
-  final List<CityResult>       results;
-  final ValueChanged<String>   onChanged;
+  final TextEditingController    ctrl;
+  final FocusNode                focus;
+  final bool                     loading;
+  final List<CityResult>         results;
+  final ValueChanged<String>     onChanged;
   final ValueChanged<CityResult> onSelect;
   const _SearchBar({
     required this.ctrl,    required this.focus,
@@ -306,6 +308,7 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Column(
@@ -313,7 +316,7 @@ class _SearchBar extends StatelessWidget {
           Container(
             height: 46,
             decoration: BoxDecoration(
-              color: AppPalette.abyss2,
+              color: t.cardBg,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                   color: AppPalette.cyan.withValues(alpha: 0.28), width: 1.5),
@@ -325,15 +328,14 @@ class _SearchBar extends StatelessWidget {
               ],
             ),
             child: TextField(
-              controller:  ctrl,
-              focusNode:   focus,
-              onChanged:   onChanged,
-              style: const TextStyle(
-                  color: AppPalette.textWhite, fontSize: 13),
+              controller: ctrl,
+              focusNode:  focus,
+              onChanged:  onChanged,
+              style: TextStyle(color: t.textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Search city, e.g. Patna or Muzaffarpur…',
                 hintStyle: TextStyle(
-                  color: AppPalette.textGrey.withValues(alpha: 0.40),
+                  color: t.textSecondary.withValues(alpha: 0.40),
                   fontSize: 12,
                 ),
                 prefixIcon: loading
@@ -355,8 +357,8 @@ class _SearchBar extends StatelessWidget {
                           ctrl.clear();
                           onChanged('');
                         },
-                        child: const Icon(Icons.close_rounded,
-                            color: AppPalette.textGrey, size: 16),
+                        child: Icon(Icons.close_rounded,
+                            color: t.textSecondary, size: 16),
                       )
                     : null,
                 border:         InputBorder.none,
@@ -369,9 +371,9 @@ class _SearchBar extends StatelessWidget {
             Container(
               margin: const EdgeInsets.only(top: 4),
               decoration: BoxDecoration(
-                color: AppPalette.abyss2,
+                color: t.cardBg,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppPalette.abyssStroke),
+                border: Border.all(color: t.stroke),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.30),
@@ -393,8 +395,7 @@ class _SearchBar extends StatelessWidget {
                       border: Border(
                         bottom: results.last == city
                             ? BorderSide.none
-                            : BorderSide(
-                                color: AppPalette.abyssStroke, width: 1),
+                            : BorderSide(color: t.stroke, width: 1),
                       ),
                     ),
                     child: Row(
@@ -405,16 +406,16 @@ class _SearchBar extends StatelessWidget {
                         Expanded(
                           child: Text(
                             city.displayName,
-                            style: const TextStyle(
-                              color: AppPalette.textWhite,
+                            style: TextStyle(
+                              color: t.textPrimary,
                               fontSize: 12, fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
                         Text(
                           city.country,
-                          style: const TextStyle(
-                            color: AppPalette.textDim, fontSize: 10),
+                          style: TextStyle(
+                            color: t.textSecondary, fontSize: 10),
                         ),
                       ],
                     ),
@@ -497,7 +498,7 @@ class _WeatherContent extends StatelessWidget {
                   label: 'Cloud Cover',
                   value: '${ws.current!.cloudCoverPct.toStringAsFixed(0)}%',
                   sub:   '',
-                  color: AppPalette.textGrey,
+                  color: AppPalette.gold,
                 )),
                 const SizedBox(width: 10),
                 Expanded(child: _MetricCard(
@@ -544,6 +545,7 @@ class _HeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
     final wc  = current.weatherCode;
     final col = _wxColor(wc);
     return Container(
@@ -553,7 +555,7 @@ class _HeroCard extends StatelessWidget {
           begin: Alignment.topLeft, end: Alignment.bottomRight,
           colors: [
             col.withValues(alpha: 0.15),
-            AppPalette.abyss2,
+            t.cardBg,
           ],
         ),
         borderRadius: BorderRadius.circular(22),
@@ -578,7 +580,7 @@ class _HeroCard extends StatelessWidget {
                       '${current.tempC.toStringAsFixed(1)}',
                       style: TextStyle(
                         fontSize: 58, fontWeight: FontWeight.w900,
-                        color: AppPalette.textWhite, height: 1.0,
+                        color: t.textPrimary, height: 1.0,
                         letterSpacing: -3,
                         shadows: [
                           Shadow(color: col.withValues(alpha: 0.5),
@@ -586,11 +588,11 @@ class _HeroCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
                       child: Text('°C',
                           style: TextStyle(
-                            fontSize: 18, color: AppPalette.textGrey,
+                            fontSize: 18, color: t.textSecondary,
                             fontWeight: FontWeight.w600,
                           )),
                     ),
@@ -598,8 +600,7 @@ class _HeroCard extends StatelessWidget {
                 ),
                 Text(
                   'Feels ${current.feelsLikeC.toStringAsFixed(1)}°C  ·  ${_wxLabel(wc)}',
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 10.5),
+                  style: TextStyle(color: t.textSecondary, fontSize: 10.5),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -652,12 +653,12 @@ class _HeroCard extends StatelessWidget {
   Color _wxColor(int c) {
     if (c == 0)  return AppPalette.amber;
     if (c <= 3)  return const Color(0xFF64B5F6);
-    if (c <= 48) return AppPalette.textGrey;
+    if (c <= 48) return AppPalette.gold;
     if (c <= 67) return AppPalette.cyan;
     if (c <= 77) return Colors.white;
     if (c <= 82) return AppPalette.cyan;
     if (c <= 99) return AppPalette.danger;
-    return AppPalette.textGrey;
+    return AppPalette.gold;
   }
 
   String _wxLabel(int c) {
@@ -709,8 +710,8 @@ class _HeroPill extends StatelessWidget {
             children: [
               Text(value, style: TextStyle(
                 color: color, fontSize: 11, fontWeight: FontWeight.w800)),
-              Text(label, style: const TextStyle(
-                color: AppPalette.textDim, fontSize: 8)),
+              Text(label, style: TextStyle(
+                color: RiverColors.of(context).textSecondary, fontSize: 8)),
             ],
           ),
         ]),
@@ -727,10 +728,11 @@ class _MonitorShareRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
             color: AppPalette.cyan.withValues(alpha: 0.18), width: 1.5),
@@ -766,7 +768,7 @@ class _MonitorShareRow extends StatelessWidget {
               Text(
                 '· shared with station monitor',
                 style: TextStyle(
-                  color: AppPalette.textDim, fontSize: 9),
+                  color: t.textSecondary, fontSize: 9),
               ),
             ],
           ),
@@ -779,21 +781,21 @@ class _MonitorShareRow extends StatelessWidget {
                 icon:  Icons.grain_rounded,
                 color: AppPalette.cyan,
               )),
-              _divider(),
+              _divider(t),
               Expanded(child: _FeedTile(
                 label: 'Rain Index',
                 value: '${ws.rainfallIndex.toStringAsFixed(0)}/100',
                 icon:  Icons.analytics_rounded,
                 color: _indexColor(ws.rainfallIndex),
               )),
-              _divider(),
+              _divider(t),
               Expanded(child: _FeedTile(
                 label: 'Precip Prob',
                 value: '${ws.maxPrecipProb.toStringAsFixed(0)}%',
                 icon:  Icons.umbrella_rounded,
                 color: AppPalette.amber,
               )),
-              _divider(),
+              _divider(t),
               Expanded(child: _FeedTile(
                 label: 'Temperature',
                 value: '${ws.tempC.toStringAsFixed(1)}°C',
@@ -807,10 +809,10 @@ class _MonitorShareRow extends StatelessWidget {
     );
   }
 
-  Widget _divider() => Container(
+  Widget _divider(RiverColors t) => Container(
       width: 1, height: 36,
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: AppPalette.abyssStroke);
+      color: t.stroke);
 
   Color _indexColor(double v) {
     if (v > 70) return AppPalette.critical;
@@ -829,20 +831,23 @@ class _FeedTile extends StatelessWidget {
     required this.icon,  required this.color,
   });
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(height: 4),
-          Text(value, style: TextStyle(
-            color: color, fontSize: 11, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(
-            color: AppPalette.textDim, fontSize: 7.5,
-            fontWeight: FontWeight.w600),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 14),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(
+          color: color, fontSize: 11, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(
+          color: t.textSecondary, fontSize: 7.5,
+          fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -859,32 +864,35 @@ class _MetricCard extends StatelessWidget {
     required this.color,
   });
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-        decoration: BoxDecoration(
-          color:        AppPalette.abyss2,
-          borderRadius: BorderRadius.circular(16),
-          border:       Border.all(color: AppPalette.abyssStroke),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 18),
-            const SizedBox(height: 6),
-            Text(value, style: TextStyle(
-              color: AppPalette.textWhite, fontSize: 12,
-              fontWeight: FontWeight.w900,
-            )),
-            if (sub.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(sub, style: TextStyle(
-                color: color, fontSize: 8.5, fontWeight: FontWeight.w700)),
-            ],
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color:        t.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border:       Border.all(color: t.stroke),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(height: 6),
+          Text(value, style: TextStyle(
+            color: t.textPrimary, fontSize: 12,
+            fontWeight: FontWeight.w900,
+          )),
+          if (sub.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text(label, style: const TextStyle(
-              color: AppPalette.textDim, fontSize: 8)),
+            Text(sub, style: TextStyle(
+              color: color, fontSize: 8.5, fontWeight: FontWeight.w700)),
           ],
-        ),
-      );
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(
+            color: t.textSecondary, fontSize: 8)),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -897,15 +905,16 @@ class _RainfallChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t       = RiverColors.of(context);
     final maxRain = forecast.map((d) => d.rainMm).fold(0.0, math.max);
     final scale   = maxRain > 0 ? maxRain : 1.0;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:        AppPalette.abyss2,
+        color:        t.cardBg,
         borderRadius: BorderRadius.circular(18),
-        border:       Border.all(color: AppPalette.abyssStroke),
+        border:       Border.all(color: t.stroke),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -915,296 +924,7 @@ class _RainfallChart extends StatelessWidget {
               const Icon(Icons.bar_chart_rounded,
                   color: AppPalette.cyan, size: 15),
               const SizedBox(width: 6),
-              const Text('7-Day Rainfall',
+              Text('7-Day Rainfall',
                   style: TextStyle(
-                    color: AppPalette.textGrey,
+                    color: t.textSecondary,
                     fontSize: 11, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              Text('Max ${maxRain.toStringAsFixed(1)} mm',
-                  style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9.5)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: forecast.map((day) {
-              final frac  = day.rainMm / scale;
-              final col   = day.rainMm > 20
-                  ? AppPalette.danger
-                  : day.rainMm > 5
-                      ? AppPalette.amber
-                      : AppPalette.cyan;
-              final label = DateFormat('EEE').format(
-                  DateTime.tryParse(day.date) ?? DateTime.now());
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: Column(
-                    children: [
-                      Text('${day.rainMm.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            color: col, fontSize: 8,
-                            fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 4),
-                      Container(
-                        height: math.max(4.0, 70.0 * frac),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end:   Alignment.bottomCenter,
-                            colors: [col, col.withValues(alpha: 0.35)],
-                          ),
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4)),
-                          boxShadow: [
-                            BoxShadow(
-                              color: col.withValues(alpha: 0.35),
-                              blurRadius: 6,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(label, style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 8)),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 7-day forecast list
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ForecastList extends StatelessWidget {
-  final List<WeatherDay> forecast;
-  const _ForecastList({required this.forecast});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color:        AppPalette.abyss2,
-        borderRadius: BorderRadius.circular(18),
-        border:       Border.all(color: AppPalette.abyssStroke),
-      ),
-      child: Column(
-        children: forecast.asMap().entries.map((e) {
-          final i   = e.key;
-          final day = e.value;
-          final dt  = DateTime.tryParse(day.date);
-          final label = i == 0 ? 'Today'
-              : i == 1 ? 'Tomorrow'
-              : (dt != null ? DateFormat('EEE, d MMM').format(dt) : day.date);
-          final emoji = _wxEmoji(day.weatherCode);
-          final col   = day.rainMm > 20
-              ? AppPalette.danger
-              : day.rainMm > 5
-                  ? AppPalette.amber
-                  : AppPalette.textGrey;
-          return Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: i < forecast.length - 1
-                    ? BorderSide(color: AppPalette.abyssStroke)
-                    : BorderSide.none,
-              ),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 90,
-                  child: Text(label,
-                      style: TextStyle(
-                        color: i == 0
-                            ? AppPalette.textWhite
-                            : AppPalette.textGrey,
-                        fontSize: 11,
-                        fontWeight: i == 0
-                            ? FontWeight.w800
-                            : FontWeight.w500,
-                      )),
-                ),
-                Text(emoji, style: const TextStyle(fontSize: 16)),
-                const Spacer(),
-                Row(children: [
-                  Icon(Icons.grain_rounded, color: col, size: 11),
-                  const SizedBox(width: 3),
-                  Text('${day.rainMm.toStringAsFixed(1)} mm',
-                      style: TextStyle(
-                          color: col, fontSize: 10,
-                          fontWeight: FontWeight.w700)),
-                ]),
-                const SizedBox(width: 12),
-                Text('${day.precipProb.toStringAsFixed(0)}%',
-                    style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 10)),
-                const SizedBox(width: 12),
-                Text(
-                  '${day.maxC.round()}° / ${day.minC.round()}°',
-                  style: const TextStyle(
-                    color: AppPalette.textWhite,
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  String _wxEmoji(int c) {
-    if (c == 0)  return '☀️';
-    if (c <= 3)  return '⛅';
-    if (c <= 48) return '🌫️';
-    if (c <= 67) return '🌧️';
-    if (c <= 77) return '❄️';
-    if (c <= 82) return '🌦️';
-    if (c <= 99) return '⛈️';
-    return '🌡️';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Loading / Error views
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LoadingView extends StatelessWidget {
-  const _LoadingView();
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 44, height: 44,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppPalette.cyan,
-                backgroundColor:
-                    AppPalette.cyan.withValues(alpha: 0.12),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text('Fetching live weather…',
-                style: TextStyle(
-                    color: AppPalette.textGrey, fontSize: 12)),
-          ],
-        ),
-      );
-}
-
-class _ErrorView extends StatelessWidget {
-  final String       message;
-  final bool         isRateLimited;
-  final int          retryInSeconds;
-  final VoidCallback onRetry;
-  const _ErrorView({
-    required this.message,
-    required this.isRateLimited,
-    required this.retryInSeconds,
-    required this.onRetry,
-  });
-
-  String _formatCountdown(int secs) {
-    final m = secs ~/ 60;
-    final s = secs % 60;
-    return m > 0 ? '${m}m ${s}s' : '${s}s';
-  }
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                isRateLimited
-                    ? Icons.hourglass_top_rounded
-                    : Icons.cloud_off_rounded,
-                color: isRateLimited
-                    ? AppPalette.amber
-                    : AppPalette.danger,
-                size: 44,
-              ),
-              const SizedBox(height: 14),
-              Text(
-                isRateLimited
-                    ? 'Weather service is busy right now.'
-                    : message,
-                style: const TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              if (isRateLimited && retryInSeconds > 0) ...[
-                Text(
-                  'Auto-retrying in ${_formatCountdown(retryInSeconds)}',
-                  style: TextStyle(
-                      color: AppPalette.amber.withValues(alpha: 0.80),
-                      fontSize: 11),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 6),
-                SizedBox(
-                  width: 140,
-                  child: LinearProgressIndicator(
-                    value: 1 - (retryInSeconds / 300),
-                    backgroundColor:
-                        AppPalette.amber.withValues(alpha: 0.15),
-                    color: AppPalette.amber,
-                    minHeight: 3,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ] else
-                const SizedBox(height: 16),
-              GestureDetector(
-                onTap: onRetry,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isRateLimited
-                        ? AppPalette.amber.withValues(alpha: 0.10)
-                        : AppPalette.cyan.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isRateLimited
-                          ? AppPalette.amber.withValues(alpha: 0.30)
-                          : AppPalette.cyan.withValues(alpha: 0.30),
-                    ),
-                  ),
-                  child: Text(
-                    isRateLimited ? 'Try Now Anyway' : 'Retry',
-                    style: TextStyle(
-                      color: isRateLimited
-                          ? AppPalette.amber
-                          : AppPalette.cyan,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-}
