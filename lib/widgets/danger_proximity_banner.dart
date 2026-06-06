@@ -1,6 +1,5 @@
 // lib/widgets/danger_proximity_banner.dart
 // Shows a red animated banner if user is within 80 km of a CRITICAL/SEVERE gauge.
-// Uses BiharGauge (has lat/lon) instead of FloodData.
 library;
 
 import 'dart:math';
@@ -8,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/bihar_rivers.dart';
-import '../providers/flood_providers.dart';
+import '../providers/flood_providers.dart';   // liveLevelsProvider
 import '../providers/location_provider.dart';
 import '../theme/river_theme.dart';
 
@@ -17,57 +16,49 @@ class DangerProximityBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final locState   = ref.watch(locationProvider);
-    final floodAsync = ref.watch(floodDataProvider);
+    final locState = ref.watch(locationProvider);
+    final stations = ref.watch(liveLevelsProvider); // List<FloodData>
 
-    // Not loaded yet or no location
     if (locState.isLoading || locState.lat == null) {
       return const SizedBox.shrink();
     }
 
-    return floodAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error:   (_, __) => const SizedBox.shrink(),
-      data: (stations) {
-        // Find nearest CRITICAL/SEVERE gauge within 80 km using BiharGauge registry
-        BiharGauge? nearest;
-        double minDist = double.infinity;
-        String nearestStatus = '';
+    BiharGauge? nearest;
+    double      minDist      = double.infinity;
+    String      nearestStatus = '';
 
-        for (final gauge in kBiharGauges) {
-          final d = _haversine(
-            locState.lat!, locState.lon!,
-            gauge.lat,     gauge.lon,
-          );
-          if (d > 80.0) continue;  // outside 80 km radius
+    for (final gauge in kBiharGauges) {
+      final d = _haversine(
+        locState.lat!, locState.lon!,
+        gauge.lat,     gauge.lon,
+      );
+      if (d > 80.0) continue;
 
-          // Match gauge to live flood data by station name
-          final live = stations.firstWhere(
-            (s) => s.station.toLowerCase().contains(
-                       gauge.station.toLowerCase().split(' ').first),
-            orElse: () => stations.first,
-          );
+      // Match gauge to live flood data by station name prefix
+      final live = stations.firstWhere(
+        (s) => s.station.toLowerCase().contains(
+                   gauge.station.toLowerCase().split(' ').first),
+        orElse: () => stations.isNotEmpty ? stations.first : null as dynamic,
+      );
 
-          final level  = live.currentLevel ?? 0.0;
-          final status = level >= gauge.dangerLevel  ? 'DANGER'
-                       : level >= gauge.warningLevel ? 'WARNING'
-                       : 'SAFE';
+      final level  = (live?.currentLevel ?? 0.0) as double;
+      final status = level >= gauge.dangerLevel  ? 'DANGER'
+                   : level >= gauge.warningLevel ? 'WARNING'
+                   : 'SAFE';
 
-          if ((status == 'DANGER' || status == 'WARNING') && d < minDist) {
-            minDist       = d;
-            nearest       = gauge;
-            nearestStatus = status;
-          }
-        }
+      if ((status == 'DANGER' || status == 'WARNING') && d < minDist) {
+        minDist       = d;
+        nearest       = gauge;
+        nearestStatus = status;
+      }
+    }
 
-        if (nearest == null) return const SizedBox.shrink();
-        return _BannerWidget(
-          station: nearest.station,
-          district: nearest.district,
-          distKm:  minDist,
-          status:  nearestStatus,
-        );
-      },
+    if (nearest == null) return const SizedBox.shrink();
+    return _BannerWidget(
+      station:  nearest.station,
+      district: nearest.district,
+      distKm:   minDist,
+      status:   nearestStatus,
     );
   }
 
@@ -82,7 +73,7 @@ class DangerProximityBanner extends ConsumerWidget {
   }
 }
 
-// ── Animated banner widget ────────────────────────────────────────────────────
+// ── Animated banner ───────────────────────────────────────────────────────────
 class _BannerWidget extends StatefulWidget {
   final String station;
   final String district;
@@ -94,7 +85,6 @@ class _BannerWidget extends StatefulWidget {
     required this.distKm,
     required this.status,
   });
-
   @override
   State<_BannerWidget> createState() => _BannerWidgetState();
 }
@@ -115,10 +105,7 @@ class _BannerWidgetState extends State<_BannerWidget>
   }
 
   @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _ctrl.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -143,9 +130,9 @@ class _BannerWidgetState extends State<_BannerWidget>
                 '${widget.status}: ${widget.station} (${widget.district}) '
                 '${widget.distKm.toStringAsFixed(0)} km away',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color:      Colors.white,
                   fontWeight: FontWeight.w700,
-                  fontSize: 13,
+                  fontSize:   13,
                 ),
               ),
             ),
