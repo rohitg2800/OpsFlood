@@ -1,7 +1,7 @@
 // lib/screens/home_screen.dart
-// EQUINOX-BH — HomeScreen v10
-// Change: Alerts removed from primary nav; Monitor promoted to primary tab.
-//         Alerts moved into the secondary More sheet.
+// EQUINOX-BH — HomeScreen v11
+// More sheet now has only Settings.
+// Stations and Alerts screens removed from navigation entirely.
 library;
 
 import 'dart:ui';
@@ -12,9 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
-import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
-import 'live_stations_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
@@ -24,48 +22,28 @@ import 'weather_screen.dart';
 // ── tab descriptors ───────────────────────────────────────────────────────────
 
 class _Tab {
-  const _Tab(this.label, this.icon, this.activeIcon, {this.badgeProvider});
+  const _Tab(this.label, this.icon, this.activeIcon);
   final String   label;
   final IconData icon, activeIcon;
-  final int?     badgeProvider;
 }
 
 // Primary nav (always visible) — 5 items
-// Index 2 is now Monitor (was Alerts)
 const _primary = [
-  _Tab('Home',    Icons.dashboard_outlined,       Icons.dashboard_rounded),
-  _Tab('Rivers',  Icons.water_outlined,            Icons.water_rounded),
-  _Tab('Monitor', Icons.monitor_heart_outlined,    Icons.monitor_heart_rounded),
-  _Tab('Weather', Icons.cloud_outlined,            Icons.cloud_rounded),
-  _Tab('Predict', Icons.model_training_outlined,   Icons.model_training_rounded),
+  _Tab('Home',    Icons.dashboard_outlined,      Icons.dashboard_rounded),
+  _Tab('Rivers',  Icons.water_outlined,           Icons.water_rounded),
+  _Tab('Monitor', Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
+  _Tab('Weather', Icons.cloud_outlined,           Icons.cloud_rounded),
+  _Tab('Predict', Icons.model_training_outlined,  Icons.model_training_rounded),
 ];
 
-// Secondary nav (More sheet) — Alerts promoted here, Stations & Settings remain
-const _secondary = [
-  _Tab('Stations', Icons.sensors_outlined,        Icons.sensors_rounded),
-  _Tab('Alerts',   Icons.notifications_outlined,  Icons.notifications_rounded,
-       badgeProvider: 0),
-  _Tab('Settings', Icons.settings_outlined,       Icons.settings_rounded),
-];
-
-// Screen index map:
-//  0 → Dashboard
-//  1 → RiverMonitor
-//  2 → Monitors  (was AlertsScreen)
-//  3 → Weather
-//  4 → Predict
-//  5 → LiveStations
-//  6 → Alerts    (moved from primary slot 2)
-//  7 → Settings
+// Screen index map: 0-4 primary, 5 = Settings (only overflow)
 Widget _buildScreen(int i) => switch (i) {
   0 => const DashboardScreen(),
   1 => const RiverMonitorScreen(),
   2 => const MonitorsScreen(),
   3 => const WeatherScreen(),
   4 => const PredictScreen(),
-  5 => const LiveStationsScreen(),
-  6 => const AlertsScreen(),
-  7 => const SettingsScreen(),
+  5 => const SettingsScreen(),
   _ => const DashboardScreen(),
 };
 
@@ -88,7 +66,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
-    _screens = List.generate(8, _buildScreen);
+    _screens = List.generate(6, _buildScreen);
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1600))
       ..repeat(reverse: true);
@@ -113,16 +91,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _showMoreSheet() {
-    final offline  = ref.read(isOfflineProvider);
-    final critical = ref.read(criticalCountProvider);
+    final offline = ref.read(isOfflineProvider);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => _MoreSheet(
-        current:       _idx,
-        offline:       offline,
-        criticalCount: critical,
-        onSelect:      (i) {
+        current:  _idx,
+        offline:  offline,
+        onSelect: (i) {
           Navigator.pop(context);
           _go(i);
         },
@@ -132,10 +108,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final criticalCount = ref.watch(criticalCountProvider);
-    final offline       = ref.watch(isOfflineProvider);
-
-    final badgeValues = [criticalCount];
+    final offline = ref.watch(isOfflineProvider);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light
@@ -147,13 +120,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           children: _screens,
         ),
         bottomNavigationBar: _NavBar(
-          current:     _idx,
-          primary:     _primary,
-          glow:        _glow,
-          badgeValues: badgeValues,
-          offline:     offline,
-          onTap:       _go,
-          onMore:      _showMoreSheet,
+          current: _idx,
+          primary: _primary,
+          glow:    _glow,
+          offline: offline,
+          onTap:   _go,
+          onMore:  _showMoreSheet,
         ),
       ),
     );
@@ -167,24 +139,21 @@ class _NavBar extends StatelessWidget {
     required this.current,
     required this.primary,
     required this.glow,
-    required this.badgeValues,
     required this.offline,
     required this.onTap,
     required this.onMore,
   });
 
-  final int                  current;
-  final List<_Tab>           primary;
-  final Animation<double>    glow;
-  final List<int>            badgeValues;
-  final bool                 offline;
-  final ValueChanged<int>    onTap;
-  final VoidCallback         onMore;
+  final int                current;
+  final List<_Tab>         primary;
+  final Animation<double>  glow;
+  final bool               offline;
+  final ValueChanged<int>  onTap;
+  final VoidCallback       onMore;
 
   @override
   Widget build(BuildContext context) {
     final pad = MediaQuery.of(context).padding.bottom;
-
     return ClipRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
@@ -196,9 +165,9 @@ class _NavBar extends StatelessWidget {
                 top: BorderSide(color: Color(0x1800C6FF), width: 1)),
             boxShadow: [
               BoxShadow(
-                  color: AppPalette.cyan.withValues(alpha: 0.04),
-                  blurRadius: 20,
-                  offset: const Offset(0, -4)),
+                color: AppPalette.cyan.withValues(alpha: 0.04),
+                blurRadius: 20,
+                offset: const Offset(0, -4)),
             ],
           ),
           child: Padding(
@@ -207,9 +176,6 @@ class _NavBar extends StatelessWidget {
               children: [
                 ...List.generate(primary.length, (i) {
                   final active = i == current;
-                  final badge  = primary[i].badgeProvider != null
-                      ? badgeValues[primary[i].badgeProvider!]
-                      : 0;
                   return Expanded(
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
@@ -220,14 +186,12 @@ class _NavBar extends StatelessWidget {
                           tab:     primary[i],
                           active:  active,
                           glowVal: active ? glow.value : 0,
-                          badge:   badge,
                         ),
                       ),
                     ),
                   );
                 }),
-
-                // «More» button
+                // «More» → only Settings now
                 Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -254,13 +218,10 @@ class _NavItem extends StatelessWidget {
     required this.tab,
     required this.active,
     required this.glowVal,
-    this.badge = 0,
   });
-
   final _Tab   tab;
   final bool   active;
   final double glowVal;
-  final int    badge;
 
   @override
   Widget build(BuildContext context) {
@@ -268,57 +229,26 @@ class _NavItem extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: 36, height: 26,
-              decoration: active
-                  ? BoxDecoration(
-                      color: AppPalette.cyan
-                          .withValues(alpha: 0.10 * glowVal),
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppPalette.cyan
-                              .withValues(alpha: 0.22 * glowVal),
-                          blurRadius: 16,
-                        ),
-                      ],
-                    )
-                  : null,
-              child: Icon(
-                active ? tab.activeIcon : tab.icon,
-                size:  active ? 18 : 16,
-                color: c,
-              ),
-            ),
-            if (badge > 0)
-              Positioned(
-                top: -4, right: -4,
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 14),
-                  height: 14,
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  decoration: BoxDecoration(
-                    color: AppPalette.critical,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(
-                        color: AppPalette.abyss0, width: 1.5),
-                  ),
-                  child: Center(
-                    child: Text(
-                      badge > 9 ? '9+' : '$badge',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 7.5,
-                          fontWeight: FontWeight.w900),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          width: 36, height: 26,
+          decoration: active
+              ? BoxDecoration(
+                  color: AppPalette.cyan.withValues(alpha: 0.10 * glowVal),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppPalette.cyan.withValues(alpha: 0.22 * glowVal),
+                      blurRadius: 16,
                     ),
-                  ),
-                ),
-              ),
-          ],
+                  ],
+                )
+              : null,
+          child: Icon(
+            active ? tab.activeIcon : tab.icon,
+            size: active ? 18 : 16,
+            color: c,
+          ),
         ),
         const SizedBox(height: 3),
         AnimatedDefaultTextStyle(
@@ -361,9 +291,7 @@ class _MoreButton extends StatelessWidget {
                     )
                   : null,
               child: Icon(
-                active
-                    ? Icons.grid_view_rounded
-                    : Icons.grid_view_outlined,
+                active ? Icons.grid_view_rounded : Icons.grid_view_outlined,
                 size: 16, color: c,
               ),
             ),
@@ -398,35 +326,26 @@ class _MoreButton extends StatelessWidget {
   }
 }
 
-// ── More bottom sheet ─────────────────────────────────────────────────────────
+// ── More bottom sheet — Settings only ─────────────────────────────────────────
 
 class _MoreSheet extends StatelessWidget {
   final int              current;
   final bool             offline;
-  final int              criticalCount;
   final ValueChanged<int> onSelect;
   const _MoreSheet({
     required this.current,
     required this.offline,
-    required this.criticalCount,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      (idx: 5, label: 'Stations', icon: Icons.sensors_rounded,      sub: 'Live gauge stations',      badge: 0),
-      (idx: 6, label: 'Alerts',   icon: Icons.notifications_rounded, sub: 'Flood & risk alerts',      badge: criticalCount),
-      (idx: 7, label: 'Settings', icon: Icons.settings_rounded,      sub: 'App preferences',          badge: 0),
-    ];
-
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF060F1C),
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         border: Border(
-            top: BorderSide(
-                color: Color(0x2200C6FF), width: 1.5)),
+            top: BorderSide(color: Color(0x2200C6FF), width: 1.5)),
       ),
       child: SafeArea(
         child: Padding(
@@ -466,15 +385,13 @@ class _MoreSheet extends StatelessWidget {
                     ],
                   ),
                 ),
-              for (final item in items)
-                _SheetRow(
-                  label:  item.label,
-                  icon:   item.icon,
-                  sub:    item.sub,
-                  badge:  item.badge,
-                  active: current == item.idx,
-                  onTap:  () => onSelect(item.idx),
-                ),
+              _SheetRow(
+                label:  'Settings',
+                icon:   Icons.settings_rounded,
+                sub:    'App preferences',
+                active: current == 5,
+                onTap:  () => onSelect(5),
+              ),
               const SizedBox(height: 8),
             ],
           ),
@@ -487,13 +404,12 @@ class _MoreSheet extends StatelessWidget {
 class _SheetRow extends StatelessWidget {
   final String   label, sub;
   final IconData icon;
-  final int      badge;
   final bool     active;
   final VoidCallback onTap;
   const _SheetRow({
     required this.label, required this.icon,
     required this.sub,   required this.active,
-    required this.onTap, this.badge = 0,
+    required this.onTap,
   });
 
   @override
@@ -504,8 +420,7 @@ class _SheetRow extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: active
               ? AppPalette.cyan.withValues(alpha: 0.08)
@@ -539,29 +454,11 @@ class _SheetRow extends StatelessWidget {
                           fontSize: 13)),
                   Text(sub,
                       style: const TextStyle(
-                          color: AppPalette.textDim,
-                          fontSize: 10)),
+                          color: AppPalette.textDim, fontSize: 10)),
                 ],
               ),
             ),
-            // badge for Alerts
-            if (badge > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppPalette.critical,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  badge > 9 ? '9+' : '$badge',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900),
-                ),
-              )
-            else if (active)
+            if (active)
               Container(
                 width: 6, height: 6,
                 decoration: const BoxDecoration(
