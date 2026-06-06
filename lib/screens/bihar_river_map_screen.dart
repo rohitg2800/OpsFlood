@@ -1,8 +1,5 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v6
-// • BiharStationRegistry wired for coords, district, coversCities
-// • _StationSheet shows district badge + covered-cities chips
-// • No more hardcoded _kBiharStationCoords map — single source of truth
+// BiharRiverMapScreen v6.1 — fix ..._[ typo in river name row
 library;
 
 import 'dart:convert';
@@ -111,7 +108,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   bool _showRivers    = true;
   bool _showDistricts = true;
   bool _showStations  = true;
-  FloodData?       _selected;
+  FloodData?        _selected;
   BiharStationMeta? _selectedMeta;
   final _mapController = MapController();
 
@@ -155,7 +152,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
       body: Stack(
         children: [
 
-          // ── MAP ────────────────────────────────────────────────────────────────
+          // ── MAP ──────────────────────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -243,7 +240,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ],
           ),
 
-          // ── App bar ───────────────────────────────────────────────────────────────
+          // ── App bar ───────────────────────────────────────────────────────────
           Positioned(
             top: 0, left: 0, right: 0,
             child: SafeArea(
@@ -275,22 +272,22 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ── Layer toggles ─────────────────────────────────────────────────────────────
+          // ── Layer toggles ─────────────────────────────────────────────────────
           Positioned(
             right: 12,
             bottom: _selected != null ? 290 : 120,
             child: Column(
               children: [
-                _LayerToggle(icon: Icons.water_rounded,    label: 'Rivers',    active: _showRivers,    color: const Color(0xFF38BDF8), onTap: () => setState(() => _showRivers    = !_showRivers)),
+                _LayerToggle(icon: Icons.water_rounded,     label: 'Rivers',    active: _showRivers,    color: const Color(0xFF38BDF8), onTap: () => setState(() => _showRivers    = !_showRivers)),
                 const SizedBox(height: 8),
                 _LayerToggle(icon: Icons.grid_view_rounded, label: 'Districts', active: _showDistricts, color: t.accent,                onTap: () => setState(() => _showDistricts = !_showDistricts)),
                 const SizedBox(height: 8),
-                _LayerToggle(icon: Icons.sensors_rounded,  label: 'Stations',  active: _showStations,  color: AppPalette.safe,         onTap: () => setState(() => _showStations  = !_showStations)),
+                _LayerToggle(icon: Icons.sensors_rounded,   label: 'Stations',  active: _showStations,  color: AppPalette.safe,         onTap: () => setState(() => _showStations  = !_showStations)),
               ],
             ),
           ),
 
-          // ── River legend (hidden when sheet open) ─────────────────────────────────
+          // ── River legend (hidden when sheet open) ─────────────────────────────
           if (_showRivers && _selected == null)
             Positioned(
               left: 12, bottom: 100,
@@ -317,7 +314,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
               ),
             ),
 
-          // ── Station sheet ─────────────────────────────────────────────────────────────
+          // ── Station sheet ─────────────────────────────────────────────────────
           if (_selected != null)
             Positioned(
               left: 0, right: 0, bottom: 0,
@@ -332,7 +329,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
               ),
             ),
 
-          // ── GeoJSON spinner ────────────────────────────────────────────────────────────
+          // ── GeoJSON spinner ───────────────────────────────────────────────────
           if (geoAsync.isLoading)
             Positioned(
               top: 80, left: 0, right: 0,
@@ -415,14 +412,14 @@ class _DistrictLayer extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station detail bottom sheet  ─ now shows district + covered cities
+// Station detail bottom sheet — district badge + covered-cities chips
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
-  final FloodData        data;
+  final FloodData         data;
   final BiharStationMeta? meta;
-  final VoidCallback     onClose;
-  final VoidCallback     onOpenDetail;
+  final VoidCallback      onClose;
+  final VoidCallback      onOpenDetail;
   const _StationSheet({
     required this.data,
     required this.meta,
@@ -432,13 +429,13 @@ class _StationSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t          = RiverColors.of(context);
-    final sev        = FloodSeverityHelper.fromString(data.status);
-    final color      = FloodSeverityHelper.color(sev);
-    final riverName  = meta?.river ?? data.riverName ?? '';
-    final riverCol   = _riverColor(riverName);
-    final district   = meta?.district ?? _districtFor(data);
-    final cities     = meta?.coversCities ?? const <String>[];
+    final t         = RiverColors.of(context);
+    final sev       = FloodSeverityHelper.fromString(data.status);
+    final color     = FloodSeverityHelper.color(sev);
+    final riverName = meta?.river ?? data.riverName ?? '';
+    final riverCol  = _riverColor(riverName);
+    final district  = meta?.district ?? _districtFor(data);
+    final cities    = meta?.coversCities ?? const <String>[];
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -463,11 +460,11 @@ class _StationSheet extends StatelessWidget {
             ),
           ),
 
-          // ─ Header row: icon + site name + district badge + close
+          // ─ Header: icon + name + district + close
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // River colour dot + severity icon
+              // Severity icon with river-colour border + dot
               Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -480,7 +477,6 @@ class _StationSheet extends StatelessWidget {
                     ),
                     child: Icon(FloodSeverityHelper.icon(sev), color: color, size: 18),
                   ),
-                  // River name tooltip dot
                   Positioned(
                     bottom: -2, right: -2,
                     child: Container(
@@ -499,14 +495,13 @@ class _StationSheet extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Site name
                     Text(data.city, style: TextStyle(
                         color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 3),
-                    // River + district row
+                    // River name + district badge  ← FIX: was ..._[ now ...[
                     Row(
                       children: [
-                        if (riverName.isNotEmpty) ..._[
+                        if (riverName.isNotEmpty) ...[
                           Container(
                             width: 8, height: 8,
                             decoration: BoxDecoration(shape: BoxShape.circle, color: riverCol),
@@ -527,8 +522,7 @@ class _StationSheet extends StatelessWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.location_on_rounded,
-                                    color: t.textSecondary, size: 9),
+                                Icon(Icons.location_on_rounded, color: t.textSecondary, size: 9),
                                 const SizedBox(width: 3),
                                 Text(district, style: TextStyle(
                                     color: t.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
@@ -572,7 +566,7 @@ class _StationSheet extends StatelessWidget {
             color:   color,
           ),
 
-          // ─ Covered cities
+          // ─ Covered cities chips
           if (cities.isNotEmpty) ...[
             const SizedBox(height: 10),
             Row(
