@@ -1,108 +1,103 @@
+// lib/services/offline_cache_service.dart
+// Resolves issue #26: Offline Data Access with Local Caching
+// connectivity_plus v7.x returns List<ConnectivityResult> — fixed here
+
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Resolves issue #26: Offline Data Access with Local Caching
-/// Uses SharedPreferences for lightweight caching until Drift is wired in.
-/// Drift integration (full SQLite ORM) is scaffolded in local_database.dart
 class OfflineCacheService {
-  static final OfflineCacheService _instance =
-      OfflineCacheService._internal();
+  static final OfflineCacheService _instance = OfflineCacheService._internal();
   factory OfflineCacheService() => _instance;
   OfflineCacheService._internal();
 
-  static const Duration _cacheTtl = Duration(minutes: 5);
-  static const Duration _maxCacheAge = Duration(days: 7);
-
-  final Connectivity _connectivity = Connectivity();
   bool _isOnline = true;
-
   bool get isOnline => _isOnline;
 
+  static const Duration _defaultTtl = Duration(hours: 6);
+
   Future<void> initialize() async {
-    final result = await _connectivity.checkConnectivity();
-    _isOnline = result != ConnectivityResult.none;
-    _connectivity.onConnectivityChanged.listen((result) {
-      _isOnline = result != ConnectivityResult.none;
-      debugPrint('Connectivity changed: ${_isOnline ? "Online" : "Offline"}');
+    // connectivity_plus v7: onConnectivityChanged emits List<ConnectivityResult>
+    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      _isOnline = results.isNotEmpty &&
+          !results.every((r) => r == ConnectivityResult.none);
+      if (kDebugMode) {
+        debugPrint('[OfflineCacheService] online=$_isOnline results=$results');
+      }
     });
-    await _pruneExpiredCache();
+
+    // Check current connectivity
+    final results = await Connectivity().checkConnectivity();
+    _isOnline = results.isNotEmpty &&
+        !results.every((r) => r == ConnectivityResult.none);
+
+    if (kDebugMode) debugPrint('[OfflineCacheService] initialized, online=$_isOnline');
   }
 
   Future<void> cacheData(
-      String key, Map<String, dynamic> data) async {
-    final prefs = await SharedPreferences.getInstance();
-    final entry = jsonEncode({
-      'data': data,
-      'cached_at': DateTime.now().toIso8601String(),
-    });
-    await prefs.setString('cache_$key', entry);
-  }
-
-  Future<void> cacheList(
-      String key, List<Map<String, dynamic>> data) async {
-    final prefs = await SharedPreferences.getInstance();
-    final entry = jsonEncode({
-      'data': data,
-      'cached_at': DateTime.now().toIso8601String(),
-    });
-    await prefs.setString('cache_$key', entry);
+    String key,
+    Map<String, dynamic> data, {
+    Duration ttl = _defaultTtl,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final envelope = {
+        'data': data,
+        'cached_at': DateTime.now().toIso8601String(),
+        'ttl_ms': ttl.inMilliseconds,
+      };
+      await prefs.setString('offline_cache_$key', jsonEncode(envelope));
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OfflineCacheService] cacheData error: $e');
+    }
   }
 
   Future<Map<String, dynamic>?> getCachedData(String key) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('cache_$key');
-    if (raw == null) return null;
-    final entry = jsonDecode(raw) as Map<String, dynamic>;
-    final cachedAt = DateTime.parse(entry['cached_at']);
-    if (DateTime.now().difference(cachedAt) > _cacheTtl && _isOnline) {
-      return null; // stale when online; use fresh data
-    }
-    return entry['data'] as Map<String, dynamic>?;
-  }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('offline_cache_$key');
+      if (raw == null) return null;
 
-  Future<List<Map<String, dynamic>>?> getCachedList(String key) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('cache_$key');
-    if (raw == null) return null;
-    final entry = jsonDecode(raw) as Map<String, dynamic>;
-    final cachedAt = DateTime.parse(entry['cached_at']);
-    if (DateTime.now().difference(cachedAt) > _cacheTtl && _isOnline) {
+      final envelope = jsonDecode(raw) as Map<String, dynamic>;
+      final cachedAt = DateTime.parse(envelope['cached_at'] as String);
+      final ttlMs    = envelope['ttl_ms'] as int;
+      final age      = DateTime.now().difference(cachedAt);
+
+      if (age.inMilliseconds > ttlMs) {
+        // Expired — remove and return null
+        await prefs.remove('offline_cache_$key');
+        return null;
+      }
+
+      return envelope['data'] as Map<String, dynamic>?;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OfflineCacheService] getCachedData error: $e');
       return null;
     }
-    final list = entry['data'] as List<dynamic>;
-    return list.cast<Map<String, dynamic>>();
   }
 
-  Future<DateTime?> getLastSyncTime(String key) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString('cache_$key');
-    if (raw == null) return null;
-    final entry = jsonDecode(raw) as Map<String, dynamic>;
-    return DateTime.parse(entry['cached_at']);
-  }
-
-  Future<void> _pruneExpiredCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys().where((k) => k.startsWith('cache_'));
-    for (final key in keys) {
-      final raw = prefs.getString(key);
-      if (raw == null) continue;
-      try {
-        final entry = jsonDecode(raw) as Map<String, dynamic>;
-        final cachedAt = DateTime.parse(entry['cached_at']);
-        if (DateTime.now().difference(cachedAt) > _maxCacheAge) {
-          await prefs.remove(key);
-          debugPrint('Cache pruned: $key');
+  Future<void> clearExpired() async {
+    try {
+      final prefs  = await SharedPreferences.getInstance();
+      final keys   = prefs.getKeys().where((k) => k.startsWith('offline_cache_'));
+      final now    = DateTime.now();
+      for (final key in keys) {
+        final raw = prefs.getString(key);
+        if (raw == null) continue;
+        try {
+          final envelope = jsonDecode(raw) as Map<String, dynamic>;
+          final cachedAt = DateTime.parse(envelope['cached_at'] as String);
+          final ttlMs    = envelope['ttl_ms'] as int;
+          if (now.difference(cachedAt).inMilliseconds > ttlMs) {
+            await prefs.remove(key);
+          }
+        } catch (_) {
+          await prefs.remove(key); // corrupt entry — purge
         }
-      } catch (_) {
-        await prefs.remove(key);
       }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[OfflineCacheService] clearExpired error: $e');
     }
   }
-
-  Stream<bool> get connectivityStream =>
-      _connectivity.onConnectivityChanged
-          .map((result) => result != ConnectivityResult.none);
 }
