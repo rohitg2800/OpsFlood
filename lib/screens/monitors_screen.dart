@@ -1,7 +1,7 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — Main tab shell (bottom navigation)
-// Tabs: Home | AI Predict | Alerts/News | SOS
-// The DangerProximityBanner is injected at the top of the Home tab.
+// OpsFlood — Monitor screen (inner tab shell)
+// Tabs: AI Predict | Alerts/News | SOS
+// Live tab removed — accessible via main nav > More > Stations
 library;
 
 import 'package:flutter/material.dart';
@@ -9,8 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../theme/river_theme.dart';
-import '../widgets/danger_proximity_banner.dart';
-import 'live_stations_screen.dart';
 import 'news_feed_screen.dart';
 import 'prediction_screen.dart';
 import 'sos_screen.dart';
@@ -26,10 +24,9 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen> {
   int _tab = 0;
 
   static const _tabs = [
-    _TabItem(icon: Icons.water_rounded,       label: 'Live'),
-    _TabItem(icon: Icons.auto_graph_rounded,  label: 'AI Predict'),
-    _TabItem(icon: Icons.feed_rounded,        label: 'Alerts'),
-    _TabItem(icon: Icons.sos_rounded,         label: 'SOS'),
+    _TabItem(icon: Icons.auto_graph_rounded, label: 'AI Predict'),
+    _TabItem(icon: Icons.feed_rounded,       label: 'Alerts'),
+    _TabItem(icon: Icons.sos_rounded,        label: 'SOS'),
   ];
 
   @override
@@ -40,15 +37,13 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen> {
         backgroundColor: AppPalette.abyss0,
         body: IndexedStack(
           index: _tab,
-          children: [
-            // Tab 0 — Live Stations + DangerProximityBanner
-            _LiveTabWithBanner(),
-            // Tab 1 — AI Flood Prediction
-            const PredictionScreen(),
-            // Tab 2 — NDMA / IMD / WRD News Feed
-            const NewsFeedScreen(),
-            // Tab 3 — Emergency SOS
-            const SosScreen(),
+          children: const [
+            // Tab 0 — AI Flood Prediction
+            PredictionScreen(),
+            // Tab 1 — NDMA / IMD / WRD News Feed
+            NewsFeedScreen(),
+            // Tab 2 — Emergency SOS
+            SosScreen(),
           ],
         ),
         bottomNavigationBar: _BottomBar(
@@ -64,18 +59,8 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen> {
   }
 }
 
-// ── Live tab wrapper injects the proximity banner ───────────────────────────────
-class _LiveTabWithBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Column(
-        children: const [
-          DangerProximityBanner(),   // ⬆️ auto-hides when user is safe
-          Expanded(child: LiveStationsScreen()),
-        ],
-      );
-}
+// ── Bottom nav bar ──────────────────────────────────────────────────────
 
-// ── Bottom nav bar ────────────────────────────────────────────────────────────
 class _TabItem {
   final IconData icon;
   final String   label;
@@ -83,8 +68,8 @@ class _TabItem {
 }
 
 class _BottomBar extends StatelessWidget {
-  final int              currentIndex;
-  final List<_TabItem>   tabs;
+  final int               currentIndex;
+  final List<_TabItem>    tabs;
   final ValueChanged<int> onTap;
   const _BottomBar({
     required this.currentIndex,
@@ -106,8 +91,9 @@ class _BottomBar extends StatelessWidget {
             final i      = e.key;
             final tab    = e.value;
             final active = i == currentIndex;
-            final col    = i == 3
-                ? AppPalette.critical   // SOS always red
+            // SOS is always the last tab — keep it red
+            final col = i == tabs.length - 1
+                ? AppPalette.critical
                 : AppPalette.cyan;
             return Expanded(
               child: GestureDetector(
