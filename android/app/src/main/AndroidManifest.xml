@@ -18,6 +18,14 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
+        <!-- ── AdMob App ID (REQUIRED — crashes without it) ─────────────────
+             Using Google's official test App ID for debug/development.
+             Replace with your real ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX
+             before publishing to Play Store.                               -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
