@@ -52,12 +52,12 @@ class AppConfig {
 
   static int get healthRetries => 3;
 
-  // ── Standard API endpoint paths ─────────────────────────────────────────
+  // ── Standard API endpoint paths ────────────────────────────────────────────────
 
   static String get epHealth   => '$baseUrl/health';
   static String get epPredict  => '$baseUrl/predict/v2';
 
-  // ── Extended endpoint paths ────────────────────────────────────────────
+  // ── Extended endpoint paths ──────────────────────────────────────────────────
 
   static String get epCwcFfs            => '$baseUrl/cwc/ffs';
   static String get epCwcStations       => '$baseUrl/cwc/stations';
@@ -68,8 +68,42 @@ class AppConfig {
   static String get epStateSeverity     => '$baseUrl/state/severity';
   static String get epLiveLevels2       => '$baseUrl/live/levels/v2';
 
-  // ── Timeouts ──────────────────────────────────────────────────────────
+  // ── Weather & agency endpoints (aliases for test + services) ────────────────
+
+  static String get epWeatherCurrent    => '$baseUrl/weather/current';
+  static String get epWeatherForecast   => '$baseUrl/weather/forecast';
+  static String get epNdmaAdvisories    => '$baseUrl/ndma/advisories';
+  static String get epNdmaContacts      => '$baseUrl/ndma/contacts';
+
+  // ── Aliases used by test/constants_domain_test.dart ───────────────────────────
+
+  static String get healthEndpoint          => epHealth;
+  static String get liveTelemetryEndpoint   => epLiveTelemetry;
+  static String get liveLevelsEndpoint      => epLiveLevels;
+  static String get criticalAlertsEndpoint  => epCriticalAlerts;
+  static String get pipelineManifestEndpoint=> epPipelineManifest;
+  static String get stateSeverityEndpoint   => epStateSeverity;
+
+  // ── Timeout / interval aliases (used by test/api_service_test.dart) ────────
 
   static const Duration coldStartTimeout = Duration(seconds: 45);
   static const Duration healthTimeout    = Duration(seconds: 10);
+
+  /// Alias: request timeout used in tests
+  static Duration get requestTimeout    => const Duration(seconds: 15);
+
+  /// Alias: how often realtime data refreshes
+  static Duration get realtimeInterval  => const Duration(minutes: 5);
+
+  /// Alias: default cache TTL
+  static Duration get cacheTtl          => const Duration(minutes: 15);
+
+  /// Alias: background fetch interval
+  static Duration get backgroundInterval => const Duration(minutes: 30);
+
+  /// Alias: max HTTP retries
+  static int get maxRetries => 3;
+
+  /// Alias: current environment string
+  static String get env => environment;
 }
