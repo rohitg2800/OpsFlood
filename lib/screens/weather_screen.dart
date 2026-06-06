@@ -1,5 +1,5 @@
 // lib/screens/weather_screen.dart
-// OpsFlood — WeatherScreen v5  "Command Centre" — fully restored + theme-aware
+// OpsFlood — WeatherScreen v6  — fully restored + theme-aware
 library;
 
 import 'dart:math' as math;
@@ -164,7 +164,7 @@ class _LoadingView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 48, height: 48,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
@@ -225,7 +225,7 @@ class _ErrorView extends StatelessWidget {
               ),
               textAlign: TextAlign.center,
             ),
-            if (message != null) ...[
+            if (message != null && message!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
                 message!,
@@ -238,7 +238,7 @@ class _ErrorView extends StatelessWidget {
               Text(
                 'Retry in ${retryInSeconds}s',
                 style: const TextStyle(
-                  color: AppPalette.amber, fontSize: 11),
+                    color: AppPalette.amber, fontSize: 11),
               ),
             ],
             const SizedBox(height: 20),
@@ -507,7 +507,7 @@ class _SearchBar extends StatelessWidget {
                         Text(
                           city.country,
                           style: TextStyle(
-                            color: t.textSecondary, fontSize: 10),
+                              color: t.textSecondary, fontSize: 10),
                         ),
                       ],
                     ),
@@ -568,8 +568,7 @@ class _WeatherContent extends StatelessWidget {
                 Expanded(child: _MetricCard(
                   icon:  Icons.visibility_rounded,
                   label: 'Visibility',
-                  value:
-                      '${(ws.current!.visibilityKm / 1000).toStringAsFixed(1)} km',
+                  value: '${(ws.current!.visibilityKm / 1000).toStringAsFixed(1)} km',
                   sub:   '',
                   color: AppPalette.cyan,
                 )),
@@ -581,8 +580,7 @@ class _WeatherContent extends StatelessWidget {
                 Expanded(child: _MetricCard(
                   icon:  Icons.speed_rounded,
                   label: 'Pressure',
-                  value:
-                      '${ws.current!.surfacePressure.toStringAsFixed(0)} hPa',
+                  value: '${ws.current!.surfacePressure.toStringAsFixed(0)} hPa',
                   sub:   '',
                   color: const Color(0xFFCE93D8),
                 )),
@@ -692,8 +690,7 @@ class _HeroCard extends StatelessWidget {
                 ),
                 Text(
                   'Feels ${current.feelsLikeC.toStringAsFixed(1)}°C  ·  ${_wxLabel(wc)}',
-                  style:
-                      TextStyle(color: t.textSecondary, fontSize: 10.5),
+                  style: TextStyle(color: t.textSecondary, fontSize: 10.5),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -727,8 +724,8 @@ class _HeroCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: col.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: col.withValues(alpha: 0.25)),
+                  border: Border.all(
+                      color: col.withValues(alpha: 0.25)),
                 ),
                 child: Text(
                   _wxLabel(wc),
@@ -943,8 +940,7 @@ class _FeedTile extends StatelessWidget {
         Text(label,
             style: TextStyle(
               color: t.textSecondary,
-              fontSize: 7.5,
-              fontWeight: FontWeight.w600,
+              fontSize: 7.5, fontWeight: FontWeight.w600,
             ),
             textAlign: TextAlign.center),
       ],
@@ -1005,6 +1001,10 @@ class _MetricCard extends StatelessWidget {
 // Rainfall bar chart (7-day)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper: parse WeatherDay.date (String "YYYY-MM-DD") → DateTime
+DateTime _parseDate(String s) =>
+    DateTime.tryParse(s) ?? DateTime.now();
+
 class _RainfallChart extends StatelessWidget {
   final List<WeatherDay> forecast;
   const _RainfallChart({required this.forecast});
@@ -1046,9 +1046,10 @@ class _RainfallChart extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: forecast.map((day) {
-                final frac = (day.rainMm / scale).clamp(0.0, 1.0);
-                final isHeavy = day.rainMm > 20;
-                final barColor = isHeavy ? AppPalette.danger : AppPalette.cyan;
+                final frac      = (day.rainMm / scale).clamp(0.0, 1.0);
+                final isHeavy   = day.rainMm > 20;
+                final barColor  = isHeavy ? AppPalette.danger : AppPalette.cyan;
+                final dateTime  = _parseDate(day.date);
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -1057,8 +1058,8 @@ class _RainfallChart extends StatelessWidget {
                       children: [
                         Text(
                           day.rainMm >= 1
-                              ? '${day.rainMm.toStringAsFixed(0)}':
-                              '',
+                              ? day.rainMm.toStringAsFixed(0)
+                              : '',
                           style: TextStyle(
                               color: barColor,
                               fontSize: 8,
@@ -1069,15 +1070,14 @@ class _RainfallChart extends StatelessWidget {
                           borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(4)),
                           child: AnimatedContainer(
-                            duration:
-                                const Duration(milliseconds: 600),
+                            duration: const Duration(milliseconds: 600),
                             curve: Curves.easeOut,
                             width: double.infinity,
                             height: frac * 60 + 2,
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                 begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
+                                end:   Alignment.topCenter,
                                 colors: [
                                   barColor.withValues(alpha: 0.8),
                                   barColor,
@@ -1088,7 +1088,7 @@ class _RainfallChart extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          DateFormat('E').format(day.date),
+                          DateFormat('E').format(dateTime),
                           style: TextStyle(
                               color: t.textSecondary, fontSize: 8),
                         ),
@@ -1124,9 +1124,10 @@ class _ForecastList extends StatelessWidget {
       ),
       child: Column(
         children: List.generate(forecast.length, (i) {
-          final day      = forecast[i];
-          final isLast   = i == forecast.length - 1;
-          final isToday  = i == 0;
+          final day       = forecast[i];
+          final isLast    = i == forecast.length - 1;
+          final isToday   = i == 0;
+          final dateTime  = _parseDate(day.date);
           final rainColor = day.rainMm > 20
               ? AppPalette.danger
               : day.rainMm > 5
@@ -1138,8 +1139,8 @@ class _ForecastList extends StatelessWidget {
             decoration: BoxDecoration(
               border: isLast
                   ? null
-                  : Border(bottom:
-                      BorderSide(color: t.stroke, width: 0.8)),
+                  : Border(bottom: BorderSide(
+                      color: t.stroke, width: 0.8)),
             ),
             child: Row(
               children: [
@@ -1148,7 +1149,7 @@ class _ForecastList extends StatelessWidget {
                   child: Text(
                     isToday
                         ? 'Today'
-                        : DateFormat('E').format(day.date),
+                        : DateFormat('E').format(dateTime),
                     style: TextStyle(
                       color: isToday
                           ? AppPalette.cyan
@@ -1171,7 +1172,7 @@ class _ForecastList extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        DateFormat('MMM d').format(day.date),
+                        DateFormat('MMM d').format(dateTime),
                         style: TextStyle(
                             color: t.textSecondary, fontSize: 9),
                       ),
@@ -1204,8 +1205,9 @@ class _ForecastList extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
+                    // Use maxC / minC — actual WeatherDay field names
                     Text(
-                      '${day.maxTempC.toStringAsFixed(0)}° / ${day.minTempC.toStringAsFixed(0)}°',
+                      '${day.maxC.toStringAsFixed(0)}° / ${day.minC.toStringAsFixed(0)}°',
                       style: TextStyle(
                           color: t.textSecondary, fontSize: 10),
                     ),
