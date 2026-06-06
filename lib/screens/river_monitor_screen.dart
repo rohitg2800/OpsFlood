@@ -45,36 +45,36 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     super.dispose();
   }
 
-  // ── CWC filtering ────────────────────────────────────────────────────────
   List<CwcStation> _filteredCwc(List<CwcStation> stations) {
     if (_query.isEmpty) return stations;
     final q = _query.toLowerCase();
-    return stations.where((s) =>
-        s.site.toLowerCase().contains(q) ||
-        s.river.toLowerCase().contains(q)).toList();
+    return stations
+        .where((s) =>
+            s.site.toLowerCase().contains(q) ||
+            s.river.toLowerCase().contains(q))
+        .toList();
   }
 
-  // ── Legacy FloodData filtering (kept for non-Bihar stations) ─────────────
   List<FloodData> _filteredLegacy(List<FloodData> levels) {
     if (_query.isEmpty) return levels;
     final q = _query.toLowerCase();
-    return levels.where((fd) =>
-        fd.city.toLowerCase().contains(q) ||
-        fd.state.toLowerCase().contains(q) ||
-        (fd.riverName?.toLowerCase().contains(q) ?? false) ||
-        fd.district.toLowerCase().contains(q)).toList();
+    return levels
+        .where((fd) =>
+            fd.city.toLowerCase().contains(q) ||
+            fd.state.toLowerCase().contains(q) ||
+            (fd.riverName?.toLowerCase().contains(q) ?? false) ||
+            fd.district.toLowerCase().contains(q))
+        .toList();
   }
 
   Map<FloodSeverity, int> _counts(
       List<CwcStation> cwc, List<FloodData> legacy) {
     final m = <FloodSeverity, int>{};
     for (final s in FloodSeverity.values) m[s] = 0;
-    // Count CWC stations
     for (final s in cwc) {
       final sev = _cwcSeverity(s);
       m[sev] = (m[sev] ?? 0) + 1;
     }
-    // Count legacy
     for (final fd in legacy) {
       final sev = FloodSeverityHelper.fromString(fd.status);
       m[sev] = (m[sev] ?? 0) + 1;
@@ -83,8 +83,8 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   }
 
   FloodSeverity _cwcSeverity(CwcStation s) {
-    if (s.isDanger)   return FloodSeverity.danger;
-    if (s.isWarning)  return FloodSeverity.warning;
+    if (s.isDanger) return FloodSeverity.danger;
+    if (s.isWarning) return FloodSeverity.warning;
     if (s.isElevated) return FloodSeverity.watch;
     return FloodSeverity.normal;
   }
@@ -94,23 +94,28 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Live CWC data
-    final cwcAsync  = ref.watch(cwcStationsProvider);
-    // Legacy realtime
-    final rt        = ref.watch(realTimeServiceProvider);
-    final legacy    = rt.liveLevels;
-    final isLoading = rt.isLoading && legacy.isEmpty &&
-        cwcAsync is AsyncLoading;
+    final cwcAsync = ref.watch(cwcStationsProvider);
+    final rt = ref.watch(realTimeServiceProvider);
+    final legacy = rt.liveLevels;
 
-    final cwcStations = cwcAsync.valueOrNull ?? [];
-    // Sort by risk score desc (highest risk first)
-    final sortedCwc = [...cwcStations]
+    // ── FIX: use .when() instead of .valueOrNull (Riverpod 3.x) ──────────
+    final List<CwcStation> cwcStations = cwcAsync.when(
+      data: (list) => list,
+      loading: () => const [],
+      error: (_, __) => const [],
+    );
+
+    final isLoading =
+        rt.isLoading && legacy.isEmpty && cwcAsync is AsyncLoading;
+
+    // ── FIX: explicitly typed List<CwcStation> so spread keeps the type ──
+    final List<CwcStation> sortedCwc = List<CwcStation>.from(cwcStations)
       ..sort((a, b) => BefiqrCwcService.riskScore(b)
           .compareTo(BefiqrCwcService.riskScore(a)));
 
-    final filteredCwc    = _filteredCwc(sortedCwc);
+    final filteredCwc = _filteredCwc(sortedCwc);
     final filteredLegacy = _filteredLegacy(legacy);
-    final totalCount     = filteredCwc.length + filteredLegacy.length;
+    final totalCount = filteredCwc.length + filteredLegacy.length;
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -132,7 +137,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
         controller: _scrollCtrl,
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── Sliver AppBar ──────────────────────────────────────────────
+          // ── Sliver AppBar ────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             floating: false,
@@ -141,7 +146,6 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             actions: [
-              // CWC live indicator
               cwcAsync.when(
                 data: (_) => Padding(
                   padding: const EdgeInsets.only(right: 4),
@@ -178,13 +182,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 loading: () => const Padding(
                   padding: EdgeInsets.all(14),
                   child: SizedBox(
-                    width: 14, height: 14,
+                    width: 14,
+                    height: 14,
                     child: CircularProgressIndicator(
                         strokeWidth: 1.5, color: AppPalette.cyan),
                   ),
                 ),
-                error: (_, __) => const Icon(
-                    Icons.cloud_off_rounded,
+                error: (_, __) => const Icon(Icons.cloud_off_rounded,
                     color: AppPalette.amber, size: 18),
               ),
               IconButton(
@@ -214,12 +218,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                   ),
                 ],
               ),
-              background: Container(
-                  decoration: AppPalette.scaffoldDecoration()),
+              background:
+                  Container(decoration: AppPalette.scaffoldDecoration()),
             ),
           ),
 
-          // ── Search bar ─────────────────────────────────────────────────
+          // ── Search bar ───────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -245,30 +249,27 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ),
 
-          // ── Status strip (merged counts) ───────────────────────────────
+          // ── Status strip ─────────────────────────────────────────────
           SliverToBoxAdapter(
             child: StationStatusStrip(
               counts: isLoading ? {} : _counts(sortedCwc, legacy),
               lastSynced: isLoading ? null : rt.lastFetchTime,
               isLoading: isLoading,
-              onTap: (sev) => setState(() {
-                _query = FloodSeverityHelper.label(sev);
-              }),
+              onTap: (sev) =>
+                  setState(() => _query = FloodSeverityHelper.label(sev)),
             ),
           ),
 
-          // ── CWC Alert banners ──────────────────────────────────────────
+          // ── CWC alert banners ────────────────────────────────────────
           if (!isLoading && _query.isEmpty && cwcStations.isNotEmpty)
             SliverToBoxAdapter(
               child: LiveAlertBannerStack(
                 alerts: _cwcAlerts(sortedCwc)
                     .map((s) => LiveAlertBanner(
-                          message:
-                              '${s.site}: ${s.statusLabel} — '
+                          message: '${s.site}: ${s.statusLabel} — '
                               '${s.gap.abs().toStringAsFixed(2)} m '
                               '${s.isDanger ? "above" : "below"} danger',
-                          subMessage:
-                              '${s.river} · Bihar CWC',
+                          subMessage: '${s.river} · Bihar CWC',
                           severity: _cwcSeverity(s),
                           onTap: () {},
                         ))
@@ -276,12 +277,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Legend ────────────────────────────────────────────────────
+          // ── Legend ───────────────────────────────────────────────────
           if (!isLoading)
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -291,15 +292,14 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                       'Tap chip to filter',
                       style: TextStyle(
                           fontSize: 10,
-                          color:
-                              AppPalette.textGrey.withValues(alpha: 0.6)),
+                          color: AppPalette.textGrey.withValues(alpha: 0.6)),
                     ),
                   ],
                 ),
               ),
             ),
 
-          // ── Count header ──────────────────────────────────────────────
+          // ── Count header ─────────────────────────────────────────────
           if (!isLoading && totalCount > 0)
             SliverToBoxAdapter(
               child: Padding(
@@ -307,7 +307,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                 child: Text(
                   _query.isEmpty
                       ? '${cwcStations.length} CWC stations  ·  '
-                        '${legacy.length} live stations'
+                          '${legacy.length} live stations'
                       : '$totalCount result${totalCount == 1 ? '' : 's'} for "$_query"',
                   style: const TextStyle(
                       fontSize: 12,
@@ -317,13 +317,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               ),
             ),
 
-          // ── Shimmer ───────────────────────────────────────────────────
+          // ── Shimmer ──────────────────────────────────────────────────
           if (isLoading)
             SliverToBoxAdapter(
               child: ShimmerLoader.stationList(count: 6),
             )
 
-          // ── CWC stations (primary, live) ───────────────────────────────
+          // ── CWC stations (primary) ───────────────────────────────────
           else if (filteredCwc.isNotEmpty) ...[
             if (_query.isEmpty)
               const SliverToBoxAdapter(
@@ -355,7 +355,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             ),
           ],
 
-          // ── Legacy stations (secondary) ────────────────────────────────
+          // ── Legacy stations (secondary) ──────────────────────────────
           if (filteredLegacy.isNotEmpty) ...[
             if (_query.isEmpty)
               const SliverToBoxAdapter(
@@ -408,8 +408,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                       TextButton(
                         onPressed: () => setState(() => _query = ''),
                         child: const Text('Clear search',
-                            style:
-                                TextStyle(color: AppPalette.gold)),
+                            style: TextStyle(color: AppPalette.gold)),
                       ),
                     ],
                   ],
@@ -423,7 +422,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CWC Station Card (befiqr live)
+// CWC Station Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CwcCard extends StatelessWidget {
@@ -431,7 +430,7 @@ class _CwcCard extends StatelessWidget {
   const _CwcCard({required this.station});
 
   Color get _statusColor {
-    if (station.isDanger)  return AppPalette.critical;
+    if (station.isDanger) return AppPalette.critical;
     if (station.isWarning) return AppPalette.danger;
     if (station.isElevated) return AppPalette.amber;
     return AppPalette.safe;
@@ -439,11 +438,10 @@ class _CwcCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color     = _statusColor;
+    final color = _statusColor;
     final riskScore = BefiqrCwcService.riskScore(station);
-    final pct       = station.fillFraction;
-    // warning tick at 97% of danger
-    final warnPct   = 0.97;
+    final pct = station.fillFraction;
+    const warnPct = 0.97;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -465,14 +463,12 @@ class _CwcCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 14, 14, 0),
             child: Row(
               children: [
-                // Arc gauge
                 _ArcGauge(
                   percent: pct,
-                  warnAt:  warnPct,
-                  color:   color,
-                  size:    72,
-                  centerLabel:
-                      '${(pct * 100).toStringAsFixed(0)}%',
+                  warnAt: warnPct,
+                  color: color,
+                  size: 72,
+                  centerLabel: '${(pct * 100).toStringAsFixed(0)}%',
                   subLabel: 'fill',
                 ),
                 const SizedBox(width: 14),
@@ -497,13 +493,13 @@ class _CwcCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Text('${station.river}  ·  Bihar',
                               style: const TextStyle(
-                                  color: AppPalette.textGrey,
-                                  fontSize: 12)),
+                                  color: AppPalette.textGrey, fontSize: 12)),
                         ],
                       ),
                       const SizedBox(height: 8),
                       Wrap(
-                        spacing: 6, runSpacing: 4,
+                        spacing: 6,
+                        runSpacing: 4,
                         children: [
                           _Badge(
                             label: station.statusLabel,
@@ -528,7 +524,6 @@ class _CwcCard extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 14),
           Divider(
               color: AppPalette.abyssStroke,
@@ -536,47 +531,42 @@ class _CwcCard extends StatelessWidget {
               indent: 14,
               endIndent: 14),
           const SizedBox(height: 12),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 _StatChip(
-                  icon:   Icons.height_rounded,
-                  label:  'Level',
-                  value:  '${station.currentLevel.toStringAsFixed(2)} m',
+                  icon: Icons.height_rounded,
+                  label: 'Level',
+                  value: '${station.currentLevel.toStringAsFixed(2)} m',
                   accent: color,
                 ),
                 const SizedBox(width: 8),
                 _StatChip(
-                  icon:   Icons.stream_rounded,
-                  label:  'Danger',
-                  value:  '${station.dangerLevel.toStringAsFixed(2)} m',
+                  icon: Icons.stream_rounded,
+                  label: 'Danger',
+                  value: '${station.dangerLevel.toStringAsFixed(2)} m',
                   accent: AppPalette.danger,
                 ),
                 const SizedBox(width: 8),
                 _StatChip(
-                  icon:   Icons.trending_down_rounded,
-                  label:  'Gap',
-                  value:  '${station.gap.toStringAsFixed(2)} m',
-                  accent: station.isDanger
-                      ? AppPalette.critical
-                      : AppPalette.safe,
+                  icon: Icons.trending_down_rounded,
+                  label: 'Gap',
+                  value: '${station.gap.toStringAsFixed(2)} m',
+                  accent:
+                      station.isDanger ? AppPalette.critical : AppPalette.safe,
                 ),
               ],
             ),
           ),
-
           const SizedBox(height: 14),
-
-          // Level bar
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             child: _LevelBar(
               current: station.currentLevel,
               warning: station.dangerLevel * 0.97,
-              danger:  station.dangerLevel,
-              color:   color,
+              danger: station.dangerLevel,
+              color: color,
             ),
           ),
         ],
@@ -586,7 +576,7 @@ class _CwcCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy River Card (unchanged)
+// Legacy River Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RiverCard extends StatelessWidget {
@@ -596,9 +586,9 @@ class _RiverCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final severity = FloodSeverityHelper.fromString(data.status);
-    final color    = FloodSeverityHelper.color(severity);
-    final pct      = (data.capacityPercent / 100).clamp(0.0, 1.0);
-    final warnPct  = data.dangerLevel > 0
+    final color = FloodSeverityHelper.color(severity);
+    final pct = (data.capacityPercent / 100).clamp(0.0, 1.0);
+    final warnPct = data.dangerLevel > 0
         ? (data.warningLevel / data.dangerLevel).clamp(0.0, 1.0)
         : 0.65;
 
@@ -624,11 +614,10 @@ class _RiverCard extends StatelessWidget {
               children: [
                 _ArcGauge(
                   percent: pct,
-                  warnAt:  warnPct,
-                  color:   color,
-                  size:    72,
-                  centerLabel:
-                      '${data.capacityPercent.toStringAsFixed(0)}%',
+                  warnAt: warnPct,
+                  color: color,
+                  size: 72,
+                  centerLabel: '${data.capacityPercent.toStringAsFixed(0)}%',
                   subLabel: 'fill',
                 ),
                 const SizedBox(width: 14),
@@ -653,8 +642,7 @@ class _RiverCard extends StatelessWidget {
                             child: Text(
                               '${data.riverName ?? 'N/A'}  ·  ${data.state}',
                               style: const TextStyle(
-                                  color: AppPalette.textGrey,
-                                  fontSize: 12),
+                                  color: AppPalette.textGrey, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -662,7 +650,8 @@ class _RiverCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Wrap(
-                        spacing: 6, runSpacing: 4,
+                        spacing: 6,
+                        runSpacing: 4,
                         children: [
                           _Badge(
                             label: FloodSeverityHelper.label(severity),
@@ -756,8 +745,8 @@ class _RiverCard extends StatelessWidget {
             child: _LevelBar(
               current: data.currentLevel,
               warning: data.warningLevel,
-              danger:  data.dangerLevel,
-              color:   color,
+              danger: data.dangerLevel,
+              color: color,
             ),
           ),
         ],
@@ -767,18 +756,22 @@ class _RiverCard extends StatelessWidget {
 
   Color _imdColor(String s) {
     switch (s.toUpperCase()) {
-      case 'RED':    return AppPalette.critical;
-      case 'ORANGE': return AppPalette.warning;
-      case 'YELLOW': return const Color(0xFFFFEE58);
-      default:       return AppPalette.textGrey;
+      case 'RED':
+        return AppPalette.critical;
+      case 'ORANGE':
+        return AppPalette.warning;
+      case 'YELLOW':
+        return const Color(0xFFFFEE58);
+      default:
+        return AppPalette.textGrey;
     }
   }
 
   String _timeAgo(DateTime t) {
     final diff = DateTime.now().difference(t);
-    if (diff.inMinutes < 1)  return 'now';
+    if (diff.inMinutes < 1) return 'now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours   < 24) return '${diff.inHours}h ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
 }
@@ -789,35 +782,42 @@ class _RiverCard extends StatelessWidget {
 
 class _ArcGauge extends StatelessWidget {
   final double percent, warnAt, size;
-  final Color  color;
+  final Color color;
   final String centerLabel, subLabel;
   const _ArcGauge({
-    required this.percent, required this.warnAt,
-    required this.color,   required this.size,
-    required this.centerLabel, required this.subLabel,
+    required this.percent,
+    required this.warnAt,
+    required this.color,
+    required this.size,
+    required this.centerLabel,
+    required this.subLabel,
   });
   @override
   Widget build(BuildContext context) => SizedBox(
-        width: size, height: size,
+        width: size,
+        height: size,
         child: Stack(
           alignment: Alignment.center,
           children: [
             CustomPaint(
               size: Size(size, size),
-              painter: _ArcPainter(
-                  percent: percent, warnAt: warnAt, color: color),
+              painter:
+                  _ArcPainter(percent: percent, warnAt: warnAt, color: color),
             ),
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(centerLabel,
                     style: TextStyle(
-                        color: color, fontSize: 14,
-                        fontWeight: FontWeight.w800, height: 1.1)),
+                        color: color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1)),
                 Text(subLabel,
                     style: const TextStyle(
                         color: AppPalette.textGrey,
-                        fontSize: 9, letterSpacing: 0.5)),
+                        fontSize: 9,
+                        letterSpacing: 0.5)),
               ],
             ),
           ],
@@ -827,17 +827,23 @@ class _ArcGauge extends StatelessWidget {
 
 class _ArcPainter extends CustomPainter {
   final double percent, warnAt;
-  final Color  color;
-  const _ArcPainter({
-    required this.percent, required this.warnAt, required this.color});
+  final Color color;
+  const _ArcPainter(
+      {required this.percent,
+      required this.warnAt,
+      required this.color});
   static const _start = math.pi * 0.75;
   static const _sweep = math.pi * 1.5;
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2, cy = size.height / 2;
     final outer = size.width / 2 - 4;
-    final rect  = Rect.fromCircle(center: Offset(cx, cy), radius: outer);
-    canvas.drawArc(rect, _start, _sweep, false,
+    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: outer);
+    canvas.drawArc(
+        rect,
+        _start,
+        _sweep,
+        false,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 8
@@ -845,24 +851,27 @@ class _ArcPainter extends CustomPainter {
           ..color = AppPalette.abyss2);
     if (percent > 0) {
       canvas.drawArc(
-          rect, _start, _sweep * percent.clamp(0, 1), false,
+          rect,
+          _start,
+          _sweep * percent.clamp(0, 1),
+          false,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 8
             ..strokeCap = StrokeCap.round
             ..shader = SweepGradient(
               startAngle: _start,
-              endAngle:   _start + _sweep,
+              endAngle: _start + _sweep,
               colors: [color.withValues(alpha: 0.5), color],
             ).createShader(rect));
     }
     final wAngle = _start + _sweep * warnAt;
-    final tickR  = outer + 3;
+    final tickR = outer + 3;
     canvas.drawLine(
       Offset(cx + (outer - 10) * math.cos(wAngle),
-             cy + (outer - 10) * math.sin(wAngle)),
-      Offset(cx + tickR * math.cos(wAngle),
-             cy + tickR * math.sin(wAngle)),
+          cy + (outer - 10) * math.sin(wAngle)),
+      Offset(
+          cx + tickR * math.cos(wAngle), cy + tickR * math.sin(wAngle)),
       Paint()
         ..color = AppPalette.warning
         ..strokeWidth = 2.5
@@ -870,17 +879,19 @@ class _ArcPainter extends CustomPainter {
     );
     if (percent > 0.01) {
       final dAngle = _start + _sweep * percent;
-      final dotC   = Offset(
-          cx + outer * math.cos(dAngle),
+      final dotC = Offset(cx + outer * math.cos(dAngle),
           cy + outer * math.sin(dAngle));
       canvas.drawCircle(dotC, 4, Paint()..color = color);
-      canvas.drawCircle(dotC, 4,
+      canvas.drawCircle(
+          dotC,
+          4,
           Paint()
             ..color = Colors.white.withValues(alpha: 0.3)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5);
     }
   }
+
   @override
   bool shouldRepaint(_ArcPainter o) =>
       o.percent != percent || o.color != color;
@@ -888,11 +899,13 @@ class _ArcPainter extends CustomPainter {
 
 class _StatChip extends StatelessWidget {
   final IconData icon;
-  final String   label, value;
-  final Color    accent;
+  final String label, value;
+  final Color accent;
   const _StatChip({
-    required this.icon, required this.label,
-    required this.value, required this.accent,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.accent,
   });
   @override
   Widget build(BuildContext context) => Expanded(
@@ -911,14 +924,17 @@ class _StatChip extends StatelessWidget {
               const SizedBox(height: 3),
               Text(value,
                   style: TextStyle(
-                      color: accent, fontSize: 12,
-                      fontWeight: FontWeight.w700, height: 1.1),
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.1),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
               Text(label,
                   style: const TextStyle(
                       color: AppPalette.textGrey,
-                      fontSize: 9, height: 1.2)),
+                      fontSize: 9,
+                      height: 1.2)),
             ],
           ),
         ),
@@ -927,31 +943,34 @@ class _StatChip extends StatelessWidget {
 
 class _Badge extends StatelessWidget {
   final String label;
-  final Color  bg, fg;
-  const _Badge({
-    required this.label, required this.bg, required this.fg});
+  final Color bg, fg;
+  const _Badge({required this.label, required this.bg, required this.fg});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-            color: bg, borderRadius: BorderRadius.circular(20)),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
         child: Text(label,
             style: TextStyle(
-                color: fg, fontSize: 10,
-                fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                color: fg,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4)),
       );
 }
 
 class _LevelBar extends StatelessWidget {
   final double current, warning, danger;
-  final Color  color;
+  final Color color;
   const _LevelBar({
-    required this.current, required this.warning,
-    required this.danger,  required this.color,
+    required this.current,
+    required this.warning,
+    required this.danger,
+    required this.color,
   });
   @override
   Widget build(BuildContext context) {
-    final pct  = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
+    final pct = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
     final wPct = danger > 0 ? (warning / danger).clamp(0.0, 1.0) : 0.65;
     return Column(
       children: [
@@ -985,7 +1004,8 @@ class _LevelBar extends StatelessWidget {
                 left: box.maxWidth * wPct - 1,
                 top: -3,
                 child: Container(
-                  width: 2.5, height: 16,
+                  width: 2.5,
+                  height: 16,
                   decoration: BoxDecoration(
                     color: AppPalette.warning,
                     borderRadius: BorderRadius.circular(2),
@@ -1003,11 +1023,9 @@ class _LevelBar extends StatelessWidget {
                 style: const TextStyle(
                     fontSize: 10, color: AppPalette.textGrey)),
             Text('⚠ ${warning.toStringAsFixed(1)} m',
-                style: TextStyle(
-                    fontSize: 10, color: AppPalette.warning)),
+                style: TextStyle(fontSize: 10, color: AppPalette.warning)),
             Text('🔴 ${danger.toStringAsFixed(1)} m',
-                style: TextStyle(
-                    fontSize: 10, color: AppPalette.danger)),
+                style: TextStyle(fontSize: 10, color: AppPalette.danger)),
           ],
         ),
       ],
