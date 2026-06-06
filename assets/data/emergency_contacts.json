@@ -1,0 +1,106 @@
+[
+  {
+    "id": "ndrf_hq",
+    "name": "NDRF Headquarters",
+    "phone": "011-24363260",
+    "category": "NDRF",
+    "is_sos": true,
+    "description": "National Disaster Response Force HQ"
+  },
+  {
+    "id": "ndma",
+    "name": "NDMA Helpline",
+    "phone": "1078",
+    "category": "NDMA",
+    "is_sos": true,
+    "description": "National Disaster Management Authority"
+  },
+  {
+    "id": "bihar_eocc",
+    "name": "Bihar State Emergency Operation Centre",
+    "phone": "0612-2294204",
+    "category": "SDRF Bihar",
+    "is_sos": true,
+    "description": "Bihar State EOC - 24x7 Operations"
+  },
+  {
+    "id": "ndrf_9_patna",
+    "name": "NDRF 9th Battalion Patna",
+    "phone": "0612-2594112",
+    "category": "NDRF",
+    "district": "Patna",
+    "is_sos": true,
+    "description": "Based at Bihta, Patna"
+  },
+  {
+    "id": "sdrf_bihar",
+    "name": "SDRF Bihar",
+    "phone": "0612-2217355",
+    "category": "SDRF Bihar",
+    "is_sos": true,
+    "description": "State Disaster Response Force Bihar"
+  },
+  {
+    "id": "police",
+    "name": "Police Emergency",
+    "phone": "100",
+    "category": "Emergency",
+    "is_sos": true
+  },
+  {
+    "id": "ambulance",
+    "name": "Ambulance (EMRI)",
+    "phone": "108",
+    "category": "Medical",
+    "is_sos": true
+  },
+  {
+    "id": "fire",
+    "name": "Fire Emergency",
+    "phone": "101",
+    "category": "Emergency",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_patna",
+    "name": "CWC Flood Forecasting Centre Patna",
+    "phone": "0612-2226960",
+    "category": "CWC",
+    "description": "Central Water Commission Flood Forecasting"
+  },
+  {
+    "id": "collector_patna",
+    "name": "District Collector Patna",
+    "phone": "0612-2219318",
+    "category": "District Administration",
+    "district": "Patna"
+  },
+  {
+    "id": "collector_muzaffarpur",
+    "name": "District Collector Muzaffarpur",
+    "phone": "0621-2261225",
+    "category": "District Administration",
+    "district": "Muzaffarpur"
+  },
+  {
+    "id": "collector_darbhanga",
+    "name": "District Collector Darbhanga",
+    "phone": "06272-222259",
+    "category": "District Administration",
+    "district": "Darbhanga"
+  },
+  {
+    "id": "collector_samastipur",
+    "name": "District Collector Samastipur",
+    "phone": "06274-222020",
+    "category": "District Administration",
+    "district": "Samastipur"
+  },
+  {
+    "id": "collector_bhagalpur",
+    "name": "District Collector Bhagalpur",
+    "phone": "0641-2400060",
+    "category": "District Administration",
+    "district": "Bhagalpur"
+  }
+]
