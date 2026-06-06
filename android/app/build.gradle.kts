@@ -3,7 +3,8 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    // Built-in Kotlin — replaces legacy id("kotlin-android") KGP
+    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")  // Google services plugin
 }
