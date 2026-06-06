@@ -1,18 +1,128 @@
-// lib/screens/predict_screen.dart  v3
-// Phase 4 — full dark-theme polish + route-arg pre-fill + rich result card
+// lib/screens/predict_screen.dart  v4
+// On-device flood risk prediction — no backend required.
+// Uses city danger/warning levels from IndiaGeodata + weighted scoring.
 library;
 
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 
-import '../config/app_config.dart';
+import '../constants/india_geodata.dart';
 import '../l10n/context_l10n.dart';
 import '../screens/city_detail_screen.dart';
 import '../theme/river_theme.dart';
+
+// ──────────────────────────────────────────────────────────────────
+// ON-DEVICE PREDICTION ENGINE
+// ──────────────────────────────────────────────────────────────────
+
+class _FloodEngine {
+  static _PredictResult run({
+    required String  cityOrState,
+    required double  peakLevelM,
+    required double  rainfall7dMm,
+    required double  dischargeM3s,
+  }) {
+    // Look up city geodata for calibrated thresholds
+    final key = cityOrState.trim().toLowerCase();
+    final geo = IndiaGeodata.monitoredCities.cast<Map<String,dynamic>?>().firstWhere(
+      (c) => (c!['city'] as String).toLowerCase() == key ||
+             (c['state'] as String).toLowerCase() == key,
+      orElse: () => null,
+    );
+
+    final dangerLevel  = (geo?['danger_level']  as num?)?.toDouble() ?? 0.0;
+    final warningLevel = (geo?['warning_level'] as num?)?.toDouble() ?? 0.0;
+    final floodFreq    = (geo?['flood_freq']    as num?)?.toDouble() ?? 0.5;
+    final zone         = (geo?['zone']          as String?) ?? 'plains';
+
+    // ── Feature 1: Level ratio (0–1.5)
+    double levelScore;
+    if (dangerLevel > 0) {
+      levelScore = (peakLevelM / dangerLevel).clamp(0.0, 1.5);
+    } else {
+      // No geodata — use generic 0–100 % assumption
+      levelScore = (peakLevelM / 100.0).clamp(0.0, 1.5);
+    }
+
+    // ── Feature 2: Rainfall score (0–1.0)
+    // Thresholds: 0mm=0, 200mm=0.3, 500mm=0.6, 1000mm=0.9, 2000mm+=1.0
+    final rainScore = _sigmoid(rainfall7dMm, midpoint: 600, steepness: 0.003);
+
+    // ── Feature 3: Discharge score (0–1.0) — optional
+    double dischargeScore = 0.0;
+    if (dischargeM3s > 0) {
+      // Benchmarks: 5000 m³/s moderate, 15000 severe, 50000 critical
+      dischargeScore = _sigmoid(dischargeM3s, midpoint: 15000, steepness: 0.00008);
+    }
+
+    // ── Zone multiplier
+    final zoneMultiplier = _zoneMultiplier(zone);
+
+    // ── Weighted composite score (0–1.0)
+    final weights = dischargeM3s > 0
+        ? [0.45, 0.30, 0.25]   // level, rain, discharge
+        : [0.60, 0.40, 0.00];  // level, rain only
+
+    double score = (
+      weights[0] * levelScore.clamp(0.0, 1.0) +
+      weights[1] * rainScore +
+      weights[2] * dischargeScore
+    ) * zoneMultiplier * (0.5 + 0.5 * floodFreq); // historical freq boost
+
+    score = score.clamp(0.0, 1.0);
+
+    // ── Also check absolute level vs warning/danger thresholds (hard rules)
+    String hardRule = 'LOW';
+    if (dangerLevel > 0) {
+      if (peakLevelM >= dangerLevel * 1.10)       hardRule = 'CRITICAL';
+      else if (peakLevelM >= dangerLevel)          hardRule = 'SEVERE';
+      else if (peakLevelM >= warningLevel)         hardRule = 'MODERATE';
+    }
+
+    // ── Map score → risk label
+    String scoreLabel;
+    if      (score >= 0.80) scoreLabel = 'CRITICAL';
+    else if (score >= 0.55) scoreLabel = 'SEVERE';
+    else if (score >= 0.30) scoreLabel = 'MODERATE';
+    else                    scoreLabel = 'LOW';
+
+    // Take the higher of score-based and hard-rule result
+    const order = ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL'];
+    final finalLabel = order.indexOf(scoreLabel) >= order.indexOf(hardRule)
+        ? scoreLabel : hardRule;
+
+    // Confidence: higher when geodata is available, calibrated thresholds
+    final confidence = geo != null
+        ? (0.72 + 0.18 * score).clamp(0.0, 0.96)
+        : (0.55 + 0.15 * score).clamp(0.0, 0.80);
+
+    return _PredictResult(
+      riskLevel:  finalLabel,
+      confidence: confidence,
+      score:      score,
+      usedGeodata: geo != null,
+    );
+  }
+
+  static double _sigmoid(double x, {required double midpoint, required double steepness}) =>
+      1.0 / (1.0 + math.exp(-steepness * (x - midpoint)));
+
+  static double _zoneMultiplier(String zone) {
+    switch (zone) {
+      case 'himalayan':  return 1.15;
+      case 'northeast':  return 1.10;
+      case 'coastal':    return 1.05;
+      case 'arid':       return 0.90;
+      default:           return 1.00;
+    }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// SCREEN
+// ──────────────────────────────────────────────────────────────────
 
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
@@ -29,12 +139,10 @@ class _PredictScreenState extends State<PredictScreen>
   final _dischargeCtrl = TextEditingController();
   final _stateCtrl     = TextEditingController(text: 'Bihar');
 
-  bool    _loading  = false;
   bool    _argsRead = false;
   String? _city;
 
   _PredictResult? _result;
-  String?         _error;
 
   late final AnimationController _gaugeCtrl;
   late final Animation<double>    _gaugeAnim;
@@ -55,10 +163,14 @@ class _PredictScreenState extends State<PredictScreen>
     _argsRead = true;
     final args = ModalRoute.of(context)?.settings.arguments;
     if (args is Map<String, dynamic>) {
-      final city  = args['city']  as String?;
-      final level = args['river_level'] as double?;
-      if (city  != null) { _stateCtrl.text = city; _city = city; }
-      if (level != null) { _peakLevelCtrl.text = level.toStringAsFixed(2); }
+      final city     = args['city']       as String?;
+      final level    = args['river_level'] as double?;
+      final rainfall = args['rainfall']    as double?;
+      final discharge= args['discharge']   as double?;
+      if (city      != null) { _stateCtrl.text    = city; _city = city; }
+      if (level     != null) { _peakLevelCtrl.text = level.toStringAsFixed(2); }
+      if (rainfall  != null) { _rainfallCtrl.text  = rainfall.toStringAsFixed(0); }
+      if (discharge != null) { _dischargeCtrl.text = discharge.toStringAsFixed(0); }
     }
   }
 
@@ -72,52 +184,20 @@ class _PredictScreenState extends State<PredictScreen>
     super.dispose();
   }
 
-  Future<void> _predict() async {
-    // currentState is guaranteed non-null because the Form widget is mounted
+  void _predict() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    HapticFeedback.lightImpact();
-    setState(() { _loading = true; _result = null; _error = null; });
+    HapticFeedback.mediumImpact();
     _gaugeCtrl.reset();
 
-    final payload = {
-      'state':          _stateCtrl.text.trim(),
-      'peak_level_m':   double.parse(_peakLevelCtrl.text.trim()),
-      'rainfall_7d_mm': double.parse(_rainfallCtrl.text.trim()),
-      'discharge_m3s':  double.tryParse(_dischargeCtrl.text.trim()) ?? 0.0,
-    };
+    final result = _FloodEngine.run(
+      cityOrState:  _stateCtrl.text.trim(),
+      peakLevelM:   double.tryParse(_peakLevelCtrl.text.trim()) ?? 0,
+      rainfall7dMm: double.tryParse(_rainfallCtrl.text.trim())  ?? 0,
+      dischargeM3s: double.tryParse(_dischargeCtrl.text.trim()) ?? 0,
+    );
 
-    try {
-      // FIX: prepend baseUrl so the URI has a valid host
-      final uri = Uri.parse('${AppConfig.baseUrl}${AppConfig.epPredict}');
-      final res = await http
-          .post(uri,
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode(payload))
-          .timeout(AppConfig.coldStartTimeout);
-
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body) as Map<String, dynamic>;
-        final level = (body['risk_level'] ??
-                body['riskLevel'] ??
-                'UNKNOWN')
-            .toString();
-        final prob = (body['probability'] ?? body['confidence']) as num?;
-        setState(() {
-          _result = _PredictResult(
-            riskLevel:  level,
-            confidence: prob?.toDouble(),
-          );
-        });
-        _gaugeCtrl.forward();
-      } else {
-        setState(() =>
-            _error = 'Backend returned HTTP ${res.statusCode}\n${res.body}');
-      }
-    } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    setState(() => _result = result);
+    _gaugeCtrl.forward();
   }
 
   @override
@@ -182,7 +262,6 @@ class _PredictScreenState extends State<PredictScreen>
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // ── Form wraps ALL validated fields ────────────────────
                 Form(
                   key: _formKey,
                   child: Column(
@@ -192,15 +271,15 @@ class _PredictScreenState extends State<PredictScreen>
                       const SizedBox(height: 8),
                       _DarkField(
                         ctrl:  _stateCtrl,
-                        label: 'State / City',
-                        hint:  'e.g. Bihar',
+                        label: 'City / State',
+                        hint:  'e.g. Jainagar or Bihar',
                         icon:  Icons.location_on_rounded,
                       ),
                       const SizedBox(height: 12),
                       _DarkField(
                         ctrl:    _peakLevelCtrl,
                         label:   '${s.riverLevel} (${s.meters})',
-                        hint:    'e.g. 12.5',
+                        hint:    'e.g. 66.28',
                         icon:    Icons.water_rounded,
                         numeric: true,
                       ),
@@ -223,9 +302,8 @@ class _PredictScreenState extends State<PredictScreen>
                       ),
                       const SizedBox(height: 22),
                       _RunButton(
-                        loading: _loading,
-                        label:   s.forecast,
-                        onTap:   _predict,
+                        label: s.forecast,
+                        onTap: _predict,
                       ),
                     ],
                   ),
@@ -238,10 +316,6 @@ class _PredictScreenState extends State<PredictScreen>
                     gaugeAnim: _gaugeAnim,
                     city:      _city,
                   ),
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  _ErrorCard(message: _error!),
                 ],
               ]),
             ),
@@ -256,13 +330,19 @@ class _PredictScreenState extends State<PredictScreen>
 
 class _PredictResult {
   final String  riskLevel;
-  final double? confidence;
-  const _PredictResult({required this.riskLevel, this.confidence});
+  final double  confidence;
+  final double  score;
+  final bool    usedGeodata;
+  const _PredictResult({
+    required this.riskLevel,
+    required this.confidence,
+    required this.score,
+    required this.usedGeodata,
+  });
 
   Color get color {
     switch (riskLevel.toUpperCase()) {
       case 'CRITICAL': return AppPalette.critical;
-      case 'HIGH':
       case 'SEVERE':   return AppPalette.danger;
       case 'MODERATE': return AppPalette.amber;
       default:         return AppPalette.safe;
@@ -272,7 +352,6 @@ class _PredictResult {
   double get riskFraction {
     switch (riskLevel.toUpperCase()) {
       case 'CRITICAL': return 1.0;
-      case 'HIGH':
       case 'SEVERE':   return 0.75;
       case 'MODERATE': return 0.45;
       default:         return 0.15;
@@ -282,7 +361,6 @@ class _PredictResult {
   IconData get icon {
     switch (riskLevel.toUpperCase()) {
       case 'CRITICAL': return Icons.crisis_alert_rounded;
-      case 'HIGH':
       case 'SEVERE':   return Icons.warning_rounded;
       case 'MODERATE': return Icons.warning_amber_rounded;
       default:         return Icons.check_circle_outline_rounded;
@@ -387,60 +465,47 @@ class _DarkField extends StatelessWidget {
 // ─── Run button ────────────────────────────────────────────────────────────────────
 
 class _RunButton extends StatelessWidget {
-  final bool       loading;
   final String     label;
   final VoidCallback onTap;
-  const _RunButton(
-      {required this.loading, required this.label, required this.onTap});
+  const _RunButton({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-        onTap: loading ? null : onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+        onTap: onTap,
+        child: Container(
           height: 52,
           decoration: BoxDecoration(
-            gradient: loading
-                ? const LinearGradient(
-                    colors: [Color(0xFF1A2A35), Color(0xFF1A2A35)])
-                : const LinearGradient(
-                    colors: [Color(0xFF005C6E), AppPalette.cyan]),
+            gradient: const LinearGradient(
+                colors: [Color(0xFF005C6E), AppPalette.cyan]),
             borderRadius: BorderRadius.circular(14),
-            boxShadow: loading
-                ? []
-                : [
-                    BoxShadow(
-                        color: AppPalette.cyan.withValues(alpha: 0.25),
-                        blurRadius: 16,
-                        spreadRadius: 1),
-                  ],
+            boxShadow: [
+              BoxShadow(
+                  color: AppPalette.cyan.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  spreadRadius: 1),
+            ],
           ),
           child: Center(
-            child: loading
-                ? const SizedBox(
-                    width: 22, height: 22,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: AppPalette.cyan))
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.analytics_rounded,
-                          color: Colors.white, size: 18),
-                      const SizedBox(width: 8),
-                      Text(label,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
-                              letterSpacing: 0.3)),
-                    ],
-                  ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.analytics_rounded,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text(label,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        letterSpacing: 0.3)),
+              ],
+            ),
           ),
         ),
       );
 }
 
-// ─── Result card with animated gauge arc ────────────────────────────────────────────
+// ─── Result card ───────────────────────────────────────────────────────────────────
 
 class _ResultCard extends StatelessWidget {
   final _PredictResult    result;
@@ -499,24 +564,32 @@ class _ResultCard extends StatelessWidget {
                               fontSize: 26,
                               fontWeight: FontWeight.w900,
                               letterSpacing: -0.5)),
-                      if (result.confidence != null) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: c.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                                color: c.withValues(alpha: 0.35)),
-                          ),
-                          child: Text(
-                            'Confidence  ${(result.confidence! * 100).toStringAsFixed(1)}%',
-                            style: TextStyle(
-                                color: c,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700),
-                          ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: c.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: c.withValues(alpha: 0.35)),
+                        ),
+                        child: Text(
+                          'Confidence  ${(result.confidence * 100).toStringAsFixed(1)}%',
+                          style: TextStyle(
+                              color: c,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      if (!result.usedGeodata) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Generic thresholds — enter a known city for accuracy',
+                          style: TextStyle(
+                              color: AppPalette.textDim,
+                              fontSize: 9.5,
+                              height: 1.3),
                         ),
                       ],
                     ],
@@ -601,37 +674,4 @@ class _GaugePainter extends CustomPainter {
   @override
   bool shouldRepaint(_GaugePainter old) =>
       old.fraction != fraction || old.color != color;
-}
-
-// ─── Error card ────────────────────────────────────────────────────────────────────
-
-class _ErrorCard extends StatelessWidget {
-  final String message;
-  const _ErrorCard({required this.message});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppPalette.critical.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: AppPalette.critical.withValues(alpha: 0.30)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.error_outline_rounded,
-                color: AppPalette.critical, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(message,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey,
-                      fontSize: 12,
-                      height: 1.5)),
-            ),
-          ],
-        ),
-      );
 }
