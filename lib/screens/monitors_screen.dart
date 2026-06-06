@@ -1,5 +1,5 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — MonitorsScreen v5.2  "Full i18n pass"
+// OpsFlood — MonitorsScreen v5.3  "Live data wired"
 library;
 
 import 'dart:math' as math;
@@ -62,24 +62,17 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final s      = context.l10n;
-    final rt     = ref.watch(realTimeServiceProvider);
-    final cities = ref.watch(monitoredCitiesProvider);
-    final _      = ref.watch(liveLevelsProvider);
+    final s  = context.l10n;
+    // ── Wire directly to liveLevelsProvider so rebuilds happen on every tick ──
+    final rt     = ref.watch(realTimeProvider);
+    final items  = ref.watch(liveLevelsProvider);   // <── THE FIX
     final wx     = ref.watch(weatherProvider);
-
-    final items = cities
-        .map((c) => rt.dataForCity(c))
-        .where((d) => d != null)
-        .cast<FloodData>()
-        .toList();
 
     final sorted    = _sorted(items);
     final critCount = sorted.where((d) => d.riskLevel == 'CRITICAL').length;
     final sevCount  = sorted.where((d) => d.riskLevel == 'SEVERE').length;
     final modCount  = sorted.where((d) => d.riskLevel == 'MODERATE').length;
     final safeCount = sorted.where((d) => d.riskLevel == 'LOW').length;
-    final noData    = cities.length - items.length;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -90,13 +83,13 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
           child: Column(
             children: [
               _Header(
-                total:     sorted.length,
-                critical:  critCount,
-                pulseAnim: _pulseAnim,
-                lastFetch: rt.lastFetchTime,
-                wxCity:    wx.cityName,
-                wxLoaded:  wx.status == WeatherStatus.loaded,
-                liveLabel: s.live,
+                total:         sorted.length,
+                critical:      critCount,
+                pulseAnim:     _pulseAnim,
+                lastFetch:     rt.lastFetchTime,
+                wxCity:        wx.cityName,
+                wxLoaded:      wx.status == WeatherStatus.loaded,
+                liveLabel:     s.live,
                 stationsLabel: s.stations,
                 onRefresh: () {
                   HapticFeedback.mediumImpact();
@@ -105,9 +98,9 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
               ),
               if (sorted.isNotEmpty)
                 _StatsBar(
-                  critical: critCount, severe:  sevCount,
-                  moderate: modCount,  safe:    safeCount,
-                  noData:   noData,    total:   cities.length,
+                  critical: critCount, severe:   sevCount,
+                  moderate: modCount,  safe:     safeCount,
+                  total:    sorted.length,
                   criticalLabel: s.critical,
                   safeLabel:     s.safe,
                 ),
@@ -115,8 +108,8 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                 _WxFeedBanner(wx: wx),
               if (sorted.isNotEmpty)
                 _SortChips(
-                  current:   _sort,
-                  sortLabel: s.sortBy,
+                  current:    _sort,
+                  sortLabel:  s.sortBy,
                   riskLabel:  s.floodRisk,
                   levelLabel: s.riverLevel,
                   rainLabel:  s.rainfall,
@@ -125,7 +118,7 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
               Expanded(
                 child: sorted.isEmpty
                     ? _EmptyState(
-                        hasCities:    cities.isNotEmpty,
+                        isLoading:    rt.isLoading,
                         loadingLabel: s.loading,
                         noDataLabel:  s.noData,
                       )
@@ -134,13 +127,13 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                         physics: const BouncingScrollPhysics(),
                         itemCount: sorted.length,
                         itemBuilder: (_, i) => _MonitorCard(
-                          data:       sorted[i],
-                          wx:         wx,
-                          isExpanded: _expanded == sorted[i].city,
-                          pulseAnim:  _pulseAnim,
-                          safeLabel:    s.safe,
-                          warningLabel: s.warning,
-                          dangerLabel:  s.danger,
+                          data:          sorted[i],
+                          wx:            wx,
+                          isExpanded:    _expanded == sorted[i].city,
+                          pulseAnim:     _pulseAnim,
+                          safeLabel:     s.safe,
+                          warningLabel:  s.warning,
+                          dangerLabel:   s.danger,
                           capacityLabel: s.capacity,
                           onTap: () {
                             HapticFeedback.selectionClick();
@@ -148,6 +141,14 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
                                 _expanded == sorted[i].city
                                     ? null
                                     : sorted[i].city);
+                          },
+                          onLongPress: () {
+                            HapticFeedback.mediumImpact();
+                            Navigator.pushNamed(
+                              context,
+                              '/city_detail',
+                              arguments: sorted[i].city,
+                            );
                           },
                         ),
                       ),
@@ -354,12 +355,12 @@ class _Header extends StatelessWidget {
 // STATS BAR
 // ══════════════════════════════════════════════════════════════════════════════
 class _StatsBar extends StatelessWidget {
-  final int    critical, severe, moderate, safe, noData, total;
+  final int    critical, severe, moderate, safe, total;
   final String criticalLabel, safeLabel;
   const _StatsBar({
     required this.critical,      required this.severe,
     required this.moderate,      required this.safe,
-    required this.noData,        required this.total,
+    required this.total,
     required this.criticalLabel, required this.safeLabel,
   });
 
@@ -388,11 +389,9 @@ class _StatsBar extends StatelessWidget {
           _vDivider(),
           _StatPill(value: safe,     label: safeLabel.toUpperCase(),
               color: AppPalette.safe),
-          if (noData > 0) ...[
-            _vDivider(),
-            _StatPill(value: noData, label: s.noData.toUpperCase(),
-                color: AppPalette.textDim),
-          ],
+          _vDivider(),
+          _StatPill(value: total,    label: 'TOTAL',
+              color: AppPalette.cyan),
         ],
       ),
     );
@@ -604,12 +603,13 @@ class _MonitorCard extends StatelessWidget {
   final Animation<double> pulseAnim;
   final String            safeLabel, warningLabel, dangerLabel, capacityLabel;
   final VoidCallback      onTap;
+  final VoidCallback      onLongPress;
   const _MonitorCard({
     required this.data,          required this.wx,
     required this.isExpanded,    required this.pulseAnim,
     required this.safeLabel,     required this.warningLabel,
     required this.dangerLabel,   required this.capacityLabel,
-    required this.onTap,
+    required this.onTap,         required this.onLongPress,
   });
 
   @override
@@ -620,7 +620,8 @@ class _MonitorCard extends StatelessWidget {
     final hasWx  = wx.status == WeatherStatus.loaded;
 
     return GestureDetector(
-      onTap: onTap,
+      onTap:       onTap,
+      onLongPress: onLongPress,
       child: AnimatedBuilder(
         animation: pulseAnim,
         builder: (_, __) => AnimatedContainer(
@@ -700,6 +701,29 @@ class _MonitorCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // Tap arrow → city detail
+                  GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.pushNamed(
+                        context, '/city_detail',
+                        arguments: data.city,
+                      );
+                    },
+                    child: Container(
+                      width: 32, height: 32,
+                      margin: const EdgeInsets.only(left: 8),
+                      decoration: BoxDecoration(
+                        color: col.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: col.withValues(alpha: 0.22)),
+                      ),
+                      child: Icon(Icons.chevron_right_rounded,
+                          color: col, size: 18),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -1101,6 +1125,32 @@ class _ExpandPanel extends StatelessWidget {
               style: const TextStyle(color: AppPalette.textDim, fontSize: 9.5),
             ),
           ]),
+          const SizedBox(height: 12),
+          // ── Detail button ──
+          GestureDetector(
+            onTap: () => Navigator.pushNamed(
+              context, '/city_detail', arguments: data.city),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: col.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: col.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.open_in_new_rounded, color: col, size: 13),
+                  const SizedBox(width: 6),
+                  Text('View Full Detail for ${data.city}',
+                      style: TextStyle(
+                        color: col, fontSize: 11,
+                        fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1342,10 +1392,10 @@ class _StatusBadge extends StatelessWidget {
 // EMPTY STATE
 // ══════════════════════════════════════════════════════════════════════════════
 class _EmptyState extends StatelessWidget {
-  final bool   hasCities;
+  final bool   isLoading;
   final String loadingLabel, noDataLabel;
   const _EmptyState({
-    required this.hasCities,
+    required this.isLoading,
     required this.loadingLabel,
     required this.noDataLabel,
   });
@@ -1368,7 +1418,7 @@ class _EmptyState extends StatelessWidget {
                       color: AppPalette.cyan.withValues(alpha: 0.20)),
                 ),
                 child: Icon(
-                  hasCities
+                  isLoading
                       ? Icons.hourglass_top_rounded
                       : Icons.sensors_off_rounded,
                   color: AppPalette.cyan, size: 36,
@@ -1376,13 +1426,23 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                hasCities ? loadingLabel : noDataLabel,
+                isLoading ? loadingLabel : noDataLabel,
                 style: const TextStyle(
                   color: AppPalette.textGrey,
                   fontSize: 14, fontWeight: FontWeight.w700,
                 ),
                 textAlign: TextAlign.center,
               ),
+              if (isLoading) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: 24, height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: AppPalette.cyan.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
