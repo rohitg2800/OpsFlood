@@ -1,5 +1,6 @@
-// lib/screens/dashboard_screen.dart
-// OpsFlood — DashboardScreen v23 (redesigned)
+// lib/screens/dashboard_screen.dart  v24 — fully theme-aware
+// Every background, card, stroke, text uses RiverColors.of(context).
+// Zero hardcoded AppPalette.abyss* colours remain.
 library;
 
 import 'dart:math' as math;
@@ -68,7 +69,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     _shimmerCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 2200))
       ..repeat();
-    _shimmerAnim = CurvedAnimation(parent: _shimmerCtrl, curve: Curves.linear);
+    _shimmerAnim =
+        CurvedAnimation(parent: _shimmerCtrl, curve: Curves.linear);
     _service.addListener(_onData);
     _loadBannerAd();
   }
@@ -115,28 +117,29 @@ class _DashboardScreenState extends State<DashboardScreen>
     return list;
   }
 
-  int get _criticalCount  => _sorted.where((d) => d.riskLevel == 'CRITICAL').length;
-  int get _severeCount    => _sorted.where((d) => d.riskLevel == 'SEVERE').length;
-  int get _moderateCount  => _sorted.where((d) => d.riskLevel == 'MODERATE').length;
-  int get _safeCount      => _sorted.where((d) => d.riskLevel == 'LOW').length;
+  int get _criticalCount => _sorted.where((d) => d.riskLevel == 'CRITICAL').length;
+  int get _severeCount   => _sorted.where((d) => d.riskLevel == 'SEVERE').length;
+  int get _moderateCount => _sorted.where((d) => d.riskLevel == 'MODERATE').length;
+  int get _safeCount     => _sorted.where((d) => d.riskLevel == 'LOW').length;
 
   double get _overallRisk {
     if (_sorted.isEmpty) return 0;
-    return (_sorted.map((d) => d.capacityPercent).fold(0.0, (a, b) => a + b)
-        / _sorted.length).clamp(0, 100);
+    return (_sorted.map((d) => d.capacityPercent).fold(0.0, (a, b) => a + b) /
+            _sorted.length)
+        .clamp(0, 100);
   }
 
   List<FloodData> get _alertCities =>
-      _sorted.where((d) =>
-          d.riskLevel == 'CRITICAL' || d.riskLevel == 'SEVERE').toList();
+      _sorted.where((d) => d.riskLevel == 'CRITICAL' || d.riskLevel == 'SEVERE').toList();
 
   @override
   Widget build(BuildContext context) {
     final data = _sorted;
+    final t    = RiverColors.of(context);   // ← single theme handle
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
+        backgroundColor: t.scaffoldBg,
         bottomNavigationBar: _bannerLoaded && _bannerAd != null
             ? SafeArea(
                 child: SizedBox(
@@ -299,15 +302,17 @@ class _CommandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
       decoration: BoxDecoration(
-        color: AppPalette.abyss0,
+        color: t.navBg,
         border: Border(bottom: BorderSide(
-          color: AppPalette.cyan.withValues(alpha: 0.10), width: 1)),
+          color: t.accent.withValues(alpha: 0.12), width: 1)),
       ),
       child: Row(
         children: [
+          // Logo icon
           AnimatedBuilder(
             animation: shimmerAnim,
             builder: (_, __) => Container(
@@ -317,49 +322,51 @@ class _CommandHeader extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topLeft, end: Alignment.bottomRight,
                   colors: [
-                    AppPalette.cyan.withValues(alpha: 0.22),
-                    AppPalette.cyan.withValues(alpha: 0.06),
+                    t.accent.withValues(alpha: 0.22),
+                    t.accent.withValues(alpha: 0.06),
                   ],
                 ),
                 border: Border.all(
-                  color: AppPalette.cyan.withValues(
+                  color: t.accent.withValues(
                     alpha: 0.20 + 0.15 * shimmerAnim.value), width: 1.5),
                 boxShadow: [
                   BoxShadow(
-                    color: AppPalette.cyan.withValues(
+                    color: t.accent.withValues(
                       alpha: 0.15 * shimmerAnim.value), blurRadius: 16),
                 ],
               ),
-              child: const Icon(Icons.water_drop_rounded,
-                color: AppPalette.cyan, size: 22),
+              child: Icon(Icons.water_drop_rounded, color: t.accent, size: 22),
             ),
           ),
           const SizedBox(width: 12),
+          // Title + timestamp
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ShaderMask(
-                  shaderCallback: (b) => const LinearGradient(
-                    colors: [Color(0xFF00E5FF), Color(0xFF0072FF)],
+                  shaderCallback: (b) => LinearGradient(
+                    colors: [t.accent, t.metricColor],
                   ).createShader(b),
                   child: const Text('EQUINOX-BR05',
                     style: TextStyle(
                       fontSize: 18, fontWeight: FontWeight.w900,
-                      color: Colors.white, letterSpacing: 1.2, height: 1.1)),
+                      color: Colors.white,
+                      letterSpacing: 1.2, height: 1.1)),
                 ),
                 if (lastUpdated != null)
                   Text('Updated ${_fmt(lastUpdated!)}',
                     style: TextStyle(fontSize: 9.5,
-                      color: AppPalette.textGrey.withValues(alpha: 0.65),
+                      color: t.textSecondary.withValues(alpha: 0.65),
                       letterSpacing: 0.2))
                 else
                   Text('Live Flood Intelligence',
                     style: TextStyle(fontSize: 9.5,
-                      color: AppPalette.textGrey.withValues(alpha: 0.65))),
+                      color: t.textSecondary.withValues(alpha: 0.65))),
               ],
             ),
           ),
+          // LIVE pill
           AnimatedBuilder(
             animation: pulseAnim,
             builder: (_, __) => Container(
@@ -393,31 +400,32 @@ class _CommandHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          // Palette button
           GestureDetector(
             onTap: () => PremiumThemeSheet.show(context),
             child: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: AppPalette.abyss2,
+                color: t.cardBg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppPalette.abyssStroke),
+                border: Border.all(color: t.stroke),
               ),
-              child: const Icon(Icons.palette_outlined,
-                color: AppPalette.cyan, size: 18),
+              child: Icon(Icons.palette_outlined, color: t.accent, size: 18),
             ),
           ),
           const SizedBox(width: 8),
+          // Refresh button
           GestureDetector(
             onTap: onRefresh,
             child: Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                color: AppPalette.abyss2,
+                color: t.cardBg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppPalette.abyssStroke, width: 1),
+                border: Border.all(color: t.stroke, width: 1),
               ),
-              child: const Icon(Icons.refresh_rounded,
-                color: AppPalette.textGrey, size: 18),
+              child: Icon(Icons.refresh_rounded,
+                color: t.textSecondary, size: 18),
             ),
           ),
         ],
@@ -519,16 +527,16 @@ class _QuickAccessGrid extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final items = [
-      _QuickItem(Icons.sensors_rounded,        'Live Stations', AppPalette.cyan,   '/live_stations'),
-      _QuickItem(Icons.psychology_alt_rounded,  'ML Predict',   AppPalette.amber,  '/predict'),
-      _QuickItem(Icons.map_rounded,             'Bihar Map',    AppPalette.safe,   '/bihar_map'),
-      _QuickItem(Icons.monitor_heart_rounded,   'Monitors',     AppPalette.danger, '/monitors'),
+      _QuickItem(Icons.sensors_rounded,       'Live Stations', AppPalette.cyan,   '/live_stations'),
+      _QuickItem(Icons.psychology_alt_rounded, 'ML Predict',   AppPalette.amber,  '/predict'),
+      _QuickItem(Icons.map_rounded,            'Bihar Map',    AppPalette.safe,   '/bihar_map'),
+      _QuickItem(Icons.monitor_heart_rounded,  'Monitors',     AppPalette.danger, '/monitors'),
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Row(
         children: items.asMap().entries.map((entry) {
-          final i = entry.key;
+          final i    = entry.key;
           final item = entry.value;
           return Expanded(
             child: GestureDetector(
@@ -584,6 +592,7 @@ class _CriticalSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t         = RiverColors.of(context);
     final col       = data.priorityColor;
     final snapshots = service.trendForCity(data.city);
     final history   = snapshots.map((s) => s.level).toList();
@@ -601,7 +610,7 @@ class _CriticalSummaryCard extends StatelessWidget {
             begin: Alignment.topLeft, end: Alignment.bottomRight,
             colors: [
               col.withValues(alpha: 0.14),
-              AppPalette.abyss2,
+              t.cardBg,
               col.withValues(alpha: 0.05),
             ],
           ),
@@ -648,8 +657,8 @@ class _CriticalSummaryCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 5),
                       Text(data.riskLevel, style: TextStyle(
-                        color: col, fontSize: 9, fontWeight: FontWeight.w900,
-                        letterSpacing: 0.8)),
+                        color: col, fontSize: 9,
+                        fontWeight: FontWeight.w900, letterSpacing: 0.8)),
                     ]),
                   ),
                   const SizedBox(width: 10),
@@ -657,16 +666,16 @@ class _CriticalSummaryCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(data.city, style: const TextStyle(
-                          color: AppPalette.textWhite, fontSize: 18,
-                          fontWeight: FontWeight.w900, letterSpacing: -0.5,
-                          height: 1.1)),
+                        Text(data.city, style: TextStyle(
+                          color: t.textPrimary, fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5, height: 1.1)),
                         Text(
                           (data.riverName ?? '') +
                           (data.district.isNotEmpty
                             ? '  ·  ${data.district}' : ''),
-                          style: const TextStyle(
-                            color: AppPalette.textGrey, fontSize: 10)),
+                          style: TextStyle(
+                            color: t.textSecondary, fontSize: 10)),
                       ],
                     ),
                   ),
@@ -679,12 +688,14 @@ class _CriticalSummaryCard extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                           letterSpacing: -1.2, height: 1)),
                       Text('current level', style: TextStyle(
-                        color: AppPalette.textDim, fontSize: 8.5)),
+                        color: t.textSecondary.withValues(alpha: 0.5),
+                        fontSize: 8.5)),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 14),
+              // Gap bar
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -692,7 +703,7 @@ class _CriticalSummaryCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('Gap to danger level', style: TextStyle(
-                        color: AppPalette.textGrey.withValues(alpha: 0.8),
+                        color: t.textSecondary.withValues(alpha: 0.8),
                         fontSize: 9.5, fontWeight: FontWeight.w600)),
                       Text(
                         overshoot > 0
@@ -710,7 +721,7 @@ class _CriticalSummaryCard extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: gapPct.clamp(0.0, 1.0),
                       minHeight: 10,
-                      backgroundColor: AppPalette.abyss4,
+                      backgroundColor: t.chipBg,
                       valueColor: AlwaysStoppedAnimation(
                         gapPct >= 1.0 ? AppPalette.critical
                         : gapPct >= 0.8 ? AppPalette.danger
@@ -755,10 +766,9 @@ class _CriticalSummaryCard extends StatelessWidget {
                   Expanded(child: _InfoTile(
                     label: 'Flow Rate',
                     value: data.flowRate != null
-                        ? '${data.flowRate!.toStringAsFixed(0)} m³/s'
-                        : '—',
+                        ? '${data.flowRate!.toStringAsFixed(0)} m³/s' : '—',
                     icon: Icons.speed_rounded,
-                    color: AppPalette.amber)),
+                    color: t.metricColor)),
                   const SizedBox(width: 8),
                   Expanded(child: _InfoTile(
                     label: 'State',
@@ -774,14 +784,14 @@ class _CriticalSummaryCard extends StatelessWidget {
     );
   }
 
-  Widget _pill(String t, Color c) => Container(
+  Widget _pill(String txt, Color c) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
       color: c.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(6),
       border: Border.all(color: c.withValues(alpha: 0.25)),
     ),
-    child: Text(t, style: TextStyle(
+    child: Text(txt, style: TextStyle(
       color: c, fontSize: 8.5, fontWeight: FontWeight.w700)),
   );
 }
@@ -795,26 +805,29 @@ class _InfoTile extends StatelessWidget {
     required this.icon, required this.color});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: color.withValues(alpha: 0.18)),
-    ),
-    child: Column(
-      children: [
-        Icon(icon, color: color, size: 14),
-        const SizedBox(height: 4),
-        Text(value, style: TextStyle(
-          color: color, fontSize: 11, fontWeight: FontWeight.w800),
-          overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(
-          color: AppPalette.textDim, fontSize: 8)),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(
+            color: color, fontSize: 11, fontWeight: FontWeight.w800),
+            overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(
+            color: t.textSecondary.withValues(alpha: 0.5), fontSize: 8)),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -825,18 +838,16 @@ class _HotspotCarousel extends StatelessWidget {
   const _HotspotCarousel({required this.cities});
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 150,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        physics: const BouncingScrollPhysics(),
-        itemCount: cities.length,
-        itemBuilder: (_, i) => _HotspotCard(data: cities[i], rank: i + 1),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+    height: 150,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      physics: const BouncingScrollPhysics(),
+      itemCount: cities.length,
+      itemBuilder: (_, i) => _HotspotCard(data: cities[i], rank: i + 1),
+    ),
+  );
 }
 
 class _HotspotCard extends StatelessWidget {
@@ -846,6 +857,7 @@ class _HotspotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t         = RiverColors.of(context);
     final col       = data.priorityColor;
     final overshoot = data.currentLevel - data.dangerLevel;
     return Container(
@@ -855,7 +867,7 @@ class _HotspotCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [col.withValues(alpha: 0.12), AppPalette.abyss2],
+          colors: [col.withValues(alpha: 0.12), t.cardBg],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: col.withValues(alpha: 0.35), width: 1.5),
@@ -890,13 +902,13 @@ class _HotspotCard extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 8),
-          Text(data.city, style: const TextStyle(
-            color: AppPalette.textWhite, fontSize: 15,
+          Text(data.city, style: TextStyle(
+            color: t.textPrimary, fontSize: 15,
             fontWeight: FontWeight.w900, letterSpacing: -0.3),
             overflow: TextOverflow.ellipsis),
           if ((data.riverName ?? '').isNotEmpty)
-            Text(data.riverName!, style: const TextStyle(
-              color: AppPalette.textGrey, fontSize: 9.5)),
+            Text(data.riverName!, style: TextStyle(
+              color: t.textSecondary, fontSize: 9.5)),
           const Spacer(),
           Row(children: [
             Text('${data.currentLevel.toStringAsFixed(2)} m',
@@ -925,7 +937,7 @@ class _HotspotCard extends StatelessWidget {
             child: LinearProgressIndicator(
               value: (data.capacityPercent / 100).clamp(0.0, 1.0),
               minHeight: 5,
-              backgroundColor: AppPalette.abyss4,
+              backgroundColor: t.chipBg,
               valueColor: AlwaysStoppedAnimation(col),
             ),
           ),
@@ -943,18 +955,16 @@ class _LivePulseStrip extends StatelessWidget {
   const _LivePulseStrip({required this.data});
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 76,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        physics: const BouncingScrollPhysics(),
-        itemCount: data.length,
-        itemBuilder: (_, i) => _PulseChip(d: data[i]),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+    height: 76,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      physics: const BouncingScrollPhysics(),
+      itemCount: data.length,
+      itemBuilder: (_, i) => _PulseChip(d: data[i]),
+    ),
+  );
 }
 
 class _PulseChip extends StatelessWidget {
@@ -963,6 +973,7 @@ class _PulseChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
     final col = d.priorityColor;
     return GestureDetector(
       onTap: () {
@@ -1001,14 +1012,14 @@ class _PulseChip extends StatelessWidget {
                     fontWeight: FontWeight.w900, letterSpacing: 0.3)),
               ),
             ]),
-            Text(d.city, style: const TextStyle(
-              color: AppPalette.textWhite, fontSize: 11,
+            Text(d.city, style: TextStyle(
+              color: t.textPrimary, fontSize: 11,
               fontWeight: FontWeight.w800, letterSpacing: -0.2),
               overflow: TextOverflow.ellipsis, maxLines: 1),
             Text('${d.currentLevel.toStringAsFixed(1)} m',
               style: TextStyle(
-                color: col, fontSize: 12, fontWeight: FontWeight.w900,
-                letterSpacing: -0.3)),
+                color: col, fontSize: 12,
+                fontWeight: FontWeight.w900, letterSpacing: -0.3)),
           ],
         ),
       ),
@@ -1025,20 +1036,20 @@ class _RiverDangerBars extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppPalette.abyssStroke),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         children: data.map((d) {
           final col   = d.priorityColor;
           final ratio = d.dangerLevel > 0
-              ? (d.currentLevel / d.dangerLevel).clamp(0.0, 1.2)
-              : 0.0;
+              ? (d.currentLevel / d.dangerLevel).clamp(0.0, 1.2) : 0.0;
           final pct   = (ratio * 100).toStringAsFixed(0);
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -1048,8 +1059,8 @@ class _RiverDangerBars extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(d.city, style: const TextStyle(
-                        color: AppPalette.textWhite, fontSize: 11.5,
+                      child: Text(d.city, style: TextStyle(
+                        color: t.textPrimary, fontSize: 11.5,
                         fontWeight: FontWeight.w700),
                         overflow: TextOverflow.ellipsis),
                     ),
@@ -1059,8 +1070,9 @@ class _RiverDangerBars extends StatelessWidget {
                         fontWeight: FontWeight.w800)),
                     const SizedBox(width: 6),
                     Text('/ ${d.dangerLevel.toStringAsFixed(1)} m',
-                      style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 9)),
+                      style: TextStyle(
+                        color: t.textSecondary.withValues(alpha: 0.5),
+                        fontSize: 9)),
                     const SizedBox(width: 6),
                     Text('$pct%', style: TextStyle(
                       color: col, fontSize: 9.5,
@@ -1073,7 +1085,7 @@ class _RiverDangerBars extends StatelessWidget {
                     Container(
                       height: 8,
                       decoration: BoxDecoration(
-                        color: AppPalette.abyss4,
+                        color: t.chipBg,
                         borderRadius: BorderRadius.circular(4)),
                     ),
                     Positioned(
@@ -1135,30 +1147,30 @@ class _RainfallChipsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppPalette.abyssStroke),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            _leg(AppPalette.safe,     '< 15 Light'),
+            _leg(AppPalette.safe,     '< 15 Light',    t),
             const SizedBox(width: 8),
-            _leg(AppPalette.warning,  '15–64 Mod'),
+            _leg(AppPalette.warning,  '15–64 Mod',     t),
             const SizedBox(width: 8),
-            _leg(AppPalette.danger,   '64–115 Heavy'),
+            _leg(AppPalette.danger,   '64–115 Heavy',  t),
             const SizedBox(width: 8),
-            _leg(AppPalette.critical, '> 115 Extreme'),
+            _leg(AppPalette.critical, '> 115 Extreme', t),
           ]),
           const SizedBox(height: 12),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 8, runSpacing: 8,
             children: data.map((d) {
               final mm  = d.effectiveRainfallMm;
               final col = _col(mm);
@@ -1178,8 +1190,8 @@ class _RainfallChipsGrid extends StatelessWidget {
                         color: col, fontSize: 11,
                         fontWeight: FontWeight.w800)),
                     const SizedBox(height: 1),
-                    Text(d.city, style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 8.5),
+                    Text(d.city, style: TextStyle(
+                      color: t.textSecondary, fontSize: 8.5),
                       overflow: TextOverflow.ellipsis),
                     Text(_label(mm), style: TextStyle(
                       color: col.withValues(alpha: 0.7),
@@ -1195,14 +1207,14 @@ class _RainfallChipsGrid extends StatelessWidget {
     );
   }
 
-  Widget _leg(Color c, String t) => Row(
+  Widget _leg(Color c, String txt, RiverColors t) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Container(width: 7, height: 7,
         decoration: BoxDecoration(shape: BoxShape.circle, color: c)),
       const SizedBox(width: 3),
-      Text(t, style: const TextStyle(
-        fontSize: 7.5, color: AppPalette.textGrey)),
+      Text(txt, style: TextStyle(
+        fontSize: 7.5, color: t.textSecondary)),
     ],
   );
 }
@@ -1219,8 +1231,9 @@ class _TrendCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (selected == null) return const SizedBox.shrink();
-    final d   = selected!;
-    final col = d.priorityColor;
+    final t         = RiverColors.of(context);
+    final d         = selected!;
+    final col       = d.priorityColor;
     final snapshots = _service.trendForCity(d.city);
     final history   = snapshots.map((s) => s.level).toList();
     return Container(
@@ -1229,7 +1242,7 @@ class _TrendCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [col.withValues(alpha: 0.05), AppPalette.abyss2],
+          colors: [col.withValues(alpha: 0.05), t.cardBg],
         ),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: col.withValues(alpha: 0.20), width: 1.5),
@@ -1243,13 +1256,13 @@ class _TrendCard extends StatelessWidget {
         children: [
           Row(children: [
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(d.city, style: const TextStyle(
-                color: AppPalette.textWhite, fontSize: 14,
+              Text(d.city, style: TextStyle(
+                color: t.textPrimary, fontSize: 14,
                 fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               if (d.district.isNotEmpty)
                 Text('${d.riverName ?? ''}  ·  ${d.district}',
-                  style: const TextStyle(
-                    color: AppPalette.textGrey, fontSize: 10)),
+                  style: TextStyle(
+                    color: t.textSecondary, fontSize: 10)),
             ]),
             const Spacer(),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -1265,8 +1278,9 @@ class _TrendCard extends StatelessWidget {
             Container(
               height: 90, alignment: Alignment.center,
               child: Text('Building trend for ${d.city}…',
-                style: const TextStyle(
-                  color: AppPalette.textDim, fontSize: 11)))
+                style: TextStyle(
+                  color: t.textSecondary.withValues(alpha: 0.5),
+                  fontSize: 11)))
           else
             OpsAreaChart(
               values: history,
@@ -1308,23 +1322,26 @@ class _LevelPill extends StatelessWidget {
   const _LevelPill({
     required this.label, required this.value, required this.color});
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: color.withValues(alpha: 0.20)),
-    ),
-    child: Column(
-      children: [
-        Text(value, style: TextStyle(
-          color: color, fontSize: 11, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(
-          color: AppPalette.textDim, fontSize: 8)),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.20)),
+      ),
+      child: Column(
+        children: [
+          Text(value, style: TextStyle(
+            color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(
+            color: t.textSecondary.withValues(alpha: 0.5), fontSize: 8)),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1340,6 +1357,7 @@ class _FooterStatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     final syncStr = lastUpdated == null
         ? '--'
         : DateFormat('HH:mm').format(lastUpdated!.toLocal());
@@ -1347,15 +1365,15 @@ class _FooterStatsBar extends StatelessWidget {
       _Stat(Icons.sensors_rounded,      '$totalStations', 'Stations',  AppPalette.cyan),
       _Stat(Icons.waves_rounded,         '$riversCount',  'Rivers',    AppPalette.safe),
       _Stat(Icons.warning_amber_rounded, '$statesAtRisk', 'At Risk',   AppPalette.amber),
-      _Stat(Icons.sync_rounded,          syncStr,         'Sync',      AppPalette.textGrey),
+      _Stat(Icons.sync_rounded,          syncStr,         'Sync',      t.textSecondary),
     ];
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppPalette.abyssStroke),
+        border: Border.all(color: t.stroke),
       ),
       child: Row(
         children: stats.asMap().entries.map((e) {
@@ -1374,16 +1392,16 @@ class _FooterStatsBar extends StatelessWidget {
                         color: s.color, fontSize: 13,
                         fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                       const SizedBox(height: 1),
-                      Text(s.label, style: const TextStyle(
-                        color: AppPalette.textDim, fontSize: 8,
-                        fontWeight: FontWeight.w600)),
+                      Text(s.label, style: TextStyle(
+                        color: t.textSecondary.withValues(alpha: 0.5),
+                        fontSize: 8, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
                 if (idx < stats.length - 1)
                   Container(
                     width: 1, height: 28,
-                    color: AppPalette.abyssStroke),
+                    color: t.stroke),
               ],
             ),
           );
@@ -1401,7 +1419,7 @@ class _Stat {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// SHARED: ARC GAUGE
+// ARC GAUGE
 // ═══════════════════════════════════════════════════════════════════════
 class _ArcGauge extends StatelessWidget {
   final Animation<double> anim;
@@ -1419,13 +1437,17 @@ class _ArcGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return SizedBox(
       width: 148, height: 148,
       child: AnimatedBuilder(
         animation: anim,
         builder: (_, __) => CustomPaint(
           painter: _ArcPainter(
-            progress: (percent / 100) * anim.value, color: _arcColor),
+            progress: (percent / 100) * anim.value,
+            color: _arcColor,
+            trackColor: t.chipBg,
+          ),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1438,12 +1460,13 @@ class _ArcGauge extends StatelessWidget {
                     '${(percent * anim.value).toStringAsFixed(0)}%',
                     style: const TextStyle(
                       fontSize: 30, fontWeight: FontWeight.w900,
-                      color: Colors.white, letterSpacing: -1.5, height: 1)),
+                      color: Colors.white,
+                      letterSpacing: -1.5, height: 1)),
                 ),
                 const SizedBox(height: 3),
                 Text('RISK INDEX', style: TextStyle(
                   fontSize: 7.5,
-                  color: AppPalette.textGrey.withValues(alpha: 0.65),
+                  color: t.textSecondary.withValues(alpha: 0.65),
                   fontWeight: FontWeight.w700, letterSpacing: 1.5)),
                 const SizedBox(height: 4),
                 Container(
@@ -1471,7 +1494,12 @@ class _ArcGauge extends StatelessWidget {
 class _ArcPainter extends CustomPainter {
   final double progress;
   final Color color;
-  _ArcPainter({required this.progress, required this.color});
+  final Color trackColor;
+  _ArcPainter({
+    required this.progress,
+    required this.color,
+    required this.trackColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1480,15 +1508,17 @@ class _ArcPainter extends CustomPainter {
     final r  = size.width * 0.44;
     const startAngle = math.pi * 0.75;
     const sweepMax   = math.pi * 1.5;
+    // track
     canvas.drawArc(
       Rect.fromCircle(center: Offset(cx, cy), radius: r),
       startAngle, sweepMax, false,
-      Paint()..color = AppPalette.abyss4
+      Paint()..color = trackColor
              ..style = PaintingStyle.stroke
              ..strokeWidth = 9
              ..strokeCap = StrokeCap.round,
     );
     if (progress > 0) {
+      // glow
       canvas.drawArc(
         Rect.fromCircle(center: Offset(cx, cy), radius: r),
         startAngle, sweepMax * progress, false,
@@ -1498,6 +1528,7 @@ class _ArcPainter extends CustomPainter {
                ..strokeCap = StrokeCap.round
                ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
       );
+      // fill
       final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
       canvas.drawArc(
         rect, startAngle, sweepMax * progress, false,
@@ -1515,11 +1546,11 @@ class _ArcPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ArcPainter old) =>
-      old.progress != progress || old.color != color;
+      old.progress != progress || old.color != color || old.trackColor != trackColor;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// SHARED: BENTO KPI
+// BENTO KPI
 // ═══════════════════════════════════════════════════════════════════════
 class _BentoKPI extends StatelessWidget {
   final String label, value;
@@ -1531,54 +1562,58 @@ class _BentoKPI extends StatelessWidget {
     required this.icon, required this.color, this.glow = false,
   });
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-    decoration: BoxDecoration(
-      color: AppPalette.abyss2,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(
-        color: glow ? color.withValues(alpha: 0.35) : AppPalette.abyssStroke,
-        width: glow ? 1.5 : 1,
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: glow ? color.withValues(alpha: 0.35) : t.stroke,
+          width: glow ? 1.5 : 1,
+        ),
+        boxShadow: glow ? [
+          BoxShadow(
+            color: color.withValues(alpha: 0.18),
+            blurRadius: 12, spreadRadius: 1),
+        ] : null,
       ),
-      boxShadow: glow ? [
-        BoxShadow(
-          color: color.withValues(alpha: 0.18),
-          blurRadius: 12, spreadRadius: 1),
-      ] : null,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(children: [
-          Icon(icon, color: color, size: 14),
-          const Spacer(),
-          if (glow) Container(
-            width: 6, height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle, color: color,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.7), blurRadius: 6)]),
-          ),
-        ]),
-        const SizedBox(height: 4),
-        Text(value, style: TextStyle(
-          fontSize: 24, fontWeight: FontWeight.w900,
-          color: glow ? color : AppPalette.textWhite,
-          letterSpacing: -1, height: 1)),
-        const SizedBox(height: 2),
-        Text(label, style: TextStyle(
-          fontSize: 8,
-          color: glow
-            ? color.withValues(alpha: 0.75) : AppPalette.textDim,
-          fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-      ],
-    ),
-  );
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(icon, color: color, size: 14),
+            const Spacer(),
+            if (glow) Container(
+              width: 6, height: 6,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle, color: color,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.7), blurRadius: 6)]),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(
+            fontSize: 24, fontWeight: FontWeight.w900,
+            color: glow ? color : t.textPrimary,
+            letterSpacing: -1, height: 1)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(
+            fontSize: 8,
+            color: glow
+              ? color.withValues(alpha: 0.75)
+              : t.textSecondary.withValues(alpha: 0.55),
+            fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// SHARED: ALERT TICKER + ALL CLEAR
+// ALERT TICKER + ALL CLEAR
 // ═══════════════════════════════════════════════════════════════════════
 class _AlertTicker extends StatelessWidget {
   final List<FloodData> alerts;
@@ -1589,6 +1624,7 @@ class _AlertTicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
     final d   = alerts[idx.clamp(0, alerts.length - 1)];
     final col = d.priorityColor;
     return AnimatedBuilder(
@@ -1629,13 +1665,13 @@ class _AlertTicker extends StatelessWidget {
                     style: TextStyle(color: col,
                       fontWeight: FontWeight.w900, letterSpacing: 0.5)),
                   TextSpan(text: d.city,
-                    style: const TextStyle(
-                      color: AppPalette.textWhite,
+                    style: TextStyle(
+                      color: t.textPrimary,
                       fontWeight: FontWeight.w700)),
                   if (d.district.isNotEmpty)
                     TextSpan(text: '  ·  ${d.district}',
-                      style: const TextStyle(
-                        color: AppPalette.textGrey,
+                      style: TextStyle(
+                        color: t.textSecondary,
                         fontWeight: FontWeight.w500)),
                 ],
               ),
@@ -1647,8 +1683,9 @@ class _AlertTicker extends StatelessWidget {
           const SizedBox(width: 6),
           if (alerts.length > 1)
             Text('${idx + 1}/${alerts.length}',
-              style: const TextStyle(
-                color: AppPalette.textDim, fontSize: 9)),
+              style: TextStyle(
+                color: t.textSecondary.withValues(alpha: 0.5),
+                fontSize: 9)),
         ]),
       ),
     );
@@ -1677,7 +1714,7 @@ class _AllClearBanner extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// SHARED: SECTION HEADER
+// SECTION HEADER
 // ═══════════════════════════════════════════════════════════════════════
 class _SectionHeader extends StatelessWidget {
   final String title, sub;
@@ -1688,46 +1725,49 @@ class _SectionHeader extends StatelessWidget {
     required this.icon, required this.color,
   });
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
-    child: Row(
-      children: [
-        Container(
-          width: 3, height: 22,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
-              colors: [color, color.withValues(alpha: 0.2)],
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
+      child: Row(
+        children: [
+          Container(
+            width: 3, height: 22,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                colors: [color, color.withValues(alpha: 0.2)],
+              ),
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: [
+                BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8)],
             ),
-            borderRadius: BorderRadius.circular(2),
-            boxShadow: [
-              BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8)],
           ),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 14),
           ),
-          child: Icon(icon, color: color, size: 14),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w800,
-              color: AppPalette.textWhite, letterSpacing: -0.3)),
-            Text(sub, style: TextStyle(
-              fontSize: 9.5,
-              color: AppPalette.textGrey.withValues(alpha: 0.7))),
-          ],
-        ),
-      ],
-    ),
-  );
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w800,
+                color: t.textPrimary, letterSpacing: -0.3)),
+              Text(sub, style: TextStyle(
+                fontSize: 9.5,
+                color: t.textSecondary.withValues(alpha: 0.7))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1736,19 +1776,22 @@ class _SectionHeader extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Icon(Icons.water_damage_outlined,
-            color: AppPalette.cyan.withValues(alpha: 0.3), size: 56),
-          const SizedBox(height: 16),
-          const Text('Loading flood data…',
-            style: TextStyle(
-              color: AppPalette.textGrey, fontSize: 14)),
-        ],
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 60),
+        child: Column(
+          children: [
+            Icon(Icons.water_damage_outlined,
+              color: t.accent.withValues(alpha: 0.3), size: 56),
+            const SizedBox(height: 16),
+            Text('Loading flood data…',
+              style: TextStyle(
+                color: t.textSecondary, fontSize: 14)),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
