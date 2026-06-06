@@ -1,6 +1,6 @@
 // lib/services/opsflood_db_service.dart
-// OpsFlood — Database Service v2.1
-// Fixes: _cache.read() returns String? not CacheResult; query: -> queryParams:
+// OpsFlood — Database Service v2.2
+// Fix: AppConfig ep* are getters, not consts — changed all `const path =` to `final path =`
 library;
 
 import 'dart:async';
@@ -27,8 +27,6 @@ DateTime _dt(dynamic v) {
   return DateTime.tryParse(v.toString()) ?? DateTime.now();
 }
 
-// Simple cache result wrapper — LocalCacheService.read() returns String?
-// We wrap it so callers can check .value and .isStale uniformly.
 class _CacheResult {
   final String? value;
   final bool isStale;
@@ -157,24 +155,20 @@ class OpsFloodDbService {
     try { return FirebaseFirestore.instance; } catch (_) { return null; }
   }
 
-  // Non-const: resolved at runtime from --dart-define
   static final String _prefix =
       const String.fromEnvironment('DB_COLLECTION_PREFIX', defaultValue: '');
 
   String _col(String name) =>
       _prefix.isEmpty ? name : '${_prefix}_$name';
 
-  // ── Cache helper: wraps String? into _CacheResult ──────────────────────────
   Future<_CacheResult> _readCache(String key) async {
     final value = await _cache.read(key);
     return _CacheResult(value);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // STATIONS
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── STATIONS ───────────────────────────────────────────────────────────────
   Future<DbResult<DbStation>> getStations() async {
-    const path = AppConfig.epCwcStations;
+    final path = AppConfig.epCwcStations;          // was: const path
     final raw  = await _client.get(path);
     if (_isOk(raw)) {
       final list   = _asList(raw);
@@ -199,11 +193,9 @@ class OpsFloodDbService {
     return DbResult(data: const [], error: raw['error']?.toString());
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // LIVE READINGS
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── LIVE READINGS ──────────────────────────────────────────────────────────
   Future<DbResult<DbReading>> getAllReadings() async {
-    const path = AppConfig.epLiveTelemetry;
+    final path = AppConfig.epLiveTelemetry;        // was: const path
     final raw  = await _client.get(path);
     if (_isOk(raw)) {
       final list   = _asList(raw);
@@ -221,8 +213,7 @@ class OpsFloodDbService {
   }
 
   Future<DbResult<DbReading>> getCityReadings(String city) async {
-    const path = AppConfig.epLiveTelemetry;
-    // Fixed: queryParams: not query:
+    final path = AppConfig.epLiveTelemetry;        // was: const path
     final raw  = await _client.get(path, queryParams: {'city': city});
     final cacheKey = '$path?city=${Uri.encodeComponent(city)}';
     if (_isOk(raw)) {
@@ -240,11 +231,9 @@ class OpsFloodDbService {
     return DbResult(data: const [], error: raw['error']?.toString());
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // CRITICAL ALERTS
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── CRITICAL ALERTS ────────────────────────────────────────────────────────
   Future<DbResult<DbAlert>> getCriticalAlerts() async {
-    const path = AppConfig.epCriticalAlerts;
+    final path = AppConfig.epCriticalAlerts;       // was: const path
     final raw  = await _client.get(path);
     if (_isOk(raw)) {
       final list   = _asList(raw);
@@ -261,11 +250,9 @@ class OpsFloodDbService {
     return DbResult(data: const [], error: raw['error']?.toString());
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // PREDICTIONS
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── PREDICTIONS ────────────────────────────────────────────────────────────
   Future<DbResult<DbPrediction>> getPredictions({String? city}) async {
-    const path = AppConfig.epPredict;
+    final path = AppConfig.epPredict;              // was: const path
     final Map<String, dynamic> body = {if (city != null) 'city': city};
     final raw = await _client.post(path, body);
     if (_isOk(raw)) {
@@ -281,14 +268,14 @@ class OpsFloodDbService {
     return DbResult(data: const [], error: raw['error']?.toString());
   }
 
-  // ── Admin helpers ─────────────────────────────────────────────────────────
+  // ── Admin helpers ──────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> fetchPipelineManifest() async {
     final raw = await _client.get(AppConfig.epPipelineManifest);
     return _isOk(raw) ? raw : {};
   }
 
   Future<Map<String, dynamic>> fetchStateSeverity() async {
-    const path = AppConfig.epStateSeverity;
+    final path = AppConfig.epStateSeverity;        // was: const path
     final raw  = await _client.get(path);
     if (_isOk(raw)) {
       await _cache.write(path, jsonEncode(raw));
