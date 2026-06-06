@@ -1,16 +1,19 @@
 // lib/screens/river_monitor_screen.dart
-// RiverMonitorScreen v4
-// Fix: deduplicate legacy (All India) list against CWC Bihar stations
-//      so cities that exist in both sources only appear once (CWC wins).
+// RiverMonitorScreen v5
+// Wired: cwcStationsWithBirpurProvider replaces cwcStationsProvider so
+//        Kosi @ Birpur always shows LIVE gauge data (3-source pipeline).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../providers/cwc_provider.dart';
 import '../providers/flood_providers.dart';
+import '../providers/kosi_birpur_provider.dart';
 import '../services/befiqr_cwc_service.dart';
+import '../services/kosi_birpur_service.dart';
 import '../theme/river_theme.dart';
 import '../utils/flood_severity_helper.dart';
 import '../widgets/live_alert_banner.dart';
@@ -46,15 +49,10 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
   }
 
   // ── Deduplication ─────────────────────────────────────────────────────────
-  // CWC Bihar stations are the authoritative source. Remove any legacy entry
-  // whose city name matches a CWC site name (case-insensitive) to avoid
-  // showing the same station twice.
   List<FloodData> _deduplicateLegacy(
       List<FloodData> legacy, List<CwcStation> cwc) {
-    final cwcSiteNames = cwc
-        .map((s) => s.site.toLowerCase().trim())
-        .toSet();
-    // Also match against city part of compound names like "Sikandarpur (Muzzafarpur)"
+    final cwcSiteNames =
+        cwc.map((s) => s.site.toLowerCase().trim()).toSet();
     final cwcCityKeys = cwc
         .map((s) => s.site.toLowerCase().split('(').first.trim())
         .toSet();
@@ -118,9 +116,11 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cwcAsync = ref.watch(cwcStationsProvider);
-    final rt       = ref.watch(realTimeServiceProvider);
-    final rawLegacy = rt.liveLevels;
+    // ── WIRED: cwcStationsWithBirpurProvider injects live Kosi/Birpur ──────
+    final cwcAsync    = ref.watch(cwcStationsWithBirpurProvider);
+    final birpurAsync = ref.watch(kosiBirpurProvider);
+    final rt          = ref.watch(realTimeServiceProvider);
+    final rawLegacy   = rt.liveLevels;
 
     final List<CwcStation> cwcStations = cwcAsync.when(
       data:    (list) => list,
@@ -141,6 +141,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final filteredCwc    = _filteredCwc(sortedCwc);
     final filteredLegacy = _filteredLegacy(legacy);
     final totalCount     = filteredCwc.length + filteredLegacy.length;
+
+    // Extract live Birpur reading for the special badge (may be null)
+    final liveBirpur = birpurAsync.valueOrNull;
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -247,6 +250,12 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
                   Container(decoration: AppPalette.scaffoldDecoration()),
             ),
           ),
+
+          // ── Kosi Birpur Live Banner (shows when data is fresh) ───────────
+          if (liveBirpur != null && liveBirpur.source != 'SEED')
+            SliverToBoxAdapter(
+              child: _KosiBirpurBanner(reading: liveBirpur),
+            ),
 
           // ── Search bar ───────────────────────────────────────────────────
           SliverToBoxAdapter(
@@ -372,7 +381,13 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => _CwcCard(station: filteredCwc[i]),
+                  (ctx, i) => _CwcCard(
+                    station: filteredCwc[i],
+                    // Pass the live reading only for the Birpur card
+                    birpurReading: _isBirpur(filteredCwc[i])
+                        ? liveBirpur
+                        : null,
+                  ),
                   childCount: filteredCwc.length,
                 ),
               ),
@@ -443,6 +458,139 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
       ),
     );
   }
+
+  static bool _isBirpur(CwcStation s) =>
+      s.river.toLowerCase().contains('kosi') &&
+      s.site.toLowerCase().contains('birpur');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kosi Birpur Live Banner
+// Shown just below the AppBar whenever live (non-seed) data is available.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _KosiBirpurBanner extends StatelessWidget {
+  final KosiBirpurReading reading;
+  const _KosiBirpurBanner({required this.reading});
+
+  @override
+  Widget build(BuildContext context) {
+    final isStale = DateTime.now().difference(reading.observedAt).inHours >= 2;
+    final Color statusColor;
+    if (reading.isDanger)        statusColor = AppPalette.critical;
+    else if (reading.isWarning)  statusColor = AppPalette.danger;
+    else if (reading.isElevated) statusColor = AppPalette.amber;
+    else                         statusColor = AppPalette.safe;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: statusColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.water_rounded, color: statusColor, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Kosi @ Birpur  ·  ${reading.levelM.toStringAsFixed(2)} m'
+                  '  (${reading.statusLabel})',
+                  style: TextStyle(
+                      color: statusColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Text(
+                      'Danger: ${reading.dangerLevel.toStringAsFixed(2)} m  '
+                      '·  Gap: ${reading.gap.toStringAsFixed(2)} m',
+                      style: const TextStyle(
+                          color: AppPalette.textGrey, fontSize: 11),
+                    ),
+                    if (reading.dischargeCumecs != null) ...[
+                      const Text('  ·  ',
+                          style: TextStyle(
+                              color: AppPalette.textGrey, fontSize: 11)),
+                      Text(
+                        'Q: ${reading.dischargeCumecs!.toStringAsFixed(0)} m³/s',
+                        style: const TextStyle(
+                            color: AppPalette.textGrey, fontSize: 11),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _SourceBadge(source: reading.source),
+              const SizedBox(height: 4),
+              if (isStale)
+                const Text('STALE',
+                    style: TextStyle(
+                        color: AppPalette.amber,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800))
+              else
+                Text(
+                  DateFormat('HH:mm').format(reading.observedAt),
+                  style: const TextStyle(
+                      color: AppPalette.textGrey, fontSize: 9),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  const _SourceBadge({required this.source});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg;
+    final Color fg;
+    switch (source) {
+      case 'CWC-FFS':
+        bg = AppPalette.cyan.withValues(alpha: 0.12);
+        fg = AppPalette.cyan;
+      case 'befiqr.in':
+        bg = AppPalette.safe.withValues(alpha: 0.12);
+        fg = AppPalette.safe;
+      case 'India-WRIS':
+      case 'India-WRIS (Q→H)':
+        bg = AppPalette.gold.withValues(alpha: 0.12);
+        fg = AppPalette.gold;
+      default:
+        bg = AppPalette.textGrey.withValues(alpha: 0.12);
+        fg = AppPalette.textGrey;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+          color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(source,
+          style: TextStyle(
+              color: fg,
+              fontSize: 8,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4)),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -451,7 +599,9 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
 class _CwcCard extends StatelessWidget {
   final CwcStation station;
-  const _CwcCard({required this.station});
+  /// Non-null only for the Kosi/Birpur card — carries source + discharge info.
+  final KosiBirpurReading? birpurReading;
+  const _CwcCard({required this.station, this.birpurReading});
 
   Color get _statusColor {
     if (station.isDanger)   return AppPalette.critical;
@@ -466,16 +616,22 @@ class _CwcCard extends StatelessWidget {
     final riskScore = BefiqrCwcService.riskScore(station);
     final pct       = station.fillFraction;
     const warnPct   = 0.97;
+    final isBirpur  = birpurReading != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: AppPalette.abyss1,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.30), width: 1),
+        border: Border.all(
+          color: isBirpur
+              ? color.withValues(alpha: 0.55)   // thicker highlight for Birpur
+              : color.withValues(alpha: 0.30),
+          width: isBirpur ? 1.5 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.08),
+            color: color.withValues(alpha: isBirpur ? 0.14 : 0.08),
             blurRadius: 18,
             offset: const Offset(0, 5),
           ),
@@ -535,13 +691,32 @@ class _CwcCard extends StatelessWidget {
                             bg: AppPalette.gold.withValues(alpha: 0.10),
                             fg: AppPalette.gold,
                           ),
-                          _Badge(
-                            label: 'CWC',
-                            bg: AppPalette.cyan.withValues(alpha: 0.08),
-                            fg: AppPalette.cyan,
-                          ),
+                          // Show data source badge for Birpur
+                          if (isBirpur)
+                            _Badge(
+                              label: birpurReading!.source,
+                              bg: AppPalette.cyan.withValues(alpha: 0.10),
+                              fg: AppPalette.cyan,
+                            )
+                          else
+                            _Badge(
+                              label: 'CWC',
+                              bg: AppPalette.cyan.withValues(alpha: 0.08),
+                              fg: AppPalette.cyan,
+                            ),
                         ],
                       ),
+                      // Show discharge for Birpur if available
+                      if (isBirpur &&
+                          birpurReading!.dischargeCumecs != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Discharge: ${birpurReading!.dischargeCumecs!.toStringAsFixed(0)} m³/s'
+                          '  ·  Danger: ${kBirpurDangerDischarge.toStringAsFixed(0)} m³/s',
+                          style: const TextStyle(
+                              color: AppPalette.textGrey, fontSize: 11),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -594,6 +769,26 @@ class _CwcCard extends StatelessWidget {
               color:   color,
             ),
           ),
+          // Last-updated row for Birpur
+          if (isBirpur)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const Icon(Icons.access_time_rounded,
+                      size: 10, color: AppPalette.textGrey),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Observed: '
+                    '${DateFormat('dd MMM HH:mm').format(birpurReading!.observedAt)}'
+                    '  ·  ${birpurReading!.source}',
+                    style: const TextStyle(
+                        color: AppPalette.textGrey, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
