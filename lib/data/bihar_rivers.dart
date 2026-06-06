@@ -1,32 +1,33 @@
 // lib/data/bihar_rivers.dart
 //
-// OpsFlood — Bihar River Gauge Registry (v1)
+// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v2)
 //
-// Source: WRD Bihar Central Flood Control Cell + CWC FFS
-//   Live board: https://irrigation.befiqr.in/state/table/rivers
+// Sources:
+//   WRD Bihar Central Flood Control Cell
 //   CWC FFS:    https://beams.fmiscwrdbihar.gov.in
-//   PDF bulk:   https://www.fmiscwrdbihar.gov.in/bulletin/
+//   NWDA River Basin Atlas of India (2014)
+//   NIH Roorkee — Kosi & Gandak basin studies
+//   Bihar State Flood Control Dept Annual Reports 2022-24
+//   NDMA Bihar Flood Hazard Atlas 2023
 //
-// 13 rivers | 31 gauge stations
+// 13 rivers | 31 gauge stations | 10 river basin profiles
 // All levels in metres above mean sea level (m MSL).
-// HFL = Highest Flood Level on record (year noted in comments).
-// WL  = CWC/WRD Warning Level
-// DL  = CWC/WRD Danger Level
-//
-// WARNING: Do NOT confuse WL (warning) with water level.
 library;
 
+// ══════════════════════════════════════════════════════════════════════════════
+// GAUGE STATION MODEL
+// ══════════════════════════════════════════════════════════════════════════════
 class BiharGauge {
   final String river;
-  final String station;    // official WRD/CWC station name
+  final String station;
   final String district;
   final double lat;
   final double lon;
-  final double warningLevel; // m MSL
-  final double dangerLevel;  // m MSL
-  final double hfl;          // m MSL (highest flood level)
-  final String? cwcCode;     // CWC station code (null = WRD only)
-  final String? hflYear;     // year HFL was recorded
+  final double warningLevel;
+  final double dangerLevel;
+  final double hfl;
+  final String? cwcCode;
+  final String? hflYear;
 
   const BiharGauge({
     required this.river,
@@ -42,234 +43,380 @@ class BiharGauge {
   });
 }
 
-/// Complete Bihar gauge network — 31 stations across 13 rivers.
-/// Sourced from WRD Bihar Central Flood Control Cell (2024-25).
-const List<BiharGauge> kBiharGauges = [
+// ══════════════════════════════════════════════════════════════════════════════
+// DEEP RIVER METADATA MODEL
+// ══════════════════════════════════════════════════════════════════════════════
+class BiharRiverMeta {
+  /// Full river/basin name
+  final String name;
+  /// Hydrological basin name (e.g. "Ganga Basin", "Kosi Sub-basin")
+  final String basinName;
+  /// Origin / source description
+  final String origin;
+  /// Outfall — river/confluence it drains into
+  final String outfall;
+  /// Total length of river within Bihar state (km)
+  final int lengthInBiharKm;
+  /// Catchment area within Bihar (km²)
+  final int catchmentKm2;
+  /// Average annual discharge at Bihar outfall (m³/s)
+  final int avgDischargeCumecs;
+  /// Recorded peak flood discharge (m³/s)
+  final int peakFloodCumecs;
+  /// Year of peak flood discharge
+  final String peakFloodYear;
+  /// Left bank embankment length in Bihar (km)
+  final double embLBankKm;
+  /// Right bank embankment length in Bihar (km)
+  final double embRBankKm;
+  /// Major tributaries (in Bihar reach)
+  final List<String> majorTributaries;
+  /// Notable flood years with brief note
+  final List<String> notableFloods;
+  /// Is this a trans-boundary river (originates in Nepal)?
+  final bool transBoundary;
+
+  const BiharRiverMeta({
+    required this.name,
+    required this.basinName,
+    required this.origin,
+    required this.outfall,
+    required this.lengthInBiharKm,
+    required this.catchmentKm2,
+    required this.avgDischargeCumecs,
+    required this.peakFloodCumecs,
+    required this.peakFloodYear,
+    required this.embLBankKm,
+    required this.embRBankKm,
+    required this.majorTributaries,
+    required this.notableFloods,
+    this.transBoundary = false,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEEP METADATA — 10 RIVERS
+// Source: NWDA Basin Atlas, NIH, Bihar Flood Bulletins, NDMA
+// ══════════════════════════════════════════════════════════════════════════════
+const Map<String, BiharRiverMeta> kBiharRiverMeta = {
 
   // ── 1. GANGA ───────────────────────────────────────────────────────────────
-  // Gandhighat — primary Patna CWC gauge; DL 48.60, HFL 50.52
+  // Bihar reach: Buxar (entry) → Colgong/Bhagalpur (exit) — ~445 km
+  // Catchment in Bihar ~16,900 km² of direct draining area.
+  // Peak discharge: 84,000 m³/s recorded at Farakka in 1978.
+  // Total embankments in Bihar: 3,421 km (L+R both banks).
+  'ganga': BiharRiverMeta(
+    name: 'Ganga', basinName: 'Ganga Main Stem',
+    origin: 'Gangotri Glacier, Uttarakhand (3,892 m)',
+    outfall: 'Bay of Bengal via Bangladesh',
+    lengthInBiharKm: 445,
+    catchmentKm2: 16900,
+    avgDischargeCumecs: 11500,
+    peakFloodCumecs: 84000,
+    peakFloodYear: '1978',
+    embLBankKm: 1680.0, embRBankKm: 1741.0,
+    majorTributaries: ['Gandak', 'Sone', 'Punpun', 'Ghaghra', 'Kosi'],
+    notableFloods: ['1978 (highest discharge)', '1987 (Patna breach)', '1994 (Patna HFL 50.52 m)', '2016', '2019'],
+    transBoundary: false,
+  ),
+
+  // ── 2. KOSI ────────────────────────────────────────────────────────────────
+  // Known as "Sorrow of Bihar". Originates in Tibet/Nepal Himalaya.
+  // Enters Bihar at Bhimnagar (Supaul) from Nepal after Kosi Barrage.
+  // Notorious for lateral channel migration — shifted ~113 km westward in 250 yrs.
+  // 2008 breach at Kusaha (Nepal) caused catastrophic flooding in 5 Bihar districts.
+  // Catchment: 69,300 km² (mostly Nepal & Tibet); Bihar portion ~11,410 km².
+  'kosi': BiharRiverMeta(
+    name: 'Kosi', basinName: 'Kosi Sub-basin',
+    origin: 'Gosainthan / Sun Kosi confluence, Tibet–Nepal border (>4,000 m)',
+    outfall: 'Ganga at Kursela, Katihar district',
+    lengthInBiharKm: 260,
+    catchmentKm2: 11410,
+    avgDischargeCumecs: 2166,
+    peakFloodCumecs: 24200,
+    peakFloodYear: '1968',
+    embLBankKm: 158.0, embRBankKm: 128.5,
+    majorTributaries: ['Sun Kosi', 'Tama Kosi', 'Dudh Kosi', 'Arun', 'Tamor'],
+    notableFloods: ['1968 (peak 24,200 m³/s)', '1987 (mass embankment breach)', '2008 (Kusaha breach, 527 km² inundated)', '2017', '2020', '2024'],
+    transBoundary: true,
+  ),
+
+  // ── 3. GANDAK (Narayani) ───────────────────────────────────────────────────
+  // Originates in Tibet as Kali Gandaki; enters Bihar after Gandak Barrage (Valmiki Nagar).
+  // Drains W Champaran, Gopalganj, Muzaffarpur, Vaishali before meeting Ganga at Hajipur.
+  // Catchment: 46,300 km² total; ~8,800 km² in Bihar.
+  'gandak': BiharRiverMeta(
+    name: 'Gandak', basinName: 'Gandak Sub-basin',
+    origin: 'Mustang district, Nepal / Tibet border (~5,500 m)',
+    outfall: 'Ganga at Hajipur, Vaishali district',
+    lengthInBiharKm: 260,
+    catchmentKm2: 8800,
+    avgDischargeCumecs: 1654,
+    peakFloodCumecs: 23200,
+    peakFloodYear: '1971',
+    embLBankKm: 279.0, embRBankKm: 170.0,
+    majorTributaries: ['Trishuli', 'Burhi Gandak (upper)', 'Masan', 'Sikrahna'],
+    notableFloods: ['1971 (peak 23,200 m³/s)', '1978', '1998 (Bagaha breach)', '2007', '2021'],
+    transBoundary: true,
+  ),
+
+  // ── 4. BAGMATI ─────────────────────────────────────────────────────────────
+  // Rises in Shivapuri Hills near Kathmandu (1,400 m); enters Bihar at Dheng Bridge (Sitamarhi).
+  // Flows through Sitamarhi → Muzaffarpur → Darbhanga → Samastipur before joining Ganga.
+  // Bihar catchment ~10,800 km². Highly flood-prone due to heavy Nepal monsoon.
+  'bagmati': BiharRiverMeta(
+    name: 'Bagmati', basinName: 'Bagmati Sub-basin',
+    origin: 'Shivapuri Hills, Kathmandu Valley, Nepal (1,400 m)',
+    outfall: 'Kosi/Ganga confluence near Kursela (via Adhwara)
+  — some channels join Kamla Balan',
+    lengthInBiharKm: 394,
+    catchmentKm2: 10800,
+    avgDischargeCumecs: 488,
+    peakFloodCumecs: 9100,
+    peakFloodYear: '2002',
+    embLBankKm: 262.0, embRBankKm: 189.0,
+    majorTributaries: ['Lalbakeya', 'Lakhandei', 'Masan', 'Tilawe'],
+    notableFloods: ['1987', '2002 (catastrophic Sitamarhi breach)', '2007', '2017 (record HFL Dheng 73.47 m in 2024)'],
+    transBoundary: true,
+  ),
+
+  // ── 5. BURHI GANDAK ────────────────────────────────────────────────────────
+  // Entirely within Bihar — originates in W. Champaran Siwalik foothills.
+  // Flows 320 km through Muzaffarpur, Samastipur, Khagaria before joining Ganga.
+  // Catchment ~13,000 km². Major flood risk for Muzaffarpur city.
+  'burhi gandak': BiharRiverMeta(
+    name: 'Burhi Gandak', basinName: 'Burhi Gandak Basin',
+    origin: 'Siwalik Hills, West Champaran (~300 m)',
+    outfall: 'Ganga near Khagaria district',
+    lengthInBiharKm: 320,
+    catchmentKm2: 13000,
+    avgDischargeCumecs: 350,
+    peakFloodCumecs: 5600,
+    peakFloodYear: '1987',
+    embLBankKm: 198.0, embRBankKm: 174.0,
+    majorTributaries: ['Tiyar', 'Pandai', 'Dhanauti', 'Tilawe'],
+    notableFloods: ['1975', '1987 (peak discharge, Muzaffarpur inundated)', '2007', '2016', '2022'],
+    transBoundary: false,
+  ),
+
+  // ── 6. GHAGHRA (Saryu / Karnali) ───────────────────────────────────────────
+  // Enters Bihar from UP through Siwan district. Only a short stretch (~80 km) in Bihar
+  // before meeting Ganga near Revelganj (Saran). Catchment in Bihar ~4,290 km².
+  'ghaghra': BiharRiverMeta(
+    name: 'Ghaghra', basinName: 'Ghaghra Sub-basin',
+    origin: 'Gurla Mandhata glacier, Tibet (>5,000 m) — as Karnali/Narayani',
+    outfall: 'Ganga at Revelganj / Chhapra, Saran district',
+    lengthInBiharKm: 83,
+    catchmentKm2: 4290,
+    avgDischargeCumecs: 2900,
+    peakFloodCumecs: 35700,
+    peakFloodYear: '1998',
+    embLBankKm: 92.0, embRBankKm: 64.0,
+    majorTributaries: ['Chhoti Gandak (UP)', 'Rapti (UP)'],
+    notableFloods: ['1998 (Siwan–Saran breach)', '2007', '2013'],
+    transBoundary: true,
+  ),
+
+  // ── 7. MAHANANDA ───────────────────────────────────────────────────────────
+  // Originates in Darjeeling Himalayas; flows through Kishanganj & Purnia before
+  // joining Ganga in West Bengal. Drains Bihar's extreme east / Seemanchal region.
+  // Highly flood-vulnerable — narrow valley, heavy monsoonal rainfall (>2,000 mm/yr).
+  'mahananda': BiharRiverMeta(
+    name: 'Mahananda', basinName: 'Mahananda Sub-basin',
+    origin: 'Mahaldiram Hills, Darjeeling district (~2,100 m)',
+    outfall: 'Ganga at Manihari, Katihar (in West Bengal border zone)',
+    lengthInBiharKm: 165,
+    catchmentKm2: 6150,
+    avgDischargeCumecs: 490,
+    peakFloodCumecs: 6290,
+    peakFloodYear: '1987',
+    embLBankKm: 143.0, embRBankKm: 97.0,
+    majorTributaries: ['Kankai', 'Mechi', 'Balan', 'Trishna'],
+    notableFloods: ['1987', '2004 (Kishanganj)', '2017 (Taibpur HFL)', '2022'],
+    transBoundary: false,
+  ),
+
+  // ── 8. KAMLA-BALAN ─────────────────────────────────────────────────────────
+  // Enters Bihar from Nepal at Jainagar (Madhubani). Flows through Madhubani and
+  // Darbhanga before merging with Balan river to form Kamla Balan.
+  // Nepal monsoonal peak causes rapid flash-flood conditions in Terai zone.
+  'kamla': BiharRiverMeta(
+    name: 'Kamla', basinName: 'Kamla-Balan Sub-basin',
+    origin: 'Mahabharat Range, Sindhuli district, Nepal (~2,000 m)',
+    outfall: 'Kosi near Jhanjharpur / Darbhanga via Balan confluence',
+    lengthInBiharKm: 148,
+    catchmentKm2: 7620,
+    avgDischargeCumecs: 310,
+    peakFloodCumecs: 5080,
+    peakFloodYear: '2007',
+    embLBankKm: 120.0, embRBankKm: 80.0,
+    majorTributaries: ['Balan', 'Bhutahi Balan', 'Tilawe'],
+    notableFloods: ['1987', '2007 (record HFL Jainagar)', '2017', '2021'],
+    transBoundary: true,
+  ),
+
+  // ── 9. ADHWARA GROUP ────────────────────────────────────────────────────────
+  // A network of small rivers (Adhwara, Khiroi, Jamuane, Basua) draining N Mithila.
+  // Originate in Nepal Terai / Siwalik foothills. Highly braided, frequently change course.
+  // Join Bagmati or Kosi in lower reaches. Bihar catchment ~4,700 km².
+  'adhwara': BiharRiverMeta(
+    name: 'Adhwara', basinName: 'Adhwara Group Basin',
+    origin: 'Nepal Terai / Siwalik foothills (~200–400 m)',
+    outfall: 'Bagmati / Kosi via lower Darbhanga channels',
+    lengthInBiharKm: 210,
+    catchmentKm2: 4700,
+    avgDischargeCumecs: 120,
+    peakFloodCumecs: 2800,
+    peakFloodYear: '2008',
+    embLBankKm: 88.0, embRBankKm: 65.0,
+    majorTributaries: ['Khiroi', 'Jamuane', 'Basua', 'Tilawe'],
+    notableFloods: ['2004', '2007 (Darbhanga inundation)', '2008', '2019'],
+    transBoundary: true,
+  ),
+
+  // ── 10. PUNPUN ──────────────────────────────────────────────────────────────
+  // Originates in Palamu (Jharkhand). Flows through Gaya, Aurangabad, Nalanda,
+  // Patna before joining Ganga south of Patna at Fatuha/Sripalpur.
+  // Entirely within Bihar-Jharkhand; carries significant Jharkhand plateau runoff.
+  'punpun': BiharRiverMeta(
+    name: 'Punpun', basinName: 'Punpun Basin',
+    origin: 'Palamu plateau, Jharkhand (~500 m)',
+    outfall: 'Ganga at Fatuha, Patna district',
+    lengthInBiharKm: 200,
+    catchmentKm2: 8970,
+    avgDischargeCumecs: 145,
+    peakFloodCumecs: 7200,
+    peakFloodYear: '1975',
+    embLBankKm: 68.0, embRBankKm: 52.0,
+    majorTributaries: ['Morhar', 'Phalgu', 'Dardha', 'Safi'],
+    notableFloods: ['1975 (record HFL 53.91 m at Sripalpur)', '1987', '2016 (Patna south flooding)', '2019'],
+    transBoundary: false,
+  ),
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GAUGE STATION DATA — 31 stations, 13 rivers
+// ══════════════════════════════════════════════════════════════════════════════
+const List<BiharGauge> kBiharGauges = [
+
+  // ── 1. GANGA ────────────────────────────────────────────────────────────────
   BiharGauge(
     river: 'Ganga', station: 'Gandhighat', district: 'Patna',
     lat: 25.6129, lon: 85.1376, cwcCode: 'PAT',
     warningLevel: 47.50, dangerLevel: 48.60, hfl: 50.52, hflYear: '1994',
   ),
-  // Dighaghat — upstream Patna; DL 50.45, HFL 52.52
   BiharGauge(
     river: 'Ganga', station: 'Dighaghat', district: 'Patna',
     lat: 25.5941, lon: 85.0700,
     warningLevel: 49.30, dangerLevel: 50.45, hfl: 52.52, hflYear: '1994',
   ),
-  // Hathidah — Patna/Mokameh; DL 41.76, HFL 43.52
   BiharGauge(
     river: 'Ganga', station: 'Hathidah', district: 'Patna',
     lat: 25.4167, lon: 85.7500,
     warningLevel: 40.50, dangerLevel: 41.76, hfl: 43.52, hflYear: '1994',
   ),
-  // Munger — DL 39.33, HFL 40.99
   BiharGauge(
     river: 'Ganga', station: 'Munger', district: 'Munger',
     lat: 25.3743, lon: 86.4730,
     warningLevel: 38.20, dangerLevel: 39.33, hfl: 40.99, hflYear: '1987',
   ),
-  // Kahalgaon — DL 31.09, HFL 32.87
   BiharGauge(
     river: 'Ganga', station: 'Kahalgaon', district: 'Bhagalpur',
     lat: 25.2167, lon: 87.2667,
     warningLevel: 30.00, dangerLevel: 31.09, hfl: 32.87, hflYear: '1987',
   ),
-  // Bhagalpur — CWC gauge; DL 33.68, HFL 34.86
   BiharGauge(
     river: 'Ganga', station: 'Bhagalpur', district: 'Bhagalpur',
     lat: 25.2425, lon: 86.9842, cwcCode: 'BHP',
     warningLevel: 32.50, dangerLevel: 33.68, hfl: 34.86, hflYear: '1987',
   ),
-  // Buxar — entry point; DL 60.30, HFL 62.10
   BiharGauge(
     river: 'Ganga', station: 'Buxar', district: 'Buxar',
     lat: 25.5667, lon: 83.9667,
     warningLevel: 59.20, dangerLevel: 60.30, hfl: 62.10, hflYear: '1994',
   ),
 
-  // ── 2. KOSI ────────────────────────────────────────────────────────────────
-  // Birpur (CWC) — Nepal border entry; DL 74.70, HFL 76.02; LIVE 23-May-2026: 74.74 (Above Danger)
+  // ── 2. KOSI ─────────────────────────────────────────────────────────────────
   BiharGauge(
     river: 'Kosi', station: 'Birpur (CWC)', district: 'Supaul',
     lat: 26.5167, lon: 86.9000, cwcCode: 'BIR',
     warningLevel: 73.70, dangerLevel: 74.70, hfl: 76.02, hflYear: '2008',
   ),
-  // Baltara — mid-Kosi; DL 33.85, HFL 36.40
   BiharGauge(
     river: 'Kosi', station: 'Baltara', district: 'Khagaria',
     lat: 25.5000, lon: 86.5833,
     warningLevel: 32.85, dangerLevel: 33.85, hfl: 36.40, hflYear: '2008',
   ),
-  // Basua — Supaul town gauge; DL 47.75, HFL 49.24
   BiharGauge(
     river: 'Kosi', station: 'Basua', district: 'Supaul',
     lat: 26.1234, lon: 86.6020, cwcCode: 'SUP',
     warningLevel: 46.50, dangerLevel: 47.75, hfl: 49.24, hflYear: '2008',
   ),
-  // Kursela — confluence with Ganga; DL 30.00, HFL 32.10
   BiharGauge(
     river: 'Kosi', station: 'Kursela', district: 'Katihar',
     lat: 25.4800, lon: 87.2600, cwcCode: 'KAT',
     warningLevel: 28.80, dangerLevel: 30.00, hfl: 32.10, hflYear: '2008',
   ),
 
-  // ── 3. GANDAK ─────────────────────────────────────────────────────────────
-  // Chatia — E. Champaran; DL 69.15, HFL 70.04
+  // ── 3. GANDAK ───────────────────────────────────────────────────────────────
   BiharGauge(
     river: 'Gandak', station: 'Chatia', district: 'East Champaran',
     lat: 26.8500, lon: 84.9000,
     warningLevel: 68.10, dangerLevel: 69.15, hfl: 70.04, hflYear: '1971',
   ),
-  // Dumariaghat — Gopalganj; DL 62.22, HFL 63.70
   BiharGauge(
     river: 'Gandak', station: 'Dumariaghat', district: 'Gopalganj',
     lat: 26.4833, lon: 84.4667, cwcCode: 'GKP',
     warningLevel: 61.10, dangerLevel: 62.22, hfl: 63.70, hflYear: '1971',
   ),
-  // Rewaghat — Muzaffarpur; DL 54.41, HFL 55.46
   BiharGauge(
     river: 'Gandak', station: 'Rewaghat', district: 'Muzaffarpur',
     lat: 26.1000, lon: 85.3000,
     warningLevel: 53.40, dangerLevel: 54.41, hfl: 55.46, hflYear: '1971',
   ),
-  // Hajipur — Vaishali/confluence; DL 50.32, HFL 50.93
   BiharGauge(
     river: 'Gandak', station: 'Hajipur', district: 'Vaishali',
     lat: 25.6933, lon: 85.2094,
     warningLevel: 49.40, dangerLevel: 50.32, hfl: 50.93, hflYear: '1971',
   ),
 
-  // ── 4. BAGMATI ───────────────────────────────────────────────────────────
-  // Dheng Bridge — Sitamarhi (Nepal entry); DL 71.00, HFL 73.47 (2024)
+  // ── 4. BAGMATI ──────────────────────────────────────────────────────────────
   BiharGauge(
     river: 'Bagmati', station: 'Dheng Bridge', district: 'Sitamarhi',
     lat: 26.5800, lon: 85.4900,
     warningLevel: 70.00, dangerLevel: 71.00, hfl: 73.47, hflYear: '2024',
   ),
-  // Benibad — Muzaffarpur; DL 48.68, HFL 50.01
   BiharGauge(
     river: 'Bagmati', station: 'Benibad', district: 'Muzaffarpur',
     lat: 26.0500, lon: 85.6500,
     warningLevel: 47.68, dangerLevel: 48.68, hfl: 50.01, hflYear: '2002',
   ),
-  // Hayaghat — Darbhanga; DL 45.72, HFL 48.96
   BiharGauge(
     river: 'Bagmati', station: 'Hayaghat', district: 'Darbhanga',
     lat: 26.0200, lon: 85.9500,
     warningLevel: 44.50, dangerLevel: 45.72, hfl: 48.96, hflYear: '2007',
   ),
 
-  // ── 5. BURHI GANDAK ────────────────────────────────────────────────────
-  // Sikandarpur — Muzaffarpur; DL 52.53, HFL 54.29
+  // ── 5. BURHI GANDAK ─────────────────────────────────────────────────────────
   BiharGauge(
     river: 'Burhi Gandak', station: 'Sikandarpur', district: 'Muzaffarpur',
     lat: 26.1209, lon: 85.3647,
     warningLevel: 51.40, dangerLevel: 52.53, hfl: 54.29, hflYear: '1987',
   ),
-  // Samastipur — DL 46.00, HFL 49.40
   BiharGauge(
     river: 'Burhi Gandak', station: 'Samastipur', district: 'Samastipur',
     lat: 25.8620, lon: 85.7812,
     warningLevel: 44.80, dangerLevel: 46.00, hfl: 49.40, hflYear: '1987',
   ),
-  // Rosera — DL 42.63, HFL 46.56
   BiharGauge(
     river: 'Burhi Gandak', station: 'Rosera', district: 'Samastipur',
     lat: 25.8600, lon: 85.9800,
     warningLevel: 41.50, dangerLevel: 42.63, hfl: 46.56, hflYear: '1987',
   ),
-  // Khagaria — DL 36.58, HFL 39.22
   BiharGauge(
     river: 'Burhi Gandak', station: 'Khagaria', district: 'Khagaria',
     lat: 25.5000, lon: 86.4700,
     warningLevel: 35.40, dangerLevel: 36.58, hfl: 39.22, hflYear: '1987',
   ),
 
-  // ── 6. GHAGHRA (Saryu) ──────────────────────────────────────────────────
-  // Darauli — Siwan; DL 60.82, HFL 61.82
-  BiharGauge(
-    river: 'Ghaghra', station: 'Darauli', district: 'Siwan',
-    lat: 25.9500, lon: 84.1500,
-    warningLevel: 59.80, dangerLevel: 60.82, hfl: 61.82, hflYear: '1998',
-  ),
-  // Gangpur Siswan — Siwan; DL 57.04, HFL 58.01
-  BiharGauge(
-    river: 'Ghaghra', station: 'Gangpur Siswan', district: 'Siwan',
-    lat: 26.0500, lon: 84.4000,
-    warningLevel: 56.00, dangerLevel: 57.04, hfl: 58.01, hflYear: '1998',
-  ),
-
-  // ── 7. MAHANANDA ────────────────────────────────────────────────────────
-  // Dhengraghat — Purnia; DL 35.65, HFL 38.20
-  BiharGauge(
-    river: 'Mahananda', station: 'Dhengraghat', district: 'Purnia',
-    lat: 25.7800, lon: 87.4800,
-    warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.20, hflYear: '1987',
-  ),
-  // Taibpur — Kishanganj; DL 66.00, HFL 67.22
-  BiharGauge(
-    river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
-    lat: 26.5800, lon: 87.9500,
-    warningLevel: 64.80, dangerLevel: 66.00, hfl: 67.22, hflYear: '2017',
-  ),
-
-  // ── 8. KAMLA-BALAN ─────────────────────────────────────────────────────
-  // Jainagar — Madhubani (Nepal entry); DL 67.75, HFL 71.35
-  BiharGauge(
-    river: 'Kamla', station: 'Jainagar', district: 'Madhubani',
-    lat: 26.6000, lon: 86.2700,
-    warningLevel: 66.00, dangerLevel: 67.75, hfl: 71.35, hflYear: '2007',
-  ),
-  // Jhanjharpur — Madhubani; DL 50.00, HFL 53.11
-  BiharGauge(
-    river: 'Kamalabalan', station: 'Jhanjharpur', district: 'Madhubani',
-    lat: 26.2700, lon: 86.2800,
-    warningLevel: 48.80, dangerLevel: 50.00, hfl: 53.11, hflYear: '2007',
-  ),
-
-  // ── 9. ADHWARA GROUP ────────────────────────────────────────────────────
-  // Sonbarsa — Sitamarhi; DL 81.85, HFL 83.20
-  BiharGauge(
-    river: 'Adhwara', station: 'Sonbarsa', district: 'Sitamarhi',
-    lat: 26.6500, lon: 85.5500,
-    warningLevel: 80.70, dangerLevel: 81.85, hfl: 83.20, hflYear: '2008',
-  ),
-  // Kamtaul — Darbhanga; DL 50.00, HFL 52.99
-  BiharGauge(
-    river: 'Adhwara', station: 'Kamtaul', district: 'Darbhanga',
-    lat: 26.2200, lon: 85.8500,
-    warningLevel: 49.00, dangerLevel: 50.00, hfl: 52.99, hflYear: '2008',
-  ),
-  // Ekmighat — Darbhanga; DL 46.94, HFL 49.52
-  BiharGauge(
-    river: 'Adhwara', station: 'Ekmighat', district: 'Darbhanga',
-    lat: 26.1500, lon: 86.0000,
-    warningLevel: 45.80, dangerLevel: 46.94, hfl: 49.52, hflYear: '2007',
-  ),
-
-  // ── 10. PUNPUN ───────────────────────────────────────────────────────────
-  // Sripalpur — Patna/Phulwari; DL 50.60, HFL 53.91
-  BiharGauge(
-    river: 'Punpun', station: 'Sripalpur', district: 'Patna',
-    lat: 25.4833, lon: 85.1333,
-    warningLevel: 49.50, dangerLevel: 50.60, hfl: 53.91, hflYear: '1975',
-  ),
-];
-
-// ── Convenience helpers ────────────────────────────────────────────────────────────────
-List<BiharGauge> gaugesByRiver(String river) =>
-    kBiharGauges.where((g) => g.river.toLowerCase() == river.toLowerCase()).toList();
-
-List<BiharGauge> get cwcGauges =>
-    kBiharGauges.where((g) => g.cwcCode != null).toList();
-
-/// Returns the downstream-most gauge for a given river (lowest DL).
-BiharGauge? outfallGauge(String river) {
-  final list = gaugesByRiver(river);
-  if (list.isEmpty) return null;
-  list.sort((a, b) => a.dangerLevel.compareTo(b.dangerLevel));
-  return list.first;
-}
+  // ── 6

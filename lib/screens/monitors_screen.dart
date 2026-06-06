@@ -1,5 +1,5 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — MonitorsScreen v5.3  "Live data wired"
+// OpsFlood — MonitorsScreen v5.4  "Null-safe wx.current + Bihar river meta"
 library;
 
 import 'dart:math' as math;
@@ -13,6 +13,7 @@ import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
 import '../providers/weather_provider.dart';
 import '../theme/river_theme.dart';
+import '../data/bihar_rivers.dart';
 
 class MonitorsScreen extends ConsumerStatefulWidget {
   const MonitorsScreen({super.key});
@@ -63,9 +64,8 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
   @override
   Widget build(BuildContext context) {
     final s  = context.l10n;
-    // ── Wire directly to liveLevelsProvider so rebuilds happen on every tick ──
     final rt     = ref.watch(realTimeProvider);
-    final items  = ref.watch(liveLevelsProvider);   // <── THE FIX
+    final items  = ref.watch(liveLevelsProvider);
     final wx     = ref.watch(weatherProvider);
 
     final sorted    = _sorted(items);
@@ -385,7 +385,7 @@ class _StatsBar extends StatelessWidget {
               color: AppPalette.danger,   glow: severe > 0),
           _vDivider(),
           _StatPill(value: moderate, label: s.warning.toUpperCase(),
-              color: AppPalette.warning),
+              color: AppPalette.amber),
           _vDivider(),
           _StatPill(value: safe,     label: safeLabel.toUpperCase(),
               color: AppPalette.safe),
@@ -618,6 +618,10 @@ class _MonitorCard extends StatelessWidget {
     final fill   = (data.capacityPercent / 100).clamp(0.0, 1.0);
     final isCrit = data.riskLevel == 'CRITICAL' || data.riskLevel == 'SEVERE';
     final hasWx  = wx.status == WeatherStatus.loaded;
+    // Look up Bihar river metadata for this card's river
+    final riverMeta = data.riverName != null
+        ? kBiharRiverMeta[data.riverName!.toLowerCase()]
+        : null;
 
     return GestureDetector(
       onTap:       onTap,
@@ -701,7 +705,6 @@ class _MonitorCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Tap arrow → city detail
                   GestureDetector(
                     onTap: () {
                       HapticFeedback.selectionClick();
@@ -785,6 +788,7 @@ class _MonitorCard extends StatelessWidget {
                     ? _ExpandPanel(
                         data:         data,
                         wx:           wx,
+                        riverMeta:    riverMeta,
                         safeLabel:    safeLabel,
                         warningLabel: warningLabel,
                         dangerLabel:  dangerLabel,
@@ -965,19 +969,23 @@ class _SubLine extends StatelessWidget {
 // EXPAND PANEL
 // ══════════════════════════════════════════════════════════════════════════════
 class _ExpandPanel extends StatelessWidget {
-  final FloodData    data;
-  final WeatherState wx;
-  final String       safeLabel, warningLabel, dangerLabel;
+  final FloodData      data;
+  final WeatherState   wx;
+  final BiharRiverMeta? riverMeta;   // ← Bihar deep data (may be null)
+  final String         safeLabel, warningLabel, dangerLabel;
   const _ExpandPanel({
     required this.data, required this.wx,
     required this.safeLabel, required this.warningLabel,
     required this.dangerLabel,
+    this.riverMeta,
   });
 
   @override
   Widget build(BuildContext context) {
     final col    = data.priorityColor;
     final hasWx  = wx.status == WeatherStatus.loaded;
+    // ── NULL-SAFE: wx.current may be null while wx is still loading ──
+    final cur    = wx.current;    // WeatherCurrent? — possibly null
     final indexColor = hasWx
         ? (wx.rainfallIndex > 70
             ? AppPalette.critical
@@ -1005,9 +1013,12 @@ class _ExpandPanel extends StatelessWidget {
                 color: AppPalette.amber,
               )),
               const SizedBox(width: 8),
+              // ✅ FIXED: was wx.current!.feelsLikeC — now null-safe
               Expanded(child: _WxDetailTile(
                 icon: Icons.device_thermostat_rounded, label: 'Feels Like',
-                value: '${wx.current!.feelsLikeC.toStringAsFixed(1)}°C',
+                value: cur != null
+                    ? '${cur.feelsLikeC.toStringAsFixed(1)}°C'
+                    : '—',
                 color: AppPalette.amber,
               )),
               const SizedBox(width: 8),
@@ -1046,9 +1057,12 @@ class _ExpandPanel extends StatelessWidget {
                 color: const Color(0xFF64B5F6),
               )),
               const SizedBox(width: 8),
+              // ✅ FIXED: was wx.current!.uvIndex — now null-safe
               Expanded(child: _WxDetailTile(
                 icon: Icons.wb_sunny_rounded, label: 'UV Index',
-                value: wx.current!.uvIndex.toStringAsFixed(1),
+                value: cur != null
+                    ? cur.uvIndex.toStringAsFixed(1)
+                    : '—',
                 color: AppPalette.amber,
               )),
               const SizedBox(width: 8),
@@ -1116,6 +1130,127 @@ class _ExpandPanel extends StatelessWidget {
             danger:  data.dangerLevel,
             color:   col,
           ),
+
+          // ── Bihar River Deep Data Panel ────────────────────────────────
+          if (riverMeta != null) ...[
+            const SizedBox(height: 14),
+            _gradientDivider(AppPalette.cyan.withValues(alpha: 0.20)),
+            const SizedBox(height: 14),
+            _sectionLabel('BASIN PROFILE', AppPalette.cyan,
+                sub: riverMeta!.basinName),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: _InfoTile(
+                icon: Icons.straighten_rounded, label: 'Length in Bihar',
+                value: '${riverMeta!.lengthInBiharKm} km',
+                color: AppPalette.cyan,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: _InfoTile(
+                icon: Icons.terrain_rounded, label: 'Catchment',
+                value: '${_fmt(riverMeta!.catchmentKm2)} km²',
+                color: AppPalette.cyan,
+              )),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _InfoTile(
+                icon: Icons.location_on_rounded, label: 'Origin',
+                value: riverMeta!.origin,
+                color: AppPalette.amber,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: _InfoTile(
+                icon: Icons.merge_rounded, label: 'Meets',
+                value: riverMeta!.outfall,
+                color: AppPalette.amber,
+              )),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _InfoTile(
+                icon: Icons.water_rounded, label: 'Avg Discharge',
+                value: '${_fmt(riverMeta!.avgDischargeCumecs)} m³/s',
+                color: const Color(0xFF64B5F6),
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: _InfoTile(
+                icon: Icons.warning_amber_rounded, label: 'Peak Flood',
+                value: '${_fmt(riverMeta!.peakFloodCumecs)} m³/s (${riverMeta!.peakFloodYear})',
+                color: AppPalette.danger,
+              )),
+            ]),
+            const SizedBox(height: 8),
+            // Embankments row
+            _InfoTile(
+              icon: Icons.foundation_rounded, label: 'Embankments (L / R bank)',
+              value: '${riverMeta!.embLBankKm} km  /  ${riverMeta!.embRBankKm} km',
+              color: AppPalette.textGrey,
+            ),
+            const SizedBox(height: 8),
+            // Tributaries chip-row
+            if (riverMeta!.majorTributaries.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('MAJOR TRIBUTARIES',
+                    style: TextStyle(
+                      color: AppPalette.textDim, fontSize: 8,
+                      fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6, runSpacing: 6,
+                children: riverMeta!.majorTributaries.map((t) =>
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppPalette.cyan.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppPalette.cyan.withValues(alpha: 0.20)),
+                      ),
+                      child: Text(t,
+                          style: const TextStyle(
+                            color: AppPalette.cyan, fontSize: 9,
+                            fontWeight: FontWeight.w700)),
+                    )
+                ).toList(),
+              ),
+            ],
+            const SizedBox(height: 8),
+            // Notable flood events
+            if (riverMeta!.notableFloods.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('NOTABLE FLOOD YEARS',
+                    style: TextStyle(
+                      color: AppPalette.textDim, fontSize: 8,
+                      fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6, runSpacing: 6,
+                children: riverMeta!.notableFloods.map((f) =>
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppPalette.danger.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppPalette.danger.withValues(alpha: 0.20)),
+                      ),
+                      child: Text(f,
+                          style: const TextStyle(
+                            color: AppPalette.danger, fontSize: 9,
+                            fontWeight: FontWeight.w700)),
+                    )
+                ).toList(),
+              ),
+            ],
+          ],
+
           const SizedBox(height: 8),
           Row(children: [
             _StatusBadge(status: data.status),
@@ -1126,7 +1261,6 @@ class _ExpandPanel extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 12),
-          // ── Detail button ──
           GestureDetector(
             onTap: () => Navigator.pushNamed(
               context, '/city_detail', arguments: data.city),
@@ -1184,6 +1318,21 @@ class _ExpandPanel extends StatelessWidget {
             style: const TextStyle(color: AppPalette.textDim, fontSize: 9)),
       ],
     ]);
+  }
+
+  /// Format large numbers: 12345 → "12,345"
+  String _fmt(num v) {
+    if (v >= 1000) {
+      final s = v.toStringAsFixed(0);
+      final buf = StringBuffer();
+      final rem = s.length % 3;
+      for (var i = 0; i < s.length; i++) {
+        if (i != 0 && (i - rem) % 3 == 0) buf.write(',');
+        buf.write(s[i]);
+      }
+      return buf.toString();
+    }
+    return v.toStringAsFixed(0);
   }
 }
 
