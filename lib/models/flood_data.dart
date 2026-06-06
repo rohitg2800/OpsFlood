@@ -1,7 +1,7 @@
 // lib/models/flood_data.dart
 //
 // FloodData — one city's live flood snapshot.
-// v2: added `district` field for zila display on river cards.
+// v3: added optional lat / lng fields for map pin rendering.
 
 import 'dart:ui' show Color;
 
@@ -25,6 +25,10 @@ class FloodData {
   final double? flowRate;
   final DateTime lastUpdated;
 
+  // ── Geographic coordinates (optional — used for map pin rendering) ──────
+  final double? lat;
+  final double? lng;
+
   const FloodData({
     required this.city,
     this.district = '',
@@ -42,6 +46,8 @@ class FloodData {
     required this.effectiveRainfallMm,
     this.flowRate,
     required this.lastUpdated,
+    this.lat,
+    this.lng,
   });
 
   int get priorityOrder {
@@ -110,6 +116,8 @@ class FloodData {
       lastUpdated:         j['last_updated'] != null
           ? DateTime.tryParse(j['last_updated'] as String) ?? DateTime.now()
           : DateTime.now(),
+      lat:                 dNull(j['lat'] ?? j['latitude']),
+      lng:                 dNull(j['lng'] ?? j['longitude']),
     );
   }
 
@@ -130,6 +138,8 @@ class FloodData {
     'rainfall_24h_mm':       effectiveRainfallMm,
     'flow_rate':             flowRate,
     'last_updated':          lastUpdated.toIso8601String(),
+    'lat':                   lat,
+    'lng':                   lng,
   };
 
   FloodData copyWith({
@@ -149,6 +159,8 @@ class FloodData {
     double?   effectiveRainfallMm,
     double?   flowRate,
     DateTime? lastUpdated,
+    double?   lat,
+    double?   lng,
   }) => FloodData(
     city:                city                ?? this.city,
     district:            district            ?? this.district,
@@ -166,6 +178,8 @@ class FloodData {
     effectiveRainfallMm: effectiveRainfallMm ?? this.effectiveRainfallMm,
     flowRate:            flowRate            ?? this.flowRate,
     lastUpdated:         lastUpdated         ?? this.lastUpdated,
+    lat:                 lat                 ?? this.lat,
+    lng:                 lng                 ?? this.lng,
   );
 
   @override

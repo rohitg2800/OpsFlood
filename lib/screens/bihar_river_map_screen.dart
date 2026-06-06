@@ -1,10 +1,7 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v4 — Real interactive map
-// • flutter_map with OpenStreetMap tiles (dark style via CartoDB DarkMatter)
-// • Bihar district boundaries from GeoJSON CDN (udit-001/india-maps-data)
-// • 10 major river polylines with real lat/lng coordinates
-// • Severity-coloured district fills driven by live flood data
-// • Station marker pins with tap-to-detail sheet
+// BiharRiverMapScreen v5 — Real interactive map
+// Fix: station pins use fd.lat/fd.lng when available, otherwise fall back to
+// _kBiharStationCoords lookup keyed by city name (case-insensitive).
 library;
 
 import 'dart:convert';
@@ -21,6 +18,74 @@ import '../theme/river_theme.dart';
 import '../utils/flood_severity.dart';
 import '../utils/flood_severity_helper.dart';
 import '../screens/city_detail_screen.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Known Bihar station coordinates (lat, lng) — fallback when API lacks coords
+// Sources: CWC FFS gauging station database + OpenStreetMap verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kBiharStationCoords = <String, LatLng>{
+  // ─ Ganga mainstem
+  'gandhighat':        LatLng(25.614, 85.127),
+  'digha ghat':        LatLng(25.623, 85.074),
+  'gandhi setu':       LatLng(25.630, 85.090),
+  'hathidah':          LatLng(25.381, 86.165),
+  'munger':            LatLng(25.375, 86.474),
+  'sultanganj':        LatLng(25.244, 86.742),
+  'bhagalpur':         LatLng(25.245, 86.978),
+  'kahalgaon':         LatLng(25.207, 87.268),
+  'farakka':           LatLng(24.814, 87.913),
+  // ─ Kosi
+  'birpur':            LatLng(26.505, 86.914),
+  'baltara':           LatLng(25.867, 86.563),
+  'kursela':           LatLng(25.453, 87.266),
+  // ─ Bagmati
+  'benibad':           LatLng(26.148, 85.852),
+  'rosera':            LatLng(25.863, 85.984),
+  'hayaghat':          LatLng(26.122, 85.762),
+  'sitamarhi':         LatLng(26.591, 85.482),
+  // ─ Burhi Gandak
+  'khagaria':          LatLng(25.502, 86.468),
+  'muzaffarpur':       LatLng(26.118, 85.391),
+  'samastipur':        LatLng(25.871, 85.779),
+  // ─ Gandak
+  'lalganj':           LatLng(25.865, 85.186),
+  'minapur':           LatLng(26.164, 84.977),
+  'hajipur':           LatLng(25.683, 85.209),
+  'valmikinagar':      LatLng(27.093, 84.342),
+  'bettiah':           LatLng(26.803, 84.503),
+  'bagaha':            LatLng(27.098, 84.076),
+  'triveni':           LatLng(27.069, 84.358),
+  // ─ Kosi tributaries / Mahananda
+  'forbesganj':        LatLng(26.300, 87.263),
+  'banmankhi':         LatLng(25.889, 87.194),
+  'purnea':            LatLng(25.775, 87.474),
+  'araria':            LatLng(26.149, 87.453),
+  'kishanganj':        LatLng(26.097, 87.951),
+  // ─ General Bihar cities as fallback
+  'patna':             LatLng(25.594, 85.137),
+  'darbhanga':         LatLng(26.157, 85.900),
+  'motihari':          LatLng(26.652, 84.917),
+  'gaya':              LatLng(24.797, 85.012),
+  'nalanda':           LatLng(25.137, 85.446),
+  'buxar':             LatLng(25.563, 83.978),
+  'chapra':            LatLng(25.778, 84.748),
+  'siwan':             LatLng(26.220, 84.357),
+  'supaul':            LatLng(26.117, 86.604),
+  'madhubani':         LatLng(26.349, 86.072),
+  'saharsa':           LatLng(25.879, 86.600),
+  'madhepura':         LatLng(25.918, 86.793),
+};
+
+/// Returns a LatLng for a FloodData station.
+/// Priority: 1) fd.lat/fd.lng from API  2) lookup by city name
+LatLng? _coordsFor(FloodData fd) {
+  if (fd.lat != null && fd.lng != null) {
+    return LatLng(fd.lat!, fd.lng!);
+  }
+  final key = fd.city.toLowerCase().trim();
+  return _kBiharStationCoords[key];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // River data — key lat/lng waypoints for Bihar's 10 major rivers
@@ -42,128 +107,122 @@ const _biharRivers = [
     name: 'Ganga',
     color: Color(0xFF38BDF8),
     points: [
-      LatLng(25.56, 83.97), // Chausa/Buxar entry
-      LatLng(25.57, 84.50), // Arrah
-      LatLng(25.61, 85.14), // Patna (Dighaghat)
-      LatLng(25.60, 85.52), // Barh
-      LatLng(25.42, 86.17), // Mokameh
-      LatLng(25.37, 86.47), // Luckeesarai/Lakhisarai
-      LatLng(25.37, 86.98), // Munger
-      LatLng(25.25, 87.01), // Sultanganj
-      LatLng(25.25, 86.98),
-      LatLng(25.24, 87.49), // Bhagalpur
-      LatLng(25.20, 87.80), // Kahalgaon
-      LatLng(25.23, 87.91), // Bihar/WB border
+      LatLng(25.56, 83.97),
+      LatLng(25.57, 84.50),
+      LatLng(25.61, 85.14),
+      LatLng(25.60, 85.52),
+      LatLng(25.42, 86.17),
+      LatLng(25.37, 86.47),
+      LatLng(25.37, 86.98),
+      LatLng(25.25, 87.01),
+      LatLng(25.24, 87.49),
+      LatLng(25.20, 87.80),
+      LatLng(25.23, 87.91),
     ],
   ),
   _RiverLine(
     name: 'Kosi',
     color: Color(0xFFF87171),
     points: [
-      LatLng(26.90, 87.15), // Nepal border (Birpur)
+      LatLng(26.90, 87.15),
       LatLng(26.52, 86.90),
-      LatLng(26.11, 86.90), // Supaul
-      LatLng(25.88, 86.85), // Saharsa
-      LatLng(25.63, 86.69), // Naugachia
-      LatLng(25.42, 86.17), // Kosi meets Ganga near Kursela/Khagaria
+      LatLng(26.11, 86.90),
+      LatLng(25.88, 86.85),
+      LatLng(25.63, 86.69),
+      LatLng(25.42, 86.17),
     ],
   ),
   _RiverLine(
     name: 'Gandak',
     color: Color(0xFF34D399),
     points: [
-      LatLng(27.48, 84.43), // Nepal border near Tribeni
-      LatLng(27.10, 84.35), // Valmiki Nagar barrage
-      LatLng(26.80, 84.45), // Champaran
-      LatLng(26.60, 84.43), // Muzaffarpur north
-      LatLng(26.18, 84.67), // Hajipur
-      LatLng(25.69, 85.02), // Sonepur confluence with Ganga
+      LatLng(27.48, 84.43),
+      LatLng(27.10, 84.35),
+      LatLng(26.80, 84.45),
+      LatLng(26.60, 84.43),
+      LatLng(26.18, 84.67),
+      LatLng(25.69, 85.02),
     ],
   ),
   _RiverLine(
     name: 'Bagmati',
     color: Color(0xFFA78BFA),
     points: [
-      LatLng(26.87, 85.72), // Nepal border / Sitamarhi
-      LatLng(26.60, 85.55), // Sitamarhi
-      LatLng(26.35, 85.42), // Muzaffarpur
-      LatLng(26.20, 85.63), // Samastipur
-      LatLng(25.87, 85.78), // Rosera
-      LatLng(25.60, 86.00), // Meets Kosi near Khagaria
+      LatLng(26.87, 85.72),
+      LatLng(26.60, 85.55),
+      LatLng(26.35, 85.42),
+      LatLng(26.20, 85.63),
+      LatLng(25.87, 85.78),
+      LatLng(25.60, 86.00),
     ],
   ),
   _RiverLine(
     name: 'Burhi Gandak',
     color: Color(0xFFFBBF24),
     points: [
-      LatLng(26.95, 84.80), // Champaran source
+      LatLng(26.95, 84.80),
       LatLng(26.60, 84.96),
-      LatLng(26.37, 85.10), // Muzaffarpur
-      LatLng(26.10, 85.42), // Samastipur
-      LatLng(25.83, 86.12), // Khagaria meets Ganga
+      LatLng(26.37, 85.10),
+      LatLng(26.10, 85.42),
+      LatLng(25.83, 86.12),
     ],
   ),
   _RiverLine(
     name: 'Sone',
     color: Color(0xFFFF8C00),
     points: [
-      LatLng(24.40, 83.77), // MP/Jharkhand border
+      LatLng(24.40, 83.77),
       LatLng(24.60, 83.99),
-      LatLng(24.80, 84.10), // Rohtas
-      LatLng(25.00, 84.30), // Arwal
-      LatLng(25.57, 84.64), // Patna confluence (Danapur)
+      LatLng(24.80, 84.10),
+      LatLng(25.00, 84.30),
+      LatLng(25.57, 84.64),
     ],
   ),
   _RiverLine(
     name: 'Ghaghra',
     color: Color(0xFFEC4899),
     points: [
-      LatLng(26.77, 83.42), // UP/Bihar border near Siwan
-      LatLng(26.23, 84.05), // Siwan
-      LatLng(25.91, 84.50), // Saran / Chapra
-      LatLng(25.76, 84.75), // Meets Ganga at Chhapra
+      LatLng(26.77, 83.42),
+      LatLng(26.23, 84.05),
+      LatLng(25.91, 84.50),
+      LatLng(25.76, 84.75),
     ],
   ),
   _RiverLine(
     name: 'Kamla',
     color: Color(0xFF6EE7B7),
     points: [
-      LatLng(26.90, 86.10), // Nepal border
-      LatLng(26.60, 86.08), // Madhubani
-      LatLng(26.35, 86.09), // Darbhanga
-      LatLng(26.10, 86.10), // Samastipur meets Bagmati
+      LatLng(26.90, 86.10),
+      LatLng(26.60, 86.08),
+      LatLng(26.35, 86.09),
+      LatLng(26.10, 86.10),
     ],
   ),
   _RiverLine(
     name: 'Mahananda',
     color: Color(0xFF67E8F9),
     points: [
-      LatLng(26.85, 88.10), // Nepal/WB border
-      LatLng(26.62, 87.87), // Kishanganj
-      LatLng(25.97, 87.70), // Purnia
-      LatLng(25.24, 87.90), // Meets Ganga near Manikpur
+      LatLng(26.85, 88.10),
+      LatLng(26.62, 87.87),
+      LatLng(25.97, 87.70),
+      LatLng(25.24, 87.90),
     ],
   ),
   _RiverLine(
     name: 'Punpun',
     color: Color(0xFFC084FC),
     points: [
-      LatLng(24.55, 84.85), // Jharkhand source
+      LatLng(24.55, 84.85),
       LatLng(24.80, 85.00),
-      LatLng(25.10, 85.00), // Gaya
-      LatLng(25.32, 85.00), // Jehanabad
-      LatLng(25.55, 85.08), // Meets Ganga near Fatuha
+      LatLng(25.10, 85.00),
+      LatLng(25.32, 85.00),
+      LatLng(25.55, 85.08),
     ],
   ),
 ];
 
-// GeoJSON CDN for Bihar district boundaries
 const _biharGeoJsonUrl =
     'https://cdn.jsdelivr.net/gh/udit-001/india-maps-data@main/geojson/states/Bihar.json';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GeoJSON provider
-// ─────────────────────────────────────────────────────────────────────────────
 
 final _biharGeoJsonProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final res = await http.get(Uri.parse(_biharGeoJsonUrl));
@@ -188,15 +247,12 @@ class BiharRiverMapScreen extends ConsumerStatefulWidget {
 
 class _BiharRiverMapScreenState
     extends ConsumerState<BiharRiverMapScreen> {
-  // Layers
   bool _showRivers    = true;
   bool _showDistricts = true;
   bool _showStations  = true;
 
-  // Selected station for bottom sheet
   FloodData? _selected;
 
-  // Map controller
   final _mapController = MapController();
 
   @override
@@ -211,7 +267,6 @@ class _BiharRiverMapScreenState
     final stations   = ref.watch(liveLevelsProvider);
     final geoAsync   = ref.watch(_biharGeoJsonProvider);
 
-    // Build district → worst-severity map
     final Map<String, FloodData> districtData = {};
     for (final fd in stations) {
       final key = fd.district.isNotEmpty ? fd.district : fd.city;
@@ -223,9 +278,11 @@ class _BiharRiverMapScreenState
       }
     }
 
+    // Only Bihar stations that have resolvable coordinates
     final biharStations = stations
-        .where((fd) => fd.state.toUpperCase().contains('BIHAR') &&
-            fd.lat != null && fd.lng != null)
+        .where((fd) =>
+            fd.state.toUpperCase().contains('BIHAR') &&
+            _coordsFor(fd) != null)
         .toList();
 
     return Scaffold(
@@ -236,14 +293,14 @@ class _BiharRiverMapScreenState
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: const LatLng(25.78, 85.82), // Bihar centroid
+              initialCenter: const LatLng(25.78, 85.82),
               initialZoom:   7.2,
               minZoom:       6.0,
               maxZoom:       13.0,
               onTap: (_, __) => setState(() => _selected = null),
             ),
             children: [
-              // ─ Base tile layer (CartoDB Dark Matter — no API key needed)
+              // ─ Base tile layer (CartoDB Dark Matter — no API key)
               TileLayer(
                 urlTemplate:
                     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -252,7 +309,7 @@ class _BiharRiverMapScreenState
                 maxZoom: 19,
               ),
 
-              // ─ District boundaries from GeoJSON
+              // ─ District boundaries
               if (_showDistricts)
                 geoAsync.when(
                   data: (geo) => _DistrictLayer(
@@ -266,14 +323,14 @@ class _BiharRiverMapScreenState
                 PolylineLayer(
                   polylines: _biharRivers
                       .map((r) => Polyline(
-                            points:       r.points,
-                            color:        r.color.withValues(alpha: 0.85),
-                            strokeWidth:  2.5,
+                            points:      r.points,
+                            color:       r.color.withValues(alpha: 0.85),
+                            strokeWidth: 2.5,
                           ))
                       .toList(),
                 ),
 
-              // ─ River name labels (markers at midpoint)
+              // ─ River name labels
               if (_showRivers)
                 MarkerLayer(
                   markers: _biharRivers.map((r) {
@@ -316,16 +373,16 @@ class _BiharRiverMapScreenState
               if (_showStations)
                 MarkerLayer(
                   markers: biharStations.map((fd) {
-                    final sev   = FloodSeverityHelper.fromString(fd.status);
-                    final color = FloodSeverityHelper.color(sev);
+                    final coords    = _coordsFor(fd)!;
+                    final sev       = FloodSeverityHelper.fromString(fd.status);
+                    final color     = FloodSeverityHelper.color(sev);
                     final isSelected = _selected?.city == fd.city;
                     return Marker(
-                      point:  LatLng(fd.lat!, fd.lng!),
+                      point:  coords,
                       width:  isSelected ? 46 : 34,
                       height: isSelected ? 46 : 34,
                       child: GestureDetector(
-                        onTap: () =>
-                            setState(() => _selected = fd),
+                        onTap: () => setState(() => _selected = fd),
                         child: AnimatedContainer(
                           duration:
                               const Duration(milliseconds: 180),
@@ -362,9 +419,7 @@ class _BiharRiverMapScreenState
 
           // ── Top app bar overlay ──────────────────────────────────────────────
           Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
+            top: 0, left: 0, right: 0,
             child: SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
@@ -385,7 +440,7 @@ class _BiharRiverMapScreenState
                                     fontSize: 14,
                                     fontWeight: FontWeight.w800)),
                             const Spacer(),
-                            if (stations.isNotEmpty)
+                            if (biharStations.isNotEmpty)
                               Text(
                                 '${biharStations.length} stations',
                                 style: TextStyle(
@@ -409,35 +464,35 @@ class _BiharRiverMapScreenState
             child: Column(
               children: [
                 _LayerToggle(
-                  icon:    Icons.water_rounded,
-                  label:   'Rivers',
-                  active:  _showRivers,
-                  color:   const Color(0xFF38BDF8),
-                  onTap:   () => setState(() => _showRivers = !_showRivers),
+                  icon:   Icons.water_rounded,
+                  label:  'Rivers',
+                  active: _showRivers,
+                  color:  const Color(0xFF38BDF8),
+                  onTap:  () => setState(() => _showRivers = !_showRivers),
                 ),
                 const SizedBox(height: 8),
                 _LayerToggle(
-                  icon:    Icons.grid_view_rounded,
-                  label:   'Districts',
-                  active:  _showDistricts,
-                  color:   t.accent,
-                  onTap:   () => setState(() =>
+                  icon:   Icons.grid_view_rounded,
+                  label:  'Districts',
+                  active: _showDistricts,
+                  color:  t.accent,
+                  onTap:  () => setState(() =>
                       _showDistricts = !_showDistricts),
                 ),
                 const SizedBox(height: 8),
                 _LayerToggle(
-                  icon:    Icons.sensors_rounded,
-                  label:   'Stations',
-                  active:  _showStations,
-                  color:   AppPalette.safe,
-                  onTap:   () => setState(() =>
+                  icon:   Icons.sensors_rounded,
+                  label:  'Stations',
+                  active: _showStations,
+                  color:  AppPalette.safe,
+                  onTap:  () => setState(() =>
                       _showStations = !_showStations),
                 ),
               ],
             ),
           ),
 
-          // ── River legend strip ───────────────────────────────────────────────
+          // ── River legend ──────────────────────────────────────────────────────────
           if (_showRivers && _selected == null)
             Positioned(
               left: 12,
@@ -476,15 +531,13 @@ class _BiharRiverMapScreenState
               ),
             ),
 
-          // ── Selected station detail sheet ──────────────────────────────────
+          // ── Selected station bottom sheet ──────────────────────────────────
           if (_selected != null)
             Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
+              left: 0, right: 0, bottom: 0,
               child: _StationSheet(
                 data: _selected!,
-                onClose:     () => setState(() => _selected = null),
+                onClose: () => setState(() => _selected = null),
                 onOpenDetail: () => Navigator.pushNamed(
                   context,
                   CityDetailScreen.route,
@@ -496,17 +549,14 @@ class _BiharRiverMapScreenState
           // ── GeoJSON loading indicator ─────────────────────────────────────────
           if (geoAsync.isLoading)
             Positioned(
-              top: 80,
-              left: 0,
-              right: 0,
+              top: 80, left: 0, right: 0,
               child: Center(
                 child: _GlassCard(
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        width: 12,
-                        height: 12,
+                        width: 12, height: 12,
                         child: CircularProgressIndicator(
                             strokeWidth: 1.5, color: t.accent),
                       ),
@@ -527,13 +577,12 @@ class _BiharRiverMapScreenState
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// District polygon layer (parses GeoJSON in-widget)
+// District polygon layer
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DistrictLayer extends StatelessWidget {
   final Map<String, dynamic> geoJson;
   final Map<String, FloodData> districtData;
-
   const _DistrictLayer({
     required this.geoJson,
     required this.districtData,
@@ -547,9 +596,7 @@ class _DistrictLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final polygons = <Polygon>[];
-
-    final features =
-        (geoJson['features'] as List?) ?? [];
+    final features = (geoJson['features'] as List?) ?? [];
 
     for (final feat in features) {
       final props    = feat['properties'] as Map? ?? {};
@@ -562,7 +609,6 @@ class _DistrictLayer extends StatelessWidget {
       final type     = geometry['type'] as String? ?? '';
       final coords   = geometry['coordinates'] as List? ?? [];
 
-      // Find severity for this district
       final fd  = districtData[name];
       final sev = fd != null
           ? FloodSeverityHelper.fromString(fd.status)
@@ -576,11 +622,11 @@ class _DistrictLayer extends StatelessWidget {
         final pts = _ring(ring);
         if (pts.length < 3) return;
         polygons.add(Polygon(
-          points:       pts,
-          color:        fillColor,
-          borderColor:  borderColor,
+          points:            pts,
+          color:             fillColor,
+          borderColor:       borderColor,
           borderStrokeWidth: 0.8,
-          label:        name,
+          label:             name,
           labelStyle: TextStyle(
             color: FloodSeverityHelper.color(sev)
                 .withValues(alpha: 0.70),
@@ -645,7 +691,6 @@ class _StationSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
           Container(
             width: 36, height: 4,
             margin: const EdgeInsets.only(bottom: 12),
@@ -702,7 +747,6 @@ class _StationSheet extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // Level bar
           _MiniLevelBar(
             current: data.currentLevel,
             warning: data.warningLevel,
@@ -871,10 +915,10 @@ class _GlassBack extends StatelessWidget {
 }
 
 class _LayerToggle extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final bool     active;
-  final Color    color;
+  final IconData     icon;
+  final String       label;
+  final bool         active;
+  final Color        color;
   final VoidCallback onTap;
   const _LayerToggle({
     required this.icon,

@@ -63,6 +63,9 @@ dependencies:
   flutter_map: ^8.1.1
   latlong2:    ^0.9.1
 
+  # AI flood background monitoring service
+  flutter_background_service: ^5.0.10
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
