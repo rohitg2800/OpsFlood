@@ -1,6 +1,5 @@
-// lib/screens/dashboard_screen.dart  v24 — fully theme-aware
-// Every background, card, stroke, text uses RiverColors.of(context).
-// Zero hardcoded AppPalette.abyss* colours remain.
+// lib/screens/dashboard_screen.dart  v25 — fluid redesign
+// Collapsible sections · animated charts · organic feel
 library;
 
 import 'dart:math' as math;
@@ -12,14 +11,22 @@ import 'package:intl/intl.dart';
 import '../models/flood_data.dart';
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
-import '../widgets/ops_area_chart.dart';
-import '../widgets/ops_bar_chart.dart';
 import '../widgets/premium_theme_sheet.dart';
 import '../widgets/risk_heatmap.dart';
 
-// ── Ad Unit ID ────────────────────────────────────────────────────────────────
 const String _kBannerAdUnitId = 'ca-app-pub-6001698589023170/6430029201';
 
+// ─── Colour helpers ───────────────────────────────────────────────────────────
+Color _riskCol(String lvl) {
+  switch (lvl.toUpperCase()) {
+    case 'CRITICAL': return AppPalette.critical;
+    case 'SEVERE':   return AppPalette.danger;
+    case 'MODERATE': return AppPalette.warning;
+    default:         return AppPalette.safe;
+  }
+}
+
+// ─── Root screen ──────────────────────────────────────────────────────────────
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
   @override
@@ -30,56 +37,75 @@ class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   final RealTimeService _service = RealTimeService();
 
-  late AnimationController _pulseCtrl;
-  late AnimationController _arcCtrl;
-  late AnimationController _tickerCtrl;
-  late AnimationController _shimmerCtrl;
-  late Animation<double> _pulseAnim;
-  late Animation<double> _arcAnim;
-  late Animation<double> _shimmerAnim;
+  // Controllers
+  late AnimationController _entryCtrl;   // staggered card entry
+  late AnimationController _gaugeCtrl;   // hero gauge fill
+  late AnimationController _waveCtrl;    // continuous wave
+  late AnimationController _pulseCtrl;   // dot pulse
+  late AnimationController _countCtrl;   // number count-up
+
+  late Animation<double> _gaugeAnim;
+
+  // Collapse state
+  final Map<String, bool> _collapsed = {
+    'rivers': false,
+    'hotspots': false,
+    'rainfall': false,
+    'capacity': false,
+    'trend': false,
+    'log': false,
+    'stats': false,
+    'map': false,
+  };
 
   int _tickerIdx = 0;
-
   BannerAd? _bannerAd;
   bool _bannerLoaded = false;
+
+  bool get _reduceMotion =>
+      MediaQuery.of(context).disableAnimations;
 
   @override
   void initState() {
     super.initState();
+
+    _entryCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
+    _gaugeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 2000))..forward();
+    _gaugeAnim = CurvedAnimation(parent: _gaugeCtrl, curve: Curves.easeOutExpo);
+    _waveCtrl  = AnimationController(
+        vsync: this, duration: const Duration(seconds: 3))..repeat();
     _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1400))
-      ..repeat(reverse: true);
-    _pulseAnim = Tween<double>(begin: 0.3, end: 1.0)
-        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _arcCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1800))
-      ..forward();
-    _arcAnim = CurvedAnimation(parent: _arcCtrl, curve: Curves.easeOutCubic);
-    _tickerCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 4))
-      ..repeat();
-    _tickerCtrl.addStatusListener((s) {
-      if (s == AnimationStatus.completed && mounted) {
-        final alerts = _alertCities;
-        if (alerts.isNotEmpty) {
-          setState(() => _tickerIdx = (_tickerIdx + 1) % alerts.length);
-        }
-        _tickerCtrl.forward(from: 0);
-      }
-    });
-    _shimmerCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2200))
-      ..repeat();
-    _shimmerAnim = Tween<double>(begin: -1.0, end: 2.0)
-        .animate(CurvedAnimation(parent: _shimmerCtrl, curve: Curves.linear));
+        vsync: this, duration: const Duration(milliseconds: 1400))..repeat(reverse: true);
+    _countCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1600))..forward();
+
+    // Ticker rotation
+    Future.delayed(const Duration(seconds: 4), _rotateTicker);
 
     _service.addListener(_onData);
     _service.startPolling();
     _loadBanner();
+    Future.microtask(() => _entryCtrl.forward());
+  }
+
+  void _rotateTicker() {
+    if (!mounted) return;
+    final alerts = _alertCities;
+    if (alerts.isNotEmpty) {
+      setState(() => _tickerIdx = (_tickerIdx + 1) % alerts.length);
+    }
+    Future.delayed(const Duration(seconds: 4), _rotateTicker);
   }
 
   void _onData() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _gaugeCtrl.forward(from: 0);
+      _countCtrl.forward(from: 0);
+      _entryCtrl.forward(from: 0);
+    }
   }
 
   void _loadBanner() {
@@ -91,7 +117,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         onAdLoaded: (ad) {
           if (mounted) setState(() { _bannerAd = ad as BannerAd; _bannerLoaded = true; });
         },
-        onAdFailedToLoad: (ad, error) => ad.dispose(),
+        onAdFailedToLoad: (ad, _) => ad.dispose(),
       ),
     ).load();
   }
@@ -99,16 +125,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _service.removeListener(_onData);
-    _pulseCtrl.dispose();
-    _arcCtrl.dispose();
-    _tickerCtrl.dispose();
-    _shimmerCtrl.dispose();
+    for (final c in [_entryCtrl, _gaugeCtrl, _waveCtrl, _pulseCtrl, _countCtrl]) {
+      c.dispose();
+    }
     _bannerAd?.dispose();
     super.dispose();
   }
 
-  // ── Data helpers ────────────────────────────────────────────────────────────
-
+  // ── Data ──────────────────────────────────────────────────────────────────
   List<FloodData> get _sorted {
     final list = List<FloodData>.from(_service.liveLevels);
     const order = ['CRITICAL', 'SEVERE', 'MODERATE', 'LOW'];
@@ -117,25 +141,41 @@ class _DashboardScreenState extends State<DashboardScreen>
     return list;
   }
 
-  int get _criticalCount => _sorted.where((d) => d.riskLevel == 'CRITICAL').length;
-  int get _severeCount   => _sorted.where((d) => d.riskLevel == 'SEVERE').length;
-  int get _moderateCount => _sorted.where((d) => d.riskLevel == 'MODERATE').length;
-  int get _safeCount     => _sorted.where((d) => d.riskLevel == 'LOW').length;
+  int get _criticalCount  => _sorted.where((d) => d.riskLevel == 'CRITICAL').length;
+  int get _severeCount    => _sorted.where((d) => d.riskLevel == 'SEVERE').length;
+  int get _moderateCount  => _sorted.where((d) => d.riskLevel == 'MODERATE').length;
+  int get _safeCount      => _sorted.where((d) => d.riskLevel == 'LOW').length;
 
   double get _overallRisk {
     if (_sorted.isEmpty) return 0;
     return (_sorted.map((d) => d.capacityPercent).fold(0.0, (a, b) => a + b) /
-            _sorted.length)
-        .clamp(0.0, 100.0);
+            _sorted.length).clamp(0.0, 100.0);
   }
 
   List<FloodData> get _alertCities =>
       _sorted.where((d) => d.riskLevel == 'CRITICAL' || d.riskLevel == 'SEVERE').toList();
 
+  void _refresh() {
+    HapticFeedback.mediumImpact();
+    _gaugeCtrl.forward(from: 0);
+    _countCtrl.forward(from: 0);
+    _entryCtrl.forward(from: 0);
+    _service.refreshData();
+  }
+
+  // ── Section toggle ────────────────────────────────────────────────────────
+  void _toggle(String key) {
+    HapticFeedback.selectionClick();
+    setState(() => _collapsed[key] = !(_collapsed[key] ?? false));
+  }
+
+  bool _isCollapsed(String key) => _collapsed[key] ?? false;
+
   @override
   Widget build(BuildContext context) {
     final data = _sorted;
     final t    = RiverColors.of(context);
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
@@ -153,124 +193,187 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              SliverToBoxAdapter(child: _CommandHeader(
-                pulseAnim: _pulseAnim, shimmerAnim: _shimmerAnim,
-                onRefresh: () {
-                  HapticFeedback.mediumImpact();
-                  _arcCtrl.forward(from: 0);
-                  _service.refreshData();
-                },
+              // ── Header ────────────────────────────────────────────────
+              SliverToBoxAdapter(child: _Header(
+                pulseCtrl: _pulseCtrl,
                 lastUpdated: _service.lastFetchTime,
+                isOnline: _service.isOnline,
+                onRefresh: _refresh,
               )),
-              SliverToBoxAdapter(child: _HeroSection(
-                arcAnim: _arcAnim, overallRisk: _overallRisk,
-                critical: _criticalCount, severe: _severeCount,
-                moderate: _moderateCount, safe: _safeCount,
-                total: data.length, alertCities: _alertCities,
-                tickerIdx: _tickerIdx, pulseAnim: _pulseAnim,
+
+              // ── Hero gauge ────────────────────────────────────────────
+              SliverToBoxAdapter(child: _HeroGauge(
+                gaugeAnim: _gaugeAnim,
+                waveCtrl: _waveCtrl,
+                pulseCtrl: _pulseCtrl,
+                countCtrl: _countCtrl,
+                overallRisk: _overallRisk,
+                critical: _criticalCount,
+                severe: _severeCount,
+                moderate: _moderateCount,
+                safe: _safeCount,
+                total: data.length,
+                alertCities: _alertCities,
+                tickerIdx: _tickerIdx,
+                reduceMotion: _reduceMotion,
               )),
-              if (data.isEmpty) ...[
-                const SliverToBoxAdapter(child: _EmptyState()),
-              ] else ...[
-                SliverToBoxAdapter(child: _QuickAccessGrid(context: context)),
-                SliverToBoxAdapter(child: _SectionHeader(
+
+              // ── Quick grid ────────────────────────────────────────────
+              SliverToBoxAdapter(child: _QuickGrid(
+                entryCtrl: _entryCtrl,
+              )),
+
+              if (data.isEmpty)
+                const SliverToBoxAdapter(child: _EmptyState())
+              else ...[
+
+                // ── River levels ─────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'rivers',
                   title: 'Live River Levels',
-                  sub: 'Sorted by risk · tap for detail',
+                  subtitle: 'Sorted by risk · tap for detail',
                   icon: Icons.water_rounded,
                   color: AppPalette.cyan,
-                )),
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) => _RiverPulseCard(
-                      data: data[i], pulseAnim: _pulseAnim,
-                    ),
-                    childCount: data.length,
+                  collapsed: _isCollapsed('rivers'),
+                  onToggle: () => _toggle('rivers'),
+                  child: Column(
+                    children: data.asMap().entries.map((e) =>
+                      _AnimatedRiverCard(
+                        data: e.value,
+                        index: e.key,
+                        entryCtrl: _entryCtrl,
+                        pulseCtrl: _pulseCtrl,
+                        reduceMotion: _reduceMotion,
+                      )
+                    ).toList(),
                   ),
-                ),
-                SliverToBoxAdapter(child: _SectionHeader(
+                )),
+
+                // ── Hotspots ─────────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'hotspots',
                   title: 'Hotspot Districts',
-                  sub: '${_alertCities.length} active alerts',
+                  subtitle: '${_alertCities.length} active alerts',
                   icon: Icons.crisis_alert_rounded,
                   color: AppPalette.critical,
+                  collapsed: _isCollapsed('hotspots'),
+                  onToggle: () => _toggle('hotspots'),
+                  child: _HotspotPageView(
+                    items: _alertCities,
+                    pulseCtrl: _pulseCtrl,
+                  ),
                 )),
-                SliverToBoxAdapter(child: _HotspotCarousel(
-                  items: _alertCities, pulseAnim: _pulseAnim,
-                )),
-                SliverToBoxAdapter(child: _SectionHeader(
-                  title: 'Rainfall Forecast',
-                  sub: 'IMD 24h estimate · Bihar',
+
+                // ── Rainfall ─────────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'rainfall',
+                  title: 'Rainfall Estimate',
+                  subtitle: 'IMD 24h · Bihar',
                   icon: Icons.grain_rounded,
                   color: AppPalette.gold,
+                  collapsed: _isCollapsed('rainfall'),
+                  onToggle: () => _toggle('rainfall'),
+                  child: _RainfallBars(
+                    data: data,
+                    gaugeAnim: _gaugeAnim,
+                    reduceMotion: _reduceMotion,
+                  ),
                 )),
-                SliverToBoxAdapter(child: _RainfallForecastStrip(data: data)),
-                SliverToBoxAdapter(child: _SectionHeader(
+
+                // ── Capacity chart ────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'capacity',
                   title: 'Capacity Overview',
-                  sub: 'All monitored rivers',
+                  subtitle: 'All monitored rivers',
                   icon: Icons.bar_chart_rounded,
                   color: AppPalette.gold,
-                )),
-                SliverToBoxAdapter(child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: OpsBarChart(
+                  collapsed: _isCollapsed('capacity'),
+                  onToggle: () => _toggle('capacity'),
+                  child: _AnimatedBarChart(
                     values: data.map((d) => d.capacityPercent).toList(),
                     labels: data.map((d) => d.city).toList(),
+                    colors: data.map((d) => _riskCol(d.riskLevel)).toList(),
+                    entryCtrl: _entryCtrl,
+                    reduceMotion: _reduceMotion,
                   ),
                 )),
-                SliverToBoxAdapter(child: _SectionHeader(
+
+                // ── Trend chart ───────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'trend',
                   title: 'Trend Analysis',
-                  sub: '7-day capacity trend',
+                  subtitle: 'Capacity distribution · live',
                   icon: Icons.show_chart_rounded,
                   color: AppPalette.cyan,
-                )),
-                SliverToBoxAdapter(child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: OpsAreaChart(
+                  collapsed: _isCollapsed('trend'),
+                  onToggle: () => _toggle('trend'),
+                  child: _AnimatedAreaChart(
                     values: data.map((d) => d.capacityPercent).toList(),
                     labels: data.map((d) => d.city).toList(),
+                    gaugeAnim: _gaugeAnim,
+                    waveCtrl: _waveCtrl,
+                    reduceMotion: _reduceMotion,
                   ),
                 )),
-                SliverToBoxAdapter(child: _SectionHeader(
-                  title: 'Alert Activity Log',
-                  sub: 'Recent critical events',
+
+                // ── Alert log ─────────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'log',
+                  title: 'Alert Activity',
+                  subtitle: 'Recent critical events',
                   icon: Icons.history_rounded,
                   color: AppPalette.danger,
+                  collapsed: _isCollapsed('log'),
+                  onToggle: () => _toggle('log'),
+                  child: _AlertLog(
+                    data: _alertCities,
+                    entryCtrl: _entryCtrl,
+                  ),
                 )),
-                SliverToBoxAdapter(child: _AlertActivityLog(data: _alertCities)),
-                SliverToBoxAdapter(child: _SectionHeader(
-                  title: 'System Stats',
-                  sub: 'Data pipeline health',
+
+                // ── System stats ──────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'stats',
+                  title: 'System Health',
+                  subtitle: 'Data pipeline status',
                   icon: Icons.analytics_outlined,
                   color: AppPalette.safe,
+                  collapsed: _isCollapsed('stats'),
+                  onToggle: () => _toggle('stats'),
+                  child: _SystemStats(
+                    service: _service,
+                    pulseCtrl: _pulseCtrl,
+                    gaugeAnim: _gaugeAnim,
+                    reduceMotion: _reduceMotion,
+                  ),
                 )),
-                SliverToBoxAdapter(child: _SystemStatsBar(
-                  service: _service, pulseAnim: _pulseAnim,
-                )),
-                SliverToBoxAdapter(child: _SectionHeader(
+
+                // ── Heatmap ───────────────────────────────────────────
+                SliverToBoxAdapter(child: _CollapsibleSection(
+                  sectionKey: 'map',
                   title: 'State Risk Map',
-                  sub: 'Region-level flood index',
+                  subtitle: 'Region-level flood index',
                   icon: Icons.grid_view_rounded,
                   color: AppPalette.safe,
+                  collapsed: _isCollapsed('map'),
+                  onToggle: () => _toggle('map'),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: RiskHeatmap(entries: _buildHeatmapEntries(data)),
+                  ),
                 )),
-                SliverToBoxAdapter(child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: RiskHeatmap(entries: _buildHeatmapEntries(data)),
-                )),
-                SliverToBoxAdapter(child: _FooterStatsBar(
+
+                // ── Footer ────────────────────────────────────────────
+                SliverToBoxAdapter(child: _Footer(
                   totalStations: data.length,
-                  riversCount: data
-                      .map((d) => d.riverName ?? '')
-                      .toSet()
-                      .where((s) => s.isNotEmpty)
-                      .length,
-                  statesAtRisk: data
-                      .where((d) => d.riskLevel != 'LOW')
-                      .map((d) => d.state)
-                      .toSet()
-                      .length,
+                  riversCount: data.map((d) => d.riverName ?? '').toSet()
+                      .where((s) => s.isNotEmpty).length,
+                  statesAtRisk: data.where((d) => d.riskLevel != 'LOW')
+                      .map((d) => d.state).toSet().length,
                   lastUpdated: _service.lastFetchTime,
                 )),
               ],
-              const SliverToBoxAdapter(child: SizedBox(height: 40)),
+              const SliverToBoxAdapter(child: SizedBox(height: 48)),
             ],
           ),
         ),
@@ -307,17 +410,16 @@ class _DashboardScreenState extends State<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CommandHeader
+// _Header
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _CommandHeader extends StatelessWidget {
-  final Animation<double> pulseAnim;
-  final Animation<double> shimmerAnim;
-  final VoidCallback onRefresh;
+class _Header extends StatelessWidget {
+  final AnimationController pulseCtrl;
   final DateTime? lastUpdated;
-  const _CommandHeader({
-    required this.pulseAnim, required this.shimmerAnim,
-    required this.onRefresh, this.lastUpdated,
+  final bool isOnline;
+  final VoidCallback onRefresh;
+  const _Header({
+    required this.pulseCtrl, required this.lastUpdated,
+    required this.isOnline, required this.onRefresh,
   });
 
   @override
@@ -326,56 +428,62 @@ class _CommandHeader extends StatelessWidget {
     final timeStr = lastUpdated != null
         ? DateFormat('HH:mm').format(lastUpdated!)
         : '--:--';
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('COMMAND CENTRE',
-                    style: TextStyle(
-                      color: t.accent, fontSize: 10,
-                      fontWeight: FontWeight.w800, letterSpacing: 2.0)),
+                Row(
+                  children: [
+                    Text('FLOOD COMMAND',
+                        style: TextStyle(
+                          color: t.accent, fontSize: 10,
+                          fontWeight: FontWeight.w800, letterSpacing: 2.5)),
+                    const SizedBox(width: 8),
+                    AnimatedBuilder(
+                      animation: pulseCtrl,
+                      builder: (_, __) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: (isOnline ? AppPalette.safe : AppPalette.critical)
+                              .withValues(alpha: 0.15 + pulseCtrl.value * 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          isOnline ? '● LIVE' : '○ OFFLINE',
+                          style: TextStyle(
+                            color: isOnline ? AppPalette.safe : AppPalette.critical,
+                            fontSize: 8, fontWeight: FontWeight.w800,
+                            letterSpacing: 1),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 2),
                 Text('Bihar Flood Intelligence',
                     style: TextStyle(
-                      color: t.textPrimary, fontSize: 22,
+                      color: t.textPrimary, fontSize: 21,
                       fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                const SizedBox(height: 4),
-                Row(children: [
-                  AnimatedBuilder(
-                    animation: pulseAnim,
-                    builder: (_, __) => Container(
-                      width: 6, height: 6,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppPalette.safe.withValues(alpha: pulseAnim.value),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Text('LIVE · Updated $timeStr',
-                      style: TextStyle(
-                        color: t.textSecondary, fontSize: 11,
-                        fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-                ]),
+                const SizedBox(height: 3),
+                Text('Updated $timeStr · WRD Bihar + GloFAS',
+                    style: TextStyle(
+                      color: t.textSecondary, fontSize: 10,
+                      fontWeight: FontWeight.w500)),
               ],
             ),
           ),
-          Row(children: [
-            IconButton(
-              onPressed: () => showPremiumThemeSheet(context),
-              icon: Icon(Icons.palette_outlined, color: t.accent, size: 22),
-              tooltip: 'Theme',
-            ),
-            IconButton(
-              onPressed: onRefresh,
-              icon: Icon(Icons.refresh_rounded, color: t.textSecondary, size: 22),
-              tooltip: 'Refresh',
-            ),
-          ]),
+          IconButton(
+            onPressed: () => showPremiumThemeSheet(context),
+            icon: Icon(Icons.palette_outlined, color: t.accent, size: 22),
+          ),
+          IconButton(
+            onPressed: onRefresh,
+            icon: Icon(Icons.refresh_rounded, color: t.textSecondary, size: 22),
+          ),
         ],
       ),
     );
@@ -383,151 +491,246 @@ class _CommandHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _HeroSection
+// _HeroGauge — animated wave gauge
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _HeroSection extends StatelessWidget {
-  final Animation<double> arcAnim;
-  final Animation<double> pulseAnim;
+class _HeroGauge extends StatelessWidget {
+  final Animation<double> gaugeAnim;
+  final AnimationController waveCtrl;
+  final AnimationController pulseCtrl;
+  final AnimationController countCtrl;
   final double overallRisk;
   final int critical, severe, moderate, safe, total, tickerIdx;
   final List<FloodData> alertCities;
+  final bool reduceMotion;
 
-  const _HeroSection({
-    required this.arcAnim, required this.pulseAnim,
+  const _HeroGauge({
+    required this.gaugeAnim, required this.waveCtrl,
+    required this.pulseCtrl, required this.countCtrl,
     required this.overallRisk, required this.critical,
     required this.severe, required this.moderate,
     required this.safe, required this.total,
     required this.alertCities, required this.tickerIdx,
+    required this.reduceMotion,
   });
 
-  Color _riskColor(double r) {
-    if (r >= 75) return AppPalette.critical;
-    if (r >= 50) return AppPalette.danger;
-    if (r >= 25) return AppPalette.warning;
+  Color get _gaugeColor {
+    if (overallRisk >= 75) return AppPalette.critical;
+    if (overallRisk >= 50) return AppPalette.danger;
+    if (overallRisk >= 25) return AppPalette.warning;
     return AppPalette.safe;
   }
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    final color = _riskColor(overallRisk);
+    final col = _gaugeColor;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       decoration: BoxDecoration(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: col.withValues(alpha: 0.20)),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.10),
-            blurRadius: 24, offset: const Offset(0, 6)),
+            color: col.withValues(alpha: 0.12),
+            blurRadius: 32, spreadRadius: -4, offset: const Offset(0, 8)),
         ],
       ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              AnimatedBuilder(
-                animation: arcAnim,
-                builder: (_, __) => SizedBox(
-                  width: 100, height: 100,
-                  child: CustomPaint(
-                    painter: _ArcGaugePainter(
-                      progress: (overallRisk / 100) * arcAnim.value,
-                      color: color,
-                      trackColor: t.stroke,
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('${overallRisk.toStringAsFixed(0)}%',
-                              style: TextStyle(
-                                color: color, fontSize: 22,
-                                fontWeight: FontWeight.w900)),
-                          Text('RISK',
-                              style: TextStyle(
-                                color: t.textSecondary, fontSize: 9,
-                                fontWeight: FontWeight.w700, letterSpacing: 1.5)),
-                        ],
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Wave gauge
+                SizedBox(
+                  width: 108,
+                  height: 108,
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([gaugeAnim, waveCtrl]),
+                    builder: (_, __) => CustomPaint(
+                      painter: _WaveGaugePainter(
+                        fillFraction: (overallRisk / 100) * gaugeAnim.value,
+                        wavePhase: reduceMotion ? 0 : waveCtrl.value * 2 * math.pi,
+                        color: col,
+                        trackColor: t.stroke,
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedBuilder(
+                              animation: countCtrl,
+                              builder: (_, __) => Text(
+                                '${(overallRisk * countCtrl.value).toStringAsFixed(0)}%',
+                                style: TextStyle(
+                                  color: col, fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -1),
+                              ),
+                            ),
+                            Text('RISK',
+                                style: TextStyle(
+                                  color: t.textSecondary, fontSize: 9,
+                                  fontWeight: FontWeight.w700, letterSpacing: 2)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _CountBadge('CRITICAL', critical, AppPalette.critical, t),
-                    const SizedBox(height: 6),
-                    _CountBadge('SEVERE',   severe,   AppPalette.danger,   t),
-                    const SizedBox(height: 6),
-                    _CountBadge('MODERATE', moderate, AppPalette.warning,  t),
-                    const SizedBox(height: 6),
-                    _CountBadge('SAFE',     safe,     AppPalette.safe,     t),
-                  ],
+                const SizedBox(width: 20),
+                // Risk breakdown
+                Expanded(
+                  child: Column(
+                    children: [
+                      _RiskRow('CRITICAL', critical, AppPalette.critical, countCtrl, t),
+                      const SizedBox(height: 8),
+                      _RiskRow('SEVERE',   severe,   AppPalette.danger,   countCtrl, t),
+                      const SizedBox(height: 8),
+                      _RiskRow('MODERATE', moderate, AppPalette.warning,  countCtrl, t),
+                      const SizedBox(height: 8),
+                      _RiskRow('SAFE',     safe,     AppPalette.safe,     countCtrl, t),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (alertCities.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              // Ticker
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 500),
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.3), end: Offset.zero,
+                    ).animate(anim),
+                    child: child,
+                  ),
+                ),
+                child: _TickerBanner(
+                  key: ValueKey(tickerIdx),
+                  city: alertCities[tickerIdx % alertCities.length],
+                  total: alertCities.length,
+                  pulseCtrl: pulseCtrl,
                 ),
               ),
             ],
-          ),
-          if (alertCities.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('$total stations monitored',
+                    style: TextStyle(
+                      color: t.textSecondary, fontSize: 11,
+                      fontWeight: FontWeight.w500)),
+                Text('Bihar · WRD',
+                    style: TextStyle(color: t.textSecondary, fontSize: 11)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Widget _RiskRow(String label, int count, Color color,
+    AnimationController ctrl, RiverColors t) {
+  return Row(
+    children: [
+      Container(
+        width: 10, height: 10,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: [
+            BoxShadow(color: color.withValues(alpha: 0.4),
+                blurRadius: 4, spreadRadius: 0),
+          ],
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(label,
+            style: TextStyle(
+              color: t.textSecondary, fontSize: 11,
+              fontWeight: FontWeight.w600)),
+      ),
+      AnimatedBuilder(
+        animation: ctrl,
+        builder: (_, __) => Text(
+          '${(count * ctrl.value).round()}',
+          style: TextStyle(
+            color: color, fontSize: 15,
+            fontWeight: FontWeight.w900),
+        ),
+      ),
+    ],
+  );
+}
+
+class _TickerBanner extends StatelessWidget {
+  final FloodData city;
+  final int total;
+  final AnimationController pulseCtrl;
+  const _TickerBanner({
+    super.key,
+    required this.city, required this.total, required this.pulseCtrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    final col = _riskCol(city.riskLevel);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [col.withValues(alpha: 0.10), col.withValues(alpha: 0.04)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: col.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          AnimatedBuilder(
+            animation: pulseCtrl,
+            builder: (_, __) => Container(
+              width: 7, height: 7,
               decoration: BoxDecoration(
-                color: t.chipBg,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppPalette.critical.withValues(alpha: 0.20)),
-              ),
-              child: Row(
-                children: [
-                  AnimatedBuilder(
-                    animation: pulseAnim,
-                    builder: (_, __) => Container(
-                      width: 6, height: 6,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppPalette.critical.withValues(alpha: pulseAnim.value),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.crisis_alert_rounded,
-                      color: AppPalette.critical, size: 13),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      alertCities[tickerIdx % alertCities.length].city,
-                      style: TextStyle(
-                        color: t.textPrimary, fontSize: 12,
-                        fontWeight: FontWeight.w700),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text('${alertCities.length} alert${alertCities.length == 1 ? '' : 's'}',
-                      style: const TextStyle(
-                        color: AppPalette.critical, fontSize: 10,
-                        fontWeight: FontWeight.w700)),
+                shape: BoxShape.circle,
+                color: col.withValues(alpha: 0.4 + pulseCtrl.value * 0.6),
+                boxShadow: [
+                  BoxShadow(
+                    color: col.withValues(alpha: pulseCtrl.value * 0.5),
+                    blurRadius: 6),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('$total stations monitored',
-                  style: TextStyle(
-                    color: t.textSecondary, fontSize: 11,
-                    fontWeight: FontWeight.w600)),
-              Text('Bihar · CWPRS',
-                  style: TextStyle(
-                    color: t.textSecondary, fontSize: 11)),
-            ],
+          ),
+          const SizedBox(width: 10),
+          Icon(Icons.crisis_alert_rounded, color: col, size: 14),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(city.city,
+                style: TextStyle(
+                  color: t.textPrimary, fontSize: 12,
+                  fontWeight: FontWeight.w700)),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: col.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text('$total alert${total == 1 ? '' : 's'}',
+                style: TextStyle(
+                  color: col, fontSize: 9,
+                  fontWeight: FontWeight.w800, letterSpacing: 0.5)),
           ),
         ],
       ),
@@ -535,376 +738,155 @@ class _HeroSection extends StatelessWidget {
   }
 }
 
-Widget _CountBadge(String label, int count, Color color, RiverColors t) =>
-    Row(
-      children: [
-        Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-        const SizedBox(width: 8),
-        Text(label,
-            style: TextStyle(
-              color: t.textSecondary, fontSize: 11,
-              fontWeight: FontWeight.w600)),
-        const Spacer(),
-        Text('$count',
-            style: TextStyle(
-              color: color, fontSize: 13,
-              fontWeight: FontWeight.w900)),
-      ],
-    );
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _ArcGaugePainter
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ArcGaugePainter extends CustomPainter {
-  final double progress;
+// Wave gauge painter
+class _WaveGaugePainter extends CustomPainter {
+  final double fillFraction;
+  final double wavePhase;
   final Color color;
   final Color trackColor;
-  const _ArcGaugePainter({
-    required this.progress, required this.color, required this.trackColor,
+  const _WaveGaugePainter({
+    required this.fillFraction, required this.wavePhase,
+    required this.color, required this.trackColor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    final r  = (size.width / 2) - 8;
-    const startAngle = -math.pi * 0.8;
-    const sweepTotal = math.pi * 1.6;
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
-      ..strokeCap = StrokeCap.round;
-    paint.color = trackColor;
-    canvas.drawArc(
-        Rect.fromCircle(center: Offset(cx, cy), radius: r),
-        startAngle, sweepTotal, false, paint);
-    paint.color = color;
-    canvas.drawArc(
-        Rect.fromCircle(center: Offset(cx, cy), radius: r),
-        startAngle, sweepTotal * progress, false, paint);
+    final r  = math.min(cx, cy) - 4;
+
+    // Track circle
+    canvas.drawCircle(
+      Offset(cx, cy), r,
+      Paint()..color = trackColor..style = PaintingStyle.fill,
+    );
+
+    // Wave fill clipped to circle
+    final clipPath = Path()..addOval(Rect.fromCircle(center: Offset(cx, cy), radius: r));
+    canvas.save();
+    canvas.clipPath(clipPath);
+
+    final fillY = size.height * (1 - fillFraction);
+    const waveAmp = 6.0;
+    final wavePath = Path();
+    wavePath.moveTo(0, size.height);
+    wavePath.lineTo(0, fillY);
+    for (double x = 0; x <= size.width; x++) {
+      final y = fillY + math.sin((x / size.width) * 2 * math.pi + wavePhase) * waveAmp;
+      wavePath.lineTo(x, y);
+    }
+    wavePath.lineTo(size.width, size.height);
+    wavePath.close();
+
+    canvas.drawPath(
+      wavePath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.withValues(alpha: 0.7), color.withValues(alpha: 0.9)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
+    );
+    canvas.restore();
+
+    // Border ring
+    canvas.drawCircle(
+      Offset(cx, cy), r,
+      Paint()
+        ..color = color.withValues(alpha: 0.30)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
   }
 
   @override
-  bool shouldRepaint(_ArcGaugePainter old) =>
-      old.progress != progress || old.color != color;
+  bool shouldRepaint(_WaveGaugePainter old) =>
+      old.fillFraction != fillFraction || old.wavePhase != wavePhase || old.color != color;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _QuickAccessGrid
+// _QuickGrid
 // ─────────────────────────────────────────────────────────────────────────────
+class _QuickGrid extends StatelessWidget {
+  final AnimationController entryCtrl;
+  const _QuickGrid({required this.entryCtrl});
 
-class _QuickAccessGrid extends StatelessWidget {
-  final BuildContext context;
-  const _QuickAccessGrid({required this.context});
+  static const _items = [
+    (label: 'Live Stations', icon: Icons.sensors_rounded,        color: AppPalette.cyan,     route: '/live_stations'),
+    (label: 'Monitors',      icon: Icons.monitor_heart_rounded,  color: AppPalette.safe,     route: '/monitors'),
+    (label: 'Predict',       icon: Icons.model_training_rounded, color: AppPalette.gold,     route: '/predict'),
+    (label: 'Alerts',        icon: Icons.notifications_rounded,  color: AppPalette.critical, route: '/alerts'),
+    (label: 'State Matrix',  icon: Icons.grid_view_rounded,      color: AppPalette.warning,  route: '/state_matrix'),
+    (label: 'Weather',       icon: Icons.cloud_rounded,          color: AppPalette.cyan,     route: '/weather'),
+  ];
 
   @override
-  Widget build(BuildContext _) {
+  Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    final items = [
-      _QA('Live Stations', Icons.sensors_rounded,       AppPalette.cyan,     '/live_stations'),
-      _QA('Monitors',      Icons.monitor_heart_rounded, AppPalette.safe,     '/monitors'),
-      _QA('Predict',       Icons.model_training_rounded,AppPalette.gold,     '/predict'),
-      _QA('Alerts',        Icons.notifications_rounded, AppPalette.critical, '/alerts'),
-      _QA('State Matrix',  Icons.grid_view_rounded,     AppPalette.warning,  '/state_matrix'),
-      _QA('Weather',       Icons.cloud_rounded,         AppPalette.cyan,     '/weather'),
-    ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: GridView.count(
-        crossAxisCount: 3,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 1.15,
-        children: items.map((q) => GestureDetector(
-          onTap: () => Navigator.pushNamed(context, q.route),
-          child: Container(
-            decoration: BoxDecoration(
-              color: t.cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: q.color.withValues(alpha: 0.20)),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(q.icon, color: q.color, size: 26),
-                const SizedBox(height: 6),
-                Text(q.label,
-                    style: TextStyle(
-                      color: t.textPrimary, fontSize: 10,
-                      fontWeight: FontWeight.w700),
-                    textAlign: TextAlign.center),
-              ],
-            ),
-          ),
-        )).toList(),
-      ),
-    );
-  }
-}
-
-class _QA {
-  final String label, route;
-  final IconData icon;
-  final Color color;
-  const _QA(this.label, this.icon, this.color, this.route);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _SectionHeader
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SectionHeader extends StatelessWidget {
-  final String title, sub;
-  final IconData icon;
-  final Color color;
-  const _SectionHeader({
-    required this.title, required this.sub,
-    required this.icon, required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color.withValues(alpha: 0.12),
-              border: Border.all(color: color.withValues(alpha: 0.25)),
-            ),
-            child: Icon(icon, color: color, size: 14),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: TextStyle(
-                    color: t.textPrimary, fontSize: 14,
-                    fontWeight: FontWeight.w800)),
-              Text(sub,
-                  style: TextStyle(
-                    color: t.textSecondary, fontSize: 10)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _RiverPulseCard
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _RiverPulseCard extends StatelessWidget {
-  final FloodData data;
-  final Animation<double> pulseAnim;
-  const _RiverPulseCard({required this.data, required this.pulseAnim});
-
-  Color _levelColor(String lvl) {
-    switch (lvl) {
-      case 'CRITICAL': return AppPalette.critical;
-      case 'SEVERE':   return AppPalette.danger;
-      case 'MODERATE': return AppPalette.warning;
-      default:         return AppPalette.safe;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t     = RiverColors.of(context);
-    final color = _levelColor(data.riskLevel);
-    final pct   = data.capacityPercent.clamp(0.0, 100.0);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withValues(alpha: 0.20)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              AnimatedBuilder(
-                animation: pulseAnim,
-                builder: (_, __) => Container(
-                  width: 8, height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: data.riskLevel == 'CRITICAL'
-                        ? color.withValues(alpha: pulseAnim.value)
-                        : color,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(data.city,
-                    style: TextStyle(
-                      color: t.textPrimary, fontSize: 13,
-                      fontWeight: FontWeight.w800)),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: color.withValues(alpha: 0.30)),
-                ),
-                child: Text(data.riskLevel,
-                    style: TextStyle(
-                      color: color, fontSize: 9,
-                      fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-              ),
-            ],
-          ),
-          if (data.riverName != null && data.riverName!.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(data.riverName!,
-                style: TextStyle(
-                  color: t.textSecondary, fontSize: 10)),
-          ],
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: pct / 100,
-              backgroundColor: t.stroke,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-              minHeight: 5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('${pct.toStringAsFixed(1)}% capacity',
-                  style: TextStyle(
-                    color: color, fontSize: 11,
-                    fontWeight: FontWeight.w700)),
-              Text(data.state,
-                  style: TextStyle(
-                    color: t.textSecondary, fontSize: 10)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _HotspotCarousel
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _HotspotCarousel extends StatelessWidget {
-  final List<FloodData> items;
-  final Animation<double> pulseAnim;
-  const _HotspotCarousel({required this.items, required this.pulseAnim});
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: RiverColors.of(context).cardBg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: AppPalette.safe.withValues(alpha: 0.20)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.check_circle_outline_rounded,
-                  color: AppPalette.safe, size: 18),
-              SizedBox(width: 10),
-              Text('No active hotspots',
-                  style: TextStyle(
-                    color: AppPalette.safe,
-                    fontSize: 13, fontWeight: FontWeight.w700)),
-            ],
-          ),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 1.1,
         ),
-      );
-    }
-    return SizedBox(
-      height: 110,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: items.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemCount: _items.length,
         itemBuilder: (ctx, i) {
-          final d   = items[i];
-          final t   = RiverColors.of(ctx);
-          final col = d.riskLevel == 'CRITICAL'
-              ? AppPalette.critical
-              : AppPalette.danger;
-          return Container(
-            width: 140,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: t.cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: col.withValues(alpha: 0.30)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    AnimatedBuilder(
-                      animation: pulseAnim,
-                      builder: (_, __) => Container(
-                        width: 7, height: 7,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: col.withValues(alpha: pulseAnim.value),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(d.riskLevel,
-                          style: TextStyle(
-                            color: col, fontSize: 9,
-                            fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-                    ),
+          final item = _items[i];
+          return AnimatedBuilder(
+            animation: entryCtrl,
+            builder: (_, child) {
+              final delay = i * 0.08;
+              final t2 = ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+              return Opacity(
+                opacity: t2,
+                child: Transform.translate(
+                  offset: Offset(0, 16 * (1 - t2)),
+                  child: child,
+                ),
+              );
+            },
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.pushNamed(context, item.route);
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: t.cardBg,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: item.color.withValues(alpha: 0.18)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: item.color.withValues(alpha: 0.06),
+                      blurRadius: 12, offset: const Offset(0, 4)),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(d.city,
-                    style: TextStyle(
-                      color: t.textPrimary, fontSize: 12,
-                      fontWeight: FontWeight.w800),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(d.riverName ?? d.state,
-                    style: TextStyle(
-                      color: t.textSecondary, fontSize: 10),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                const Spacer(),
-                Text('${d.capacityPercent.toStringAsFixed(0)}% full',
-                    style: TextStyle(
-                      color: col, fontSize: 11,
-                      fontWeight: FontWeight.w700)),
-              ],
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: item.color.withValues(alpha: 0.12),
+                      ),
+                      child: Icon(item.icon, color: item.color, size: 22),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(item.label,
+                        style: TextStyle(
+                          color: t.textPrimary, fontSize: 9.5,
+                          fontWeight: FontWeight.w700),
+                        textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
             ),
           );
         },
@@ -914,166 +896,481 @@ class _HotspotCarousel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _RainfallForecastStrip
+// _CollapsibleSection
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _RainfallForecastStrip extends StatelessWidget {
-  final List<FloodData> data;
-  const _RainfallForecastStrip({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    final chips = data.take(6).map((d) {
-      final mm = (d.capacityPercent * 0.8).toStringAsFixed(0);
-      return _RFChip(city: d.city, mm: mm, color: t.accent);
-    }).toList();
-    return SizedBox(
-      height: 70,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: chips.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) => chips[i],
-      ),
-    );
-  }
-}
-
-class _RFChip extends StatelessWidget {
-  final String city, mm;
+class _CollapsibleSection extends StatelessWidget {
+  final String sectionKey, title, subtitle;
+  final IconData icon;
   final Color color;
-  const _RFChip({required this.city, required this.mm, required this.color});
+  final bool collapsed;
+  final VoidCallback onToggle;
+  final Widget child;
+
+  const _CollapsibleSection({
+    required this.sectionKey, required this.title, required this.subtitle,
+    required this.icon, required this.color,
+    required this.collapsed, required this.onToggle, required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.20)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.grain_rounded, color: color, size: 16),
-          const SizedBox(height: 4),
-          Text('$mm mm',
-              style: TextStyle(
-                color: t.textPrimary, fontSize: 11,
-                fontWeight: FontWeight.w700)),
-          Text(city,
-              style: TextStyle(color: t.textSecondary, fontSize: 9),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-        ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header row — tappable
+        InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color.withValues(alpha: 0.12),
+                  ),
+                  child: Icon(icon, color: color, size: 15),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: TextStyle(
+                            color: t.textPrimary, fontSize: 13.5,
+                            fontWeight: FontWeight.w800)),
+                      Text(subtitle,
+                          style: TextStyle(
+                            color: t.textSecondary, fontSize: 10)),
+                    ],
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: collapsed ? 0 : 0.5,
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(Icons.keyboard_arrow_down_rounded,
+                      color: t.textSecondary, size: 20),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Content
+        AnimatedSize(
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          child: collapsed
+              ? const SizedBox.shrink()
+              : child,
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _AnimatedRiverCard
+// ─────────────────────────────────────────────────────────────────────────────
+class _AnimatedRiverCard extends StatelessWidget {
+  final FloodData data;
+  final int index;
+  final AnimationController entryCtrl;
+  final AnimationController pulseCtrl;
+  final bool reduceMotion;
+
+  const _AnimatedRiverCard({
+    required this.data, required this.index,
+    required this.entryCtrl, required this.pulseCtrl,
+    required this.reduceMotion,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t   = RiverColors.of(context);
+    final col = _riskCol(data.riskLevel);
+    final pct = data.capacityPercent.clamp(0.0, 100.0);
+
+    return AnimatedBuilder(
+      animation: entryCtrl,
+      builder: (_, child) {
+        final delay = (index * 0.06).clamp(0.0, 0.6);
+        final progress = ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+        return Opacity(
+          opacity: progress,
+          child: Transform.translate(
+            offset: Offset(24 * (1 - progress), 0),
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: () => Navigator.pushNamed(
+          context, '/city_detail',
+          arguments: data,
+        ),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          decoration: BoxDecoration(
+            color: t.cardBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: col.withValues(alpha: 0.18)),
+            boxShadow: [
+              BoxShadow(
+                color: col.withValues(alpha: 0.06),
+                blurRadius: 12, offset: const Offset(0, 3)),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    // Animated dot
+                    AnimatedBuilder(
+                      animation: pulseCtrl,
+                      builder: (_, __) {
+                        final glow = data.riskLevel == 'CRITICAL' || data.riskLevel == 'SEVERE';
+                        return Container(
+                          width: 9, height: 9,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: glow
+                                ? col.withValues(alpha: 0.5 + pulseCtrl.value * 0.5)
+                                : col,
+                            boxShadow: glow ? [
+                              BoxShadow(
+                                color: col.withValues(alpha: pulseCtrl.value * 0.6),
+                                blurRadius: 8),
+                            ] : null,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(data.city,
+                          style: TextStyle(
+                            color: t.textPrimary, fontSize: 13,
+                            fontWeight: FontWeight.w800)),
+                    ),
+                    // Risk pill
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: col.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: col.withValues(alpha: 0.25)),
+                      ),
+                      child: Text(data.riskLevel,
+                          style: TextStyle(
+                            color: col, fontSize: 9,
+                            fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                    ),
+                  ],
+                ),
+                if (data.riverName != null && data.riverName!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(data.riverName!,
+                      style: TextStyle(
+                        color: t.textSecondary, fontSize: 10)),
+                ],
+                const SizedBox(height: 10),
+                // Animated progress bar
+                LayoutBuilder(
+                  builder: (ctx, constraints) {
+                    return Container(
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: t.stroke,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: AnimatedBuilder(
+                        animation: entryCtrl,
+                        builder: (_, __) {
+                          final delay = (index * 0.06).clamp(0.0, 0.6);
+                          final p = ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+                          return FractionallySizedBox(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: (pct / 100) * p,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(3),
+                                gradient: LinearGradient(
+                                  colors: [col.withValues(alpha: 0.7), col],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('${pct.toStringAsFixed(1)}% capacity',
+                        style: TextStyle(
+                          color: col, fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                    Text(data.state,
+                        style: TextStyle(
+                          color: t.textSecondary, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _AlertActivityLog
+// _HotspotPageView — swipeable cards with parallax
 // ─────────────────────────────────────────────────────────────────────────────
+class _HotspotPageView extends StatefulWidget {
+  final List<FloodData> items;
+  final AnimationController pulseCtrl;
+  const _HotspotPageView({required this.items, required this.pulseCtrl});
+  @override
+  State<_HotspotPageView> createState() => _HotspotPageViewState();
+}
 
-class _AlertActivityLog extends StatelessWidget {
-  final List<FloodData> data;
-  const _AlertActivityLog({required this.data});
+class _HotspotPageViewState extends State<_HotspotPageView> {
+  late final PageController _pageCtrl;
+  double _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageCtrl = PageController(viewportFraction: 0.72)
+      ..addListener(() {
+        if (mounted) setState(() => _page = _pageCtrl.page ?? 0);
+      });
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    if (data.isEmpty) {
+    if (widget.items.isEmpty) {
+      final t = RiverColors.of(context);
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: t.cardBg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: t.stroke),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppPalette.safe.withValues(alpha: 0.20)),
           ),
-          child: Text('No recent alert activity',
-              style: TextStyle(color: t.textSecondary, fontSize: 12)),
+          child: const Row(
+            children: [
+              Icon(Icons.check_circle_outline_rounded, color: AppPalette.safe, size: 18),
+              SizedBox(width: 10),
+              Text('No active hotspots',
+                  style: TextStyle(color: AppPalette.safe, fontSize: 13,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
         ),
       );
     }
+    return SizedBox(
+      height: 130,
+      child: PageView.builder(
+        controller: _pageCtrl,
+        itemCount: widget.items.length,
+        itemBuilder: (ctx, i) {
+          final d   = widget.items[i];
+          final t   = RiverColors.of(ctx);
+          final col = _riskCol(d.riskLevel);
+          final diff = (_page - i).abs();
+          final scale = 1.0 - diff * 0.05;
+          return Transform.scale(
+            scale: scale.clamp(0.9, 1.0),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: t.cardBg,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: col.withValues(alpha: 0.30)),
+                boxShadow: [
+                  BoxShadow(
+                    color: col.withValues(alpha: 0.12),
+                    blurRadius: 16, offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      AnimatedBuilder(
+                        animation: widget.pulseCtrl,
+                        builder: (_, __) => Container(
+                          width: 7, height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: col.withValues(
+                              alpha: 0.4 + widget.pulseCtrl.value * 0.6),
+                            boxShadow: [
+                              BoxShadow(
+                                color: col.withValues(
+                                  alpha: widget.pulseCtrl.value * 0.5),
+                                blurRadius: 6),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: col.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(d.riskLevel,
+                            style: TextStyle(
+                              color: col, fontSize: 8,
+                              fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(d.city,
+                      style: TextStyle(
+                        color: t.textPrimary, fontSize: 14,
+                        fontWeight: FontWeight.w900),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(d.riverName ?? d.state,
+                      style: TextStyle(
+                        color: t.textSecondary, fontSize: 10),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const Spacer(),
+                  // Mini bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: d.capacityPercent / 100,
+                      backgroundColor: t.stroke,
+                      valueColor: AlwaysStoppedAnimation(col),
+                      minHeight: 4,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('${d.capacityPercent.toStringAsFixed(0)}% capacity',
+                      style: TextStyle(
+                        color: col, fontSize: 10,
+                        fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _RainfallBars — animated bar chart for rainfall estimate
+// ─────────────────────────────────────────────────────────────────────────────
+class _RainfallBars extends StatelessWidget {
+  final List<FloodData> data;
+  final Animation<double> gaugeAnim;
+  final bool reduceMotion;
+  const _RainfallBars({
+    required this.data, required this.gaugeAnim, required this.reduceMotion,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t    = RiverColors.of(context);
+    final items = data.take(8).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
         decoration: BoxDecoration(
           color: t.cardBg,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: t.stroke),
         ),
         child: Column(
-          children: data.take(5).map((d) {
-            final col = d.riskLevel == 'CRITICAL'
-                ? AppPalette.critical
-                : AppPalette.danger;
-            return ListTile(
-              dense: true,
-              leading: Icon(Icons.crisis_alert_rounded, color: col, size: 18),
-              title: Text(d.city,
-                  style: TextStyle(
-                    color: t.textPrimary, fontSize: 12,
-                    fontWeight: FontWeight.w700)),
-              subtitle: Text('${d.riskLevel} · ${d.capacityPercent.toStringAsFixed(0)}%',
-                  style: TextStyle(color: t.textSecondary, fontSize: 10)),
-              trailing: Text(d.riverName ?? '',
-                  style: TextStyle(color: t.textSecondary, fontSize: 10)),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _SystemStatsBar
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SystemStatsBar extends StatelessWidget {
-  final RealTimeService service;
-  final Animation<double> pulseAnim;
-  const _SystemStatsBar({required this.service, required this.pulseAnim});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    final isOnline = service.isOnline;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: t.cardBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.stroke),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _StatChip(
-              label: 'Status',
-              value: isOnline ? 'LIVE' : 'OFFLINE',
-              color: isOnline ? AppPalette.safe : AppPalette.critical,
-              t: t,
-            ),
-            _StatChip(
-              label: 'Stations',
-              value: '${service.liveLevels.length}',
-              color: t.accent,
-              t: t,
-            ),
-            _StatChip(
-              label: 'Critical',
-              value: '${service.criticalCount}',
-              color: AppPalette.critical,
-              t: t,
+            Text('24h Estimated Rainfall',
+                style: TextStyle(
+                  color: t.textSecondary, fontSize: 10,
+                  fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 80,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: items.asMap().entries.map((e) {
+                  final i   = e.key;
+                  final d   = e.value;
+                  final mm  = (d.effectiveRainfallMm).clamp(0.0, 80.0);
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          AnimatedBuilder(
+                            animation: gaugeAnim,
+                            builder: (_, __) {
+                              final frac = reduceMotion ? 1.0
+                                  : ((gaugeAnim.value - i * 0.06).clamp(0.0, 1.0));
+                              final h = (mm / 80) * 56 * frac;
+                              return Container(
+                                width: double.infinity,
+                                height: h.clamp(3.0, 56.0),
+                                decoration: BoxDecoration(
+                                  borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(4)),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                      t.accent.withValues(alpha: 0.8),
+                                      t.accent.withValues(alpha: 0.4),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 4),
+                          Text(d.city.substring(0, math.min(3, d.city.length)),
+                              style: TextStyle(
+                                color: t.textSecondary, fontSize: 8),
+                              textAlign: TextAlign.center),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
             ),
           ],
         ),
@@ -1082,107 +1379,101 @@ class _SystemStatsBar extends StatelessWidget {
   }
 }
 
-class _StatChip extends StatelessWidget {
-  final String label, value;
-  final Color color;
-  final RiverColors t;
-  const _StatChip({
-    required this.label, required this.value,
-    required this.color, required this.t,
-  });
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Text(value,
-          style: TextStyle(
-            color: color, fontSize: 16,
-            fontWeight: FontWeight.w900)),
-      Text(label,
-          style: TextStyle(
-            color: t.textSecondary, fontSize: 10,
-            fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-    ],
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// _FooterStatsBar
+// _AnimatedBarChart — staggered animated bars
 // ─────────────────────────────────────────────────────────────────────────────
+class _AnimatedBarChart extends StatelessWidget {
+  final List<double> values;
+  final List<String> labels;
+  final List<Color>  colors;
+  final AnimationController entryCtrl;
+  final bool reduceMotion;
 
-class _FooterStatsBar extends StatelessWidget {
-  final int totalStations, riversCount, statesAtRisk;
-  final DateTime? lastUpdated;
-  const _FooterStatsBar({
-    required this.totalStations, required this.riversCount,
-    required this.statesAtRisk, this.lastUpdated,
+  const _AnimatedBarChart({
+    required this.values, required this.labels,
+    required this.colors, required this.entryCtrl,
+    required this.reduceMotion,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
+    if (values.isEmpty) return const SizedBox.shrink();
+    final maxVal = values.reduce(math.max).clamp(1.0, double.infinity);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
         decoration: BoxDecoration(
           color: t.cardBg,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: t.stroke),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _FooterStat('$totalStations', 'Stations', t),
-            _FooterStat('$riversCount',   'Rivers',   t),
-            _FooterStat('$statesAtRisk',  'At Risk',  t),
-          ],
+        child: SizedBox(
+          height: 120,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: values.asMap().entries.map((e) {
+              final i   = e.key;
+              final val = e.value;
+              final col = colors.length > i ? colors[i] : t.accent;
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      AnimatedBuilder(
+                        animation: entryCtrl,
+                        builder: (_, __) {
+                          final delay = (i * 0.05).clamp(0.0, 0.7);
+                          final p = reduceMotion ? 1.0
+                              : ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+                          final h = (val / maxVal) * 80 * p;
+                          return Container(
+                            width: double.infinity,
+                            height: h.clamp(2.0, 80.0),
+                            decoration: BoxDecoration(
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(5)),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  col,
+                                  col.withValues(alpha: 0.6),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        labels.length > i
+                            ? labels[i].substring(0, math.min(3, labels[i].length))
+                            : '',
+                        style: TextStyle(
+                          color: t.textSecondary, fontSize: 8),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
   }
 }
 
-Widget _FooterStat(String val, String lbl, RiverColors t) => Column(
-  children: [
-    Text(val,
-        style: TextStyle(
-          color: t.textPrimary, fontSize: 18,
-          fontWeight: FontWeight.w900)),
-    Text(lbl,
-        style: TextStyle(
-          color: t.textSecondary, fontSize: 10,
-          fontWeight: FontWeight.w600)),
-  ],
-);
-
 // ─────────────────────────────────────────────────────────────────────────────
-// _EmptyState
+// _AnimatedAreaChart — smooth animated area with gradient fill
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(40),
-      child: Column(
-        children: [
-          Icon(Icons.water_drop_outlined,
-              color: t.textSecondary, size: 48),
-          const SizedBox(height: 16),
-          Text('No data available',
-              style: TextStyle(
-                color: t.textPrimary, fontSize: 16,
-                fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('Pull to refresh or check your connection',
-              style: TextStyle(
-                color: t.textSecondary, fontSize: 12),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
-}
+class _AnimatedAreaChart extends StatelessWidget {
+  final List<double> values;
+  final List<String> labels;
+  final Animation<double> gaugeAnim;
+  
