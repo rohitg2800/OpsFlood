@@ -212,7 +212,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 )),
                 SliverToBoxAdapter(child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: OpsBarChart(data: data),
+                  child: OpsBarChart(
+                    values: data.map((d) => d.capacityPercent).toList(),
+                    labels: data.map((d) => d.city).toList(),
+                  ),
                 )),
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Trend Analysis',
@@ -222,7 +225,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 )),
                 SliverToBoxAdapter(child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: OpsAreaChart(data: data),
+                  child: OpsAreaChart(
+                    values: data.map((d) => d.capacityPercent).toList(),
+                    labels: data.map((d) => d.city).toList(),
+                  ),
                 )),
                 SliverToBoxAdapter(child: _SectionHeader(
                   title: 'Alert Activity Log',
@@ -424,7 +430,6 @@ class _HeroSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              // Arc gauge
               AnimatedBuilder(
                 animation: arcAnim,
                 builder: (_, __) => SizedBox(
@@ -454,7 +459,6 @@ class _HeroSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 20),
-              // Count badges
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -921,7 +925,6 @@ class _RainfallForecastStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    // Generate simple forecast chips from live data
     final chips = data.take(6).map((d) {
       final mm = (d.capacityPercent * 0.8).toStringAsFixed(0);
       return _RFChip(city: d.city, mm: mm, color: t.accent);
