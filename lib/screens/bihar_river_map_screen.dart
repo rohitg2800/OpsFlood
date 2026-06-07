@@ -1,19 +1,10 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v9.1 — all compile errors fixed
+// BiharRiverMapScreen v9.2 — all compile errors fixed
 //
 // Fixes applied (no other files changed):
-//  • RiverTheme.of → RiverColors.of
-//  • floodDataProvider → liveLevelsProvider
-//  • alertsAsync.valueOrNull → alertsAsync.cwcAlerts
-//  • cwcAsync.valueOrNull → cwcAsync.value ?? []
-//  • a.stationId → a.cityId
-//  • ThresholdAlert.fromFloodStatus → _makeAlert() inline factory
-//  • alert.requiresEmergency → alert.level.requiresEmergency
-//  • FloodSeverity.rank() → FloodSeverity.fromString().index
-//  • FloodSeverity.districtColor() → FloodSeverity.fromString().color
-//  • CityDetailScreen(city:) → CityDetailScreen(cityName:)
-//  • pred.nextPeakLevel/trend/confidence/sparkline6h → computed properties
-//  • Path name collision with latlong2 → renamed local to linePath
+//  • fd.river → fd.riverName (FloodData exposes riverName, not river)
+//  • cwcAsync.value typed as List<CwcStation> to fix Object? inference on
+//    siteName / lat / lng and the List<dynamic> ≠ List<Marker> cascade
 library;
 
 import 'dart:math' as math;
@@ -232,23 +223,17 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
 
   // Returns the ThresholdAlert for a station (falls back to FloodData.status)
   ThresholdAlert _alertForStation(FloodData fd, List<ThresholdAlert> allAlerts) {
-    // FIX: field is cityId, not stationId
     final match = allAlerts.where((a) => a.cityId == fd.city).firstOrNull;
     if (match != null) return match;
-    // FIX: ThresholdAlert.fromFloodStatus doesn't exist → use inline factory
     return _makeAlert(fd.city, fd.status);
   }
 
   @override
   Widget build(BuildContext context) {
-    // FIX: RiverColors.of, not RiverTheme.of
     final t           = RiverColors.of(context);
-    // FIX: liveLevelsProvider, not floodDataProvider
     final floodList   = ref.watch(liveLevelsProvider);
-    // FIX: AlertsState is plain state, not AsyncValue — access .cwcAlerts directly
     final alertsState = ref.watch(alertsProvider);
     final geoAsync    = ref.watch(biharGeoJsonProvider);
-    // FIX: AsyncValue.value (nullable), not .valueOrNull (removed in Riverpod 3)
     final cwcAsync    = ref.watch(cwcStationsProvider);
 
     final allAlerts = alertsState.cwcAlerts;
@@ -265,7 +250,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
       if (d.isEmpty) continue;
       districtStations.putIfAbsent(d, () => []).add(fd);
       final cur = districtData[d];
-      // FIX: FloodSeverity.rank() doesn't exist → use FloodSeverity.fromString().index
       if (cur == null ||
           FloodSeverity.fromString(fd.status).index >
           FloodSeverity.fromString(cur.status).index) {
@@ -274,25 +258,26 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
     }
 
     // River → worst AlertLevel
+    // FIX v9.2: fd.riverName (not fd.river — FloodData field is riverName)
     final Map<String, AlertLevel> riverAlertMap = {};
     for (final fd in biharStations) {
-      final river = fd.river ?? BiharStationRegistry.forSite(fd.city)?.river;
-      if (river == null) continue;
+      final river = fd.riverName ?? BiharStationRegistry.forSite(fd.city)?.river;
+      if (river == null || river.isEmpty) continue;
       final lvl = _alertForStation(fd, allAlerts).level;
       final cur = riverAlertMap[river] ?? AlertLevel.normal;
       if (lvl.index > cur.index) riverAlertMap[river] = lvl;
     }
 
     // CWC-only stations (stations in CWC data but not in FloodData)
-    // FIX: .value instead of .valueOrNull
-    final cwcStations = cwcAsync.value ?? <CwcStation>[];
+    // FIX v9.2: explicit List<CwcStation> so Dart infers siteName/lat/lng correctly
+    final List<CwcStation> cwcStations =
+        cwcAsync.value?.cast<CwcStation>() ?? const <CwcStation>[];
     final biharCitySet = biharStations.map((fd) => fd.city.toLowerCase()).toSet();
-    final cwcOnly = cwcStations
+    final List<CwcStation> cwcOnly = cwcStations
         .where((s) => !biharCitySet.contains(s.siteName.toLowerCase()))
         .toList();
 
     final alertCount = biharStations
-        // FIX: alert.level.requiresEmergency, not alert.requiresEmergency
         .where((fd) => _alertForStation(fd, allAlerts).level.requiresEmergency)
         .length;
 
@@ -403,7 +388,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                 MarkerLayer(
                   markers: cwcOnly
                     .where((s) => s.lat != null && s.lng != null)
-                    .map((s) {
+                    .map<Marker>((s) {
                       return Marker(
                         point: LatLng(s.lat!, s.lng!),
                         width: 18, height: 18,
@@ -428,7 +413,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                     final coords  = _coordsFor(fd)!;
                     final alert   = _alertForStation(fd, allAlerts);
                     final col     = _alertLevelColor(alert.level);
-                    // FIX: alert.level.requiresEmergency
                     final isPulse = alert.level.requiresEmergency;
                     return Marker(
                       point: coords,
@@ -560,7 +544,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                   onClose:    _clearSelection,
                   onOpenDetail: () {
                     Navigator.push(context, MaterialPageRoute(
-                      // FIX: param is cityName, not city
                       builder: (_) => CityDetailScreen(cityName: _selected!.city)));
                   },
                 ),
@@ -654,7 +637,6 @@ class _DistrictLayerState extends State<_DistrictLayer> {
       final geom  = f['geometry'] as Map<String, dynamic>? ?? {};
       final type  = geom['type'] as String? ?? '';
       final worst = widget.districtData[name];
-      // FIX: FloodSeverity.districtColor() doesn't exist → use .fromString().color
       final fill  = FloodSeverity.fromString(worst?.status).color;
       final isSelected = name == widget.selectedDistrict;
 
@@ -766,7 +748,6 @@ class _StationSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // FIX: RiverColors.of
     final t         = RiverColors.of(context);
     final col       = _alertLevelColor(alertLevel.level);
     final predAsync = ref.watch(predictionProvider(data.city));
@@ -809,10 +790,11 @@ class _StationSheet extends ConsumerWidget {
                         Text(data.city,
                           style: TextStyle(color: t.textPrimary,
                               fontSize: 18, fontWeight: FontWeight.w800)),
-                        if (meta?.river != null)
-                          Text(meta!.river!,
+                        // FIX v9.2: use riverName
+                        if (data.riverName != null)
+                          Text(data.riverName!,
                             style: TextStyle(
-                                color: _riverColor(meta!.river),
+                                color: _riverColor(data.riverName),
                                 fontSize: 12, fontWeight: FontWeight.w600)),
                         if (meta?.district != null)
                           Text(meta!.district!,
@@ -861,7 +843,7 @@ class _StationSheet extends ConsumerWidget {
                 const SizedBox(height: 12),
 
                 // ── fill-percent bar ────────────────────────────────────
-                if (alertLevel.fillPercent > 0) ...[ 
+                if (alertLevel.fillPercent > 0) ...[
                   Row(children: [
                     Text('Fill', style: TextStyle(
                         color: t.textSecondary, fontSize: 11)),
@@ -947,7 +929,6 @@ class _StationSheet extends ConsumerWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Prediction panel
-// FIX: pred.nextPeakLevel/trend/confidence/sparkline6h computed from real fields
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PredictionPanel extends StatelessWidget {
@@ -955,7 +936,6 @@ class _PredictionPanel extends StatelessWidget {
   final dynamic         t;
   const _PredictionPanel({required this.pred, required this.t});
 
-  // Computed properties from existing FloodPrediction fields
   double? get _nextPeakLevel {
     if (pred.next24h.isEmpty) return null;
     return pred.next24h.map((p) => p.level).reduce(math.max);
@@ -975,10 +955,7 @@ class _PredictionPanel extends StatelessWidget {
 
   List<double>? get _sparkline6h {
     if (pred.next24h.length < 2) return null;
-    return pred.next24h
-        .take(6)
-        .map((p) => p.level)
-        .toList();
+    return pred.next24h.take(6).map((p) => p.level).toList();
   }
 
   @override
@@ -1043,7 +1020,6 @@ class _PredictionPanel extends StatelessWidget {
               ),
             ),
           ],
-          // 6 h sparkline
           if (spark != null && spark.length > 1) ...[
             const SizedBox(height: 8),
             SizedBox(
@@ -1081,7 +1057,6 @@ class _PredStat extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline painter
-// FIX: renamed local var from `path` to `linePath` to avoid latlong2.Path conflict
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SparklinePainter extends CustomPainter {
@@ -1097,7 +1072,6 @@ class _SparklinePainter extends CustomPainter {
     final rng = (mx - mn).abs() < 0.01 ? 1.0 : mx - mn;
     final dx  = size.width / (values.length - 1);
 
-    // FIX: renamed from `path` → `linePath` to avoid latlong2.Path name collision
     final linePath = ui.Path();
     for (var i = 0; i < values.length; i++) {
       final x = i * dx;
@@ -1172,17 +1146,13 @@ class _DistrictSheet extends StatelessWidget {
   });
 
   ThresholdAlert _alert(FloodData fd) {
-    // FIX: field is cityId, not stationId
     final match = allAlerts.where((a) => a.cityId == fd.city).firstOrNull;
-    // FIX: inline factory
     return match ?? _makeAlert(fd.city, fd.status);
   }
 
   @override
   Widget build(BuildContext context) {
-    // FIX: RiverColors.of
     final t   = RiverColors.of(context);
-    // FIX: FloodSeverity.fromString().color, not FloodSeverity.districtColor()
     final col = worstStation != null
         ? FloodSeverity.fromString(worstStation!.status).color
         : t.stroke;
@@ -1283,7 +1253,6 @@ class _LayerToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // FIX: RiverColors.of
     final t     = RiverColors.of(context);
     final color = active ? t.accent : t.textSecondary;
     return GestureDetector(
@@ -1356,7 +1325,6 @@ class _MapLegendState extends State<_MapLegend>
 
   @override
   Widget build(BuildContext context) {
-    // FIX: RiverColors.of
     final t = RiverColors.of(context);
     return Container(
       constraints: const BoxConstraints(maxWidth: 180),
@@ -1640,7 +1608,6 @@ class _ZoomButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // FIX: RiverColors.of
     final t = RiverColors.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
