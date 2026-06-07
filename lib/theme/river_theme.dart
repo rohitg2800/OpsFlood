@@ -2,62 +2,41 @@ import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EQUINOX-BR05  –  Golden Ops Design Language  (v6 — Warm Gold Rebuild)
-//
-//  Philosophy:
-//    • Deep warm-gold base        →  rich dark-amber scaffold, zero blue
-//    • Bronze-to-gold layers      →  each card step warms upward visibly
-//    • Bright amber gold accent   →  primary CTA / live data highlights
-//    • Electric cyan retained     →  only for live status / alerts
-//    • Red reserved               →  critical alerts ONLY
-//    • Glass morphism             →  warm frosted overlays
-//
-//  Background progression (dark → light, all warm gold):
-//    abyss0  #0F0A00  ← deepest floor  (near-black with warm gold tint)
-//    abyss1  #1A1000  ← scaffold bg    (dark amber-brown)
-//    abyss2  #251800  ← card surface   (deep bronze)
-//    abyss3  #312200  ← elevated card  (richer bronze-gold)
-//    abyss4  #3D2C00  ← chip / input   (warm mid-gold)
-//    abyssStroke #5A4000 ← borders     (visible golden edge)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppPalette {
-  // ── Golden Abyss backgrounds ────────────────────────────────────────────────
-  //  Warm amber-to-bronze depth ladder. Zero blue anywhere.
-  static const abyss0      = Color(0xFF0F0A00);  // near-black warm gold floor
-  static const abyss1      = Color(0xFF1A1000);  // dark amber-brown scaffold
-  static const abyss2      = Color(0xFF251800);  // deep bronze card
-  static const abyss3      = Color(0xFF312200);  // elevated bronze-gold card
-  static const abyss4      = Color(0xFF3D2C00);  // chip / input warm gold
-  static const abyssStroke = Color(0xFF5A4000);  // golden border edge
-  static const abyssGlass  = Color(0xCC251800);  // frosted warm bronze overlay
+  static const abyss0      = Color(0xFF0F0A00);
+  static const abyss1      = Color(0xFF1A1000);
+  static const abyss2      = Color(0xFF251800);
+  static const abyss3      = Color(0xFF312200);
+  static const abyss4      = Color(0xFF3D2C00);
+  static const abyssStroke = Color(0xFF5A4000);
+  static const abyssGlass  = Color(0xCC251800);
 
-  // ── Sunset palette ────────────────────────────────────────────────────────
-  static const sunset0      = Color(0xFF12000A);  // deepest — dark magenta-black
-  static const sunset1      = Color(0xFF1F0510);  // scaffold
-  static const sunset2      = Color(0xFF2E0C1A);  // card
-  static const sunset3      = Color(0xFF3D1525);  // elevated card
-  static const sunset4      = Color(0xFF4F2030);  // chip
-  static const sunsetStroke = Color(0xFF8B3A50);  // border
-  static const sunsetAccent = Color(0xFFFF6B35);  // vivid orange-red CTA
-  static const sunsetGold   = Color(0xFFFFAA00);  // warm amber highlight
+  static const sunset0      = Color(0xFF12000A);
+  static const sunset1      = Color(0xFF1F0510);
+  static const sunset2      = Color(0xFF2E0C1A);
+  static const sunset3      = Color(0xFF3D1525);
+  static const sunset4      = Color(0xFF4F2030);
+  static const sunsetStroke = Color(0xFF8B3A50);
+  static const sunsetAccent = Color(0xFFFF6B35);
+  static const sunsetGold   = Color(0xFFFFAA00);
 
-  // ── Ocean palette ─────────────────────────────────────────────────────────
-  static const ocean0      = Color(0xFF00060F);  // deepest navy-black
-  static const ocean1      = Color(0xFF000D1A);  // scaffold
-  static const ocean2      = Color(0xFF001628);  // card
-  static const ocean3      = Color(0xFF002038);  // elevated card
-  static const ocean4      = Color(0xFF002B4A);  // chip
-  static const oceanStroke = Color(0xFF00456E);  // border
-  static const oceanAccent = Color(0xFF00C6FF);  // same cyan — LIVE status
+  static const ocean0      = Color(0xFF00060F);
+  static const ocean1      = Color(0xFF000D1A);
+  static const ocean2      = Color(0xFF001628);
+  static const ocean3      = Color(0xFF002038);
+  static const ocean4      = Color(0xFF002B4A);
+  static const oceanStroke = Color(0xFF00456E);
+  static const oceanAccent = Color(0xFF00C6FF);
   static const oceanGlow   = Color(0x4400C6FF);
 
-  // ── Light palette ────────────────────────────────────────────────────────
-  static const light0      = Color(0xFFFFF8E7);  // cream scaffold
-  static const light1      = Color(0xFFFFF3CC);  // card
-  static const light2      = Color(0xFFFFE999);  // chip
+  static const light0      = Color(0xFFFFF8E7);
+  static const light1      = Color(0xFFFFF3CC);
+  static const light2      = Color(0xFFFFE999);
   static const lightStroke = Color(0xFFE8C84A);
 
-  // ── Keep old names as aliases ────────────────────────────────────────────
+  // Old name aliases
   static const navy0      = abyss0;
   static const navy1      = abyss1;
   static const navy2      = abyss2;
@@ -66,28 +45,23 @@ class AppPalette {
   static const navyStroke = abyssStroke;
   static const navyGlass  = abyssGlass;
 
-  // ── Primary accent — bright amber gold ───────────────────────────────────
-  //  Replaces cyan as the main accent throughout the UI
-  static const gold        = Color(0xFFFFB800);  // vivid amber gold (primary)
-  static const goldLight   = Color(0xFFFFD966);  // bright highlight gold
-  static const goldDark    = Color(0xFFB07800);  // pressed / muted gold
-  static const goldGlow    = Color(0x55FFB800);  // glow halo
-  static const goldGlow2   = Color(0x22FFB800);  // subtle ambient glow
-  static const goldDim     = Color(0xFF7A5200);  // inactive gold
+  static const gold        = Color(0xFFFFB800);
+  static const goldLight   = Color(0xFFFFD966);
+  static const goldDark    = Color(0xFFB07800);
+  static const goldGlow    = Color(0x55FFB800);
+  static const goldGlow2   = Color(0x22FFB800);
+  static const goldDim     = Color(0xFF7A5200);
 
-  // ── Keep cyan alias for live-status only ─────────────────────────────────
-  static const cyan      = Color(0xFF00C6FF);  // reserved for LIVE badge only
+  static const cyan      = Color(0xFF00C6FF);
   static const cyanDark  = Color(0xFF007FA8);
   static const cyanGlow  = Color(0x4400C6FF);
   static const cyanDim   = Color(0xFF005F80);
   static const cyanGlow2 = Color(0x1A00C6FF);
 
-  // ── Warm amber gold metrics ──────────────────────────────────────────────
-  static const amber      = Color(0xFFFFB800);  // same as gold — unified
+  static const amber      = Color(0xFFFFB800);
   static const amberLight = Color(0xFFFFD966);
   static const amberDim   = Color(0xFF7A5200);
 
-  // ── Status ────────────────────────────────────────────────────────────────
   static const safe        = Color(0xFF10E88A);
   static const warning     = Color(0xFFFFA520);
   static const danger      = Color(0xFFFF5500);
@@ -97,71 +71,51 @@ class AppPalette {
   static const dangerGlow  = Color(0x28FF5500);
   static const critGlow    = Color(0x28FF1A44);
 
-  // ── Text ──────────────────────────────────────────────────────────────────
-  static const textWhite = Color(0xFFFFF8E7);  // warm white — cream not cold
-  static const textGrey  = Color(0xFF9A8060);  // warm tan-grey
-  static const textDim   = Color(0xFF4A3410);  // dark warm-brown
+  static const textWhite = Color(0xFFFFF8E7);
+  static const textGrey  = Color(0xFF9A8060);
+  static const textDim   = Color(0xFF4A3410);
 
-  // ── Gradients / decorations ───────────────────────────────────────────────
   static const LinearGradient abyssGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [abyss1, abyss3],
   );
-
   static const LinearGradient navyGradient = abyssGradient;
 
-  // Golden radial glow from top-center — warm amber bloom
   static BoxDecoration scaffoldDecoration() => const BoxDecoration(
     gradient: RadialGradient(
       center: Alignment(0.0, -0.6),
       radius: 1.1,
-      colors: [
-        Color(0x33FFB800),  // warm gold bloom at top
-        Color(0xFF0F0A00),  // deep warm-black floor
-      ],
+      colors: [Color(0x33FFB800), Color(0xFF0F0A00)],
     ),
   );
 
   static LinearGradient glowGradient(Color c) => LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [
-      c.withValues(alpha: 0.20),
-      c.withValues(alpha: 0.04),
-    ],
+    colors: [c.withValues(alpha: 0.20), c.withValues(alpha: 0.04)],
   );
 
   static List<BoxShadow> glowShadow(Color c, {double blur = 20}) => [
-    BoxShadow(
-      color: c.withValues(alpha: 0.28),
-      blurRadius: blur,
-      offset: const Offset(0, 6),
-    ),
-    BoxShadow(
-      color: c.withValues(alpha: 0.10),
-      blurRadius: blur * 2,
-      spreadRadius: 2,
-    ),
+    BoxShadow(color: c.withValues(alpha: 0.28), blurRadius: blur, offset: const Offset(0, 6)),
+    BoxShadow(color: c.withValues(alpha: 0.10), blurRadius: blur * 2, spreadRadius: 2),
   ];
 
   static BoxDecoration glassMorph({
     Color borderColor = AppPalette.abyssStroke,
     double radius = 20,
     Color? bg,
-  }) =>
-      BoxDecoration(
-        color: bg ?? AppPalette.abyssGlass,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.50),
-            blurRadius: 32,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      );
+  }) => BoxDecoration(
+    color: bg ?? AppPalette.abyssGlass,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: borderColor, width: 1),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.50),
+        blurRadius: 32, offset: const Offset(0, 8),
+      ),
+    ],
+  );
 
   static Color statusColor(String level) {
     switch (level.toUpperCase()) {
@@ -199,7 +153,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     required this.navBg,
     required this.navActive,
     required this.navInactive,
-    required this.scaffoldBg,   // ← NEW: actual scaffold color for this theme
+    required this.scaffoldBg,
   });
 
   final Color riverNormal;
@@ -249,7 +203,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.abyss1,
   );
 
-  // ── LIGHT (warm cream-gold) ───────────────────────────────────────────────
+  // ── LIGHT (warm cream-gold) ────────────────────────────────────────────────────
   static const RiverColors _light = RiverColors(
     riverNormal:    Color(0xFF00897B),
     riverWarning:   AppPalette.warning,
@@ -270,9 +224,10 @@ class RiverColors extends ThemeExtension<RiverColors> {
     navBg:          Color(0xFF1A1000),
     navActive:      AppPalette.gold,
     navInactive:    Color(0xFF9A8060),
+    scaffoldBg:     Color(0xFFFFF8E7),
   );
 
-  // ── SUNSET (deep rose-orange) ─────────────────────────────────────────────
+  // ── SUNSET (deep rose-orange) ────────────────────────────────────────────────
   static const RiverColors _sunset = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   Color(0xFFFFAA00),
@@ -296,7 +251,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.sunset1,
   );
 
-  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────
+  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────────
   static const RiverColors _ocean = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
@@ -320,13 +275,12 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.ocean1,
   );
 
-  /// Returns the [RiverColors] extension for the given [AppThemeMode] name.
   static RiverColors forMode(String modeName) {
     switch (modeName) {
       case 'light':  return _light;
       case 'sunset': return _sunset;
       case 'ocean':  return _ocean;
-      default:       return _dark;   // dark + system
+      default:       return _golden;  // dark + system
     }
   }
 
@@ -362,8 +316,8 @@ class RiverColors extends ThemeExtension<RiverColors> {
   );
 
   @override
-  RiverColors lerp(RiverColors? other, double t) {
-    if (other == null) return this;
+  RiverColors lerp(ThemeExtension<RiverColors>? other, double t) {
+    if (other is! RiverColors) return this;
     return RiverColors(
       riverNormal:    Color.lerp(riverNormal,    other.riverNormal,    t)!,
       riverWarning:   Color.lerp(riverWarning,   other.riverWarning,   t)!,
@@ -388,18 +342,16 @@ class RiverColors extends ThemeExtension<RiverColors> {
     );
   }
 
+  // ── Theme builders ───────────────────────────────────────────────────────────
   static ThemeData lightTheme() => _buildTheme(
-      brightness: Brightness.light, ext: _light,
-      scaffoldBg: const Color(0xFF1A1000));
+      brightness: Brightness.light, ext: _light);
 
   static ThemeData darkTheme() => _buildTheme(
-      brightness: Brightness.dark, ext: _golden,
-      scaffoldBg: AppPalette.abyss1);
+      brightness: Brightness.dark, ext: _golden);
 
   static ThemeData _buildTheme({
     required Brightness brightness,
     required RiverColors ext,
-    required Brightness brightness,
   }) {
     final isDark   = brightness == Brightness.dark;
     final scaffold = ext.scaffoldBg;
@@ -521,7 +473,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
           color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
           width: 1,
         ),
-        side: BorderSide(color: stroke, width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(

@@ -38,10 +38,7 @@ import 'screens/prediction_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   WidgetsBinding.instance.deferFirstFrame();
-
-  final container = ProviderContainer();
 
   try {
     // 1. Load .env
@@ -60,7 +57,7 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
+              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out');
               throw TimeoutException('Firebase init timeout');
             },
           );
@@ -119,9 +116,6 @@ Future<void> main() async {
       }));
       unawaited(ThresholdAlertService.instance.start().catchError((e) {
         if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
-      }));
-      unawaited(CwcAlertWatcher.instance.start(container).catchError((e) {
-        if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
       }));
     }
   } finally {
