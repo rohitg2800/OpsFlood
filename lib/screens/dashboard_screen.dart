@@ -1,4 +1,4 @@
-// lib/screens/dashboard_screen.dart  v25 — fluid redesign (complete)
+// lib/screens/dashboard_screen.dart  v26 — analyze clean
 // Collapsible sections · animated charts · organic feel
 library;
 
@@ -105,7 +105,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _service.removeListener(_onData);
-    for (final c in [_entryCtrl, _gaugeCtrl, _waveCtrl, _pulseCtrl, _countCtrl]) c.dispose();
+    for (final c in [_entryCtrl, _gaugeCtrl, _waveCtrl, _pulseCtrl, _countCtrl]) {
+      c.dispose();
+    }
     _bannerAd?.dispose();
     super.dispose();
   }
@@ -183,7 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               SliverToBoxAdapter(child: _QuickGrid(entryCtrl: _entryCtrl)),
 
               if (data.isEmpty)
-                SliverToBoxAdapter(child: _EmptyState())
+                const SliverToBoxAdapter(child: _EmptyState())
               else ...[
                 SliverToBoxAdapter(child: _CollapsibleSection(
                   sectionKey: 'rivers', title: 'Live River Levels',
@@ -444,13 +446,13 @@ class _HeroGauge extends StatelessWidget {
                 const SizedBox(width: 20),
                 Expanded(
                   child: Column(children: [
-                    _RiskRow('CRITICAL', critical, AppPalette.critical, countCtrl, t),
+                    _riskRow('CRITICAL', critical, AppPalette.critical, countCtrl, t),
                     const SizedBox(height: 8),
-                    _RiskRow('SEVERE',   severe,   AppPalette.danger,   countCtrl, t),
+                    _riskRow('SEVERE',   severe,   AppPalette.danger,   countCtrl, t),
                     const SizedBox(height: 8),
-                    _RiskRow('MODERATE', moderate, AppPalette.warning,  countCtrl, t),
+                    _riskRow('MODERATE', moderate, AppPalette.warning,  countCtrl, t),
                     const SizedBox(height: 8),
-                    _RiskRow('SAFE',     safe,     AppPalette.safe,     countCtrl, t),
+                    _riskRow('SAFE',     safe,     AppPalette.safe,     countCtrl, t),
                   ]),
                 ),
               ],
@@ -493,7 +495,8 @@ class _HeroGauge extends StatelessWidget {
   }
 }
 
-Widget _RiskRow(String label, int count, Color color, AnimationController ctrl, RiverColors t) {
+// ignore: non_constant_identifier_names (top-level helper, lowercase per fix)
+Widget _riskRow(String label, int count, Color color, AnimationController ctrl, RiverColors t) {
   return Row(children: [
     Container(width: 10, height: 10,
         decoration: BoxDecoration(shape: BoxShape.circle, color: color,
@@ -1171,7 +1174,9 @@ class _AreaChartPainter extends CustomPainter {
       fillPath.cubicTo(prev.dx + xStep * 0.4, prev.dy,
           cur.dx - xStep * 0.4, cur.dy, cur.dx, cur.dy);
     }
-    fillPath.lineTo(size.width, size.height)..close();
+    // Fix: split lineTo + close into separate statements (cascade on void result)
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
     canvas.drawPath(fillPath, Paint()
       ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
           colors: [fillColor, fillColor.withValues(alpha: 0.01)])
