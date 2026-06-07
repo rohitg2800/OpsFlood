@@ -1,349 +1,417 @@
 // lib/screens/news_feed_screen.dart
-// OpsFlood — NDMA + IMD + WRD Bihar Alert Feed
-// Wired to CwcAlertWatcher.showNewsNotification() for push on new articles.
+// Bihar Flood Command — News Feed HUD v3
+// Scrapes Bihar flood news from BSDMA, NDMA, IMD, and news providers.
 library;
 
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/news_feed_provider.dart';
-import '../services/cwc_alert_watcher.dart';
 import '../theme/river_theme.dart';
 
+const _biharKeywords = [
+  'bihar','patna','muzaffarpur','darbhanga','bhagalpur','kosi','gandak',
+  'ganga','bagmati','ghaghara','flood','flood warning','bsdma','ndma',
+  'champaran','sitamarhi','supaul','saran','vaishali','madhubani',
+];
+
 class NewsFeedScreen extends ConsumerStatefulWidget {
+  static const route = '/news-feed';
   const NewsFeedScreen({super.key});
   @override
   ConsumerState<NewsFeedScreen> createState() => _NewsFeedScreenState();
 }
 
-class _NewsFeedScreenState extends ConsumerState<NewsFeedScreen> {
-  // Tracks titles we've already notified to avoid duplicates
-  final Set<String> _notified = {};
+class _NewsFeedScreenState extends ConsumerState<NewsFeedScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  late final Timer _clock;
+  String _timeStr = '';
+  String _tag = 'ALL';
+  final _tags = ['ALL', 'FLOOD', 'RAIN', 'ALERT', 'RESCUE', 'RELIEF'];
 
   @override
   void initState() {
     super.initState();
-    // Fire once for any articles already loaded when screen opens
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final state = ref.read(newsFeedProvider);
-      _notifyNew(state.items);
-    });
+    _pulse = AnimationController(
+        vsync: this, duration: const Duration(seconds: 2))
+      ..repeat(reverse: true);
+    _tick();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
-  void _notifyNew(List<NewsItem> items) {
-    for (final item in items) {
-      if (_notified.contains(item.title)) continue;
-      _notified.add(item.title);
-      // Only notify for non-normal severity
-      if (item.severity.toUpperCase() == 'GREEN') continue;
-      CwcAlertWatcher.instance.showNewsNotification(
-        headline: item.title,
-        source: item.source,
-      );
-    }
+  void _tick() {
+    if (!mounted) return;
+    setState(() => _timeStr = DateFormat('HH:mm:ss').format(DateTime.now()));
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    _clock.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // ref.listen fires whenever the provider state changes (e.g. after refresh)
-    ref.listen<NewsFeedState>(newsFeedProvider, (prev, next) {
-      if (!next.isLoading && next.error == null) {
-        _notifyNew(next.items);
-      }
-    });
+    final newsAsync = ref.watch(newsFeedProvider);
+    return Scaffold(
+      backgroundColor: AppPalette.abyss0,
+      body: NestedScrollView(
+        headerSliverBuilder: (_, __) => [
+          SliverToBoxAdapter(child: _buildHeader()),
+          SliverToBoxAdapter(child: _buildTagBar()),
+        ],
+        body: newsAsync.when(
+          data: (items) {
+            // Filter to Bihar-relevant items
+            final biharItems = items.where((item) {
+              final text = [
+                (item['title'] ?? '').toString(),
+                (item['description'] ?? '').toString(),
+                (item['source'] ?? '').toString(),
+              ].join(' ').toLowerCase();
+              return _biharKeywords.any((k) => text.contains(k));
+            }).toList();
 
-    final state = ref.watch(newsFeedProvider);
+            // Tag filter
+            final filtered = _tag == 'ALL'
+                ? biharItems
+                : biharItems.where((item) {
+                    final text = [
+                      (item['title'] ?? '').toString(),
+                      (item['description'] ?? '').toString(),
+                    ].join(' ').toLowerCase();
+                    return text.contains(_tag.toLowerCase());
+                  }).toList();
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: AppPalette.abyss0,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _Header(
-                onRefresh: () {
-                  HapticFeedback.mediumImpact();
-                  ref.read(newsFeedProvider.notifier).refresh();
-                },
-              ),
-              if (state.isLoading)
-                const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: AppPalette.cyan),
-                  ),
-                )
-              else if (state.error != null && state.items.isEmpty)
-                Expanded(child: _ErrorState(message: state.error!))
-              else
-                Expanded(
-                  child: RefreshIndicator(
-                    color: AppPalette.cyan,
-                    onRefresh: () =>
-                        ref.read(newsFeedProvider.notifier).refresh(),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: state.items.length,
-                      itemBuilder: (_, i) =>
-                          _NewsCard(item: state.items[i]),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+            if (filtered.isEmpty) {
+              return _NoSignal(label: 'NO FEED · BIHAR UPDATES AWAITED');
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+              itemCount: filtered.length,
+              itemBuilder: (_, i) => _NewsCard(item: filtered[i]),
+            );
+          },
+          loading: () => Center(
+              child: CircularProgressIndicator(
+                  color: AppPalette.cyan, strokeWidth: 1.5)),
+          error: (e, _) => _NoSignal(label: 'FEED ERROR · NDMA/IMD OFFLINE'),
         ),
       ),
     );
   }
-}
 
-// ── Header ────────────────────────────────────────────────────────────────────
-class _Header extends StatelessWidget {
-  final VoidCallback onRefresh;
-  const _Header({required this.onRefresh});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-        decoration: BoxDecoration(
-          color: AppPalette.abyss0,
-          border: Border(
-            bottom: BorderSide(
-                color: AppPalette.cyan.withValues(alpha: 0.10), width: 1)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: AppPalette.cyan.withValues(alpha: 0.10),
-                border: Border.all(
-                    color: AppPalette.cyan.withValues(alpha: 0.28),
-                    width: 1.5),
-              ),
-              child: const Icon(Icons.feed_rounded,
-                  color: AppPalette.cyan, size: 22),
+  Widget _buildHeader() => Container(
+    padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
+    decoration: BoxDecoration(
+      color: AppPalette.abyss0,
+      border: Border(bottom:
+          BorderSide(color: AppPalette.cyan.withValues(alpha: 0.15))),
+    ),
+    child: Row(
+      children: [
+        GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.30)),
+              color: AppPalette.abyss2,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ShaderMask(
-                    shaderCallback: (b) => const LinearGradient(
-                      colors: [Color(0xFF00E5FF), Color(0xFF0072FF)],
-                    ).createShader(b),
-                    child: const Text('ALERTS & NEWS',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: -0.5,
-                        )),
+            child: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: AppPalette.cyan, size: 14),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('INTEL FEED · BIHAR',
+                  style: TextStyle(
+                    color: AppPalette.cyan, fontSize: 13,
+                    fontWeight: FontWeight.w800, letterSpacing: 2,
+                  )),
+              Text('SYS $_timeStr · NDMA / IMD / BSDMA',
+                  style: const TextStyle(
+                    color: AppPalette.textDim, fontSize: 9,
+                    letterSpacing: 1,
+                  )),
+            ],
+          ),
+        ),
+        AnimatedBuilder(
+          animation: _pulse,
+          builder: (_, __) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppPalette.cyan.withValues(alpha: 0.06 + 0.06 * _pulse.value),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6, height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppPalette.cyan.withValues(alpha: 0.5 + 0.5 * _pulse.value),
                   ),
-                  Text('NDMA · IMD · Bihar WRD Bulletins',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppPalette.textGrey.withValues(alpha: 0.65),
-                      )),
-                ],
-              ),
-            ),
-            GestureDetector(
-              onTap: onRefresh,
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppPalette.abyss2,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppPalette.abyssStroke),
                 ),
-                child: const Icon(Icons.refresh_rounded,
-                    color: AppPalette.textGrey, size: 18),
-              ),
+                const SizedBox(width: 5),
+                const Text('LIVE',
+                    style: TextStyle(
+                      color: AppPalette.cyan, fontSize: 9,
+                      fontWeight: FontWeight.w800, letterSpacing: 1.5,
+                    )),
+              ],
             ),
-          ],
+          ),
         ),
-      );
+      ],
+    ),
+  );
+
+  Widget _buildTagBar() => SizedBox(
+    height: 44,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      children: _tags.map((t) {
+        final active = _tag == t;
+        return GestureDetector(
+          onTap: () => setState(() => _tag = t),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: active
+                  ? AppPalette.cyan.withValues(alpha: 0.14)
+                  : AppPalette.abyss2,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                  color: active ? AppPalette.cyan : AppPalette.abyssStroke),
+            ),
+            child: Center(
+              child: Text(t,
+                  style: TextStyle(
+                    color: active ? AppPalette.cyan : AppPalette.textDim,
+                    fontSize: 9, fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  )),
+            ),
+          ),
+        );
+      }).toList(),
+    ),
+  );
 }
 
-// ── Card ──────────────────────────────────────────────────────────────────────
+// ─── News Card ────────────────────────────────────────────────────────────────
 class _NewsCard extends StatelessWidget {
-  final NewsItem item;
+  final dynamic item;
   const _NewsCard({required this.item});
+
+  String _f(String k, [String fb = '']) {
+    try {
+      final v = (item as dynamic)[k];
+      return v?.toString().isNotEmpty == true ? v.toString() : fb;
+    } catch (_) { return fb; }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final col = _sourceColor(item.source);
-    return GestureDetector(
-      onTap: () async {
-        final uri = Uri.tryParse(item.url);
-        if (uri != null && uri.hasScheme) {
-          if (await canLaunchUrl(uri)) {
-            launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppPalette.abyss2,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: col.withValues(alpha: 0.20)),
+    final title   = _f('title', 'No title');
+    final desc    = _f('description', _f('summary', ''));
+    final source  = _f('source', _f('publisher', ''));
+    final rawDate = _f('published_at', _f('date', ''));
+    final url     = _f('url', _f('link', ''));
+    final category= _f('category', 'FLOOD').toUpperCase();
+
+    String dateStr = '';
+    if (rawDate.isNotEmpty) {
+      final dt = DateTime.tryParse(rawDate);
+      dateStr = dt != null
+          ? DateFormat('dd MMM, HH:mm').format(dt.toLocal())
+          : rawDate;
+    }
+
+    final isBiharKw = _biharKeywords.any(
+        (k) => title.toLowerCase().contains(k) ||
+            desc.toLowerCase().contains(k));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isBiharKw
+              ? AppPalette.cyan.withValues(alpha: 0.20)
+              : AppPalette.abyssStroke,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      ),
+      child: Column(
+        children: [
+          if (isBiharKw)
+            Container(
+              height: 1.5,
+              decoration: BoxDecoration(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(10)),
+                gradient: LinearGradient(colors: [
+                  AppPalette.cyan.withValues(alpha: 0.7),
+                  AppPalette.cyan.withValues(alpha: 0),
+                ]),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _SourceBadge(source: item.source, color: col),
-                const SizedBox(width: 8),
-                _SeverityBadge(severity: item.severity),
-                const Spacer(),
-                Text(
-                  item.publishedAt,
-                  style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppPalette.cyan.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(3),
+                        border: Border.all(
+                            color: AppPalette.cyan.withValues(alpha: 0.22)),
+                      ),
+                      child: Text(category,
+                          style: const TextStyle(
+                            color: AppPalette.cyan, fontSize: 7.5,
+                            fontWeight: FontWeight.w800, letterSpacing: 0.8,
+                          )),
+                    ),
+                    if (isBiharKw) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppPalette.safe.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(3),
+                          border: Border.all(
+                              color: AppPalette.safe.withValues(alpha: 0.22)),
+                        ),
+                        child: const Text('BIHAR',
+                            style: TextStyle(
+                              color: AppPalette.safe, fontSize: 7.5,
+                              fontWeight: FontWeight.w800, letterSpacing: 0.8,
+                            )),
+                      ),
+                    ],
+                    const Spacer(),
+                    if (dateStr.isNotEmpty)
+                      Text(dateStr,
+                          style: const TextStyle(
+                            color: AppPalette.textDim, fontSize: 8.5)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(title,
+                    style: const TextStyle(
+                      color: AppPalette.textWhite,
+                      fontSize: 12.5, fontWeight: FontWeight.w700,
+                      height: 1.4,
+                    )),
+                if (desc.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(desc,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppPalette.textGrey,
+                        fontSize: 10.5, height: 1.5,
+                      )),
+                ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    if (source.isNotEmpty) ...[
+                      const Icon(Icons.language_rounded,
+                          color: AppPalette.textDim, size: 10),
+                      const SizedBox(width: 3),
+                      Text(source,
+                          style: const TextStyle(
+                            color: AppPalette.textDim, fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    ],
+                    const Spacer(),
+                    if (url.isNotEmpty)
+                      GestureDetector(
+                        onTap: () async {
+                          final uri = Uri.tryParse(url);
+                          if (uri != null) {
+                            await launchUrl(uri,
+                                mode: LaunchMode.externalApplication);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppPalette.cyan.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                                color: AppPalette.cyan.withValues(alpha: 0.25)),
+                          ),
+                          child: const Text('READ →',
+                              style: TextStyle(
+                                color: AppPalette.cyan, fontSize: 8.5,
+                                fontWeight: FontWeight.w800, letterSpacing: 0.8,
+                              )),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              item.title,
-              style: const TextStyle(
-                color: AppPalette.textWhite,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-              ),
-            ),
-            if (item.summary != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                item.summary!,
-                style: const TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 11,
-                  height: 1.5,
-                ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-            if (item.url.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text('Read more',
-                      style: TextStyle(
-                        color: col,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      )),
-                  const SizedBox(width: 3),
-                  Icon(Icons.open_in_new_rounded, color: col, size: 10),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _sourceColor(String src) {
-    final s = src.toUpperCase();
-    if (s.contains('NDMA') || s.contains('BSDMA')) return AppPalette.critical;
-    if (s.contains('IMD'))                         return AppPalette.amber;
-    if (s.contains('CWC'))                         return const Color(0xFF4CAF50);
-    if (s.contains('WRD'))                         return AppPalette.cyan;
-    return AppPalette.textGrey;
-  }
-}
-
-// ── Badges ────────────────────────────────────────────────────────────────────
-class _SourceBadge extends StatelessWidget {
-  final String source;
-  final Color  color;
-  const _SourceBadge({required this.source, required this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withValues(alpha: 0.28)),
-        ),
-        child: Text(
-          source.toUpperCase(),
-          style: TextStyle(
-            color: color,
-            fontSize: 8,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0.5,
           ),
-        ),
-      );
-}
-
-class _SeverityBadge extends StatelessWidget {
-  final String severity;
-  const _SeverityBadge({required this.severity});
-  @override
-  Widget build(BuildContext context) {
-    final col = severity.toUpperCase() == 'RED'
-        ? AppPalette.critical
-        : severity.toUpperCase() == 'ORANGE'
-            ? AppPalette.danger
-            : AppPalette.amber;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: col.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: col.withValues(alpha: 0.28)),
-      ),
-      child: Text(
-        '${severity.toUpperCase()} ALERT',
-        style: TextStyle(
-          color: col,
-          fontSize: 8,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
-        ),
+        ],
       ),
     );
   }
 }
 
-// ── Error state ───────────────────────────────────────────────────────────────
-class _ErrorState extends StatelessWidget {
-  final String message;
-  const _ErrorState({required this.message});
+class _NoSignal extends StatelessWidget {
+  final String label;
+  const _NoSignal({required this.label});
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.wifi_off_rounded,
-                  color: AppPalette.textDim, size: 48),
-              const SizedBox(height: 16),
-              Text(message,
-                  style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 13),
-                  textAlign: TextAlign.center),
-            ],
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 64, height: 64,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppPalette.cyan.withValues(alpha: 0.08),
+            border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
           ),
+          child: const Icon(Icons.rss_feed_rounded, color: AppPalette.cyan, size: 28),
         ),
-      );
+        const SizedBox(height: 12),
+        Text(label,
+            style: const TextStyle(
+              color: AppPalette.textGrey, fontSize: 11,
+              fontWeight: FontWeight.w700, letterSpacing: 1.5,
+            )),
+      ],
+    ),
+  );
 }
