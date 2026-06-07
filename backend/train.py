@@ -42,7 +42,7 @@ except ImportError:
 # Bihar thresholds (from STATE_SEVERITY_MATRIX):
 #   peak_level_m  → moderate: 11.0 m | severe: 12.0 m | critical: 13.2 m
 #   rainfall_7d_mm→ moderate: 240 mm | severe: 390 mm | critical: 560 mm
-#   danger_level_m: 12.00 m  |  hfl_m: 13.80 m
+#   danger_level_m: 12.00 m  |  hfl_m: 14.40 m
 #
 # If you retrain for a different primary state, change CALIBRATION_STATE below.
 CALIBRATION_STATE = "bihar"
@@ -53,7 +53,7 @@ _pk = _entry["peak_level_m"]
 PK_MOD      = float(_pk["moderate"])   # 11.0
 PK_SEV      = float(_pk["severe"])     # 12.0
 PK_CRIT     = float(_pk["critical"])   # 13.2
-PK_HFL      = float(_entry["hfl_m"])   # 13.8  — hard ceiling for CRITICAL synthetic rows
+PK_HFL      = float(_entry["hfl_m"])   # 14.4  — hard ceiling for CRITICAL synthetic rows
 
 # 7-day rainfall (mm) boundaries
 _rn = _entry["rainfall_7d_mm"]
@@ -72,9 +72,9 @@ def get_training_data():
     #          T1d, T2d, T3d, T4d, T5d, T6d, T7d, severity_label
     # severity_label: 0=LOW, 1=MODERATE, 2=SEVERE, 3=CRITICAL
     real_events = [
-        # CRITICAL — peak above Bihar HFL (13.8 m) with 7d rain > 560 mm
-        [PK_HFL + 0.1,  5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 3],   # 13.9 m, ~560 mm
-        [PK_HFL - 0.1,  4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 3],   # 13.7 m (at/above crit)
+        # CRITICAL — peak above Bihar HFL (14.4 m) with 7d rain > 560 mm
+        [PK_HFL + 0.1,  5, 2, 4, 180, 320, 420, 450, 480, 490, 550, 3],   # 14.5 m, ~560 mm
+        [PK_HFL - 0.1,  4, 2, 3, 160, 280, 380, 420, 450, 460, 480, 3],   # 14.3 m (at/above crit)
         # SEVERE — above danger (12.0 m), below HFL
         [PK_SEV + 0.8,  3, 2, 2, 120, 200, 280, 320, 350, 380, 400, 2],   # 12.8 m
         [PK_SEV + 0.2,  2, 1, 2, 100, 180, 250, 290, 320, 350, 370, 2],   # 12.2 m
