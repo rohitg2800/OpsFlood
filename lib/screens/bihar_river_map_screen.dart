@@ -19,6 +19,7 @@ library;
 
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -512,12 +513,10 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                                   border: Border.all(color: const Color(0xFFFF5500).withValues(alpha: 0.40)),
                                 ),
                                 child: Text('$alertCount alerts',
-                                    style: const TextStyle(color: Color(0xFFFF5500), fontSize: 9, fontWeight: FontWeight.w800)),
+                                    style: const TextStyle(
+                                        color: Color(0xFFFF5500), fontSize: 10,
+                                        fontWeight: FontWeight.w800)),
                               ),
-                            if (alertCount > 0) const SizedBox(width: 6),
-                            if (biharStations.isNotEmpty)
-                              Text('${biharStations.length} stations',
-                                  style: TextStyle(color: t.textSecondary, fontSize: 10)),
                           ],
                         ),
                       ),
@@ -530,91 +529,64 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
 
           // ── Layer toggles ───────────────────────────────────────────────
           Positioned(
-            right: 12,
-            bottom: anySheetOpen ? 290 : 130,
-            child: Column(
-              children: [
-                _LayerToggle(icon: Icons.water_rounded,     label: 'Rivers',    active: _showRivers,    color: const Color(0xFF38BDF8), onTap: () => setState(() => _showRivers    = !_showRivers)),
-                const SizedBox(height: 8),
-                _LayerToggle(icon: Icons.grid_view_rounded, label: 'Districts', active: _showDistricts, color: t.accent,                onTap: () => setState(() => _showDistricts = !_showDistricts)),
-                const SizedBox(height: 8),
-                _LayerToggle(icon: Icons.sensors_rounded,   label: 'Stations',  active: _showStations,  color: const Color(0xFF10E88A), onTap: () => setState(() => _showStations  = !_showStations)),
-                const SizedBox(height: 8),
-                _LayerToggle(icon: Icons.warning_amber_rounded, label: 'Alerts', active: _showAlerts,   color: const Color(0xFFFFA520), onTap: () => setState(() => _showAlerts    = !_showAlerts)),
-              ],
+            top: 60, right: 8,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  _LayerToggle(icon: Icons.water_rounded,        label: 'Rivers',    active: _showRivers,    onTap: () => setState(() => _showRivers    = !_showRivers)),
+                  const SizedBox(height: 6),
+                  _LayerToggle(icon: Icons.map_outlined,         label: 'Districts', active: _showDistricts, onTap: () => setState(() => _showDistricts = !_showDistricts)),
+                  const SizedBox(height: 6),
+                  _LayerToggle(icon: Icons.sensors_rounded,      label: 'Stations',  active: _showStations,  onTap: () => setState(() => _showStations  = !_showStations)),
+                  const SizedBox(height: 6),
+                  _LayerToggle(icon: Icons.notifications_active_rounded, label: 'Alerts', active: _showAlerts, onTap: () => setState(() => _showAlerts = !_showAlerts)),
+                ],
+              ),
             ),
           ),
 
-          // ── Legend ──────────────────────────────────────────────────────
+          // ── Legend (bottom-left, hide when sheet open) ───────────────────
           if (!anySheetOpen)
             Positioned(
-              left: 12, bottom: 100,
-              child: _MapLegend(
-                showRivers:    _showRivers,
-                showDistricts: _showDistricts,
-                alertsByLevel: {
-                  for (final lvl in AlertLevel.values)
-                    lvl: allAlerts.where((a) => a.level == lvl).length,
-                },
+              bottom: 16, left: 8,
+              child: SafeArea(
+                child: _MapLegend(
+                  showRivers:    _showRivers,
+                  showDistricts: _showDistricts,
+                ),
               ),
             ),
 
-          // ── Station bottom sheet ────────────────────────────────────────
+          // ── Station bottom sheet ─────────────────────────────────────────
           if (_selected != null)
             Positioned(
-              left: 0, right: 0, bottom: 0,
-              child: _StationSheet(
-                data:         _selected!,
-                meta:         _selectedMeta,
-                alertLevel:   _alertForStation(_selected!, allAlerts),
-                onClose:      _clearSelection,
-                onOpenDetail: () => Navigator.pushNamed(
-                  context, CityDetailScreen.route,
-                  arguments: _selected!.city,
+              bottom: 0, left: 0, right: 0,
+              child: SafeArea(
+                child: _StationSheet(
+                  data:       _selected!,
+                  meta:       _selectedMeta,
+                  alertLevel: _alertForStation(_selected!, allAlerts),
+                  onClose:    _clearSelection,
+                  onOpenDetail: () {
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => CityDetailScreen(city: _selected!.city)));
+                  },
                 ),
               ),
             ),
 
-          // ── District bottom sheet ───────────────────────────────────────
+          // ── District bottom sheet ────────────────────────────────────────
           if (_selectedDistrict != null)
             Positioned(
-              left: 0, right: 0, bottom: 0,
-              child: _DistrictSheet(
-                districtName:  _selectedDistrict!,
-                worstStation:  districtData[_selectedDistrict],
-                allStations:   districtStations[_selectedDistrict] ?? [],
-                allAlerts:     allAlerts,
-                onClose:       _clearSelection,
-                onStationTap:  _selectStation,
-              ),
-            ),
-
-          // ── GeoJSON loading / error ─────────────────────────────────────
-          if (geoAsync.isLoading)
-            Positioned(
-              top: 80, left: 0, right: 0,
-              child: Center(
-                child: _GlassCard(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(width: 12, height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 1.5, color: t.accent)),
-                      const SizedBox(width: 8),
-                      Text('Loading district boundaries…',
-                          style: TextStyle(color: t.textSecondary, fontSize: 11)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (geoAsync.hasError)
-            Positioned(
-              top: 80, left: 0, right: 0,
-              child: Center(
-                child: _GlassCard(
-                  child: Text('District boundaries unavailable',
-                      style: TextStyle(color: AppPalette.danger, fontSize: 11)),
+              bottom: 0, left: 0, right: 0,
+              child: SafeArea(
+                child: _DistrictSheet(
+                  districtName:  _selectedDistrict!,
+                  worstStation:  districtData[_selectedDistrict],
+                  allStations:   districtStations[_selectedDistrict] ?? [],
+                  allAlerts:     allAlerts,
+                  onClose:       _clearSelection,
+                  onStationTap:  _selectStation,
                 ),
               ),
             ),
@@ -625,41 +597,29 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// River alert chip (on polyline)
+// River alert chip
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RiverAlertChip extends StatelessWidget {
   final AlertLevel level;
-  final Color riverColor;
-  final Color col;
+  final Color      riverColor;
+  final Color      col;
   const _RiverAlertChip({required this.level, required this.riverColor, required this.col});
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
     decoration: BoxDecoration(
-      color:        col.withValues(alpha: 0.22),
-      borderRadius: BorderRadius.circular(5),
-      border:       Border.all(color: col.withValues(alpha: 0.65), width: 0.8),
-      boxShadow:    [BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 4)],
+      color: Colors.black.withValues(alpha: 0.72),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: col.withValues(alpha: 0.70), width: 1.0),
     ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(_alertLevelIcon(level), color: col, size: 9),
-        const SizedBox(width: 3),
-        Flexible(
-          child: Text(
-            level.label,
-            style: TextStyle(
-              color: col, fontSize: 8.5, fontWeight: FontWeight.w800,
-              shadows: const [Shadow(color: Colors.black, blurRadius: 3)],
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(_alertLevelIcon(level), color: col, size: 9),
+      const SizedBox(width: 3),
+      Text(level.label,
+          style: TextStyle(color: col, fontSize: 8, fontWeight: FontWeight.w800)),
+    ]),
   );
 }
 
@@ -685,17 +645,23 @@ class _DistrictLayer extends StatefulWidget {
 }
 
 class _DistrictLayerState extends State<_DistrictLayer> {
-  final LayerHitNotifier<String> _hitNotifier = ValueNotifier(null);
+  final _hitNotifier = ValueNotifier<LayerHitResult<String>?>(null);
 
-  List<LatLng> _ring(List coords) => coords
-      .map<LatLng>((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
+  static List<LatLng> _ring(List ring) => ring
+      .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
       .toList();
 
   @override
+  void dispose() {
+    _hitNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final List<Polygon<String>> basePolygons      = [];
-    final List<Polygon<String>> highlightPolygons = [];
-    final features = (widget.geoJson['features'] as List?) ?? [];
+    final features = (widget.geoJson['features'] as List? ?? []);
+    final basePolygons      = <Polygon<String>>[];
+    final highlightPolygons = <Polygon<String>>[];
 
     for (final feat in features) {
       final props    = feat['properties'] as Map? ?? {};
@@ -919,46 +885,57 @@ class _StationSheet extends ConsumerWidget {
               _FillPercentRow(
                 fillPct: (data.currentLevel / data.dangerLevel).clamp(0.0, 1.5),
                 color:   alertColor,
-                t:       t,
               ),
             ],
-
-            // ── AI prediction block ───────────────────────────────────────
-            const SizedBox(height: 12),
-            _PredictionBlock(predAsync: predAsync, alertColor: alertColor, t: t),
 
             // ── Covered cities ────────────────────────────────────────────
             if (cities.isNotEmpty) ...[
               const SizedBox(height: 10),
-              Row(children: [
-                Icon(Icons.location_city_rounded, color: t.textSecondary, size: 11),
-                const SizedBox(width: 4),
-                Text('Covers', style: TextStyle(color: t.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
-              ]),
-              const SizedBox(height: 6),
-              Wrap(spacing: 5, runSpacing: 4,
-                children: cities.map((city) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              Wrap(
+                spacing: 4, runSpacing: 4,
+                children: cities.map((c) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: alertColor.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: alertColor.withValues(alpha: 0.20), width: 0.7)),
-                  child: Text(city, style: TextStyle(
-                      color: alertColor.withValues(alpha: 0.85), fontSize: 9.5, fontWeight: FontWeight.w600)),
-                )).toList()),
+                    color: riverCol.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: riverCol.withValues(alpha: 0.25))),
+                  child: Text(c, style: TextStyle(
+                      color: riverCol, fontSize: 8.5, fontWeight: FontWeight.w600)),
+                )).toList(),
+              ),
             ],
 
             const SizedBox(height: 12),
-            SizedBox(width: double.infinity,
+
+            // ── AI Prediction block ───────────────────────────────────────
+            predAsync.when(
+              data:    (pred) => _PredictionBlock(pred: pred, alertColor: alertColor),
+              loading: () => Container(
+                height: 52,
+                decoration: BoxDecoration(
+                  color: t.cardBgElevated, borderRadius: BorderRadius.circular(12)),
+                child: const Center(child: SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2)))),
+              error:   (_, __) => const SizedBox.shrink(),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Open full detail ──────────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
               child: TextButton(
                 style: TextButton.styleFrom(
                   backgroundColor: alertColor.withValues(alpha: 0.12),
+                  foregroundColor: alertColor,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 10)),
                 onPressed: onOpenDetail,
-                child: Text('View ${data.city} Detail →',
-                    style: TextStyle(color: alertColor, fontSize: 13, fontWeight: FontWeight.w700)),
-              )),
+                child: const Text('Open Full Detail →',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+              ),
+            ),
           ],
         ),
       ),
@@ -967,35 +944,41 @@ class _StationSheet extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fill percent row
+// Fill-percent row
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _FillPercentRow extends StatelessWidget {
-  final double fillPct;
+  final double fillPct;   // 0.0–1.5
   final Color  color;
-  final RiverColors t;
-  const _FillPercentRow({required this.fillPct, required this.color, required this.t});
+  const _FillPercentRow({required this.fillPct, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final pct   = fillPct.clamp(0.0, 1.0);
-    final label = '${(pct * 100).toStringAsFixed(0)}% of danger level';
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text('Danger fill', style: TextStyle(color: t.textSecondary, fontSize: 9.5)),
-        Text(label, style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w700)),
-      ]),
-      const SizedBox(height: 4),
-      ClipRRect(borderRadius: BorderRadius.circular(4),
-        child: Container(
-          height: 6, color: t.cardBgElevated,
-          child: FractionallySizedBox(
-            widthFactor: pct, alignment: Alignment.centerLeft,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [color.withValues(alpha: 0.50), color]))),
+    final t = RiverColors.of(context);
+    final pct = fillPct.clamp(0.0, 1.0);
+    return Row(children: [
+      Expanded(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 6,
+            color: t.cardBgElevated,
+            child: FractionallySizedBox(
+              widthFactor: pct,
+              alignment: Alignment.centerLeft,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [color.withValues(alpha: 0.50), color]),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
           ),
-        )),
+        ),
+      ),
+      const SizedBox(width: 6),
+      Text('${(fillPct * 100).toStringAsFixed(0)}% of danger',
+          style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
     ]);
   }
 }
@@ -1005,166 +988,159 @@ class _FillPercentRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PredictionBlock extends StatelessWidget {
-  final AsyncValue<FloodPrediction> predAsync;
-  final Color alertColor;
-  final RiverColors t;
-  const _PredictionBlock({required this.predAsync, required this.alertColor, required this.t});
+  final FloodPrediction pred;
+  final Color           alertColor;
+  const _PredictionBlock({required this.pred, required this.alertColor});
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+
+    // Sparkline: use next24h normalised to 0-1 between current and danger
+    final points = pred.next24h.isEmpty
+        ? <double>[]
+        : pred.next24h.map((p) {
+            if (pred.dangerLevel <= pred.currentLevel) return 0.5;
+            return ((p.level - pred.currentLevel) /
+                    (pred.dangerLevel - pred.currentLevel))
+                .clamp(0.0, 1.0);
+          }).toList();
+
+    // Trend
+    final trend = pred.next24h.isEmpty
+        ? TrendDirection.steady
+        : pred.next24h.last.level > pred.currentLevel * 1.005
+            ? TrendDirection.rising
+            : pred.next24h.last.level < pred.currentLevel * 0.995
+                ? TrendDirection.falling
+                : TrendDirection.steady;
+
+    final trendColor = switch (trend) {
+      TrendDirection.rising  => const Color(0xFFFF5500),
+      TrendDirection.falling => const Color(0xFF10E88A),
+      TrendDirection.steady  => const Color(0xFF00C6FF),
+    };
+    final trendIcon = switch (trend) {
+      TrendDirection.rising  => Icons.trending_up_rounded,
+      TrendDirection.falling => Icons.trending_down_rounded,
+      TrendDirection.steady  => Icons.trending_flat_rounded,
+    };
+
+    // Peak in next 24h
+    final peakPt = pred.next24h.isEmpty
+        ? null
+        : pred.next24h.reduce((a, b) => a.level > b.level ? a : b);
+
+    // CWC risk score
+    final cwcRisk = pred.cwcRiskScore;
+
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color:        t.cardBgElevated,
-        borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: t.stroke),
+        color: t.cardBgElevated,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: alertColor.withValues(alpha: 0.20)),
       ),
-      child: predAsync.when(
-        loading: () => Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(width: 12, height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5, color: alertColor)),
-            const SizedBox(width: 8),
-            Text('Loading AI forecast…',
-                style: TextStyle(color: t.textSecondary, fontSize: 10)),
-          ],
-        ),
-        error: (_, __) => Row(children: [
-          Icon(Icons.info_outline_rounded, color: t.textSecondary, size: 12),
-          const SizedBox(width: 6),
-          Text('Forecast unavailable', style: TextStyle(color: t.textSecondary, fontSize: 10)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Header row
+        Row(children: [
+          Icon(Icons.psychology_rounded, color: alertColor, size: 13),
+          const SizedBox(width: 5),
+          Text('AI Prediction · 24 h',
+              style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w800)),
+          const Spacer(),
+          // Trend badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: trendColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: trendColor.withValues(alpha: 0.35))),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(trendIcon, color: trendColor, size: 10),
+              const SizedBox(width: 3),
+              Text(trend.label,
+                  style: TextStyle(color: trendColor, fontSize: 9, fontWeight: FontWeight.w800)),
+            ]),
+          ),
         ]),
-        data: (pred) {
-          // Peak level in next 24 h
-          final pts24  = pred.next24h;
-          double? peak;
-          int?    peakHourIdx;
-          for (int i = 0; i < pts24.length; i++) {
-            if (peak == null || pts24[i].level > peak) {
-              peak = pts24[i].level;
-              peakHourIdx = i;
-            }
-          }
-          final trend   = peak != null && peak > pred.currentLevel ? '⬆' :
-                          peak != null && peak < pred.currentLevel ? '⬇' : '→';
-          final trendCol = trend == '⬆' ? AppPalette.danger
-                         : trend == '⬇' ? const Color(0xFF10E88A)
-                         : t.textSecondary;
-          final conf    = pred.confidencePct.toStringAsFixed(0);
-          final model   = pred.modelVersion;
 
-          // 6 h sparkline (first 6 points of next24h)
-          final spark   = pts24.take(6).toList();
-          final sparkMin = spark.isEmpty ? 0.0 : spark.map((p) => p.level).reduce(math.min);
-          final sparkMax = spark.isEmpty ? 1.0 : spark.map((p) => p.level).reduce(math.max);
-          final sparkRange = (sparkMax - sparkMin).clamp(0.01, double.infinity);
+        if (points.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 36,
+            child: CustomPaint(
+              painter: _SparklinePainter(points: points, color: alertColor),
+              size: const Size(double.infinity, 36),
+            ),
+          ),
+        ],
 
-          // CWC risk score bar
-          final riskScore = pred.cwcRiskScore;
+        const SizedBox(height: 8),
 
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Header
-            Row(children: [
-              Icon(Icons.psychology_rounded, color: alertColor, size: 12),
-              const SizedBox(width: 5),
-              Text('AI Flood Forecast', style: TextStyle(
-                  color: t.textPrimary, fontSize: 10, fontWeight: FontWeight.w800)),
-              const Spacer(),
-              Text(model, style: TextStyle(color: t.textSecondary, fontSize: 8)),
-            ]),
-            const SizedBox(height: 8),
+        // Stats row
+        Row(children: [
+          if (peakPt != null) ...[
+            _PredStat('Peak', '${peakPt.level.toStringAsFixed(2)} m', alertColor),
+            const SizedBox(width: 8),
+          ],
+          _PredStat('Confidence', '${pred.confidencePct.toStringAsFixed(0)}%',
+              const Color(0xFF00C6FF)),
+          const SizedBox(width: 8),
+          _PredStat('Model', pred.modelVersion, t.textSecondary),
+        ]),
 
-            // Key metrics row
-            Row(children: [
-              Expanded(child: _PredStat(
-                label: '24 h Peak',
-                value: peak != null ? '${peak.toStringAsFixed(2)} m' : '—',
-                color: alertColor, t: t,
-              )),
-              const SizedBox(width: 6),
-              Expanded(child: _PredStat(
-                label: 'Trend',
-                value: '$trend ${peakHourIdx != null ? '+${peakHourIdx}h' : ''}',
-                color: trendCol, t: t,
-              )),
-              const SizedBox(width: 6),
-              Expanded(child: _PredStat(
-                label: 'Confidence',
-                value: '$conf%',
-                color: t.textSecondary, t: t,
-              )),
-            ]),
-
-            // CWC risk score bar
-            if (riskScore != null) ...[
-              const SizedBox(height: 8),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('CWC Risk Score', style: TextStyle(color: t.textSecondary, fontSize: 9)),
-                Text('${riskScore.toStringAsFixed(0)}/100',
-                    style: TextStyle(color: alertColor, fontSize: 9, fontWeight: FontWeight.w700)),
-              ]),
-              const SizedBox(height: 3),
-              ClipRRect(borderRadius: BorderRadius.circular(3),
+        // CWC risk bar
+        if (cwcRisk != null) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Text('CWC Risk', style: TextStyle(color: t.textSecondary, fontSize: 9)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
                 child: Container(
                   height: 5, color: t.cardBg,
                   child: FractionallySizedBox(
-                    widthFactor: (riskScore / 100).clamp(0.0, 1.0),
+                    widthFactor: (cwcRisk / 100).clamp(0.0, 1.0),
                     alignment: Alignment.centerLeft,
                     child: Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(colors: [
                           const Color(0xFF10E88A),
                           const Color(0xFFFFA520),
-                          AppPalette.danger,
-                        ], stops: const [0.0, 0.6, 1.0])),
+                          const Color(0xFFFF1A44),
+                        ], stops: const [0.0, 0.5, 1.0]),
+                      ),
                     ),
                   ),
-                )),
-            ],
-
-            // 6 h sparkline
-            if (spark.length > 1) ...[
-              const SizedBox(height: 8),
-              Text('Next 6 h', style: TextStyle(color: t.textSecondary, fontSize: 9)),
-              const SizedBox(height: 4),
-              SizedBox(height: 28,
-                child: CustomPaint(
-                  painter: _SparklinePainter(
-                    points: spark.map((p) =>
-                      (p.level - sparkMin) / sparkRange).toList(),
-                    color: alertColor,
-                  ),
-                  size: const Size(double.infinity, 28),
                 ),
               ),
-            ],
-          ]);
-        },
-      ),
+            ),
+            const SizedBox(width: 6),
+            Text('${cwcRisk.toStringAsFixed(0)}',
+                style: const TextStyle(color: Color(0xFF00C6FF), fontSize: 9, fontWeight: FontWeight.w800)),
+          ]),
+        ],
+      ]),
     );
   }
 }
 
 class _PredStat extends StatelessWidget {
-  final String label, value;
+  final String label;
+  final String value;
   final Color  color;
-  final RiverColors t;
-  const _PredStat({required this.label, required this.value, required this.color, required this.t});
+  const _PredStat(this.label, this.value, this.color);
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: color.withValues(alpha: 0.18))),
-    child: Column(children: [
-      Text(value, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800),
-          textAlign: TextAlign.center),
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: TextStyle(color: t.textSecondary, fontSize: 8)),
-    ]),
-  );
+      Text(value,  style: TextStyle(color: color,          fontSize: 11, fontWeight: FontWeight.w800)),
+    ]);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1180,7 +1156,7 @@ class _SparklinePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (points.length < 2) return;
     final n    = points.length;
-    final path = Path();
+    final path = ui.Path();
     for (int i = 0; i < n; i++) {
       final x = size.width * i / (n - 1);
       final y = size.height * (1 - points[i]);
@@ -1193,7 +1169,8 @@ class _SparklinePainter extends CustomPainter {
       ..strokeCap   = StrokeCap.round
       ..strokeJoin  = StrokeJoin.round);
     // fill
-    final fill = Path.from(path)
+    final fill = ui.Path()
+      ..addPath(path, Offset.zero)
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height)
       ..close();
@@ -1422,10 +1399,7 @@ class _DistrictStationRow extends StatelessWidget {
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(4)),
             child: Text(alertLevel.label,
-                style: TextStyle(color: color, fontSize: 8, fontWeight: FontWeight.w800))),
-          const SizedBox(width: 5),
-          Text('${fd.currentLevel.toStringAsFixed(1)} m',
-              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+                style: TextStyle(color: color, fontSize: 8.5, fontWeight: FontWeight.w700))),
           const SizedBox(width: 4),
           Icon(Icons.chevron_right_rounded, color: t.textSecondary, size: 14),
         ]),
@@ -1435,204 +1409,217 @@ class _DistrictStationRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _MapLegend (updated: alert count badges)
+// Map Legend (collapsible)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLegend extends StatefulWidget {
   final bool showRivers;
   final bool showDistricts;
-  final Map<AlertLevel, int> alertsByLevel;
-  const _MapLegend({
-    required this.showRivers,
-    required this.showDistricts,
-    required this.alertsByLevel,
-  });
+  const _MapLegend({required this.showRivers, required this.showDistricts});
 
   @override
   State<_MapLegend> createState() => _MapLegendState();
 }
 
 class _MapLegendState extends State<_MapLegend> with SingleTickerProviderStateMixin {
-  bool _expanded     = false;
-  bool _showAlerts   = true;
-  bool _showLevelBar = true;
-  bool _showRiversSec= true;
-  bool _showDistrSec = true;
+  bool _expanded = false;
+  late final AnimationController _ctrl;
+  late final Animation<double> _fadeAnim;
 
-  late final AnimationController _anim;
-  late final Animation<double>   _fade;
+  // Section collapse states
+  bool _alertsExpanded    = true;
+  bool _levelsExpanded    = false;
+  bool _riversExpanded    = true;
+  bool _districtExpanded  = false;
 
   @override
   void initState() {
     super.initState();
-    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
-    _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
+    _ctrl     = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _fadeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
   }
 
   @override
-  void dispose() { _anim.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
-    _expanded ? _anim.forward() : _anim.reverse();
+    _expanded ? _ctrl.forward() : _ctrl.reverse();
   }
-
-  static const _levels = [
-    (AlertLevel.normal,  'Normal',  'सामान्य'),
-    (AlertLevel.watch,   'Watch',   'सतर्क'),
-    (AlertLevel.warning, 'Warning', 'चेतावनी'),
-    (AlertLevel.danger,  'Danger',  'खतरा'),
-    (AlertLevel.extreme, 'Extreme', 'अतिखतरा'),
-  ];
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-      alignment: Alignment.bottomLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 200),
-        decoration: BoxDecoration(
-          color: t.cardBg.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.stroke, width: 1),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 16)],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            GestureDetector(
-              onTap: _toggle,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
-                child: Row(children: [
-                  Icon(Icons.legend_toggle_rounded, color: t.accent, size: 13),
-                  const SizedBox(width: 6),
-                  Text('Legend', style: TextStyle(
-                      color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
-                  const Spacer(),
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.keyboard_arrow_down_rounded, color: t.textSecondary, size: 16)),
-                ]),
-              ),
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 190),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10), width: 0.8),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.40), blurRadius: 16)],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header (tap to expand/collapse) ───────────────────────────
+          GestureDetector(
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+              child: Row(children: [
+                Icon(Icons.legend_toggle_rounded,
+                    color: t.accent, size: 13),
+                const SizedBox(width: 5),
+                Text('Legend',
+                    style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: _expanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.keyboard_arrow_down_rounded,
+                      color: t.textSecondary, size: 14)),
+              ]),
             ),
-            FadeTransition(
-              opacity: _fade,
-              child: _expanded
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _LegendDivider(t),
-                      _SectionHeader(title: 'Alert Levels', icon: Icons.warning_amber_rounded,
-                          expanded: _showAlerts,    onToggle: () => setState(() => _showAlerts    = !_showAlerts),    t: t),
-                      if (_showAlerts) ...[
-                        const SizedBox(height: 4),
-                        for (final r in _levels)
-                          _AlertLevelRow(
-                            sev:   r.$1, label: r.$2, hindi: r.$3, t: t,
-                            count: widget.alertsByLevel[r.$1] ?? 0,
+          ),
+
+          // ── Expandable body ───────────────────────────────────────────
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            child: _expanded
+                ? FadeTransition(
+                    opacity: _fadeAnim,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _LegendDivider(),
+
+                          // ── Alert Levels ───────────────────────────────
+                          _SectionHeader(
+                            label: 'Flood Alert Levels',
+                            expanded: _alertsExpanded,
+                            onTap: () => setState(() => _alertsExpanded = !_alertsExpanded),
                           ),
-                        const SizedBox(height: 6),
-                      ],
-                      _LegendDivider(t),
-                      _SectionHeader(title: 'Water Level Zones', icon: Icons.straighten_rounded,
-                          expanded: _showLevelBar,  onToggle: () => setState(() => _showLevelBar  = !_showLevelBar),  t: t),
-                      if (_showLevelBar) ...[ const SizedBox(height: 6), const _WaterLevelBar(), const SizedBox(height: 6) ],
-                      if (widget.showRivers) ...[
-                        _LegendDivider(t),
-                        _SectionHeader(title: 'Rivers', icon: Icons.water_rounded,
-                            expanded: _showRiversSec, onToggle: () => setState(() => _showRiversSec = !_showRiversSec), t: t),
-                        if (_showRiversSec) ...[
-                          const SizedBox(height: 4),
-                          for (final r in _biharRivers) _RiverRow(river: r, t: t),
-                          const SizedBox(height: 4),
+                          if (_alertsExpanded) ...[
+                            for (final lvl in AlertLevel.values)
+                              _AlertLevelRow(level: lvl),
+                          ],
+
+                          _LegendDivider(),
+
+                          // ── Water Level Zones ──────────────────────────
+                          _SectionHeader(
+                            label: 'Water Level Zones',
+                            expanded: _levelsExpanded,
+                            onTap: () => setState(() => _levelsExpanded = !_levelsExpanded),
+                          ),
+                          if (_levelsExpanded) ...[
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              child: _WaterLevelBar(),
+                            ),
+                            const SizedBox(height: 4),
+                          ],
+
+                          // ── Rivers ─────────────────────────────────────
+                          if (widget.showRivers) ...[
+                            _LegendDivider(),
+                            _SectionHeader(
+                              label: 'Rivers',
+                              expanded: _riversExpanded,
+                              onTap: () => setState(() => _riversExpanded = !_riversExpanded),
+                            ),
+                            if (_riversExpanded)
+                              for (final r in _biharRivers)
+                                _RiverRow(name: r.name, color: r.color),
+                          ],
+
+                          // ── District Shading ───────────────────────────
+                          if (widget.showDistricts) ...[
+                            _LegendDivider(),
+                            _SectionHeader(
+                              label: 'District Fill',
+                              expanded: _districtExpanded,
+                              onTap: () => setState(() => _districtExpanded = !_districtExpanded),
+                            ),
+                            if (_districtExpanded) ...[
+                              const SizedBox(height: 4),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                child: _DistrictShadingBar(),
+                              ),
+                              const SizedBox(height: 4),
+                            ],
+                          ],
                         ],
-                      ],
-                      if (widget.showDistricts) ...[
-                        _LegendDivider(t),
-                        _SectionHeader(title: 'District Fill', icon: Icons.grid_view_rounded,
-                            expanded: _showDistrSec,  onToggle: () => setState(() => _showDistrSec  = !_showDistrSec),  t: t),
-                        if (_showDistrSec) ...[ const SizedBox(height: 6), const _DistrictShadingBar(), const SizedBox(height: 8) ],
-                      ],
-                    ],
+                      ),
+                    ),
                   )
                 : const SizedBox.shrink(),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Legend sub-widgets
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LegendDivider extends StatelessWidget {
-  final RiverColors t;
-  const _LegendDivider(this.t);
   @override
   Widget build(BuildContext context) =>
-      Divider(height: 1, thickness: 1, color: t.stroke.withValues(alpha: 0.60));
+      Divider(height: 1, thickness: 0.5, color: Colors.white.withValues(alpha: 0.08),
+          indent: 10, endIndent: 10);
 }
 
 class _SectionHeader extends StatelessWidget {
-  final String title; final IconData icon;
-  final bool expanded; final VoidCallback onToggle; final RiverColors t;
-  const _SectionHeader({required this.title, required this.icon, required this.expanded, required this.onToggle, required this.t});
+  final String label;
+  final bool expanded;
+  final VoidCallback onTap;
+  const _SectionHeader({required this.label, required this.expanded, required this.onTap});
+
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onToggle, behavior: HitTestBehavior.opaque,
+    onTap: onTap,
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(12, 7, 10, 3),
+      padding: const EdgeInsets.fromLTRB(10, 6, 8, 2),
       child: Row(children: [
-        Icon(icon, color: t.accent, size: 10), const SizedBox(width: 5),
-        Text(title, style: TextStyle(color: t.textSecondary, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.7)),
+        Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 8.5,
+            fontWeight: FontWeight.w700, letterSpacing: 0.4)),
         const Spacer(),
-        Icon(expanded ? Icons.remove_rounded : Icons.add_rounded, color: t.textSecondary, size: 11),
+        Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+            color: const Color(0xFF94A3B8), size: 12),
       ]),
     ),
   );
 }
 
 class _AlertLevelRow extends StatelessWidget {
-  final AlertLevel sev;
-  final String     label, hindi;
-  final int        count;     // live alert count for this level
-  final RiverColors t;
-  const _AlertLevelRow({required this.sev, required this.label, required this.hindi, required this.count, required this.t});
+  final AlertLevel level;
+  const _AlertLevelRow({required this.level});
 
   @override
   Widget build(BuildContext context) {
-    final color = _alertLevelColor(sev);
+    final col = _alertLevelColor(level);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 10, 4),
+      padding: const EdgeInsets.fromLTRB(10, 3, 10, 0),
       child: Row(children: [
         Container(width: 8, height: 8,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color,
-            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)])),
-        const SizedBox(width: 5),
-        Icon(_alertLevelIcon(sev), color: color, size: 11),
-        const SizedBox(width: 5),
-        Expanded(child: Text(label, style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w700))),
-        Text(hindi, style: TextStyle(color: color.withValues(alpha: 0.65), fontSize: 8.5, fontWeight: FontWeight.w500)),
-        if (count > 0) ...[
-          const SizedBox(width: 5),
-          Container(
-            width: 16, height: 16,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.20)),
-            child: Center(child: Text('$count',
-                style: TextStyle(color: color, fontSize: 7.5, fontWeight: FontWeight.w900))),
-          ),
-        ],
+            decoration: BoxDecoration(shape: BoxShape.circle, color: col,
+                boxShadow: [BoxShadow(color: col.withValues(alpha: 0.50), blurRadius: 4)])),
+        const SizedBox(width: 6),
+        Icon(_alertLevelIcon(level), color: col, size: 9),
+        const SizedBox(width: 4),
+        Expanded(child: Text(level.label,
+            style: TextStyle(color: col, fontSize: 9, fontWeight: FontWeight.w700))),
+        Text(_alertLevelHindi(level),
+            style: TextStyle(color: col.withValues(alpha: 0.60), fontSize: 8)),
       ]),
     );
   }
@@ -1640,164 +1627,229 @@ class _AlertLevelRow extends StatelessWidget {
 
 class _WaterLevelBar extends StatelessWidget {
   const _WaterLevelBar();
-  static const _segments = [
-    (Color(0xFF10E88A), 'Normal',  ''),
-    (Color(0xFF00C6FF), 'Watch',   '90%W'),
-    (Color(0xFFFFA520), 'Warning', 'W'),
-    (Color(0xFFFF5500), 'Danger',  'D'),
-    (Color(0xFFFF1A44), 'Extreme', '115%D'),
-  ];
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ClipRRect(borderRadius: BorderRadius.circular(5),
-          child: SizedBox(height: 10,
-            child: Row(children: _segments.map((s) => Expanded(
-              child: Container(color: s.$1))).toList()))),
-        const SizedBox(height: 3),
-        Row(children: List.generate(_segments.length, (i) {
-          final label = _segments[i].$3;
-          return Expanded(child: label.isEmpty ? const SizedBox.shrink() :
-            Text(label, style: TextStyle(color: t.textSecondary, fontSize: 7.5, fontWeight: FontWeight.w600),
-              textAlign: i == 0 ? TextAlign.start : TextAlign.center));
-        })),
-        const SizedBox(height: 4),
-        Row(children: _segments.map((s) => Expanded(child: Text(s.$2,
-          style: TextStyle(color: s.$1, fontSize: 7, fontWeight: FontWeight.w700),
-          textAlign: TextAlign.center, overflow: TextOverflow.ellipsis))).toList()),
-      ]),
-    );
-  }
-}
 
-class _RiverRow extends StatelessWidget {
-  final _RiverLine river; final RiverColors t;
-  const _RiverRow({required this.river, required this.t});
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 0, 10, 3),
-    child: Row(children: [
-      SizedBox(width: 20, height: 10, child: CustomPaint(painter: _LinePainter(river.color))),
-      const SizedBox(width: 6),
-      Text(river.name, style: TextStyle(color: river.color, fontSize: 9, fontWeight: FontWeight.w600)),
-    ]),
-  );
-}
-
-class _LinePainter extends CustomPainter {
-  final Color color;
-  const _LinePainter(this.color);
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawLine(Offset(0, size.height / 2), Offset(size.width, size.height / 2),
-      Paint()..color = color..strokeWidth = 3.0..strokeCap = StrokeCap.round);
-  }
-  @override
-  bool shouldRepaint(_LinePainter old) => old.color != color;
-}
-
-class _DistrictShadingBar extends StatelessWidget {
-  const _DistrictShadingBar();
-  static const _stops = [
+  static const _zones = [
     (Color(0xFF10E88A), 'Normal'),
     (Color(0xFF00C6FF), 'Watch'),
     (Color(0xFFFFA520), 'Warning'),
     (Color(0xFFFF5500), 'Danger'),
     (Color(0xFFFF1A44), 'Extreme'),
   ];
+
+  static const _labels = ['90%W', 'W', 'D', '115%D'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Segmented colour bar
+      ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Row(
+          children: _zones.map((z) => Expanded(
+            child: Container(height: 8, color: z.$1),
+          )).toList(),
+        ),
+      ),
+      const SizedBox(height: 2),
+      // Threshold tick labels
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: _labels.map((l) => Text(l,
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 7))).toList(),
+      ),
+      const SizedBox(height: 3),
+      // Colour name row
+      Row(
+        children: _zones.map((z) => Expanded(
+          child: Text(z.$2,
+              style: TextStyle(color: z.$1, fontSize: 7, fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+        )).toList(),
+      ),
+    ]);
+  }
+}
+
+class _RiverRow extends StatelessWidget {
+  final String name;
+  final Color  color;
+  const _RiverRow({required this.name, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 3, 10, 0),
+    child: Row(children: [
+      SizedBox(width: 22, height: 10,
+          child: CustomPaint(painter: _LinePainter(color: color))),
+      const SizedBox(width: 6),
+      Text(name, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
+    ]),
+  );
+}
+
+class _LinePainter extends CustomPainter {
+  final Color color;
+  const _LinePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width, size.height / 2),
+      Paint()
+        ..color       = color
+        ..strokeWidth = 3
+        ..strokeCap   = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LinePainter old) => old.color != color;
+}
+
+class _DistrictShadingBar extends StatelessWidget {
+  const _DistrictShadingBar();
+
+  static const _sevColors = [
+    Color(0xFF10E88A), Color(0xFF00C6FF),
+    Color(0xFFFFA520), Color(0xFFFF5500), Color(0xFFFF1A44),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: _sevColors
+                  .map((c) => c.withValues(alpha: 0.70))
+                  .toList(),
+            ),
+          ),
+          child: const SizedBox(height: 8, width: double.infinity),
+        ),
+      ),
+      const SizedBox(height: 3),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        const Text('Low risk',  style: TextStyle(color: Color(0xFF10E88A), fontSize: 7.5)),
+        const Text('High risk', style: TextStyle(color: Color(0xFFFF1A44), fontSize: 7.5)),
+      ]),
+      const SizedBox(height: 3),
+      Wrap(
+        spacing: 4, runSpacing: 2,
+        children: _sevColors.map((c) => Container(
+          width: 10, height: 10,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: c.withValues(alpha: 0.70)),
+        )).toList(),
+      ),
+    ]);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sheet stat chip
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SheetStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+  const _SheetStat(this.label, this.value, this.color);
+
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ClipRRect(borderRadius: BorderRadius.circular(5),
-          child: SizedBox(height: 8, child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: _stops.map((s) => s.$1.withValues(alpha: 0.70)).toList())),
-            child: const SizedBox.expand()))),
-        const SizedBox(height: 3),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('Low risk',  style: TextStyle(color: t.textSecondary, fontSize: 7.5)),
-          Text('High risk', style: const TextStyle(color: AppPalette.danger, fontSize: 7.5)),
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(color: t.textSecondary, fontSize: 9)),
+          const SizedBox(height: 2),
+          Text(value,  style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
         ]),
-        const SizedBox(height: 4),
-        Row(children: _stops.map((s) => Expanded(child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: s.$1)),
-            const SizedBox(width: 2),
-            Flexible(child: Text(s.$2,
-              style: TextStyle(color: s.$1, fontSize: 6.5, fontWeight: FontWeight.w700),
-              overflow: TextOverflow.ellipsis)),
-          ]))).toList()),
-      ]),
+      ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared small widgets
+// Mini level bar
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SheetStat extends StatelessWidget {
-  final String label, value; final Color color;
-  const _SheetStat(this.label, this.value, this.color);
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Expanded(child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.20))),
-      child: Column(children: [
-        Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
-        Text(label, style: TextStyle(color: t.textSecondary, fontSize: 9)),
-      ])));
-  }
-}
-
 class _MiniLevelBar extends StatelessWidget {
-  final double current, warning, danger; final Color color;
-  const _MiniLevelBar({required this.current, required this.warning, required this.danger, required this.color});
+  final double current;
+  final double warning;
+  final double danger;
+  final Color  color;
+  const _MiniLevelBar({required this.current, required this.warning,
+    required this.danger, required this.color});
+
   @override
   Widget build(BuildContext context) {
-    final t   = RiverColors.of(context);
-    final pct = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
-    return Column(children: [
-      ClipRRect(borderRadius: BorderRadius.circular(6),
-        child: Container(height: 8, color: t.cardBgElevated,
-          child: FractionallySizedBox(widthFactor: pct, alignment: Alignment.centerLeft,
-            child: Container(decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [color.withValues(alpha: 0.5), color])))))),
-      const SizedBox(height: 4),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text('${current.toStringAsFixed(1)} m', style: TextStyle(fontSize: 9, color: t.textSecondary)),
-        Text('⚠ ${warning.toStringAsFixed(1)} m', style: const TextStyle(fontSize: 9, color: AppPalette.warning)),
-        Text('🔴 ${danger.toStringAsFixed(1)} m',  style: const TextStyle(fontSize: 9, color: AppPalette.danger)),
-      ]),
+    final t      = RiverColors.of(context);
+    final maxVal = math.max(danger * 1.1, current * 1.05);
+    if (maxVal <= 0) return const SizedBox.shrink();
+
+    final wPct = (warning / maxVal).clamp(0.0, 1.0);
+    final dPct = (danger  / maxVal).clamp(0.0, 1.0);
+    final cPct = (current / maxVal).clamp(0.0, 1.0);
+
+    return Stack(children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: Container(
+          height: 10,
+          color: t.cardBgElevated,
+          child: Row(children: [
+            Flexible(flex: (cPct * 100).round(), child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [color.withValues(alpha: 0.40), color])))),
+            Flexible(flex: ((1 - cPct) * 100).round(), child: const SizedBox.shrink()),
+          ]),
+        ),
+      ),
+      // Warning tick
+      Positioned(left: wPct * (MediaQuery.of(context).size.width - 64),
+        top: 0, bottom: 0,
+        child: Container(width: 1.5, color: AppPalette.warning)),
+      // Danger tick
+      Positioned(left: dPct * (MediaQuery.of(context).size.width - 64),
+        top: 0, bottom: 0,
+        child: Container(width: 1.5, color: AppPalette.danger)),
     ]);
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Glass card / back button
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _GlassCard extends StatelessWidget {
   final Widget child;
   const _GlassCard({required this.child});
+
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: t.cardBg.withValues(alpha: 0.88), borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.stroke),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 12)]),
-      child: child);
+        color: t.cardBg.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.stroke.withValues(alpha: 0.60), width: 0.8),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 12)],
+      ),
+      child: child,
+    );
   }
 }
 
@@ -1806,38 +1858,57 @@ class _GlassBack extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
     return GestureDetector(
-      onTap: () => Navigator.maybePop(context),
+      onTap: () => Navigator.of(context).maybePop(),
       child: Container(
-        width: 40, height: 40,
+        width: 36, height: 36,
         decoration: BoxDecoration(
-          color: t.cardBg.withValues(alpha: 0.88), borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: t.stroke),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 10)]),
-        child: Icon(Icons.arrow_back_ios_new_rounded, color: t.accent, size: 16)));
+          color: t.cardBg.withValues(alpha: 0.88),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: t.stroke.withValues(alpha: 0.60), width: 0.8),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 8)],
+        ),
+        child: Icon(Icons.arrow_back_ios_new_rounded, color: t.textPrimary, size: 16),
+      ),
+    );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer toggle button
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _LayerToggle extends StatelessWidget {
-  final IconData icon; final String label; final bool active;
-  final Color color; final VoidCallback onTap;
-  const _LayerToggle({required this.icon, required this.label, required this.active, required this.color, required this.onTap});
+  final IconData icon;
+  final String   label;
+  final bool     active;
+  final VoidCallback onTap;
+  const _LayerToggle({required this.icon, required this.label,
+    required this.active, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
+    final t     = RiverColors.of(context);
+    final color = active ? t.accent : t.textSecondary;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.18) : t.cardBg.withValues(alpha: 0.80),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: active ? color : t.stroke, width: active ? 1.2 : 0.8),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)]),
+          color: active
+              ? t.accent.withValues(alpha: 0.15)
+              : t.cardBg.withValues(alpha: 0.80),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: active ? t.accent.withValues(alpha: 0.50) : t.stroke.withValues(alpha: 0.60),
+              width: 0.8),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 6)],
+        ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: active ? color : t.stroke, size: 14),
-          const SizedBox(width: 5),
-          Text(label, style: TextStyle(
-              color: active ? color : t.stroke, fontSize: 10, fontWeight: FontWeight.w700)),
-        ])));
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w700)),
+        ]),
+      ),
+    );
   }
 }
