@@ -1,14 +1,5 @@
 // lib/screens/splash_screen.dart
-// EQUINOX-BH — SplashScreen v7  "Deep Space Launch"
-// ─────────────────────────────────────────────────────────────────────────────
-// Phase 5 upgrades over v6:
-//  1. Star-field CustomPainter  — 120 randomised twinkling stars
-//  2. Dual orbit rings          — outer slow CW + inner fast CCW, different radii
-//  3. Letter-by-letter wordmark — staggered Interval fade/slide per character
-//  4. Multi-phase boot log      — each phase unlocks when its provider is ready
-//  5. Riverpod warm-up progress — reads isWakingUpProvider + liveLevelsProvider
-//                                 to drive a real (not fake) progress arc
-// ─────────────────────────────────────────────────────────────────────────────
+// EQUINOX-BR05 — SplashScreen v6  (Deep Space — ultra-minimal premium)
 library;
 
 import 'dart:async';
@@ -340,10 +331,32 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 32),
-
-                // ── staggered wordmark ──────────────────────────────────────
+                const SizedBox(height: 36),
+                FadeTransition(
+                  opacity: _textFade,
+                  child: SlideTransition(
+                    position: _textSlide,
+                    child: const Column(
+                      children: [
+                        Text('EQUINOX-BR05',
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w700,
+                              color: AppPalette.textWhite,
+                              letterSpacing: 1.5,
+                            )),
+                        SizedBox(height: 6),
+                        Text('Real-time flood intelligence',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppPalette.textGrey,
+                              letterSpacing: 0.8,
+                            )),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 48),
                 AnimatedBuilder(
                   animation: _entryCtrl,
                   builder: (_, __) => Row(

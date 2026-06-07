@@ -1,5 +1,5 @@
 // lib/screens/home_screen.dart
-// EQUINOX-BH — HomeScreen v12  — FULLY THEME-AWARE (RiverColors)
+// OpsFlood — HomeScreen v8  (Settings tab + locale-aware labels)
 library;
 
 import 'dart:ui';
@@ -11,35 +11,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 import 'dashboard_screen.dart';
+import 'live_stations_screen.dart';
 import 'monitors_screen.dart';
 import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
 import 'settings_screen.dart';
 import 'weather_screen.dart';
-
-class _Tab {
-  const _Tab(this.label, this.icon, this.activeIcon);
-  final String   label;
-  final IconData icon, activeIcon;
-}
-
-const _primary = [
-  _Tab('Home',    Icons.dashboard_outlined,      Icons.dashboard_rounded),
-  _Tab('Rivers',  Icons.water_outlined,           Icons.water_rounded),
-  _Tab('Monitor', Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
-  _Tab('Weather', Icons.cloud_outlined,           Icons.cloud_rounded),
-  _Tab('Predict', Icons.model_training_outlined,  Icons.model_training_rounded),
-];
-
-Widget _buildScreen(int i) => switch (i) {
-  0 => const DashboardScreen(),
-  1 => const RiverMonitorScreen(),
-  2 => const MonitorsScreen(),
-  3 => const WeatherScreen(),
-  4 => const PredictScreen(),
-  5 => const SettingsScreen(),
-  _ => const DashboardScreen(),
-};
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -51,9 +28,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   int _idx = 0;
 
-  late final AnimationController _glowCtrl;
-  late final Animation<double>    _glow;
-  late final List<Widget>         _screens;
+  late AnimationController _glowCtrl;
+  late Animation<double> _glow;
+
+  // Labels are hardcoded English here; for full i18n swap with AppLocalizations
+  static const _tabs = [
+    _Tab('Dashboard', Icons.dashboard_outlined,      Icons.dashboard_rounded),
+    _Tab('Rivers',    Icons.water_outlined,           Icons.water_rounded),
+    _Tab('Alerts',    Icons.notifications_outlined,   Icons.notifications_rounded),
+    _Tab('Weather',   Icons.cloud_outlined,           Icons.cloud_rounded),
+    _Tab('Predict',   Icons.model_training_outlined,  Icons.model_training_rounded),
+    _Tab('Stations',  Icons.sensors_outlined,         Icons.sensors_rounded),
+    _Tab('Monitor',   Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
+    _Tab('Settings',  Icons.settings_outlined,        Icons.settings_rounded),
+  ];
+
+  Widget _screen(int i) => switch (i) {
+    0 => const DashboardScreen(),
+    1 => const RiverMonitorScreen(),
+    2 => const AlertsScreen(),
+    3 => const WeatherScreen(),
+    4 => const PredictScreen(),
+    5 => const LiveStationsScreen(),
+    6 => const MonitorsScreen(),
+    7 => const SettingsScreen(),
+    _ => const DashboardScreen(),
+  };
 
   @override
   void initState() {
@@ -207,11 +207,7 @@ class _NavBar extends StatelessWidget {
 // ── nav item ──────────────────────────────────────────────────────────────────
 
 class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.tab,
-    required this.active,
-    required this.glowVal,
-  });
+  const _NavItem({required this.tab, required this.active, required this.glowVal});
   final _Tab   tab;
   final bool   active;
   final double glowVal;
@@ -238,11 +234,8 @@ class _NavItem extends StatelessWidget {
                   ],
                 )
               : null,
-          child: Icon(
-            active ? tab.activeIcon : tab.icon,
-            size: active ? 18 : 16,
-            color: c,
-          ),
+          child: Icon(active ? tab.activeIcon : tab.icon,
+              size: active ? 18 : 16, color: c),
         ),
         const SizedBox(height: 3),
         AnimatedDefaultTextStyle(
@@ -250,8 +243,7 @@ class _NavItem extends StatelessWidget {
           style: TextStyle(
             fontSize:   active ? 8.5 : 8,
             fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-            color: c,
-            letterSpacing: 0.2,
+            color: c, letterSpacing: 0.2,
           ),
           child: Text(tab.label),
         ),
@@ -260,213 +252,8 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-// ── More button ───────────────────────────────────────────────────────────────
-
-class _MoreButton extends StatelessWidget {
-  final bool active, offline;
-  const _MoreButton({required this.active, required this.offline});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    final c = active ? t.navActive : t.navInactive;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: 36, height: 26,
-              decoration: active
-                  ? BoxDecoration(
-                      color: t.navActive.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    )
-                  : null,
-              child: Icon(
-                active ? Icons.grid_view_rounded : Icons.grid_view_outlined,
-                size: 16, color: c,
-              ),
-            ),
-            if (offline)
-              Positioned(
-                top: -3, right: -3,
-                child: Container(
-                  width: 7, height: 7,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppPalette.amber,
-                    border: Border.all(
-                        color: t.navBg, width: 1.2),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 3),
-        AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 180),
-          style: TextStyle(
-            fontSize:   active ? 8.5 : 8,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-            color: c,
-            letterSpacing: 0.2,
-          ),
-          child: Text(offline ? 'Offline' : 'More'),
-        ),
-      ],
-    );
-  }
-}
-
-// ── More bottom sheet — Settings only ─────────────────────────────────────────
-
-class _MoreSheet extends StatelessWidget {
-  final int              current;
-  final bool             offline;
-  final ValueChanged<int> onSelect;
-  const _MoreSheet({
-    required this.current,
-    required this.offline,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(
-            top: BorderSide(color: t.stroke.withValues(alpha: 0.22), width: 1.5)),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36, height: 3,
-                margin: const EdgeInsets.only(bottom: 18),
-                decoration: BoxDecoration(
-                  color: t.stroke,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-              if (offline)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 14),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppPalette.amber.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: AppPalette.amber.withValues(alpha: 0.28)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.wifi_off_rounded,
-                          color: AppPalette.amber, size: 14),
-                      SizedBox(width: 8),
-                      Text(
-                        'Offline — showing cached data',
-                        style: TextStyle(
-                            color: AppPalette.amber, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              _SheetRow(
-                label:  'Settings',
-                icon:   Icons.settings_rounded,
-                sub:    'App preferences',
-                active: current == 5,
-                onTap:  () => onSelect(5),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetRow extends StatelessWidget {
-  final String   label, sub;
-  final IconData icon;
-  final bool     active;
-  final VoidCallback onTap;
-  const _SheetRow({
-    required this.label, required this.icon,
-    required this.sub,   required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    final c = active ? t.accent : t.textPrimary;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: active
-              ? t.accent.withValues(alpha: 0.08)
-              : t.cardBg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: active
-                ? t.accent.withValues(alpha: 0.35)
-                : t.stroke,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: c.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: c, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: TextStyle(
-                          color: c,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13)),
-                  Text(sub,
-                      style: TextStyle(
-                          color: t.textSecondary.withValues(alpha: 0.6),
-                          fontSize: 10)),
-                ],
-              ),
-            ),
-            if (active)
-              Container(
-                width: 6, height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: t.accent,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+class _Tab {
+  const _Tab(this.label, this.icon, this.activeIcon);
+  final String   label;
+  final IconData icon, activeIcon;
 }

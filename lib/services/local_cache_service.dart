@@ -74,26 +74,4 @@ class LocalCacheService {
   Future<void> setNow(String timestampKey) async {
     await setString(timestampKey, DateTime.now().toIso8601String());
   }
-
-  // ── Legacy aliases (used by cached_flood_api.dart + opsflood_db_service.dart)
-  // These map the old read/write/delete/clearAll API → current setString/getString/remove/clear
-  // ──────────────────────────────────────────────────────────────────────────
-
-  /// Legacy: read(key) → getString(key)
-  Future<String?> read(String key) async => getString(key);
-
-  /// Legacy: write(key, value) → setString(key, value)
-  Future<void> write(String key, String value) async {
-    await setString(key, value);
-  }
-
-  /// Legacy: delete(key) → remove(key)
-  Future<void> delete(String key) async {
-    await remove(key);
-  }
-
-  /// Legacy: clearAll() → clear()
-  Future<void> clearAll() async {
-    await clear();
-  }
 }

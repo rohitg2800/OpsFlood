@@ -74,62 +74,6 @@ operational_store.initialize()
 # ============= CONSTANTS =============
 WEATHER_CACHE_TTL_SECONDS = 600
 
-# India Standard Time: UTC+5:30 = 19800 seconds offset
-WEATHER_TIMEZONE_OFFSET: int = 19800
-WEATHER_TIMEZONE_NAME: str = "Asia/Kolkata"
-
-# BASE_DIR: backend/ directory (parent of routers/)
-BASE_DIR = str(Path(__file__).resolve().parent.parent)
-
-# REPO_DIR: repo root (two levels up: routers/ -> backend/ -> repo root)
-REPO_DIR = str(Path(__file__).resolve().parent.parent.parent)
-
-# Keywords used to identify flood model artifact files
-FLOOD_ARTIFACT_KEYWORDS = [
-    "flood",
-    "model",
-    "scaler",
-    "feature",
-    "classifier",
-    "predictor",
-    "ensemble",
-    "xgboost",
-    "random_forest",
-    "rf_",
-    "xgb_",
-]
-
-# State keys used in IndoFloods / CWC dataset
-INDOFLOODS_STATE_KEYS = [
-    "Bihar",
-    "Assam",
-    "Uttar Pradesh",
-    "West Bengal",
-    "Odisha",
-    "Uttarakhand",
-    "Himachal Pradesh",
-    "Arunachal Pradesh",
-    "Manipur",
-    "Meghalaya",
-    "Nagaland",
-    "Sikkim",
-    "Tripura",
-    "Mizoram",
-    "Kerala",
-    "Karnataka",
-    "Andhra Pradesh",
-    "Telangana",
-    "Maharashtra",
-    "Madhya Pradesh",
-    "Rajasthan",
-    "Gujarat",
-    "Punjab",
-    "Haryana",
-    "Jammu and Kashmir",
-    "Jharkhand",
-    "Chhattisgarh",
-]
-
 
 # ============= ENV HELPERS =============
 
@@ -169,6 +113,7 @@ def get_model_artifact_root() -> str:
     root = os.getenv("MODEL_ARTIFACT_ROOT", "").strip()
     if root:
         return root
+    # Default: backend/artifacts/models
     base = Path(__file__).resolve().parent.parent  # backend/
     return str(base / "artifacts" / "models")
 
@@ -189,15 +134,25 @@ def repo_relative_path(path: str) -> str:
 
 
 def resolve_model_artifact_path(path_name: str) -> str:
+    """
+    Resolve a model artifact path to an absolute path.
+    Supports:
+      - Absolute paths
+      - Paths relative to the backend/ directory
+      - Paths relative to the repo root
+    """
     p = Path(path_name)
     if p.is_absolute():
         return str(p)
+    # Try relative to backend/
     backend_p = Path(__file__).resolve().parent.parent / p
     if backend_p.exists():
         return str(backend_p)
+    # Try relative to repo root
     repo_p = Path(__file__).resolve().parent.parent.parent / p
     if repo_p.exists():
         return str(repo_p)
+    # Fall back to backend-relative (even if not found)
     return str(backend_p)
 
 
@@ -254,9 +209,6 @@ def _weather_cache_key(path: str, params: Dict[str, Any]) -> str:
 
 
 _weather_cache: Dict[str, Any] = {}
-
-# Public alias used by weather.py
-WEATHER_CACHE = _weather_cache
 
 
 def get_cached_weather_response(
@@ -323,7 +275,7 @@ def write_audit_log(
             }
         )
     except Exception as exc:
-        print(f"\u26a0\ufe0f Audit log write failed (non-fatal): {exc}")
+        print(f"⚠️ Audit log write failed (non-fatal): {exc}")
 
 
 # ============= TELEMETRY HELPERS =============
@@ -351,7 +303,7 @@ def persist_telemetry_record(
             }
         )
     except Exception as exc:
-        print(f"\u26a0\ufe0f Telemetry persistence failed: {exc}")
+        print(f"⚠️ Telemetry persistence failed: {exc}")
         snapshot_id = None
 
     write_audit_log(
@@ -388,6 +340,20 @@ def get_pipeline_features(
     state_name: str | None = None,
     station_name: str | None = None,
 ) -> Optional[Dict[str, Any]]:
+    """
+    Read the most recent OperationalDataPipeline feature row for this
+    (state, station) pair from:
+
+        data/features/weather_water/weather_water_features_latest.csv
+
+    Returns a dict with column names as keys, or None if not available.
+
+    Key columns returned (when present):
+      river_level_m   → Peak_Flood_Level_m
+      rainfall_1h_mm  → T1d (scaled)
+      rainfall_24h_mm
+      ...
+    """
     try:
         import pandas as pd
         csv_path = backend_relative_path(
@@ -399,6 +365,7 @@ def get_pipeline_features(
         if df.empty:
             return None
 
+        # Filter by state if present
         if state_name:
             col = next(
                 (c for c in df.columns if c.lower() in ("state", "state_name")),
@@ -409,6 +376,7 @@ def get_pipeline_features(
                 if mask.any():
                     df = df[mask]
 
+        # Filter by station if present
         if station_name:
             col = next(
                 (c for c in df.columns if c.lower() in ("station", "station_name", "city", "city_name")),
@@ -420,7 +388,9 @@ def get_pipeline_features(
                     df = df[mask]
 
         import math
+        # Take the most recent row
         row = df.iloc[-1].to_dict()
+        # Strip NaN values
         return {k: v for k, v in row.items() if not (isinstance(v, float) and math.isnan(v))}
     except Exception as exc:
         print(f"[WARN] get_pipeline_features failed: {exc}")
@@ -446,6 +416,15 @@ def pipeline_autofill_predict_input(
     state_name: str | None = None,
     station_name: str | None = None,
 ) -> Dict[str, Any]:
+    """
+    Auto-fill sentinel default values in input_dict from the pipeline feature CSV.
+
+    Sentinel defaults that get replaced:
+      Peak_Flood_Level_m  == 8.5   → replaced with river_level_m
+      T1d                 == 10.0  → replaced with scaled rainfall_1h_mm
+
+    Manual overrides from the Flutter UI or API caller are always respected.
+    """
     out = copy.deepcopy(input_dict)
     features = get_pipeline_features(state_name, station_name)
     meta = {"applied": False, "source": "none", "fields_replaced": []}
@@ -470,6 +449,7 @@ def pipeline_autofill_predict_input(
 
     rainfall_1h = _f("rainfall_1h_mm")
     if rainfall_1h is not None and float(out.get("T1d", 10.0)) == 10.0:
+        # Scale 1h reading to approximate 24h by × 12 (conservative midday factor)
         t1d_estimate = round(min(rainfall_1h * 12.0, 400.0), 2)
         out["T1d"] = t1d_estimate
         meta["fields_replaced"].append("T1d")
@@ -504,6 +484,7 @@ def get_source_policy_payload() -> Dict[str, Any]:
             "prediction_data_source": "Fallback Manual Context",
             "description": "Manual input only. No live data sources.",
         }
+    # Default: open_data_context
     return {
         "mode": "open_data_context",
         "label": "Open Data Context",

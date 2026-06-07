@@ -1,13 +1,22 @@
 // lib/services/threshold_alert_service.dart
+<<<<<<< HEAD
+// EQUINOX-BH — Polls GloFAS for Bihar cities and fires FCM-style local
+// alerts when river discharge crosses WARNING or DANGER thresholds.
+=======
 // OpsFlood — ThresholdAlertService
 // Polls live data and exposes a Stream<List<ThresholdAlert>> for AlertsProvider.
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
 library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+<<<<<<< HEAD
+import 'live_fetch_engine.dart';
+=======
 import '../models/threshold_alert.dart';
 import 'live_fetch_engine.dart';
 import 'alert_evaluator.dart';
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
 
 class ThresholdAlertService {
   ThresholdAlertService._();
@@ -19,6 +28,8 @@ class ThresholdAlertService {
 
   static const _checkInterval = Duration(minutes: 10);
 
+<<<<<<< HEAD
+=======
   // ── Stream ───────────────────────────────────────────────────────────
   final _controller = StreamController<List<ThresholdAlert>>.broadcast();
   Stream<List<ThresholdAlert>> get stream => _controller.stream;
@@ -31,6 +42,7 @@ class ThresholdAlertService {
   int get unreadCount => _unreadCount;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
   Future<void> start() async {
     if (_running) return;
     _running = true;
@@ -46,6 +58,20 @@ class ThresholdAlertService {
     if (kDebugMode) debugPrint('[ThresholdAlertService] stopped');
   }
 
+<<<<<<< HEAD
+  Future<void> _check() async {
+    try {
+      await _engine.refreshData();
+      final critical = _engine.criticalAlerts;
+      if (critical.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[ThresholdAlertService] ${critical.length} critical alert(s): '
+            '${critical.map((a) => a['city']).join(', ')}',
+          );
+        }
+        // TODO: wire to flutter_local_notifications for on-device alert
+=======
   // ── Public API ────────────────────────────────────────────────────────
   Future<void> refresh() async => _check();
 
@@ -82,6 +108,7 @@ class ThresholdAlertService {
 
       if (kDebugMode && alerts.isNotEmpty) {
         debugPrint('[ThresholdAlertService] ${alerts.length} alert(s) emitted');
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
       }
     } catch (e) {
       if (kDebugMode) debugPrint('[ThresholdAlertService] _check error: $e');
