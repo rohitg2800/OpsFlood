@@ -3,10 +3,9 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    // Built-in Kotlin — replaces legacy id("kotlin-android") KGP
-    id("org.jetbrains.kotlin.android")
+    id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")  // Google services plugin
+    id("com.google.gms.google-services")
 }
 
 val localProperties = Properties()
@@ -15,11 +14,21 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
+// ── Keystore signing ────────────────────────────────────────────────────────
+// Place your keystore at android/keystore.jks and set these 4 lines
+// in android/keystore.properties (DO NOT commit that file):
+//   storeFile=keystore.jks
+//   storePassword=YOUR_STORE_PASSWORD
+//   keyAlias=YOUR_KEY_ALIAS
+//   keyPassword=YOUR_KEY_PASSWORD
+//
+// If keystore.properties is missing (e.g. CI without secrets), the build
+// falls back to the debug keystore so it still compiles.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val useReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
-    namespace = "com.equinox_bh.android"
+    namespace = "in.rohitg.floodwatch"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -49,11 +58,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.equinox_bh.android"
+        applicationId = "in.rohitg.floodwatch"
         minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 2
+        versionName = "1.1.0"
         multiDexEnabled = true
     }
 
@@ -75,15 +84,6 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
-    // Firebase BoM — controls all Firebase library versions
-    implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
-
-    // Firebase Analytics (no version needed when using BoM)
-    implementation("com.google.firebase:firebase-analytics")
-
-    // Firebase Cloud Messaging — needed for push notification support
-    implementation("com.google.firebase:firebase-messaging")
 }
 
 flutter {

@@ -1,35 +1,19 @@
 <!-- android/app/src/main/AndroidManifest.xml -->
 <!-- Added ACCESS_FINE_LOCATION + ACCESS_COARSE_LOCATION for geolocator -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- ── Existing permissions ──────────────────────────────────── -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.CALL_PHONE" />
-
-    <!-- ── Location for “Am I in danger?” proximity banner ──────────────── -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <!-- ── AI Prediction Background Service permissions ────────────────── -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-
+   >
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="OpsFlood"
+        android:label="EQUINOX-BH"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- ── AdMob App ID ────────────────────────────────────────────────
-             Replace with real ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX
-             before publishing.                                        -->
+        <!-- AdMob Real App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-6001698589023170~4240191583"/>
 
         <activity
             android:name=".MainActivity"
@@ -88,14 +72,4 @@
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
-
-    <!-- Required to query activities that can process text -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.DIAL" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.CALL" />
-        </intent>
-    </queries>
 </manifest>

@@ -1,7 +1,7 @@
 name: equinox_flood
 description: EQUINOX-BR05 - AI-powered flood prediction app
 publish_to: 'none'
-version: 1.1.0+2003
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -39,7 +39,7 @@ dependencies:
   # i18n
   intl: ^0.20.2
 
-  # Links / SOS calls
+  # Links
   url_launcher: ^6.3.0
 
   # Local notifications
@@ -85,4 +85,4 @@ flutter:
   generate: true
   assets:
     - .env
-    - assets/icon/opsflood_icon.png
+    - assets/icon/

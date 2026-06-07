@@ -16,7 +16,6 @@ import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
-import 'screens/city_detail_screen.dart';
 import 'screens/india_river_explorer_screen.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/model_info_screen.dart';
@@ -27,8 +26,6 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/state_matrix_screen.dart';
 import 'screens/weather_screen.dart';
-import 'services/ai_prediction_background_service.dart';
-import 'services/cwc_alert_watcher.dart';
 import 'services/fcm_service.dart';
 import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
@@ -41,6 +38,7 @@ import 'screens/prediction_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   WidgetsBinding.instance.deferFirstFrame();
 
   final container = ProviderContainer();
@@ -62,7 +60,7 @@ Future<void> main() async {
           ).timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out');
+              if (kDebugMode) debugPrint('⚠️  Firebase.initializeApp timed out — continuing without Firebase');
               throw TimeoutException('Firebase init timeout');
             },
           );
@@ -128,12 +126,14 @@ Future<void> main() async {
 
       // 8. AI Prediction Background Service
       unawaited(
-        AiPredictionBgService.initialise().then((_) {
-          return AiPredictionBgService.start();
-        }).catchError((Object e) {
-          if (kDebugMode) {
-            debugPrint('⚠️  AiPredictionBgService init/start failed (non-fatal): $e');
-          }
+        FcmService.instance.init().catchError((e) {
+          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
+        }),
+      );
+
+      unawaited(
+        ThresholdAlertService.instance.start().catchError((e) {
+          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
         }),
       );
     }
@@ -141,10 +141,7 @@ Future<void> main() async {
     WidgetsBinding.instance.allowFirstFrame();
   }
 
-  runApp(UncontrolledProviderScope(
-    container: container,
-    child: const EquinoxBHApp(),
-  ));
+  runApp(const ProviderScope(child: EquinoxBHApp()));
 }
 
 class EquinoxBHApp extends ConsumerWidget {
@@ -155,27 +152,22 @@ class EquinoxBHApp extends ConsumerWidget {
     final AppThemeMode appMode = ref.watch(themeModeProvider);
     final locale               = ref.watch(localeProvider);
 
-    final ThemeData resolvedTheme = switch (appMode) {
-      AppThemeMode.light  => RiverColors.lightTheme(),
-      AppThemeMode.sunset => RiverColors.sunsetTheme(),
-      AppThemeMode.ocean  => RiverColors.oceanTheme(),
-      _                   => RiverColors.darkTheme(),
-    };
-
     final ThemeMode flutterMode = switch (appMode) {
       AppThemeMode.system => ThemeMode.system,
       AppThemeMode.light  => ThemeMode.light,
-      _                   => ThemeMode.dark,
+      AppThemeMode.dark   => ThemeMode.dark,
+      AppThemeMode.sunset => ThemeMode.light,
+      AppThemeMode.ocean  => ThemeMode.dark,
     };
 
     return MaterialApp(
       title:                      'EQUINOX-BH',
       debugShowCheckedModeBanner: false,
-      themeMode: flutterMode,
-      theme:     appMode == AppThemeMode.system ? RiverColors.lightTheme() : resolvedTheme,
-      darkTheme: appMode == AppThemeMode.system ? RiverColors.darkTheme()  : resolvedTheme,
-      locale:    locale,
-      supportedLocales: kSupportedLocales,
+      themeMode:                  flutterMode,
+      theme:                      RiverColors.lightTheme(),
+      darkTheme:                  RiverColors.darkTheme(),
+      locale:                     locale,
+      supportedLocales:           kSupportedLocales,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -194,15 +186,7 @@ class EquinoxBHApp extends ConsumerWidget {
         '/settings':                    (_) => const SettingsScreen(),
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
-        '/bihar_map':                   (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
-        CityDetailScreen.route: (ctx) {
-          final city = ModalRoute.of(ctx)!.settings.arguments as String;
-          return CityDetailScreen(cityName: city);
-        },
-        '/sos':        (_) => const SosScreen(),
-        '/news':       (_) => const NewsFeedScreen(),
-        '/ai_predict': (_) => const PredictionScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);

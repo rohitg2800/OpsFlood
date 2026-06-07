@@ -18,6 +18,11 @@ class AppConfig {
     'EQUINOX_BH_DEBUG_LOGGING', defaultValue: false,
   );
 
+  /// Primary backend URL.
+<<<<<<< HEAD
+  /// Override at build time: --dart-define=EQUINOX_BH_BASE_URL=https://...
+=======
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
   static const String baseUrl = String.fromEnvironment(
     'EQUINOX_BH_BASE_URL',
     defaultValue: 'https://equinox-bh.onrender.com',
@@ -39,10 +44,38 @@ class AppConfig {
   static bool get isLoggingEnabled => debugLogging || !isProduction || kDebugMode;
   static bool get isDebugLogging   => isLoggingEnabled;
 
+  static bool get isLoggingEnabled =>
+      debugLogging || !isProduction || kDebugMode;
+
+<<<<<<< HEAD
+  /// How often the app polls the backend for fresh data (seconds).
+  /// 0 = use the default defined inside each service.
+=======
+  static bool get isDebugLogging => isLoggingEnabled;
+
+  /// How often the app polls the backend for fresh data (seconds).
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
   static const int pollSeconds = int.fromEnvironment(
     'EQUINOX_BH_POLL_SECONDS', defaultValue: 0,
   );
 
+<<<<<<< HEAD
+  // ── API endpoint paths ─────────────────────────────────────────────────────
+
+  /// Health-check endpoint — GET /health
+  static String get epHealth  => '$baseUrl/health';
+
+  /// ML prediction endpoint — POST /predict/v2
+  static String get epPredict => '$baseUrl/predict/v2';
+
+  // ── Timeouts ───────────────────────────────────────────────────────────────
+
+  /// Timeout for a cold-start wake-up health check (Render spins down on idle).
+  static const Duration coldStartTimeout = Duration(seconds: 45);
+
+  /// Timeout for a normal (warm) health check.
+  static const Duration healthTimeout = Duration(seconds: 10);
+=======
   static int get healthRetries => 3;
   static int get maxRetries    => 3;
   static String get env        => environment;
@@ -88,7 +121,7 @@ class AppConfig {
   /// How often the app polls — alias for test/constants_domain_test.dart
   static Duration get pollingInterval     => const Duration(minutes: 5);
 
-  /// Animation durations — used by test/constants_domain_test.dart
-  static Duration get shortAnimDuration   => const Duration(milliseconds: 200);
-  static Duration get longAnimDuration    => const Duration(milliseconds: 600);
+  static const Duration coldStartTimeout = Duration(seconds: 45);
+  static const Duration healthTimeout    = Duration(seconds: 10);
+>>>>>>> aa6257a02c27d3c7283d10595888690047122be6
 }

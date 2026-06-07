@@ -1,5 +1,6 @@
 // lib/providers/flood_providers.dart
-// Riverpod 3.x — RealTimeService is a singleton ChangeNotifier.
+// Riverpod 3 — ChangeNotifierProvider is removed.
+// We wrap RealTimeService in a Notifier so notifyListeners() drives UI rebuilds.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,26 +9,31 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Tick notifier ────────────────────────────────────────────────────────────
-class _TickNotifier extends Notifier<int> {
+// ── Notifier wrapper ──────────────────────────────────────────────────────────
+// Riverpod 3 replaced ChangeNotifierProvider with Notifier/NotifierProvider.
+// We expose RealTimeService as the state; every time the service calls
+// notifyListeners() we call state = state (same object) which triggers
+// Riverpod to re-read all downstream Provider<T> that watch realTimeProvider.
+class RealTimeNotifier extends Notifier<RealTimeService> {
   @override
-  int build() => 0;
-  void increment() => state = state + 1;
+  RealTimeService build() {
+    final service = RealTimeService();
+    // Hook: re-assign state so Riverpod propagates changes to all watchers.
+    service.addListener(() => state = service);
+    // Start polling after the first frame.
+    Future.microtask(() => service.startPolling());
+    ref.onDispose(service.dispose);
+    return service;
+  }
 }
 
-final _tickProvider = NotifierProvider<_TickNotifier, int>(_TickNotifier.new);
+final realTimeProvider =
+    NotifierProvider<RealTimeNotifier, RealTimeService>(RealTimeNotifier.new);
 
-// ── Bootstrap provider ───────────────────────────────────────────────────────
-final _serviceBootProvider = Provider<RealTimeService>((ref) {
-  final service = RealTimeService();
-  void onUpdate() => ref.read(_tickProvider.notifier).increment();
-  service.addListener(onUpdate);
-  ref.onDispose(() => service.removeListener(onUpdate));
-  Future.microtask(() => service.startPolling());
-  return service;
-});
+/// Alias kept for backward compatibility.
+final realTimeServiceProvider = realTimeProvider;
 
-// ── Public providers ─────────────────────────────────────────────────────────
+// ── Derived providers ─────────────────────────────────────────────────────────
 
 final realTimeProvider = Provider<RealTimeService>((ref) {
   ref.watch(_tickProvider);
@@ -37,10 +43,13 @@ final realTimeProvider = Provider<RealTimeService>((ref) {
 /// Alias kept for backward compatibility.
 final realTimeServiceProvider = realTimeProvider;
 
-// ── Derived providers ─────────────────────────────────────────────────────────
+final isWakingUpProvider = Provider<bool>((ref) {
+  return ref.watch(realTimeProvider).isWakingUp;
+});
 
-final lastFetchTimeProvider = Provider<DateTime?>((ref) =>
-    ref.watch(realTimeProvider).lastFetchTime);
+final errorMessageProvider = Provider<String?>((ref) {
+  return ref.watch(realTimeProvider).error;
+});
 
 final isOfflineProvider = Provider<bool>((ref) =>
     !ref.watch(realTimeProvider).isOnline);
@@ -48,90 +57,21 @@ final isOfflineProvider = Provider<bool>((ref) =>
 final isWakingUpProvider = Provider<bool>((ref) =>
     ref.watch(realTimeProvider).isWakingUp);
 
-final errorMessageProvider = Provider<String?>((ref) =>
-    ref.watch(realTimeProvider).error);
+final criticalCountProvider = Provider<int>((ref) {
+  return ref.watch(realTimeProvider).criticalCount;
+});
 
 final imdAlertsProvider = Provider<List<dynamic>>((ref) =>
     ref.watch(realTimeProvider).imdAlerts);
 
-final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) =>
-    ref.watch(realTimeProvider).ndmaAdvisories);
-
-final criticalCountProvider = Provider<int>((ref) =>
-    ref.watch(realTimeProvider).criticalCount);
-
-// ── liveLevelsProvider ────────────────────────────────────────────────────────
-// Always returns allFloodData so every city in the cache is visible in
-// All Stations, Monitors, etc. — regardless of whether it has a live WRD
-// gauge reading. Cities without a gauge show status 'ESTIMATED'.
-// Previously this toggled between liveFloodData (hasLiveLevel==true only)
-// and allFloodData, which meant non-gauge cities vanished the moment any
-// single city got a live reading.
-final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
-    ref.watch(realTimeProvider).allFloodData);
-
-final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) =>
-    ref.watch(realTimeProvider).monitoringData);
-
-final monitoredCitiesProvider = Provider<List<String>>((ref) =>
-    ref.watch(liveLevelsProvider).map((fd) => fd.city).toList());
-
-// ── Per-city ──────────────────────────────────────────────────────────────────
-// Uses rt.dataForCity() which hits the engine cache directly — guaranteed
-// to find the entry as long as the city was fetched, regardless of whether
-// it has hasLiveLevel==true or false.
-final cityDataProvider = Provider.family<FloodData?, String>((ref, city) {
-  final rt = ref.watch(realTimeProvider);
-  // Direct cache lookup via the engine — most reliable path
-  final direct = rt.dataForCity(city);
-  if (direct != null) return direct;
-  // Fallback: linear scan of allFloodData (handles edge cases)
-  return rt.allFloodData.cast<FloodData?>().firstWhere(
-    (fd) => fd!.city.trim().toLowerCase() == city.trim().toLowerCase(),
-    orElse: () => null,
-  );
+final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
+  return ref.watch(realTimeProvider).monitoringData;
 });
 
-final cityTrendProvider =
-    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) =>
-        ref.watch(realTimeProvider).trendForCity(city));
-
-// ── Per-state ──────────────────────────────────────────────────────────────────
-
-final stateImdAlertsProvider =
-    Provider.family<List<dynamic>, String>((ref, stateName) {
-  final all = ref.watch(imdAlertsProvider);
-  if (stateName.isEmpty) return all;
-  return all.where((a) {
-    final s = (a.state as String? ?? '').toLowerCase();
-    return s.isEmpty || s.contains(stateName.toLowerCase());
-  }).toList();
-});
-
-final stateNdmaAdvisoriesProvider =
-    Provider.family<List<dynamic>, String>((ref, stateName) {
-  final all = ref.watch(ndmaAdvisoriesProvider);
-  if (stateName.isEmpty) return all;
-  return all.where((a) {
-    final s = (a.state as String? ?? '').toLowerCase();
-    return s.isEmpty || s.contains(stateName.toLowerCase());
-  }).toList();
-});
-
-final stateEmergencyContactsProvider =
-    Provider.family<List<dynamic>, String>((ref, stateName) {
-  try {
-    return ref.watch(realTimeProvider).emergencyContactsForState(stateName);
-  } catch (_) {
-    return const [];
-  }
-});
-
-final stateLiveLevelsProvider =
-    Provider.family<List<FloodData>, String>((ref, stateName) {
+final monitoredCitiesProvider = Provider<List<String>>((ref) {
   return ref
-      .watch(liveLevelsProvider)
-      .where((fd) =>
-          fd.state.toLowerCase().contains(stateName.toLowerCase()))
+      .watch(realTimeProvider)
+      .liveLevels
+      .map((fd) => fd.city)
       .toList();
 });

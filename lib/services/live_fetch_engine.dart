@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v3.4 — trendForCity rolling window)
+// lib/services/live_fetch_engine.dart  (v2.2 — district propagated)
 library;
 
 import 'dart:async';
@@ -10,7 +10,6 @@ import 'package:http/http.dart' as http;
 import '../constants/india_geodata.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
-import 'wrd_bihar_service.dart';
 
 class LiveCityData {
   final double?   currentLevel;
@@ -20,7 +19,6 @@ class LiveCityData {
   final double?   rainfall24h;
   final String?   riskLevel;
   final DateTime  lastUpdated;
-  final bool      hasLiveLevel;
 
   const LiveCityData({
     this.currentLevel,
@@ -30,22 +28,12 @@ class LiveCityData {
     this.rainfall24h,
     this.riskLevel,
     required this.lastUpdated,
-    this.hasLiveLevel = false,
   });
 
   @override
   String toString() =>
-      'LiveCityData(flow=$flowRate m\u00b3/s, risk=$riskLevel, '
-      'rain=${rainfall24h}mm, level=$currentLevel m, live=$hasLiveLevel)';
-
-  String get _statusFromRisk {
-    switch ((riskLevel ?? 'LOW').toUpperCase()) {
-      case 'CRITICAL': return 'CRITICAL';
-      case 'SEVERE':   return 'DANGER';
-      case 'MODERATE': return 'WARNING';
-      default:         return 'SAFE';
-    }
-  }
+      'LiveCityData(flow=$flowRate m³/s, risk=$riskLevel, '
+      'rain=${rainfall24h}mm, level=$currentLevel m)';
 
   FloodData toFloodData(String city, String state,
       {String? riverName, String district = ''}) {
@@ -64,7 +52,7 @@ class LiveCityData {
       safeLevel:           warningLevel * 0.8,
       capacityPercent:     capPct,
       riskLevel:           riskLevel ?? 'LOW',
-      status:              hasLiveLevel ? _statusFromRisk : 'ESTIMATED',
+      status:              'ESTIMATED',
       effectiveRainfallMm: rainfall24h ?? 0.0,
       flowRate:            flowRate,
       lastUpdated:         lastUpdated,
@@ -73,15 +61,11 @@ class LiveCityData {
 }
 
 class LiveFetchEngine {
-  static const _cacheTtl         = Duration(minutes: 15);
-  static const _pollInterval     = Duration(seconds: 45);
-  static const _httpTimeout      = Duration(seconds: 20);
-  static const _glofasTimeout    = Duration(seconds: 8);
-  static const _maxTrendPoints   = 8;
+  static const _cacheTtl     = Duration(minutes: 15);
+  static const _pollInterval = Duration(seconds: 45);
+  static const _httpTimeout  = Duration(seconds: 20);
 
-  final Map<String, LiveCityData>              _cache = {};
-  final Map<String, List<RiverLevelSnapshot>>  _trend = {};
-
+  final Map<String, LiveCityData> _cache = {};
   DateTime?  _lastFetch;
   Timer?     _pollTimer;
   bool       _isLoading     = false;
@@ -94,8 +78,6 @@ class LiveFetchEngine {
   int        _wakeAttempts  = 0;
 
   void Function()? onStateChanged;
-
-  final WrdBiharService _wrd = WrdBiharService.instance;
 
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
@@ -122,32 +104,6 @@ class LiveFetchEngine {
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
   List<FloodData> get liveFloodData {
-    return _cache.entries
-        .where((e) => e.value.hasLiveLevel)
-        .map((e) {
-          final city = e.key;
-          final data = e.value;
-          final mc   = IndiaGeodata.monitoredCities.firstWhere(
-            (c) => (c['city'] as String).toLowerCase() == city,
-            orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
-          );
-          return data.toFloodData(
-            mc['city']  as String,
-            mc['state'] as String,
-            riverName: mc['river']    as String?,
-            district: (mc['district'] as String?) ?? '',
-          );
-        }).toList()
-        ..sort((a, b) {
-          const order = ['CRITICAL', 'DANGER', 'WARNING', 'SAFE', 'ESTIMATED'];
-          final ai = order.indexOf(a.status);
-          final bi = order.indexOf(b.status);
-          if (ai != bi) return ai.compareTo(bi);
-          return b.currentLevel.compareTo(a.currentLevel);
-        });
-  }
-
-  List<FloodData> get allFloodData {
     return _cache.entries.map((e) {
       final city = e.key;
       final data = e.value;
@@ -156,10 +112,10 @@ class LiveFetchEngine {
         orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
       );
       return data.toFloodData(
-        mc['city']  as String,
-        mc['state'] as String,
-        riverName: mc['river']    as String?,
-        district: (mc['district'] as String?) ?? '',
+        mc['city']     as String,
+        mc['state']    as String,
+        riverName:  mc['river']    as String?,
+        district:  (mc['district'] as String?) ?? '',
       );
     }).toList();
   }
@@ -168,7 +124,7 @@ class LiveFetchEngine {
   List<dynamic> get criticalAlerts       => _buildCriticalAlerts();
   int           get criticalCount        => _buildCriticalAlerts().length;
   List<dynamic> get cwcStations          => liveFloodData;
-  bool          get hasCwcLiveData       => _cache.values.any((v) => v.hasLiveLevel);
+  bool          get hasCwcLiveData       => _cache.isNotEmpty;
 
   MultiLocationMonitoring get monitoringData => MultiLocationMonitoring(
     locations:   liveFloodData,
@@ -197,20 +153,14 @@ class LiveFetchEngine {
       orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
     );
     return d.toFloodData(
-      mc['city']  as String,
-      mc['state'] as String,
-      riverName: mc['river']    as String?,
-      district: (mc['district'] as String?) ?? '',
+      mc['city']     as String,
+      mc['state']    as String,
+      riverName:  mc['river']    as String?,
+      district:  (mc['district'] as String?) ?? '',
     );
   }
 
-  List<RiverLevelSnapshot> trendForCity(String city) {
-    final key      = city.toLowerCase().trim();
-    final snaps    = _trend[key];
-    if (snaps == null || snaps.length < 2) return const [];
-    return List.unmodifiable(snaps);
-  }
-
+  List<RiverLevelSnapshot> trendForCity(String city) => const [];
   List<dynamic> imdAlertsForState(String state)         => const [];
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
@@ -243,12 +193,6 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  void _appendTrend(String key, double level, DateTime ts) {
-    final list = _trend.putIfAbsent(key, () => []);
-    list.add(RiverLevelSnapshot(level: level, timestamp: ts));
-    if (list.length > _maxTrendPoints) list.removeAt(0);
-  }
-
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
@@ -257,100 +201,46 @@ class LiveFetchEngine {
 
     final lats = biharCities.map((c) => '${c['lat']}').join(',');
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
-    final now  = DateTime.now();
 
-    final wrdStations = await _wrd.fetch();
-    final wrdByKey = <String, WrdStation>{};
-    for (final s in wrdStations) {
-      wrdByKey[s.site.toLowerCase().trim()] = s;
-    }
-
-    for (int i = 0; i < biharCities.length; i++) {
-      final mc       = biharCities[i];
-      final cityName = mc['city']          as String;
-      final dl       = (mc['danger_level']  as num).toDouble();
-      final wl       = (mc['warning_level'] as num).toDouble();
-      final key      = cityName.toLowerCase().trim();
-
-      WrdStation? wrdMatch = wrdByKey[key];
-      if (wrdMatch == null) {
-        try {
-          wrdMatch = wrdStations.firstWhere(
-            (s) => s.site.toLowerCase().contains(key) ||
-                   key.contains(s.site.toLowerCase()),
-          );
-        } catch (_) { wrdMatch = null; }
-      }
-
-      final existing = _cache[key];
-      _cache[key] = LiveCityData(
-        currentLevel: wrdMatch?.currentLevel,
-        warningLevel: wrdMatch?.warningLevel  ?? wl,
-        dangerLevel:  wrdMatch?.dangerLevel   ?? dl,
-        flowRate:     existing?.flowRate,
-        rainfall24h:  existing?.rainfall24h,
-        riskLevel:    wrdMatch?.riskLabel ?? existing?.riskLevel,
-        lastUpdated:  now,
-        hasLiveLevel: wrdMatch?.currentLevel != null,
-      );
-
-      final lvl = wrdMatch?.currentLevel;
-      if (lvl != null) _appendTrend(key, lvl, now);
-    }
-    _lastFetch = now;
-
-    final matched = _cache.values.where((v) => v.hasLiveLevel).length;
-    _log('WRD done — ${_cache.length} cities ($matched live). Notifying UI.');
-
-    _isLoading = false;
-    _notify();
-
-    unawaited(_overlayGloFAS(biharCities, lats, lons));
-  }
-
-  Future<void> _overlayGloFAS(
-    List<Map<String, dynamic>> biharCities,
-    String lats,
-    String lons,
-  ) async {
     var dischargeMap = <String, List<double?>>{};
     var meanMap      = <String, List<double?>>{};
-    var rainMap      = <String, double?>{};
+    try {
+      final result = await _fetchGloFAS(lats, lons, biharCities.length);
+      dischargeMap = result['discharge']!;
+      meanMap      = result['mean']!;
+    } catch (e) { _log('GloFAS batch fetch failed: $e'); }
 
-    await Future.wait([
-      _fetchGloFAS(lats, lons, biharCities.length)
-          .then((r) { dischargeMap = r['discharge']!; meanMap = r['mean']!; })
-          .catchError((e) { _log('GloFAS skipped: $e'); }),
-      _fetchRainfall(lats, lons, biharCities.length)
-          .then((r) { rainMap = r; })
-          .catchError((e) { _log('Open-Meteo skipped: $e'); }),
-    ]);
+    var rainMap = <String, double?>{};
+    try {
+      rainMap = await _fetchRainfall(lats, lons, biharCities.length);
+    } catch (e) { _log('Open-Meteo batch fetch failed: $e'); }
 
-    final updateNow = DateTime.now();
+    final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
-      final key      = (biharCities[i]['city'] as String).toLowerCase().trim();
-      final existing = _cache[key];
-      if (existing == null) continue;
-
-      final discharge   = dischargeMap[key]?.firstOrNull;
-      final mean        = meanMap[key]?.firstOrNull;
-      final rain        = rainMap[key];
-      final derivedRisk = existing.riskLevel ?? _deriveRisk(discharge, mean);
-
+      final mc        = biharCities[i];
+      final cityName  = mc['city']          as String;
+      final dl        = (mc['danger_level']  as num).toDouble();
+      final wl        = (mc['warning_level'] as num).toDouble();
+      final key       = cityName.toLowerCase().trim();
+      final discharge = dischargeMap[key]?.firstOrNull;
+      final mean      = meanMap[key]?.firstOrNull;
+      final rain      = rainMap[key];
+      final risk      = _deriveRisk(discharge, mean);
+      final estLevel  = (discharge != null && mean != null && mean > 0 && dl > 0)
+          ? (discharge / mean) * dl * 0.85
+          : null;
       _cache[key] = LiveCityData(
-        currentLevel: existing.currentLevel,
-        warningLevel: existing.warningLevel,
-        dangerLevel:  existing.dangerLevel,
-        flowRate:     discharge ?? existing.flowRate,
-        rainfall24h:  rain      ?? existing.rainfall24h,
-        riskLevel:    derivedRisk,
-        lastUpdated:  updateNow,
-        hasLiveLevel: existing.hasLiveLevel,
+        currentLevel: estLevel,
+        warningLevel: wl,
+        dangerLevel:  dl,
+        flowRate:     discharge,
+        rainfall24h:  rain,
+        riskLevel:    risk,
+        lastUpdated:  now,
       );
     }
-    _lastFetch = updateNow;
-    _log('GloFAS overlay done.');
-    _notify();
+    _lastFetch = now;
+    _log('Bihar cache updated — ${_cache.length} cities');
   }
 
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
@@ -361,9 +251,8 @@ class LiveFetchEngine {
       '&daily=river_discharge,river_discharge_mean'
       '&forecast_days=1&models=seamless_v4',
     );
-    final res = await http.get(uri).timeout(_glofasTimeout);
-    // ✅ Fixed: was \${res.statusCode} (escaped, printed literally)
-    if (res.statusCode != 200) throw Exception('GloFAS HTTP ${res.statusCode}');
+    final res = await http.get(uri).timeout(_httpTimeout);
+    if (res.statusCode != 200) throw Exception('GloFAS HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
     final cities = IndiaGeodata.monitoredCities
@@ -387,9 +276,8 @@ class LiveFetchEngine {
       '&daily=precipitation_sum'
       '&forecast_days=1&timezone=Asia%2FKolkata',
     );
-    final res = await http.get(uri).timeout(_glofasTimeout);
-    // ✅ Fixed: was \${res.statusCode} (escaped, printed literally)
-    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP ${res.statusCode}');
+    final res = await http.get(uri).timeout(_httpTimeout);
+    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body] as List<dynamic>;
     final cities = IndiaGeodata.monitoredCities
@@ -416,9 +304,8 @@ class LiveFetchEngine {
   List<Map<String, dynamic>> _buildCriticalAlerts() {
     return _cache.entries
         .where((e) =>
-            e.value.hasLiveLevel &&
-            (e.value.riskLevel == 'CRITICAL' ||
-             e.value.riskLevel == 'SEVERE'))
+            e.value.riskLevel == 'CRITICAL' ||
+            e.value.riskLevel == 'SEVERE')
         .map((e) => {
               'city':      e.key,
               'riskLevel': e.value.riskLevel,
@@ -452,5 +339,3 @@ class LiveFetchEngine {
     if (kDebugMode) debugPrint('[LiveFetchEngine] $msg');
   }
 }
-
-void unawaited(Future<void> f) {}
