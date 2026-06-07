@@ -15,6 +15,7 @@ import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
+import 'screens/city_detail_screen.dart';
 import 'screens/india_river_explorer_screen.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/manual_predict_screen.dart';
@@ -170,6 +171,7 @@ class EquinoxBHApp extends ConsumerWidget {
         '/prediction':                  (_) => const PredictionScreen(),
         '/sos':                         (_) => const SosScreen(),
         '/news':                        (_) => const NewsFeedScreen(),
+        '/city_detail':                 (_) => const CityDetailScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);
