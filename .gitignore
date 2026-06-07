@@ -70,3 +70,4 @@ android/keystore.properties
 .venv311/
 .python-version
 *.zip
+*.zip
