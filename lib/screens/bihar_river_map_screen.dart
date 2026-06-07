@@ -1,10 +1,11 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v9.2 — all compile errors fixed
+// BiharRiverMapScreen v9.3 — CwcStation compile errors fixed
 //
 // Fixes applied (no other files changed):
-//  • fd.river → fd.riverName (FloodData exposes riverName, not river)
-//  • cwcAsync.value typed as List<CwcStation> to fix Object? inference on
-//    siteName / lat / lng and the List<dynamic> ≠ List<Marker> cascade
+//  • Added import for befiqr_cwc_service.dart so CwcStation resolves
+//  • s.siteName → s.site  (CwcStation has no siteName field)
+//  • Removed cwcOnly MarkerLayer — CwcStation has no lat/lng fields;
+//    secondary CWC pins are omitted until coordinate data is available
 library;
 
 import 'dart:math' as math;
@@ -24,6 +25,7 @@ import '../providers/cwc_provider.dart';
 import '../providers/flood_providers.dart';
 import '../providers/prediction_provider.dart';
 import '../screens/city_detail_screen.dart';
+import '../services/befiqr_cwc_service.dart'; // provides CwcStation
 import '../theme/river_theme.dart';
 import '../utils/flood_severity.dart';
 import '../utils/flood_severity_helper.dart';
@@ -258,7 +260,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
     }
 
     // River → worst AlertLevel
-    // FIX v9.2: fd.riverName (not fd.river — FloodData field is riverName)
     final Map<String, AlertLevel> riverAlertMap = {};
     for (final fd in biharStations) {
       final river = fd.riverName ?? BiharStationRegistry.forSite(fd.city)?.river;
@@ -268,13 +269,13 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
       if (lvl.index > cur.index) riverAlertMap[river] = lvl;
     }
 
-    // CWC-only stations (stations in CWC data but not in FloodData)
-    // FIX v9.2: explicit List<CwcStation> so Dart infers siteName/lat/lng correctly
+    // FIX v9.3: CwcStation has .site not .siteName; no lat/lng — cwcOnly used
+    // only for deduplication logic here, not for map markers.
     final List<CwcStation> cwcStations =
-        cwcAsync.value?.cast<CwcStation>() ?? const <CwcStation>[];
+        cwcAsync.value ?? const <CwcStation>[];
     final biharCitySet = biharStations.map((fd) => fd.city.toLowerCase()).toSet();
     final List<CwcStation> cwcOnly = cwcStations
-        .where((s) => !biharCitySet.contains(s.siteName.toLowerCase()))
+        .where((s) => !biharCitySet.contains(s.site.toLowerCase()))
         .toList();
 
     final alertCount = biharStations
@@ -383,28 +384,10 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                     }).toList(),
                 ),
 
-              // CWC-only station pins (secondary layer)
-              if (_showStations)
-                MarkerLayer(
-                  markers: cwcOnly
-                    .where((s) => s.lat != null && s.lng != null)
-                    .map<Marker>((s) {
-                      return Marker(
-                        point: LatLng(s.lat!, s.lng!),
-                        width: 18, height: 18,
-                        child: Container(
-                          width: 18, height: 18,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFF94A3B8).withValues(alpha: 0.25),
-                            border: Border.all(color: const Color(0xFF94A3B8), width: 1.2),
-                          ),
-                          child: const Icon(Icons.sensors_rounded,
-                              color: Color(0xFF94A3B8), size: 10),
-                        ),
-                      );
-                    }).toList(),
-                ),
+              // NOTE v9.3: CwcStation has no lat/lng — secondary CWC marker layer
+              // removed until coordinate data is added to the model.
+              // cwcOnly is still computed above for deduplication; when lat/lng
+              // are added to CwcStation just reinstate the MarkerLayer here.
 
               // Main station pins
               if (_showStations)
@@ -790,7 +773,6 @@ class _StationSheet extends ConsumerWidget {
                         Text(data.city,
                           style: TextStyle(color: t.textPrimary,
                               fontSize: 18, fontWeight: FontWeight.w800)),
-                        // FIX v9.2: use riverName
                         if (data.riverName != null)
                           Text(data.riverName!,
                             style: TextStyle(
