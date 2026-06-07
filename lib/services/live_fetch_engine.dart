@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v2.2 — district propagated)
+// lib/services/live_fetch_engine.dart  (v2.3 — notify-on-update, fixed interpolation)
 library;
 
 import 'dart:async';
@@ -75,7 +75,7 @@ class LiveFetchEngine {
   String?    _error;
   int        _queuedOffline = 0;
   int        _retryCount    = 0;
-  final int        _wakeAttempts  = 0;
+  final int  _wakeAttempts  = 0;
 
   void Function()? onStateChanged;
 
@@ -183,6 +183,9 @@ class LiveFetchEngine {
     } finally {
       _isLoading  = false;
       _isWakingUp = false;
+      // Always notify after refresh so UI rebuilds regardless of whether
+      // data changed. This is the key fix: without this, the monitor screen
+      // stays empty because Riverpod never learns the cache was populated.
       _notify();
     }
   }
@@ -241,6 +244,9 @@ class LiveFetchEngine {
     }
     _lastFetch = now;
     _log('Bihar cache updated — ${_cache.length} cities');
+    // Notify immediately after cache is populated so downstream providers
+    // rebuild without waiting for the finally block in refreshData().
+    _notify();
   }
 
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
@@ -252,7 +258,9 @@ class LiveFetchEngine {
       '&forecast_days=1&models=seamless_v4',
     );
     final res = await http.get(uri).timeout(_httpTimeout);
-    if (res.statusCode != 200) throw Exception('GloFAS HTTP \${res.statusCode}');
+    if (res.statusCode != 200) {
+      throw Exception('GloFAS HTTP ${res.statusCode}');
+    }
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
@@ -277,7 +285,9 @@ class LiveFetchEngine {
       '&forecast_days=1&timezone=Asia%2FKolkata',
     );
     final res = await http.get(uri).timeout(_httpTimeout);
-    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP \${res.statusCode}');
+    if (res.statusCode != 200) {
+      throw Exception('Open-Meteo HTTP ${res.statusCode}');
+    }
     final body  = jsonDecode(res.body);
     final items = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
