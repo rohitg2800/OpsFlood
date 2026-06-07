@@ -14,7 +14,7 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
-// ── Keystore signing ────────────────────────────────────────────────────────
+// ── Keystore signing ────────────────────────────────────────────
 // Place your keystore at android/keystore.jks and set these 4 lines
 // in android/keystore.properties (DO NOT commit that file):
 //   storeFile=keystore.jks
@@ -28,7 +28,7 @@ val keystorePropertiesFile = rootProject.file("keystore.properties")
 val useReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
-    namespace = "in.rohitg.floodwatch"
+    namespace = "com.rohitg.floodwatch"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -58,7 +58,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "in.rohitg.floodwatch"
+        applicationId = "com.rohitg.floodwatch"
         minSdk    = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = 2

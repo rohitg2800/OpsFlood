@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "1071864126219",
-    "project_id": "device-streaming-e762727d",
-    "storage_bucket": "device-streaming-e762727d.firebasestorage.app"
+    "project_number": "1234567890",
+    "project_id": "android-flood-app",
+    "storage_bucket": "android-flood-app.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1071864126219:android:5f5149d0b9bed892e7e00e",
+        "mobilesdk_app_id": "1:1234567890:android:abcdef1234567890",
         "android_client_info": {
-          "package_name": "in.rohitg.floodwatch"
+          "package_name": "com.rohitg.floodwatch"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU"
+          "current_key": "YOUR_API_KEY"
         }
       ],
       "services": {
