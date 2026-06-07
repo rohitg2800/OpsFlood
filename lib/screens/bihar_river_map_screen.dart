@@ -1,30 +1,21 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v9.0
+// BiharRiverMapScreen v9.1 — all compile errors fixed
 //
-// NEW in v9.0
-// ─────────────────────────────────────────────────────────────────────────────
-// • Station pins colour-coded by live ThresholdAlert.level from alertsProvider
-//   (previously only used FloodData.status)
-// • Danger/Extreme stations pulse with AnimatedOpacity ring
-// • River polylines show inline AlertLevel chip at midpoint (river worst alert)
-// • Station sheet shows:
-//     – ThresholdAlert level badge + fill-percent bar
-//     – AI 24 h prediction (next peak, trend, confidence) from predictionProvider
-//     – CWC risk score bar from cwcRiskScore on FloodPrediction
-//     – 6 h sparkline preview
-// • CWC-only stations (no FloodData entry) rendered as a secondary layer
-// • Alerts layer toggle + legend alert count badges
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// v9.1 additions
-// ─────────────────────────────────────────────────────────────────────────────
-// • +/- zoom buttons (right side, bottom: 130) via _ZoomButtons / _ZoomBtn
-// • CameraConstraint.containCenter locks view to Bihar bounding box
-//   SW(24.20, 83.20) → NE(27.55, 88.30)
-// ─────────────────────────────────────────────────────────────────────────────
+// Fixes applied (no other files changed):
+//  • RiverTheme.of → RiverColors.of
+//  • floodDataProvider → liveLevelsProvider
+//  • alertsAsync.valueOrNull → alertsAsync.cwcAlerts
+//  • cwcAsync.valueOrNull → cwcAsync.value ?? []
+//  • a.stationId → a.cityId
+//  • ThresholdAlert.fromFloodStatus → _makeAlert() inline factory
+//  • alert.requiresEmergency → alert.level.requiresEmergency
+//  • FloodSeverity.rank() → FloodSeverity.fromString().index
+//  • FloodSeverity.districtColor() → FloodSeverity.fromString().color
+//  • CityDetailScreen(city:) → CityDetailScreen(cityName:)
+//  • pred.nextPeakLevel/trend/confidence/sparkline6h → computed properties
+//  • Path name collision with latlong2 → renamed local to linePath
 library;
 
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -32,7 +23,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../data/bihar_station_metadata.dart';
@@ -59,6 +49,42 @@ LatLng? _coordsFor(FloodData fd) {
 String _districtFor(FloodData fd) {
   if (fd.district.isNotEmpty) return fd.district;
   return BiharStationRegistry.forSite(fd.city)?.district ?? '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline fallback factory for ThresholdAlert (replaces missing .fromFloodStatus)
+// ─────────────────────────────────────────────────────────────────────────────
+
+ThresholdAlert _makeAlert(String cityId, String status) {
+  final level = _alertLevelFromStatus(status);
+  return ThresholdAlert(
+    id:           'synthetic_$cityId',
+    cityId:       cityId,
+    cityName:     cityId,
+    state:        '',
+    river:        '',
+    level:        level,
+    currentValue: 0,
+    warningLevel: 0,
+    dangerLevel:  0,
+    hfl:          0,
+    breachMargin: 0,
+    fillPercent:  0,
+    timestamp:    DateTime.now(),
+  );
+}
+
+AlertLevel _alertLevelFromStatus(String status) {
+  switch (status.toUpperCase()) {
+    case 'EXTREME':
+    case 'CRITICAL': return AlertLevel.extreme;
+    case 'DANGER':
+    case 'FLOOD':    return AlertLevel.danger;
+    case 'WARNING':
+    case 'WARN':     return AlertLevel.warning;
+    case 'WATCH':    return AlertLevel.watch;
+    default:         return AlertLevel.normal;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -206,24 +232,30 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
 
   // Returns the ThresholdAlert for a station (falls back to FloodData.status)
   ThresholdAlert _alertForStation(FloodData fd, List<ThresholdAlert> allAlerts) {
-    final match = allAlerts.where((a) => a.stationId == fd.city).firstOrNull;
+    // FIX: field is cityId, not stationId
+    final match = allAlerts.where((a) => a.cityId == fd.city).firstOrNull;
     if (match != null) return match;
-    return ThresholdAlert.fromFloodStatus(fd.city, fd.status);
+    // FIX: ThresholdAlert.fromFloodStatus doesn't exist → use inline factory
+    return _makeAlert(fd.city, fd.status);
   }
 
   @override
   Widget build(BuildContext context) {
-    final t           = RiverTheme.of(context);
-    final floodAsync  = ref.watch(floodDataProvider);
-    final alertsAsync = ref.watch(alertsProvider);
+    // FIX: RiverColors.of, not RiverTheme.of
+    final t           = RiverColors.of(context);
+    // FIX: liveLevelsProvider, not floodDataProvider
+    final floodList   = ref.watch(liveLevelsProvider);
+    // FIX: AlertsState is plain state, not AsyncValue — access .cwcAlerts directly
+    final alertsState = ref.watch(alertsProvider);
     final geoAsync    = ref.watch(biharGeoJsonProvider);
+    // FIX: AsyncValue.value (nullable), not .valueOrNull (removed in Riverpod 3)
     final cwcAsync    = ref.watch(cwcStationsProvider);
 
-    final allAlerts = alertsAsync.valueOrNull ?? <ThresholdAlert>[];
+    final allAlerts = alertsState.cwcAlerts;
 
-    final biharStations = floodAsync.valueOrNull
-        ?.where((fd) => fd.state.toLowerCase() == 'bihar')
-        .toList() ?? <FloodData>[];
+    final biharStations = floodList
+        .where((fd) => fd.state.toLowerCase() == 'bihar')
+        .toList();
 
     // District → worst FloodData
     final Map<String, FloodData>       districtData     = {};
@@ -233,8 +265,10 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
       if (d.isEmpty) continue;
       districtStations.putIfAbsent(d, () => []).add(fd);
       final cur = districtData[d];
+      // FIX: FloodSeverity.rank() doesn't exist → use FloodSeverity.fromString().index
       if (cur == null ||
-          FloodSeverity.rank(fd.status) > FloodSeverity.rank(cur.status)) {
+          FloodSeverity.fromString(fd.status).index >
+          FloodSeverity.fromString(cur.status).index) {
         districtData[d] = fd;
       }
     }
@@ -250,14 +284,16 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
     }
 
     // CWC-only stations (stations in CWC data but not in FloodData)
-    final cwcStations = cwcAsync.valueOrNull ?? [];
+    // FIX: .value instead of .valueOrNull
+    final cwcStations = cwcAsync.value ?? <CwcStation>[];
     final biharCitySet = biharStations.map((fd) => fd.city.toLowerCase()).toSet();
     final cwcOnly = cwcStations
         .where((s) => !biharCitySet.contains(s.siteName.toLowerCase()))
         .toList();
 
     final alertCount = biharStations
-        .where((fd) => _alertForStation(fd, allAlerts).requiresEmergency)
+        // FIX: alert.level.requiresEmergency, not alert.requiresEmergency
+        .where((fd) => _alertForStation(fd, allAlerts).level.requiresEmergency)
         .length;
 
     final bool anySheetOpen = _selected != null || _selectedDistrict != null;
@@ -275,8 +311,8 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
               initialZoom: 7.2, minZoom: 6.0, maxZoom: 13.0,
               cameraConstraint: CameraConstraint.containCenter(
                 bounds: LatLngBounds(
-                  const LatLng(24.20, 83.20),  // SW corner of Bihar
-                  const LatLng(27.55, 88.30),  // NE corner of Bihar
+                  const LatLng(24.20, 83.20),
+                  const LatLng(27.55, 88.30),
                 ),
               ),
               onTap: (_, __) => _clearSelection(),
@@ -389,10 +425,11 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
               if (_showStations)
                 MarkerLayer(
                   markers: biharStations.where((fd) => _coordsFor(fd) != null).map((fd) {
-                    final coords = _coordsFor(fd)!;
-                    final alert  = _alertForStation(fd, allAlerts);
-                    final col    = _alertLevelColor(alert.level);
-                    final isPulse = alert.requiresEmergency;
+                    final coords  = _coordsFor(fd)!;
+                    final alert   = _alertForStation(fd, allAlerts);
+                    final col     = _alertLevelColor(alert.level);
+                    // FIX: alert.level.requiresEmergency
+                    final isPulse = alert.level.requiresEmergency;
                     return Marker(
                       point: coords,
                       width: isPulse ? 36 : 28,
@@ -491,7 +528,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
             ),
           ),
 
-          // ── Zoom +/- buttons (right side, below layer toggles) ───────────
+          // ── Zoom +/- buttons ─────────────────────────────────────────────
           Positioned(
             right: 8, bottom: 130,
             child: SafeArea(
@@ -499,7 +536,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
             ),
           ),
 
-          // ── Legend (bottom-left, hide when sheet open) ───────────────────
+          // ── Legend ───────────────────────────────────────────────────────
           if (!anySheetOpen)
             Positioned(
               bottom: 16, left: 8,
@@ -523,7 +560,8 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen>
                   onClose:    _clearSelection,
                   onOpenDetail: () {
                     Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => CityDetailScreen(city: _selected!.city)));
+                      // FIX: param is cityName, not city
+                      builder: (_) => CityDetailScreen(cityName: _selected!.city)));
                   },
                 ),
               ),
@@ -616,7 +654,8 @@ class _DistrictLayerState extends State<_DistrictLayer> {
       final geom  = f['geometry'] as Map<String, dynamic>? ?? {};
       final type  = geom['type'] as String? ?? '';
       final worst = widget.districtData[name];
-      final fill  = FloodSeverity.districtColor(worst?.status);
+      // FIX: FloodSeverity.districtColor() doesn't exist → use .fromString().color
+      final fill  = FloodSeverity.fromString(worst?.status).color;
       final isSelected = name == widget.selectedDistrict;
 
       void addPoly(List coords) {
@@ -683,7 +722,7 @@ class _StationPin extends StatelessWidget {
           ),
           child: Icon(_alertLevelIcon(alert.level), color: color, size: 13),
         ),
-        if (pct != null)
+        if (pct > 0)
           Positioned(
             bottom: -2, right: -2,
             child: Container(
@@ -727,9 +766,10 @@ class _StationSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final t          = RiverTheme.of(context);
-    final col        = _alertLevelColor(alertLevel.level);
-    final predAsync  = ref.watch(predictionProvider(data.city));
+    // FIX: RiverColors.of
+    final t         = RiverColors.of(context);
+    final col       = _alertLevelColor(alertLevel.level);
+    final predAsync = ref.watch(predictionProvider(data.city));
 
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
@@ -821,12 +861,12 @@ class _StationSheet extends ConsumerWidget {
                 const SizedBox(height: 12),
 
                 // ── fill-percent bar ────────────────────────────────────
-                if (alertLevel.fillPercent != null) ...[
+                if (alertLevel.fillPercent > 0) ...[ 
                   Row(children: [
                     Text('Fill', style: TextStyle(
                         color: t.textSecondary, fontSize: 11)),
                     const Spacer(),
-                    Text('${alertLevel.fillPercent!.toStringAsFixed(1)}%',
+                    Text('${alertLevel.fillPercent.toStringAsFixed(1)}%',
                       style: TextStyle(color: col,
                           fontSize: 11, fontWeight: FontWeight.w700)),
                   ]),
@@ -834,7 +874,7 @@ class _StationSheet extends ConsumerWidget {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
-                      value: (alertLevel.fillPercent! / 100).clamp(0, 1),
+                      value: (alertLevel.fillPercent / 100).clamp(0, 1),
                       minHeight: 6,
                       backgroundColor: t.stroke.withValues(alpha: 0.20),
                       valueColor: AlwaysStoppedAnimation(col),
@@ -846,21 +886,15 @@ class _StationSheet extends ConsumerWidget {
                 // ── live stats row ──────────────────────────────────────
                 Row(children: [
                   _StatChip(label: 'Level',
-                      value: data.currentLevel != null
-                          ? '${data.currentLevel!.toStringAsFixed(2)} m'
-                          : '—',
+                      value: '${data.currentLevel.toStringAsFixed(2)} m',
                       color: col, t: t),
                   const SizedBox(width: 8),
                   _StatChip(label: 'Danger',
-                      value: data.dangerLevel != null
-                          ? '${data.dangerLevel!.toStringAsFixed(2)} m'
-                          : '—',
+                      value: '${data.dangerLevel.toStringAsFixed(2)} m',
                       color: const Color(0xFFFF5500), t: t),
                   const SizedBox(width: 8),
                   _StatChip(label: 'Warning',
-                      value: data.warningLevel != null
-                          ? '${data.warningLevel!.toStringAsFixed(2)} m'
-                          : '—',
+                      value: '${data.warningLevel.toStringAsFixed(2)} m',
                       color: const Color(0xFFFFA520), t: t),
                 ]),
 
@@ -868,9 +902,7 @@ class _StationSheet extends ConsumerWidget {
 
                 // ── AI prediction panel ─────────────────────────────────
                 predAsync.when(
-                  data: (pred) => pred == null
-                      ? const SizedBox.shrink()
-                      : _PredictionPanel(pred: pred, t: t),
+                  data: (pred) => _PredictionPanel(pred: pred, t: t),
                   loading: () => const SizedBox(
                     height: 40,
                     child: Center(child: CircularProgressIndicator(strokeWidth: 1.5)),
@@ -914,7 +946,8 @@ class _StationSheet extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Prediction panel (inside station sheet)
+// Prediction panel
+// FIX: pred.nextPeakLevel/trend/confidence/sparkline6h computed from real fields
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PredictionPanel extends StatelessWidget {
@@ -922,9 +955,37 @@ class _PredictionPanel extends StatelessWidget {
   final dynamic         t;
   const _PredictionPanel({required this.pred, required this.t});
 
+  // Computed properties from existing FloodPrediction fields
+  double? get _nextPeakLevel {
+    if (pred.next24h.isEmpty) return null;
+    return pred.next24h.map((p) => p.level).reduce(math.max);
+  }
+
+  String get _trend {
+    if (pred.next24h.length < 2) return '—';
+    final first = pred.next24h.first.level;
+    final last  = pred.next24h.last.level;
+    final delta = last - first;
+    if (delta > 0.05)  return '↑ Rising';
+    if (delta < -0.05) return '↓ Falling';
+    return '→ Steady';
+  }
+
+  double get _confidence => pred.confidencePct / 100;
+
+  List<double>? get _sparkline6h {
+    if (pred.next24h.length < 2) return null;
+    return pred.next24h
+        .take(6)
+        .map((p) => p.level)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final riskCol = pred.cwcRiskScore != null
+    final peak     = _nextPeakLevel;
+    final spark    = _sparkline6h;
+    final riskCol  = pred.cwcRiskScore != null
         ? Color.lerp(const Color(0xFF10E88A), const Color(0xFFFF1A44),
               pred.cwcRiskScore! / 100)!
         : null;
@@ -932,41 +993,40 @@ class _PredictionPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: t.stroke.withValues(alpha: 0.08),
+        color: (t.stroke as Color).withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: t.stroke.withValues(alpha: 0.20)),
+        border: Border.all(color: (t.stroke as Color).withValues(alpha: 0.20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
             Icon(Icons.auto_graph_rounded,
-                color: t.accent, size: 13),
+                color: t.accent as Color, size: 13),
             const SizedBox(width: 5),
             Text('AI 24 h Forecast',
-              style: TextStyle(color: t.textSecondary,
+              style: TextStyle(color: t.textSecondary as Color,
                   fontSize: 11, fontWeight: FontWeight.w700)),
           ]),
           const SizedBox(height: 6),
           Row(children: [
-            _PredStat(label: 'Next Peak',
-                value: pred.nextPeakLevel != null
-                    ? '${pred.nextPeakLevel!.toStringAsFixed(2)} m' : '—',
+            _PredStat(
+                label: 'Next Peak',
+                value: peak != null ? '${peak.toStringAsFixed(2)} m' : '—',
                 t: t),
             const SizedBox(width: 10),
-            _PredStat(label: 'Trend',
-                value: pred.trend ?? '—', t: t),
+            _PredStat(label: 'Trend', value: _trend, t: t),
             const SizedBox(width: 10),
-            _PredStat(label: 'Confidence',
-                value: pred.confidence != null
-                    ? '${(pred.confidence! * 100).round()}%' : '—',
+            _PredStat(
+                label: 'Confidence',
+                value: '${(_confidence * 100).round()}%',
                 t: t),
           ]),
           if (pred.cwcRiskScore != null && riskCol != null) ...[
             const SizedBox(height: 8),
             Row(children: [
               Text('CWC Risk',
-                  style: TextStyle(color: t.textSecondary, fontSize: 10)),
+                  style: TextStyle(color: t.textSecondary as Color, fontSize: 10)),
               const Spacer(),
               Text('${pred.cwcRiskScore!.round()}',
                   style: TextStyle(color: riskCol,
@@ -978,20 +1038,20 @@ class _PredictionPanel extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: pred.cwcRiskScore! / 100,
                 minHeight: 4,
-                backgroundColor: t.stroke.withValues(alpha: 0.15),
+                backgroundColor: (t.stroke as Color).withValues(alpha: 0.15),
                 valueColor: AlwaysStoppedAnimation(riskCol),
               ),
             ),
           ],
           // 6 h sparkline
-          if (pred.sparkline6h != null && pred.sparkline6h!.length > 1) ...[
+          if (spark != null && spark.length > 1) ...[
             const SizedBox(height: 8),
             SizedBox(
               height: 32,
               child: CustomPaint(
                 painter: _SparklinePainter(
-                  values: pred.sparkline6h!,
-                  color:  t.accent,
+                  values: spark,
+                  color:  t.accent as Color,
                 ),
                 size: const Size(double.infinity, 32),
               ),
@@ -1012,8 +1072,8 @@ class _PredStat extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: TextStyle(color: t.textSecondary, fontSize: 9)),
-      Text(value, style: TextStyle(color: t.textPrimary,
+      Text(label, style: TextStyle(color: t.textSecondary as Color, fontSize: 9)),
+      Text(value, style: TextStyle(color: t.textPrimary as Color,
           fontSize: 12, fontWeight: FontWeight.w700)),
     ],
   );
@@ -1021,6 +1081,7 @@ class _PredStat extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sparkline painter
+// FIX: renamed local var from `path` to `linePath` to avoid latlong2.Path conflict
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SparklinePainter extends CustomPainter {
@@ -1036,13 +1097,14 @@ class _SparklinePainter extends CustomPainter {
     final rng = (mx - mn).abs() < 0.01 ? 1.0 : mx - mn;
     final dx  = size.width / (values.length - 1);
 
-    final path = Path();
+    // FIX: renamed from `path` → `linePath` to avoid latlong2.Path name collision
+    final linePath = ui.Path();
     for (var i = 0; i < values.length; i++) {
       final x = i * dx;
       final y = size.height - ((values[i] - mn) / rng) * size.height;
-      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
+      i == 0 ? linePath.moveTo(x, y) : linePath.lineTo(x, y);
     }
-    canvas.drawPath(path,
+    canvas.drawPath(linePath,
       Paint()
         ..color = color.withValues(alpha: 0.80)
         ..style = PaintingStyle.stroke
@@ -1078,7 +1140,7 @@ class _StatChip extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(color: t.textSecondary, fontSize: 9)),
+        Text(label, style: TextStyle(color: t.textSecondary as Color, fontSize: 9)),
         Text(value,
           style: TextStyle(color: color,
               fontSize: 12, fontWeight: FontWeight.w800),
@@ -1110,15 +1172,19 @@ class _DistrictSheet extends StatelessWidget {
   });
 
   ThresholdAlert _alert(FloodData fd) {
-    final match = allAlerts.where((a) => a.stationId == fd.city).firstOrNull;
-    return match ?? ThresholdAlert.fromFloodStatus(fd.city, fd.status);
+    // FIX: field is cityId, not stationId
+    final match = allAlerts.where((a) => a.cityId == fd.city).firstOrNull;
+    // FIX: inline factory
+    return match ?? _makeAlert(fd.city, fd.status);
   }
 
   @override
   Widget build(BuildContext context) {
-    final t   = RiverTheme.of(context);
+    // FIX: RiverColors.of
+    final t   = RiverColors.of(context);
+    // FIX: FloodSeverity.fromString().color, not FloodSeverity.districtColor()
     final col = worstStation != null
-        ? FloodSeverity.districtColor(worstStation!.status)
+        ? FloodSeverity.fromString(worstStation!.status).color
         : t.stroke;
 
     return Container(
@@ -1135,7 +1201,6 @@ class _DistrictSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // drag handle
           Container(
             margin: const EdgeInsets.only(top: 10, bottom: 5),
             width: 36, height: 4,
@@ -1144,7 +1209,6 @@ class _DistrictSheet extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          // header
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(children: [
@@ -1174,26 +1238,23 @@ class _DistrictSheet extends StatelessWidget {
             ]),
           ),
           const Divider(height: 1),
-          // station list
           Flexible(
             child: ListView.builder(
               shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 4),
               itemCount: allStations.length,
               itemBuilder: (_, i) {
-                final fd  = allStations[i];
-                final al  = _alert(fd);
-                final c   = _alertLevelColor(al.level);
+                final fd = allStations[i];
+                final al = _alert(fd);
+                final c  = _alertLevelColor(al.level);
                 return ListTile(
                   dense: true,
                   leading: Icon(_alertLevelIcon(al.level), color: c, size: 18),
                   title: Text(fd.city,
                     style: TextStyle(color: t.textPrimary,
                         fontSize: 13, fontWeight: FontWeight.w600)),
-                  subtitle: fd.currentLevel != null
-                      ? Text('${fd.currentLevel!.toStringAsFixed(2)} m',
-                          style: TextStyle(color: t.textSecondary, fontSize: 11))
-                      : null,
+                  subtitle: Text('${fd.currentLevel.toStringAsFixed(2)} m',
+                      style: TextStyle(color: t.textSecondary, fontSize: 11)),
                   trailing: Text(al.level.label,
                     style: TextStyle(color: c,
                         fontSize: 10, fontWeight: FontWeight.w700)),
@@ -1222,7 +1283,8 @@ class _LayerToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t     = RiverTheme.of(context);
+    // FIX: RiverColors.of
+    final t     = RiverColors.of(context);
     final color = active ? t.accent : t.textSecondary;
     return GestureDetector(
       onTap: onTap,
@@ -1265,7 +1327,6 @@ class _MapLegendState extends State<_MapLegend>
     with SingleTickerProviderStateMixin {
   bool _expanded = false;
 
-  // Per-section collapse state
   bool _secAlerts    = true;
   bool _secWaterBar  = true;
   bool _secRivers    = true;
@@ -1295,7 +1356,8 @@ class _MapLegendState extends State<_MapLegend>
 
   @override
   Widget build(BuildContext context) {
-    final t = RiverTheme.of(context);
+    // FIX: RiverColors.of
+    final t = RiverColors.of(context);
     return Container(
       constraints: const BoxConstraints(maxWidth: 180),
       decoration: BoxDecoration(
@@ -1309,7 +1371,6 @@ class _MapLegendState extends State<_MapLegend>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── header / toggle ───────────────────────────────────────────
           GestureDetector(
             onTap: _toggle,
             child: Padding(
@@ -1331,7 +1392,6 @@ class _MapLegendState extends State<_MapLegend>
             ),
           ),
 
-          // ── expandable body ───────────────────────────────────────────
           AnimatedSize(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeInOut,
@@ -1344,7 +1404,6 @@ class _MapLegendState extends State<_MapLegend>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
 
-                        // ── Alert levels ──────────────────────────────
                         _SectionHeader('Alert Levels', _secAlerts,
                             () => setState(() => _secAlerts = !_secAlerts), t),
                         if (_secAlerts)
@@ -1373,12 +1432,10 @@ class _MapLegendState extends State<_MapLegend>
 
                         const SizedBox(height: 6),
 
-                        // ── Water level zones ─────────────────────────
                         _SectionHeader('Water Level Zones', _secWaterBar,
                             () => setState(() => _secWaterBar = !_secWaterBar), t),
                         if (_secWaterBar) _WaterLevelBar(t: t),
 
-                        // ── Rivers ────────────────────────────────────
                         if (widget.showRivers) ...[
                           const SizedBox(height: 6),
                           _SectionHeader('Rivers', _secRivers,
@@ -1399,7 +1456,6 @@ class _MapLegendState extends State<_MapLegend>
                             )),
                         ],
 
-                        // ── District shading ──────────────────────────
                         if (widget.showDistricts) ...[
                           const SizedBox(height: 6),
                           _SectionHeader('District Fill', _secDistricts,
@@ -1418,7 +1474,6 @@ class _MapLegendState extends State<_MapLegend>
   }
 }
 
-// Section header with collapse arrow
 class _SectionHeader extends StatelessWidget {
   final String   title;
   final bool     expanded;
@@ -1433,7 +1488,7 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(children: [
         Text(title,
-          style: TextStyle(color: t.textSecondary,
+          style: TextStyle(color: t.textSecondary as Color,
               fontSize: 9.5, fontWeight: FontWeight.w800,
               letterSpacing: 0.3)),
         const Spacer(),
@@ -1441,14 +1496,13 @@ class _SectionHeader extends StatelessWidget {
           turns: expanded ? 0 : -0.25,
           duration: const Duration(milliseconds: 180),
           child: Icon(Icons.expand_more_rounded,
-              color: t.textSecondary.withValues(alpha: 0.55), size: 11),
+              color: (t.textSecondary as Color).withValues(alpha: 0.55), size: 11),
         ),
       ]),
     ),
   );
 }
 
-// River colour swatch line
 class _LinePainter extends CustomPainter {
   final Color color;
   const _LinePainter({required this.color});
@@ -1467,7 +1521,6 @@ class _LinePainter extends CustomPainter {
   bool shouldRepaint(_LinePainter old) => old.color != color;
 }
 
-// Segmented water-level bar
 class _WaterLevelBar extends StatelessWidget {
   final dynamic t;
   const _WaterLevelBar({required this.t});
@@ -1484,7 +1537,6 @@ class _WaterLevelBar extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      // bar
       ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: SizedBox(
@@ -1497,24 +1549,22 @@ class _WaterLevelBar extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 3),
-      // threshold ticks label
       Row(children: [
         Expanded(child: Text('90%W',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.55),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.55),
               fontSize: 7), textAlign: TextAlign.center)),
         Expanded(child: Text('W',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.55),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.55),
               fontSize: 7), textAlign: TextAlign.center)),
         Expanded(child: Text('D',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.55),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.55),
               fontSize: 7), textAlign: TextAlign.center)),
         Expanded(child: Text('115%D',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.55),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.55),
               fontSize: 7), textAlign: TextAlign.center)),
         const Expanded(child: SizedBox()),
       ]),
       const SizedBox(height: 3),
-      // colour names
       Row(children: _segs.map((s) =>
         Expanded(child: Text(s.label,
           style: TextStyle(color: s.color, fontSize: 7,
@@ -1525,7 +1575,6 @@ class _WaterLevelBar extends StatelessWidget {
   );
 }
 
-// District shading gradient bar
 class _DistrictShadingBar extends StatelessWidget {
   final dynamic t;
   const _DistrictShadingBar({required this.t});
@@ -1553,15 +1602,14 @@ class _DistrictShadingBar extends StatelessWidget {
       const SizedBox(height: 3),
       Row(children: [
         Text('Low risk',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.65),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.65),
               fontSize: 7)),
         const Spacer(),
         Text('High risk',
-          style: TextStyle(color: t.textSecondary.withValues(alpha: 0.65),
+          style: TextStyle(color: (t.textSecondary as Color).withValues(alpha: 0.65),
               fontSize: 7)),
       ]),
       const SizedBox(height: 4),
-      // colour chips
       Row(children: _cols.map((c) =>
         Expanded(child: Container(
           height: 6,
@@ -1592,7 +1640,8 @@ class _ZoomButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = RiverTheme.of(context);
+    // FIX: RiverColors.of
+    final t = RiverColors.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1618,7 +1667,7 @@ class _ZoomBtn extends StatelessWidget {
   final IconData     icon;
   final String       tooltip;
   final VoidCallback onTap;
-  final dynamic      t;   // RiverTheme data
+  final dynamic      t;
   const _ZoomBtn({required this.icon, required this.tooltip,
                   required this.onTap, required this.t});
 
@@ -1631,16 +1680,16 @@ class _ZoomBtn extends StatelessWidget {
         child: Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: t.cardBg.withValues(alpha: 0.88),
+            color: (t.cardBg as Color).withValues(alpha: 0.88),
             borderRadius: BorderRadius.circular(9),
             border: Border.all(
-                color: t.stroke.withValues(alpha: 0.60), width: 0.8),
+                color: (t.stroke as Color).withValues(alpha: 0.60), width: 0.8),
             boxShadow: [BoxShadow(
               color: Colors.black.withValues(alpha: 0.22),
               blurRadius: 8, offset: const Offset(0, 2),
             )],
           ),
-          child: Icon(icon, color: t.accent, size: 20),
+          child: Icon(icon, color: t.accent as Color, size: 20),
         ),
       ),
     );
