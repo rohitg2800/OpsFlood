@@ -1,18 +1,14 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v8.0 — district polygon touch interactivity
+// BiharRiverMapScreen v8.1 — flutter_map 8.3.0 API fixes
 //
-// District touch changes:
-//   • Tapping a district polygon selects it (_selectedDistrict state)
-//   • Selected polygon gets boosted fill alpha + thick glowing border ring
-//   • _DistrictLayer now takes selectedDistrict + onTap callback
-//   • flutter_map PolygonLayer hitNotifier wires polygon taps to the callback
-//   • _DistrictSheet bottom sheet slides up showing:
-//       – District name + severity badge
-//       – Worst-severity station card (level bar, river dot, status chip)
-//       – List of all stations in the district with mini severity dots
-//       – "View station detail" button → CityDetailScreen
-//   • Station sheet and district sheet are mutually exclusive; tapping map
-//     background deselects both.
+// Breaking-change fixes vs v8.0:
+//   • isDotted: false  → pattern: const StrokePattern.solid()
+//     (isDotted was removed; StrokePattern is the replacement in fm ≥6.0)
+//   • PolygonHitNotifier()  → LayerHitNotifier<String>()
+//     (PolygonHitNotifier was renamed; the generic type is the hitValue type)
+//   • PolygonLayer<String>  — type param required when using hitNotifier
+//   • Polygon hitValue      — each polygon carries its district name string
+//     so hitValues.first gives the name directly (no index indirection)
 library;
 
 import 'dart:convert';
@@ -433,19 +429,11 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
 // District polygon layer — interactive
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Holds the data for a single tappable polygon so we can associate a name
-/// with the hit-test result from flutter_map's [PolygonLayer].
-class _DistrictPolygonMeta {
-  final String name;
-  final Polygon polygon;
-  const _DistrictPolygonMeta({required this.name, required this.polygon});
-}
-
-class _DistrictLayer extends StatelessWidget {
-  final Map<String, dynamic>  geoJson;
+class _DistrictLayer extends StatefulWidget {
+  final Map<String, dynamic>   geoJson;
   final Map<String, FloodData> districtData;
-  final String?               selectedDistrict;
-  final ValueChanged<String>  onDistrictTap;
+  final String?                selectedDistrict;
+  final ValueChanged<String>   onDistrictTap;
 
   const _DistrictLayer({
     required this.geoJson,
@@ -454,21 +442,24 @@ class _DistrictLayer extends StatelessWidget {
     required this.onDistrictTap,
   });
 
+  @override
+  State<_DistrictLayer> createState() => _DistrictLayerState();
+}
+
+class _DistrictLayerState extends State<_DistrictLayer> {
+  // LayerHitNotifier<String> — String is the type of each Polygon's hitValue
+  // (the district name). flutter_map 8.x renamed PolygonHitNotifier to this.
+  final _hitNotifier = LayerHitNotifier<String>();
+
   List<LatLng> _ring(List coords) => coords
       .map<LatLng>((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
       .toList();
 
   @override
   Widget build(BuildContext context) {
-    // We build two polygon lists:
-    //   1. base polygons   – all districts (normal fill + border)
-    //   2. highlight ring  – only the selected district (thicker glowing border)
-    // Rendering both via separate PolygonLayers means the highlight always
-    // draws on top without needing to sort the polygon list.
-
-    final List<_DistrictPolygonMeta> allMeta = [];
-    final List<Polygon>              highlighted = [];
-    final features = (geoJson['features'] as List?) ?? [];
+    final List<Polygon<String>> basePolygons      = [];
+    final List<Polygon<String>> highlightPolygons = [];
+    final features = (widget.geoJson['features'] as List?) ?? [];
 
     for (final feat in features) {
       final props    = feat['properties'] as Map? ?? {};
@@ -478,10 +469,10 @@ class _DistrictLayer extends StatelessWidget {
       final type     = geometry['type'] as String? ?? '';
       final coords   = geometry['coordinates'] as List? ?? [];
 
-      final fd         = districtData[name];
+      final fd         = widget.districtData[name];
       final sev        = fd != null ? FloodSeverityHelper.fromString(fd.status) : FloodSeverity.normal;
       final isNormal   = sev == FloodSeverity.normal;
-      final isSelected = selectedDistrict == name;
+      final isSelected = widget.selectedDistrict == name;
       final sevColor   = FloodSeverityHelper.color(sev);
 
       final fillAlpha   = isSelected ? 0.38 : (isNormal ? 0.10 : 0.22);
@@ -492,10 +483,11 @@ class _DistrictLayer extends StatelessWidget {
         final pts = _ring(ring);
         if (pts.length < 3) return;
 
-        final poly = Polygon(
-          points:           pts,
-          color:            sevColor.withValues(alpha: fillAlpha),
-          borderColor:      sevColor.withValues(alpha: borderAlpha),
+        // Base polygon — hitValue carries the district name for the notifier
+        basePolygons.add(Polygon<String>(
+          points:            pts,
+          color:             sevColor.withValues(alpha: fillAlpha),
+          borderColor:       sevColor.withValues(alpha: borderAlpha),
           borderStrokeWidth: borderWidth,
           label: name,
           labelStyle: TextStyle(
@@ -506,18 +498,19 @@ class _DistrictLayer extends StatelessWidget {
           ),
           labelPlacement: PolygonLabelPlacement.centroid,
           rotateLabel: false,
-        );
+          hitValue: name,   // ← district name attached; surfaced via _hitNotifier
+        ));
 
-        allMeta.add(_DistrictPolygonMeta(name: name, polygon: poly));
-
-        // Extra outer glow ring for selected district
+        // Glow ring for the selected district — no hitValue needed (purely visual)
         if (isSelected) {
-          highlighted.add(Polygon(
+          highlightPolygons.add(Polygon<String>(
             points:            pts,
-            color:             sevColor.withValues(alpha: 0.0),   // transparent fill
+            color:             sevColor.withValues(alpha: 0.0),  // transparent fill
             borderColor:       sevColor.withValues(alpha: 0.55),
             borderStrokeWidth: 5.0,
-            isDotted: false,
+            // FIX: isDotted was removed in flutter_map 6+.
+            // Use pattern: StrokePattern.solid() (the default) explicitly.
+            pattern: const StrokePattern.solid(),
           ));
         }
       }
@@ -530,35 +523,27 @@ class _DistrictLayer extends StatelessWidget {
       }
     }
 
-    // Build hit notifier: maps each Polygon index → district name
-    final hitNotifier = PolygonHitNotifier();
-
     return Stack(
       children: [
-        // Base layer — all district polygons
-        PolygonLayer(
-          polygons:    allMeta.map((m) => m.polygon).toList(),
-          hitNotifier: hitNotifier,
-        ),
-
-        // Tap gesture catcher wired to the hit notifier
+        // Base layer — all district polygons, wired to _hitNotifier
         GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onTapUp: (_) {
-            final hit = hitNotifier.value;
-            if (hit == null || hit.hitValues.isEmpty) return;
-            // hit.hitValues contains the polygon index in the list
-            final idx  = hit.hitValues.first as int;
-            if (idx < allMeta.length) {
-              onDistrictTap(allMeta[idx].name);
-            }
+          onTap: () {
+            // hitNotifier.value is set synchronously before onTap fires
+            final result = _hitNotifier.value;
+            if (result == null || result.hitValues.isEmpty) return;
+            // hitValues.first is the district name String (the hitValue we set)
+            widget.onDistrictTap(result.hitValues.first);
           },
-          child: const SizedBox.expand(),
+          child: PolygonLayer<String>(
+            polygons:    basePolygons,
+            hitNotifier: _hitNotifier,
+          ),
         ),
 
-        // Highlight ring — rendered above base so it glows over other districts
-        if (highlighted.isNotEmpty)
-          PolygonLayer(polygons: highlighted),
+        // Highlight ring — rendered above so the glow border overlays others
+        if (highlightPolygons.isNotEmpty)
+          PolygonLayer<String>(polygons: highlightPolygons),
       ],
     );
   }
