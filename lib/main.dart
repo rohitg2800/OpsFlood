@@ -18,9 +18,9 @@ import 'screens/alerts_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
 import 'screens/india_river_explorer_screen.dart';
 import 'screens/live_stations_screen.dart';
+import 'screens/manual_predict_screen.dart';
 import 'screens/model_info_screen.dart';
 import 'screens/monitors_screen.dart';
-import 'screens/predict_screen.dart';
 import 'screens/river_monitor_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
@@ -31,7 +31,7 @@ import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
-// ── Phase 2: new screens ────────────────────────────────────────────────────
+// ── Phase 2: new screens ──────────────────────────────────────────────────────────────────────
 import 'screens/sos_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'screens/prediction_screen.dart';
@@ -123,19 +123,6 @@ Future<void> main() async {
       unawaited(CwcAlertWatcher.instance.start(container).catchError((e) {
         if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
       }));
-
-      // 8. AI Prediction Background Service
-      unawaited(
-        FcmService.instance.init().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
-        }),
-      );
-
-      unawaited(
-        ThresholdAlertService.instance.start().catchError((e) {
-          if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
-        }),
-      );
     }
   } finally {
     WidgetsBinding.instance.allowFirstFrame();
@@ -179,7 +166,7 @@ class EquinoxBHApp extends ConsumerWidget {
         AlertsScreen.route:             (_) => const AlertsScreen(),
         '/live_stations':               (_) => const LiveStationsScreen(),
         '/weather':                     (_) => const WeatherScreen(),
-        '/predict':                     (_) => const PredictScreen(),
+        '/predict':                     (_) => const ManualPredictScreen(),
         '/monitors':                    (_) => const MonitorsScreen(),
         '/river_monitor':               (_) => const RiverMonitorScreen(),
         '/state_matrix':                (_) => const StateMatrixScreen(),
@@ -187,6 +174,9 @@ class EquinoxBHApp extends ConsumerWidget {
         '/model_info':                  (_) => const ModelInfoScreen(),
         '/bihar_river_map':             (_) => const BiharRiverMapScreen(),
         '/india_river_explorer':        (_) => const IndiaRiverExplorerScreen(),
+        '/prediction':                  (_) => const PredictionScreen(),
+        '/sos':                         (_) => const SosScreen(),
+        '/news':                        (_) => const NewsFeedScreen(),
       },
       builder: (context, child) {
         final mq = MediaQuery.of(context);

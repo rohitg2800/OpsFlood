@@ -1,5 +1,5 @@
 // lib/screens/home_screen.dart
-// OpsFlood — HomeScreen v8  (Settings tab + locale-aware labels)
+// OpsFlood — HomeScreen v9  (Settings tab + locale-aware labels)
 library;
 
 import 'dart:ui';
@@ -10,10 +10,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
+import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'live_stations_screen.dart';
+import 'manual_predict_screen.dart';
 import 'monitors_screen.dart';
-import 'predict_screen.dart';
 import 'river_monitor_screen.dart';
 import 'settings_screen.dart';
 import 'weather_screen.dart';
@@ -31,34 +32,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   late AnimationController _glowCtrl;
   late Animation<double> _glow;
 
-  // Labels are hardcoded English here; for full i18n swap with AppLocalizations
   static const _tabs = [
-    _Tab('Dashboard', Icons.dashboard_outlined,      Icons.dashboard_rounded),
-    _Tab('Rivers',    Icons.water_outlined,           Icons.water_rounded),
-    _Tab('Alerts',    Icons.notifications_outlined,   Icons.notifications_rounded),
-    _Tab('Weather',   Icons.cloud_outlined,           Icons.cloud_rounded),
-    _Tab('Predict',   Icons.model_training_outlined,  Icons.model_training_rounded),
-    _Tab('Stations',  Icons.sensors_outlined,         Icons.sensors_rounded),
-    _Tab('Monitor',   Icons.monitor_heart_outlined,   Icons.monitor_heart_rounded),
-    _Tab('Settings',  Icons.settings_outlined,        Icons.settings_rounded),
+    _Tab('Dashboard', Icons.dashboard_outlined,            Icons.dashboard_rounded),
+    _Tab('Rivers',    Icons.water_outlined,                Icons.water_rounded),
+    _Tab('Alerts',    Icons.notifications_outlined,        Icons.notifications_rounded),
+    _Tab('Weather',   Icons.cloud_outlined,                Icons.cloud_rounded),
+    _Tab('Predict',   Icons.model_training_outlined,       Icons.model_training_rounded),
+    _Tab('Stations',  Icons.sensors_outlined,              Icons.sensors_rounded),
+    _Tab('Monitor',   Icons.monitor_heart_outlined,        Icons.monitor_heart_rounded),
+    _Tab('Settings',  Icons.settings_outlined,             Icons.settings_rounded),
   ];
 
-  Widget _screen(int i) => switch (i) {
+  // First 5 tabs shown in the bottom nav bar; the rest live in the “More” sheet.
+  static const int _primaryCount = 5;
+  static List<_Tab> get _primary => _tabs.take(_primaryCount).toList();
+
+  Widget _buildScreen(int i) => switch (i) {
     0 => const DashboardScreen(),
     1 => const RiverMonitorScreen(),
     2 => const AlertsScreen(),
     3 => const WeatherScreen(),
-    4 => const PredictScreen(),
+    4 => const ManualPredictScreen(),
     5 => const LiveStationsScreen(),
     6 => const MonitorsScreen(),
     7 => const SettingsScreen(),
     _ => const DashboardScreen(),
   };
 
+  late final List<Widget> _screens;
+
   @override
   void initState() {
     super.initState();
-    _screens = List.generate(6, _buildScreen);
+    _screens = List.generate(_tabs.length, _buildScreen);
     _glowCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1600))
       ..repeat(reverse: true);
@@ -125,7 +131,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 }
 
-// ── nav bar ───────────────────────────────────────────────────────────────────
+// ── More bottom sheet ────────────────────────────────────────────────────────────
+class _MoreSheet extends StatelessWidget {
+  const _MoreSheet({
+    required this.current,
+    required this.offline,
+    required this.onSelect,
+  });
+
+  final int current;
+  final bool offline;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    final extraTabs = _HomeScreenState._tabs.skip(_HomeScreenState._primaryCount).toList();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: t.navBg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 36, height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...extraTabs.asMap().entries.map((e) {
+            final tabIdx = _HomeScreenState._primaryCount + e.key;
+            final active  = current == tabIdx;
+            return ListTile(
+              leading: Icon(
+                active ? e.value.activeIcon : e.value.icon,
+                color: active ? t.accent : t.navInactive,
+              ),
+              title: Text(
+                e.value.label,
+                style: TextStyle(
+                  color: active ? t.accent : t.navInactive,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+              onTap: () => onSelect(tabIdx),
+            );
+          }),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+}
+
+// ── nav bar ───────────────────────────────────────────────────────────────────────
 
 class _NavBar extends StatelessWidget {
   const _NavBar({
@@ -204,8 +269,7 @@ class _NavBar extends StatelessWidget {
   }
 }
 
-// ── nav item ──────────────────────────────────────────────────────────────────
-
+// ── nav item ──────────────────────────────────────────────────────────────────────
 class _NavItem extends StatelessWidget {
   const _NavItem({required this.tab, required this.active, required this.glowVal});
   final _Tab   tab;
@@ -246,6 +310,50 @@ class _NavItem extends StatelessWidget {
             color: c, letterSpacing: 0.2,
           ),
           child: Text(tab.label),
+        ),
+      ],
+    );
+  }
+}
+
+// ── “More” nav button ─────────────────────────────────────────────────────────────
+class _MoreButton extends StatelessWidget {
+  const _MoreButton({required this.active, required this.offline});
+  final bool active;
+  final bool offline;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    final c = active ? t.navActive : t.navInactive;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(active ? Icons.grid_view_rounded : Icons.grid_view_outlined,
+                size: active ? 18 : 16, color: c),
+            if (offline)
+              Positioned(
+                top: -2, right: -2,
+                child: Container(
+                  width: 7, height: 7,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        Text('More',
+          style: TextStyle(
+            fontSize:   active ? 8.5 : 8,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+            color: c, letterSpacing: 0.2,
+          ),
         ),
       ],
     );
