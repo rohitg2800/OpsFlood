@@ -38,8 +38,11 @@ class LocationNotifier extends Notifier<LocationState> {
         state = const LocationState(error: 'Location permission denied');
         return;
       }
+      // Use LocationSettings instead of the deprecated desiredAccuracy param.
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       );
       state = LocationState(lat: pos.latitude, lon: pos.longitude);
     } catch (e) {
