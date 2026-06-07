@@ -1,14 +1,10 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v8.1 — flutter_map 8.3.0 API fixes
+// BiharRiverMapScreen v8.2 — fix LayerHitNotifier constructor
 //
-// Breaking-change fixes vs v8.0:
-//   • isDotted: false  → pattern: const StrokePattern.solid()
-//     (isDotted was removed; StrokePattern is the replacement in fm ≥6.0)
-//   • PolygonHitNotifier()  → LayerHitNotifier<String>()
-//     (PolygonHitNotifier was renamed; the generic type is the hitValue type)
-//   • PolygonLayer<String>  — type param required when using hitNotifier
-//   • Polygon hitValue      — each polygon carries its district name string
-//     so hitValues.first gives the name directly (no index indirection)
+// Fix vs v8.1:
+//   • LayerHitNotifier<String>()  →  ValueNotifier(null)
+//     LayerHitNotifier<T> is a typedef for ValueNotifier<LayerHitResult<T>?>
+//     and has NO zero-arg constructor — always initialise with null.
 library;
 
 import 'dart:convert';
@@ -447,9 +443,9 @@ class _DistrictLayer extends StatefulWidget {
 }
 
 class _DistrictLayerState extends State<_DistrictLayer> {
-  // LayerHitNotifier<String> — String is the type of each Polygon's hitValue
-  // (the district name). flutter_map 8.x renamed PolygonHitNotifier to this.
-  final _hitNotifier = LayerHitNotifier<String>();
+  // FIX (v8.2): LayerHitNotifier<T> is a typedef for ValueNotifier<LayerHitResult<T>?>
+  // It has no zero-arg constructor — initialise with null.
+  final LayerHitNotifier<String> _hitNotifier = ValueNotifier(null);
 
   List<LatLng> _ring(List coords) => coords
       .map<LatLng>((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
@@ -483,7 +479,6 @@ class _DistrictLayerState extends State<_DistrictLayer> {
         final pts = _ring(ring);
         if (pts.length < 3) return;
 
-        // Base polygon — hitValue carries the district name for the notifier
         basePolygons.add(Polygon<String>(
           points:            pts,
           color:             sevColor.withValues(alpha: fillAlpha),
@@ -498,18 +493,15 @@ class _DistrictLayerState extends State<_DistrictLayer> {
           ),
           labelPlacement: PolygonLabelPlacement.centroid,
           rotateLabel: false,
-          hitValue: name,   // ← district name attached; surfaced via _hitNotifier
+          hitValue: name,
         ));
 
-        // Glow ring for the selected district — no hitValue needed (purely visual)
         if (isSelected) {
           highlightPolygons.add(Polygon<String>(
             points:            pts,
-            color:             sevColor.withValues(alpha: 0.0),  // transparent fill
+            color:             sevColor.withValues(alpha: 0.0),
             borderColor:       sevColor.withValues(alpha: 0.55),
             borderStrokeWidth: 5.0,
-            // FIX: isDotted was removed in flutter_map 6+.
-            // Use pattern: StrokePattern.solid() (the default) explicitly.
             pattern: const StrokePattern.solid(),
           ));
         }
@@ -525,14 +517,11 @@ class _DistrictLayerState extends State<_DistrictLayer> {
 
     return Stack(
       children: [
-        // Base layer — all district polygons, wired to _hitNotifier
         GestureDetector(
           behavior: HitTestBehavior.translucent,
           onTap: () {
-            // hitNotifier.value is set synchronously before onTap fires
             final result = _hitNotifier.value;
             if (result == null || result.hitValues.isEmpty) return;
-            // hitValues.first is the district name String (the hitValue we set)
             widget.onDistrictTap(result.hitValues.first);
           },
           child: PolygonLayer<String>(
@@ -541,7 +530,6 @@ class _DistrictLayerState extends State<_DistrictLayer> {
           ),
         ),
 
-        // Highlight ring — rendered above so the glow border overlays others
         if (highlightPolygons.isNotEmpty)
           PolygonLayer<String>(polygons: highlightPolygons),
       ],
@@ -555,8 +543,8 @@ class _DistrictLayerState extends State<_DistrictLayer> {
 
 class _DistrictSheet extends StatelessWidget {
   final String             districtName;
-  final FloodData?         worstStation;   // highest severity station in district
-  final List<FloodData>    allStations;    // all stations in district
+  final FloodData?         worstStation;
+  final List<FloodData>    allStations;
   final VoidCallback       onClose;
   final ValueChanged<FloodData> onStationTap;
 
@@ -576,7 +564,6 @@ class _DistrictSheet extends StatelessWidget {
         : FloodSeverity.normal;
     final color = FloodSeverityHelper.color(sev);
 
-    // Sort stations: highest severity first
     final sorted = [...allStations]
       ..sort((a, b) =>
           FloodSeverityHelper.fromString(b.status).index -
@@ -595,7 +582,6 @@ class _DistrictSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 
-          // ── Drag handle
           Center(
             child: Container(
               width: 36, height: 4,
@@ -607,7 +593,6 @@ class _DistrictSheet extends StatelessWidget {
             ),
           ),
 
-          // ── Header row
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 12, 10),
             child: Row(
@@ -631,7 +616,6 @@ class _DistrictSheet extends StatelessWidget {
                       const SizedBox(height: 2),
                       Row(
                         children: [
-                          // Severity badge
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
@@ -664,7 +648,6 @@ class _DistrictSheet extends StatelessWidget {
             ),
           ),
 
-          // ── Worst station highlight card (if any stations exist)
           if (worstStation != null) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -672,7 +655,6 @@ class _DistrictSheet extends StatelessWidget {
             ),
           ],
 
-          // ── All stations list
           if (sorted.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
@@ -694,7 +676,6 @@ class _DistrictSheet extends StatelessWidget {
             ),
           ],
 
-          // ── Empty state
           if (allStations.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -751,7 +732,6 @@ class _DistrictWorstCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // Level bar
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: Container(
@@ -811,7 +791,6 @@ class _DistrictStationRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Severity dot
             Container(
               width: 8, height: 8,
               decoration: BoxDecoration(
@@ -844,7 +823,7 @@ class _DistrictStationRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _MapLegend — collapsible legend panel (unchanged from v7)
+// _MapLegend — collapsible legend panel
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapLegend extends StatefulWidget {
@@ -1111,7 +1090,7 @@ class _DistrictShadingBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station bottom sheet (unchanged from v7)
+// Station bottom sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
