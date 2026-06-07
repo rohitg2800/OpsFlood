@@ -35,13 +35,13 @@ final realTimeServiceProvider = realTimeProvider;
 
 // ── Derived providers ─────────────────────────────────────────────────────────
 
-final lastFetchTimeProvider = Provider<DateTime?>((ref) {
-  return ref.watch(realTimeProvider).lastFetchTime;
+final realTimeProvider = Provider<RealTimeService>((ref) {
+  ref.watch(_tickProvider);
+  return ref.watch(_serviceBootProvider);
 });
 
-final isOfflineProvider = Provider<bool>((ref) {
-  return !ref.watch(realTimeProvider).isOnline;
-});
+/// Alias kept for backward compatibility.
+final realTimeServiceProvider = realTimeProvider;
 
 final isWakingUpProvider = Provider<bool>((ref) {
   return ref.watch(realTimeProvider).isWakingUp;
@@ -51,21 +51,18 @@ final errorMessageProvider = Provider<String?>((ref) {
   return ref.watch(realTimeProvider).error;
 });
 
-final imdAlertsProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).imdAlerts;
-});
+final isOfflineProvider = Provider<bool>((ref) =>
+    !ref.watch(realTimeProvider).isOnline);
 
-final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) {
-  return ref.watch(realTimeProvider).ndmaAdvisories;
-});
+final isWakingUpProvider = Provider<bool>((ref) =>
+    ref.watch(realTimeProvider).isWakingUp);
 
 final criticalCountProvider = Provider<int>((ref) {
   return ref.watch(realTimeProvider).criticalCount;
 });
 
-final liveLevelsProvider = Provider<List<FloodData>>((ref) {
-  return ref.watch(realTimeProvider).liveLevels;
-});
+final imdAlertsProvider = Provider<List<dynamic>>((ref) =>
+    ref.watch(realTimeProvider).imdAlerts);
 
 final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) {
   return ref.watch(realTimeProvider).monitoringData;

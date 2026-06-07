@@ -31,10 +31,17 @@ import 'services/local_cache_service.dart';
 import 'services/threshold_alert_service.dart';
 import 'theme/river_theme.dart';
 
+// ── Phase 2: new screens ────────────────────────────────────────────────────
+import 'screens/sos_screen.dart';
+import 'screens/news_feed_screen.dart';
+import 'screens/prediction_screen.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   WidgetsBinding.instance.deferFirstFrame();
+
+  final container = ProviderContainer();
 
   try {
     // 1. Load .env
@@ -107,7 +114,17 @@ Future<void> main() async {
       await LocalCacheService.instance.init().catchError((e) {
         if (kDebugMode) debugPrint('⚠️  LocalCacheService.init failed: $e');
       });
+      unawaited(FcmService.instance.init().catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');
+      }));
+      unawaited(ThresholdAlertService.instance.start().catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  ThresholdAlertService.start failed: $e');
+      }));
+      unawaited(CwcAlertWatcher.instance.start(container).catchError((e) {
+        if (kDebugMode) debugPrint('⚠️  CwcAlertWatcher.start failed: $e');
+      }));
 
+      // 8. AI Prediction Background Service
       unawaited(
         FcmService.instance.init().catchError((e) {
           if (kDebugMode) debugPrint('⚠️  FcmService.init failed: $e');

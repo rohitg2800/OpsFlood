@@ -440,7 +440,6 @@ def pipeline_autofill_predict_input(
         except (TypeError, ValueError):
             return None
 
-    # Peak flood level from live river gauge
     river_level = _f("river_level_m")
     if river_level is not None and river_level > 0 and float(out.get("Peak_Flood_Level_m", 8.5)) == 8.5:
         out["Peak_Flood_Level_m"] = round(river_level, 3)
@@ -448,7 +447,6 @@ def pipeline_autofill_predict_input(
         meta["applied"] = True
         meta["source"] = "pipeline_csv"
 
-    # T1d from hourly rainfall (scaled to daily estimate)
     rainfall_1h = _f("rainfall_1h_mm")
     if rainfall_1h is not None and float(out.get("T1d", 10.0)) == 10.0:
         # Scale 1h reading to approximate 24h by × 12 (conservative midday factor)

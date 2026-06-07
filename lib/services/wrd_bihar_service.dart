@@ -1,26 +1,24 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v3.1)
+// OpsFlood — WRD Bihar Service (v5.2 — on-device + offline persistence)
 //
 // SOURCE: Central Flood Control Cell, WRD Patna
-// URL:    https://irrigation.befiqr.in/state/table/rivers
+// PRIMARY:  https://irrigation.befiqr.in/state/table/rivers  (direct scrape)
+// FALLBACK: allOrigins proxy  (for portal bot-blocks)
+// OFFLINE:  shared_preferences disk cache (last successful fetch)
 //
-// v3.1 CHANGES:
-//   ─ belowDanger is always computed when dangerLevel is known:
-//       if belowDanger cell is NA but cur & DL both exist → DL - cur
-//       if cur is NA but DL is known → belowDanger = null (genuinely unknown)
-//   ─ _dblStr now also strips leading +/trailing whitespace more aggressively
-//   ─ percentOfDanger: returns null only when DL is truly missing (not when cur is NA)
-//   ─ riskLabel: falls back to 'PRE-MONSOON' instead of 'UNKNOWN' when no data
-//   ─ displayLevel getter: always returns a non-null String for UI use
-//   ─ displayDanger getter: always returns a non-null String for UI use
+// BeFIQR table layout (two header rows!):
+//   Row 0: (1) (2) (3) ... (11)   ← column numbers, ignored
+//   Row 1: River | Site | HFL | DL | Yesterday | Current | Diff | Above/Below | Trend | District
+//   Rows 2-32: 31 live data rows
 library;
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-// ── Data model ────────────────────────────────────────────────────────────────────────
+// ── Data model ────────────────────────────────────────────────────────────────
 class WrdStation {
   final String  river;
   final String  site;
@@ -52,46 +50,32 @@ class WrdStation {
     required this.fetchedAt,
   });
 
-  /// True only when WRD is reporting an actual gauge reading (not NA).
-  bool get hasLiveData => currentLevel != null;
-
-  /// Whether danger level is known (independent of current reading).
+  bool get hasLiveData    => currentLevel != null;
   bool get hasDangerLevel => dangerLevel != null && dangerLevel! > 0;
 
-  /// Safe display string for current level — never throws, never empty.
   String get displayLevel {
     if (currentLevel != null) return '${currentLevel!.toStringAsFixed(2)} m';
     return 'NA';
   }
-
-  /// Safe display string for danger level.
   String get displayDanger {
     if (dangerLevel != null) return '${dangerLevel!.toStringAsFixed(2)} m';
     return '—';
   }
-
-  /// Safe display string for warning level.
   String get displayWarning {
     if (warningLevel != null) return '${warningLevel!.toStringAsFixed(2)} m';
     return '—';
   }
-
-  /// 24-h diff with arrow prefix. e.g. "+0.23 m" or "-0.10 m"
   String get displayDiff {
     if (diff24h == null) return '—';
     final sign = diff24h! >= 0 ? '+' : '';
     return '$sign${diff24h!.toStringAsFixed(2)} m';
   }
 
-  /// Risk label from WRD danger margin.
-  /// Uses belowDanger when available; falls back to NA label gracefully.
   String get riskLabel {
     final bd = belowDanger;
-    // If we have no live reading and no danger level, label PRE-MONSOON
     if (!hasLiveData && !hasDangerLevel) return 'PRE-MONSOON';
-    if (!hasLiveData) return 'NA';           // DL known, level not reported yet
-    if (bd == null && dangerLevel == null)  return 'UNKNOWN';
-    // Compute from belowDanger or derive it
+    if (!hasLiveData) return 'NA';
+    if (bd == null && dangerLevel == null) return 'UNKNOWN';
     final margin = bd ?? (dangerLevel! - currentLevel!);
     if (margin <= 0)   return 'CRITICAL';
     if (margin <= 1.0) return 'HIGH';
@@ -99,30 +83,55 @@ class WrdStation {
     return 'LOW';
   }
 
-  /// Safety percentage (0–100+). Null when no live gauge reading.
   double? get percentOfDanger {
     if (currentLevel == null || dangerLevel == null || dangerLevel! <= 0) return null;
     return (currentLevel! / dangerLevel!) * 100.0;
   }
-
-  /// Percent of danger expressed as a safe string for UI.
   String get displayPctOfDanger {
     final p = percentOfDanger;
     if (p == null) return '—';
     return '${p.toStringAsFixed(0)}%';
   }
-
-  /// Margin below danger level as safe string.
   String get displayBelowDanger {
-    if (belowDanger != null) {
-      return '${belowDanger!.toStringAsFixed(2)} m';
-    }
+    if (belowDanger != null) return '${belowDanger!.toStringAsFixed(2)} m';
     if (currentLevel != null && dangerLevel != null) {
-      final bd = dangerLevel! - currentLevel!;
-      return '${bd.toStringAsFixed(2)} m';
+      return '${(dangerLevel! - currentLevel!).toStringAsFixed(2)} m';
     }
     return '—';
   }
+
+  // ── Serialization ────────────────────────────────────────────────────────
+  Map<String, dynamic> toJson() => {
+    'river':        river,
+    'site':         site,
+    'district':     district,
+    'hfl':          hfl,
+    'dangerLevel':  dangerLevel,
+    'warningLevel': warningLevel,
+    'prevLevel':    prevLevel,
+    'currentLevel': currentLevel,
+    'diff24h':      diff24h,
+    'belowDanger':  belowDanger,
+    'trend':        trend,
+    'source':       source,
+    'fetchedAt':    fetchedAt.toIso8601String(),
+  };
+
+  factory WrdStation.fromJson(Map<String, dynamic> j) => WrdStation(
+    river:        j['river']        as String? ?? '',
+    site:         j['site']         as String? ?? '',
+    district:     j['district']     as String? ?? '',
+    hfl:          (j['hfl']         as num?)?.toDouble(),
+    dangerLevel:  (j['dangerLevel'] as num?)?.toDouble(),
+    warningLevel: (j['warningLevel']as num?)?.toDouble(),
+    prevLevel:    (j['prevLevel']   as num?)?.toDouble(),
+    currentLevel: (j['currentLevel']as num?)?.toDouble(),
+    diff24h:      (j['diff24h']     as num?)?.toDouble(),
+    belowDanger:  (j['belowDanger'] as num?)?.toDouble(),
+    trend:        j['trend']        as String?,
+    source:       j['source']       as String? ?? 'WRD_BIHAR_DISK',
+    fetchedAt:    DateTime.tryParse(j['fetchedAt'] as String? ?? '') ?? DateTime.now(),
+  );
 
   @override
   String toString() =>
@@ -131,113 +140,165 @@ class WrdStation {
       'risk=$riskLabel | live=$hasLiveData)';
 }
 
-// ── WRD ⇒ IndiaCity alias map ─────────────────────────────────────────────────────────────
+// ── WRD site name ⇒ city alias map ───────────────────────────────────────────
 const Map<String, String> _kAliasMap = {
-  // Adhwara
-  'ekmighat':                    'Ekmighat',
-  'kamtaul':                     'Kamtaul',
-  'sonbarsa':                    'Sonbarsa',
-  // Bagmati
-  'benibad':                     'Benibad',
-  'dheng bridge':                'Dheng Bridge',
-  'hayaghat':                    'Hayaghat',
-  // Burhi Gandak
-  'khagaria':                    'Khagaria',
-  'rosera':                      'Rosera',
-  'samastipur':                  'Samastipur',
-  'sikandarpur (muzzafarpur)':   'Sikandarpur',
-  'sikandarpur':                 'Sikandarpur',
-  // Gandak
-  'chatia':                      'Chatia',
-  'dumariaghat':                 'Dumariaghat',
-  'hajipur':                     'Hajipur',
-  'rewaghat':                    'Rewaghat',
-  // Ganga
-  'bhagalpur':                   'Bhagalpur',
-  'buxar':                       'Buxar',
-  'dighaghat':                   'Dighaghat',
-  'gandhighat':                  'Gandhighat',
-  'hathidah':                    'Hathidah',
-  'kahalgaon':                   'Kahalgaon',
-  'munger':                      'Munger',
-  // Ghaghra
-  'darauli':                     'Darauli',
-  'gangpur siswan':              'Gangpur Siswan',
-  // Kamalabalan
-  'jhanjharpur':                 'Jhanjharpur',
-  // Kamla
-  'jainagar':                    'Jainagar',
-  // Kosi
-  'baltara':                     'Baltara',
-  'basua':                       'Basua',
-  'birpur':                      'Birpur',
-  'kursela':                     'Kursela',
-  // Mahananda
-  'dhengraghat':                 'Dhengraghat',
-  'taibpur':                     'Taibpur',
-  // Punpun
-  'sripalpur':                   'Sripalpur',
+  'ekmighat':                  'Ekmighat',
+  'kamtaul':                   'Kamtaul',
+  'sonbarsa':                  'Sonbarsa',
+  'benibad':                   'Benibad',
+  'dheng bridge':              'Dheng Bridge',
+  'hayaghat':                  'Hayaghat',
+  'khagaria':                  'Khagaria',
+  'rosera':                    'Rosera',
+  'samastipur':                'Samastipur',
+  'sikandarpur (muzzafarpur)': 'Sikandarpur',
+  'sikandarpur':               'Sikandarpur',
+  'chatia':                    'Chatia',
+  'dumariaghat':               'Dumariaghat',
+  'hajipur':                   'Hajipur',
+  'rewaghat':                  'Rewaghat',
+  'bhagalpur':                 'Bhagalpur',
+  'buxar':                     'Buxar',
+  'dighaghat':                 'Dighaghat',
+  'gandhighat':                'Gandhighat',
+  'hathidah':                  'Hathidah',
+  'kahalgaon':                 'Kahalgaon',
+  'munger':                    'Munger',
+  'darauli':                   'Darauli',
+  'gangpur siswan':            'Gangpur Siswan',
+  'jhanjharpur':               'Jhanjharpur',
+  'jainagar':                  'Jainagar',
+  'baltara':                   'Baltara',
+  'basua':                     'Basua',
+  'kursela':                   'Kursela',
+  'dhengraghat':               'Dhengraghat',
+  'taibpur':                   'Taibpur',
+  'sripalpur':                 'Sripalpur',
 };
 
-// ── Service ────────────────────────────────────────────────────────────────────────
+// ── Scrape URLs (tried in order) ─────────────────────────────────────────────
+const _kDirectUrls = [
+  'https://irrigation.befiqr.in/state/table/rivers',
+  'http://irrigation.befiqr.in/state/table/rivers',
+];
+
+String _proxyUrl(String target) =>
+    'https://api.allorigins.win/get?url=${Uri.encodeComponent(target)}';
+
+// Full Android browser UA — portal rejects bare Dart http-client UA
+const _kHeaders = {
+  'User-Agent':
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/124.0.0.0 Mobile Safari/537.36',
+  'Accept':
+      'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-IN,en;q=0.9,hi;q=0.8',
+  'Referer':         'https://irrigation.befiqr.in/',
+  'Cache-Control':   'no-cache',
+};
+
+// ── Service ───────────────────────────────────────────────────────────────────
 class WrdBiharService {
   WrdBiharService._();
   static final WrdBiharService instance = WrdBiharService._();
 
-  static const _primaryUrl  = 'https://irrigation.befiqr.in/state/table/rivers';
-  static const _fallbackUrl =
-      'https://beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx';
-  static const _cacheTtl    = Duration(minutes: 10);
-  static const _source      = 'WRD_BIHAR';
+  static const _cacheTtl      = Duration(minutes: 15);
+  static const _source        = 'WRD_BIHAR_LIVE';
+  static const _directTimeout = Duration(seconds: 25);
+  static const _proxyTimeout  = Duration(seconds: 40);
+  static const _persistKey    = 'wrd_bihar_stations_v5';
 
   List<WrdStation>?        _cache;
   DateTime?                _cacheTime;
   Map<String, WrdStation>? _stationByCity;
 
-  // ── Public API ────────────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
+    // 1. Serve hot in-memory cache if still fresh
     if (!forceRefresh &&
         _cache != null &&
         _cacheTime != null &&
         DateTime.now().difference(_cacheTime!) < _cacheTtl) {
+      _log('cache hit — ${_cache!.length} stations (in-memory)');
       return _cache!;
     }
+
+    // 2. Load disk cache on cold start (no in-memory data yet)
+    if (_cache == null) {
+      final disk = await _loadFromDisk();
+      if (disk.isNotEmpty) {
+        _cache     = disk;
+        _cacheTime = null; // mark as stale so we still try live fetch
+        _buildCityIndex(disk);
+        _log('cold-start: loaded ${disk.length} stations from disk');
+      }
+    }
+
+    // 3. Try live direct scrape
+    for (final url in _kDirectUrls) {
+      try {
+        final res = await http
+            .get(Uri.parse(url), headers: _kHeaders)
+            .timeout(_directTimeout);
+        if (res.statusCode == 200) {
+          final stations = _parseHtmlTable(res.body);
+          if (stations.isNotEmpty) {
+            await _setCache(stations);
+            _log('direct-scrape ✓ ${stations.length} stations — persisted to disk');
+            return stations;
+          }
+          _log('direct-scrape: HTTP 200 but 0 stations from $url');
+        } else {
+          _log('direct-scrape: HTTP ${res.statusCode} from $url');
+        }
+      } catch (e) {
+        _log('direct-scrape error ($url): $e');
+      }
+    }
+
+    // 4. allOrigins proxy fallback
+    const primaryUrl = 'https://irrigation.befiqr.in/state/table/rivers';
     try {
-      final stations = await _fetchFromPrimary();
-      if (stations.isNotEmpty) {
-        _cache     = stations;
-        _cacheTime = DateTime.now();
-        _buildCityIndex(stations);
-        if (kDebugMode) debugPrint('[WrdBihar] ✓ ${stations.length} stations (primary)');
-        return stations;
+      final res = await http
+          .get(Uri.parse(_proxyUrl(primaryUrl)))
+          .timeout(_proxyTimeout);
+      if (res.statusCode == 200) {
+        final json = jsonDecode(res.body) as Map?;
+        final html = json?['contents'] as String? ?? '';
+        if (html.isNotEmpty) {
+          final stations = _parseHtmlTable(html);
+          if (stations.isNotEmpty) {
+            await _setCache(stations);
+            _log('proxy-scrape ✓ ${stations.length} stations — persisted to disk');
+            return stations;
+          }
+          _log('proxy-scrape: 0 stations parsed from proxy HTML');
+        }
+      } else {
+        _log('proxy-scrape: HTTP ${res.statusCode}');
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('[WrdBihar] primary failed: $e');
+      _log('proxy-scrape error: $e');
     }
-    try {
-      final stations = await _fetchFromFallback();
-      if (stations.isNotEmpty) {
-        _cache     = stations;
-        _cacheTime = DateTime.now();
-        _buildCityIndex(stations);
-        if (kDebugMode) debugPrint('[WrdBihar] ✓ ${stations.length} stations (fallback)');
-        return stations;
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[WrdBihar] fallback failed: $e');
-    }
-    return _cache ?? [];
+
+    // 5. All live sources failed — return disk/memory cache (offline mode)
+    final offline = _cache ?? [];
+    _log('offline mode — returning ${offline.length} stations from disk cache');
+    return offline;
   }
 
   Future<WrdStation?> fetchBestMatch(String city, {String? river}) async {
     await fetch();
-    final lc = city.toLowerCase().trim();
+    final lc      = city.toLowerCase().trim();
     final byAlias = _stationByCity?[lc];
     if (byAlias != null) return byAlias;
-    final all = _cache ?? [];
-    final candidates = all.where((s) =>
-        s.site.toLowerCase().contains(lc) ||
-        s.district.toLowerCase().contains(lc)).toList();
+    final all        = _cache ?? [];
+    final candidates = all
+        .where((s) =>
+            s.site.toLowerCase().contains(lc) ||
+            s.district.toLowerCase().contains(lc))
+        .toList();
     if (candidates.isEmpty) return null;
     if (river != null) {
       final rv      = river.toLowerCase();
@@ -266,15 +327,59 @@ class WrdBiharService {
       list.sort((a, b) {
         if (a.hasLiveData && !b.hasLiveData) return -1;
         if (!a.hasLiveData && b.hasLiveData) return 1;
-        final al = a.currentLevel ?? 0;
-        final bl = b.currentLevel ?? 0;
-        return bl.compareTo(al);
+        return (b.currentLevel ?? 0).compareTo(a.currentLevel ?? 0);
       });
     }
     return map;
   }
 
-  // ── Internal ─────────────────────────────────────────────────────────────────────
+  // ── Persistence ───────────────────────────────────────────────────────────
+
+  Future<void> _saveToDisk(List<WrdStation> stations) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = jsonEncode(stations.map((s) => s.toJson()).toList());
+      await prefs.setString(_persistKey, encoded);
+      await prefs.setString('${_persistKey}_ts', DateTime.now().toIso8601String());
+      _log('disk: saved ${stations.length} stations');
+    } catch (e) {
+      _log('disk save error: $e');
+    }
+  }
+
+  Future<List<WrdStation>> _loadFromDisk() async {
+    try {
+      final prefs   = await SharedPreferences.getInstance();
+      final raw     = prefs.getString(_persistKey);
+      final tsRaw   = prefs.getString('${_persistKey}_ts');
+      if (raw == null || raw.isEmpty) return [];
+
+      final ts = tsRaw != null ? DateTime.tryParse(tsRaw) : null;
+      if (ts != null) {
+        _log('disk: last saved ${DateTime.now().difference(ts).inMinutes} min ago');
+      }
+
+      final list = (jsonDecode(raw) as List)
+          .whereType<Map<String, dynamic>>()
+          .map(WrdStation.fromJson)
+          .toList();
+      _log('disk: loaded ${list.length} stations');
+      return list;
+    } catch (e) {
+      _log('disk load error: $e');
+      return [];
+    }
+  }
+
+  // ── Internals ─────────────────────────────────────────────────────────────
+
+  Future<void> _setCache(List<WrdStation> stations) async {
+    _cache     = stations;
+    _cacheTime = DateTime.now();
+    _buildCityIndex(stations);
+    await _saveToDisk(stations);
+  }
+
   void _buildCityIndex(List<WrdStation> stations) {
     final map = <String, WrdStation>{};
     for (final s in stations) {
@@ -282,172 +387,122 @@ class WrdBiharService {
       if (alias != null) map[alias.toLowerCase()] = s;
     }
     _stationByCity = map;
-    if (kDebugMode) {
-      debugPrint('[WrdBihar] city index: ${map.length}/${stations.length} resolved');
-    }
+    _log('city index: ${map.length}/${stations.length} resolved');
   }
 
-  Future<List<WrdStation>> _fetchFromPrimary() async {
-    final res = await http
-        .get(Uri.parse(_primaryUrl))
-        .timeout(const Duration(seconds: 15));
-    if (res.statusCode != 200) {
-      throw Exception('[WrdBihar] primary HTTP ${res.statusCode}');
-    }
-    try {
-      final j = jsonDecode(res.body);
-      if (j is List) return _parseJsonList(j);
-      if (j is Map && j['data'] is List) return _parseJsonList(j['data'] as List);
-    } catch (_) {}
-    return _parseHtmlTable(res.body);
-  }
-
-  Future<List<WrdStation>> _fetchFromFallback() async {
-    final res = await http
-        .get(Uri.parse(_fallbackUrl))
-        .timeout(const Duration(seconds: 15));
-    if (res.statusCode != 200) {
-      throw Exception('[WrdBihar] fallback HTTP ${res.statusCode}');
-    }
-    return _parseHtmlTable(res.body);
-  }
-
-  List<WrdStation> _parseJsonList(List raw) {
-    final now    = DateTime.now();
-    final result = <WrdStation>[];
-    for (final item in raw.whereType<Map>()) {
-      try {
-        final cur = _dbl(item['currentLevel'] ?? item['current'] ?? item['waterLevel']);
-        final dl  = _dbl(item['danger'] ?? item['dangerLevel'] ?? item['DL']);
-        final bdRaw = _dbl(item['belowDanger'] ?? item['aboveBelow']);
-        // Compute belowDanger from cur & DL if the cell itself was absent/NA
-        final bd = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
-        result.add(WrdStation(
-          river:        _str(item['river']    ?? item['River']),
-          site:         _str(item['site']     ?? item['Site'] ?? item['station'] ?? item['Station']),
-          district:     _str(item['district'] ?? item['District'] ?? item['block'] ?? ''),
-          hfl:          _dbl(item['hfl']      ?? item['HFL']),
-          dangerLevel:  dl,
-          warningLevel: _dbl(item['warning']  ?? item['warningLevel'] ?? item['WL']),
-          prevLevel:    _dbl(item['prevLevel'] ?? item['yesterday']),
-          currentLevel: cur,
-          diff24h:      _dbl(item['diff24h']   ?? item['diff']),
-          belowDanger:  bd,
-          trend:        _str(item['trend'] ?? item['Trend']).isEmpty
-              ? null : _str(item['trend'] ?? item['Trend']),
-          source:    _source,
-          fetchedAt: now,
-        ));
-      } catch (_) {}
-    }
-    return result;
-  }
-
-  // Column layout (BeFIQR):
-  // 0=SL 1=River 2=Site 3=HFL 4=DL 5=Yesterday 6=Current 7=Diff 8=BelowDanger 9=Trend 10=District
+  // ── HTML table parser ─────────────────────────────────────────────────────
+  //
+  // BeFIQR uses TWO header rows:
+  //   Row 0 → (1)(2)(3)...(11)   [column number labels — NOT text]
+  //   Row 1 → River|Site|HFL|DL|Yesterday|Current|Diff|Above/Below|Trend|District
+  //   Rows 2..N → data
+  //
+  // Strategy: scan first 4 rows for the one containing "river".
+  // That is the real text-header row. Data starts on the row AFTER it.
   List<WrdStation> _parseHtmlTable(String html) {
     final now    = DateTime.now();
     final result = <WrdStation>[];
-    final rowRe  = RegExp(r'<tr[^>]*>(.*?)</tr>', dotAll: true, caseSensitive: false);
-    final cellRe = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', dotAll: true, caseSensitive: false);
+    final rowRe  = RegExp(r'<tr[^>]*>(.*?)<\/tr>',  dotAll: true, caseSensitive: false);
+    final cellRe = RegExp(r'<t[dh][^>]*>(.*?)<\/t[dh]>', dotAll: true, caseSensitive: false);
     final tagRe  = RegExp(r'<[^>]+>');
 
-    String clean(String s) =>
-        s.replaceAll(tagRe, '').replaceAll('\u00a0', ' ').trim();
+    String clean(String s) => s
+        .replaceAll(tagRe, '')
+        .replaceAll('\u00a0', ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .trim();
 
     final rows = rowRe.allMatches(html).toList();
-    if (rows.isEmpty) return result;
+    if (rows.isEmpty) {
+      _log('HTML parser: 0 <tr> rows found — page may be JS-rendered or empty');
+      return result;
+    }
 
-    final headerCells = cellRe
-        .allMatches(rows.first.group(1)!)
-        .map((m) => clean(m.group(1)!).toLowerCase())
-        .toList();
-    final isBefiqr = headerCells.any((h) => h.contains('river'));
-    final isBeams  =
-        headerCells.any((h) => h.contains('basin') || h.contains('maintained'));
+    // Find the real text-header row (contains the word "river")
+    int textHeaderIdx = -1;
+    final scanLimit   = rows.length < 5 ? rows.length : 5;
+    for (int i = 0; i < scanLimit; i++) {
+      final cells = cellRe
+          .allMatches(rows[i].group(1)!)
+          .map((m) => clean(m.group(1)!).toLowerCase())
+          .toList();
+      _log('HTML parser row[$i] cells: $cells');
+      if (cells.any((c) => c.contains('river'))) {
+        textHeaderIdx = i;
+        break;
+      }
+    }
 
-    for (final row in rows.skip(1)) {
+    _log('HTML parser: ${rows.length} total rows, text-header at row $textHeaderIdx');
+
+    if (textHeaderIdx < 0) {
+      _log('HTML parser: no text-header row found — cannot determine column layout');
+      return result;
+    }
+
+    // Data rows start after the text-header row
+    for (final row in rows.skip(textHeaderIdx + 1)) {
       final cells = cellRe
           .allMatches(row.group(1)!)
           .map((m) => clean(m.group(1)!))
           .toList();
-      if (cells.length < 6) continue;
+
+      if (cells.length < 10) continue;
+
+      final river = cells[1].trim();
+      final site  = cells[2].replaceAll('*', '').trim();
+
+      if (river.isEmpty || site.isEmpty) continue;
+      if (river.toLowerCase() == 'river' || site.toLowerCase() == 'site') continue;
+      if (river.startsWith('(') || river.toLowerCase().contains('sl.')) continue;
+
       try {
-        if (isBefiqr && !isBeams) {
-          if (cells.length < 10) continue;
-          final river = cells[1];
-          final site  = cells[2].replaceAll('*', '').trim();
-          if (river.isEmpty || site.isEmpty) continue;
+        final cur   = _dblStr(cells[6]);
+        final dl    = _dblStr(cells[4]);
+        final bdRaw = _dblStr(cells[8]);
+        final bd    = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
 
-          final cur   = _dblStr(cells.length > 6 ? cells[6] : '');
-          final dl    = _dblStr(cells.length > 4 ? cells[4] : '');
-          final bdRaw = _dblStr(cells.length > 8 ? cells[8] : '');
-          // Always compute belowDanger if the column was NA but we have cur & DL
-          final bd = bdRaw ?? (cur != null && dl != null ? dl - cur : null);
+        final trendRaw = cells.length > 9 ? cells[9] : '';
+        final trend = trendRaw.contains('↑') || trendRaw.toUpperCase().contains('RISE')  ? '↑'
+                    : trendRaw.contains('↓') || trendRaw.toUpperCase().contains('FALL')  ? '↓'
+                    : trendRaw.contains('→') || trendRaw.toUpperCase().contains('STEAD') ? '→'
+                    : trendRaw.isNotEmpty ? trendRaw
+                    : null;
 
-          result.add(WrdStation(
-            river:        river,
-            site:         site,
-            district:     cells.length > 10 ? _districtOnly(cells[10]) : '',
-            hfl:          _dblStr(cells[3]),
-            dangerLevel:  dl,
-            warningLevel: null,
-            prevLevel:    _dblStr(cells.length > 5 ? cells[5] : ''),
-            currentLevel: cur,
-            diff24h:      _dblStr(cells.length > 7 ? cells[7] : ''),
-            belowDanger:  bd,
-            trend:        cells.length > 9 && cells[9].isNotEmpty
-                ? cells[9] : null,
-            source:    _source,
-            fetchedAt: now,
-          ));
-        } else if (isBeams) {
-          if (cells.length < 15) continue;
-          final river = cells[1];
-          final site  = cells[2];
-          if (river.isEmpty || site.isEmpty) continue;
-          final cur = _dblStr(cells.length > 14 ? cells[14] : '');
-          final dl  = _dblStr(cells[8]);
-          result.add(WrdStation(
-            river:        river,
-            site:         site,
-            district:     cells.length > 12 ? cells[12] : '',
-            hfl:          _dblStr(cells[7]),
-            dangerLevel:  dl,
-            warningLevel: _dblStr(cells[9]),
-            prevLevel:    _dblStr(cells.length > 15 ? cells[15] : ''),
-            currentLevel: cur,
-            diff24h:      null,
-            belowDanger:  (cur != null && dl != null) ? dl - cur : null,
-            trend:        cells.length > 17 && cells[17].isNotEmpty
-                ? cells[17] : null,
-            source:    _source,
-            fetchedAt: now,
-          ));
-        }
-      } catch (_) {}
+        result.add(WrdStation(
+          river:        river,
+          site:         site,
+          district:     cells.length > 10 ? _districtOnly(cells[10]) : '',
+          hfl:          _dblStr(cells[3]),
+          dangerLevel:  dl,
+          warningLevel: null,
+          prevLevel:    _dblStr(cells[5]),
+          currentLevel: cur,
+          diff24h:      _dblStr(cells[7]),
+          belowDanger:  bd,
+          trend:        trend,
+          source:       _source,
+          fetchedAt:    now,
+        ));
+      } catch (e) {
+        _log('HTML parser: skipping row (parse error): $e | cells=$cells');
+      }
     }
-    if (kDebugMode) {
-      debugPrint('[WrdBihar] parsed ${result.length} stations from HTML');
-    }
+
+    _log('HTML parser: parsed ${result.length} stations from ${rows.length} rows');
     return result;
   }
 
-  String  _str(dynamic v) => (v?.toString() ?? '').trim();
-
-  double? _dbl(dynamic v) {
-    if (v == null) return null;
-    final s = v.toString().trim();
-    if (s.isEmpty || s == '-' || s.toUpperCase() == 'NA') return null;
-    return double.tryParse(s);
-  }
-
   double? _dblStr(String s) {
-    // Strip everything except digits, dot, dash, slash
-    final c = s.replaceAll(RegExp(r'[^\d.\/\-]'), '').trim();
-    if (c.isEmpty || c == '-') return null;
+    final c = s.replaceAll(RegExp(r'[^\d.\-]'), '').trim();
+    if (c.isEmpty || c == '-' || c == '.') return null;
     return double.tryParse(c);
   }
 
   String _districtOnly(String s) => s.split('/').first.trim();
+
+  void _log(String msg) {
+    if (kDebugMode) debugPrint('[WrdBihar] $msg');
+  }
 }

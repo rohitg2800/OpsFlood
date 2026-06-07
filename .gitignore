@@ -40,7 +40,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# ── SECURITY: Firebase / Google config files with real API keys ──────────────
+# ── SECURITY: Firebase / Google config files with real API keys ────────────────
 # Download from Firebase Console and place locally. Never commit.
 lib/firebase_options.dart
 google-services.json
@@ -61,3 +61,12 @@ analyze_output.txt
 bihar_live_data.json
 android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 ios/Runner/GeneratedPluginRegistrant.m
+
+# ── SIGNING: Keystore files ────────────────────────────────────────────────────
+# NEVER commit these — losing them = can never update the app on any store
+android/keystore.jks
+android/keystore.properties
+*.jks
+.venv311/
+.python-version
+*.zip

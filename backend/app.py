@@ -70,11 +70,13 @@ if _is_package_context():
     from backend.cwc_scraper import CWCRiverScraper
     from backend.routers.core import router as core_router
     from backend.routers.predict import router as predict_router
-
     from backend.routers.weather import router as weather_router
     from backend.routers.telemetry import router as telemetry_router
     from backend.routers.ingestion import router as ingestion_router
     from backend.routers.live_levels import router as live_levels_router
+    from backend.routers.wrd_bihar import router as wrd_bihar_router
+    from backend.routers.wrd_bihar import start_scheduler as wrd_start_scheduler
+    from backend.routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
 else:
     # When running from within the backend folder: `uvicorn app:app`
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
@@ -94,6 +96,9 @@ else:
     from routers.telemetry import router as telemetry_router
     from routers.ingestion import router as ingestion_router
     from routers.live_levels import router as live_levels_router
+    from routers.wrd_bihar import router as wrd_bihar_router
+    from routers.wrd_bihar import start_scheduler as wrd_start_scheduler
+    from routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
 
 
 warnings.filterwarnings('ignore')
@@ -673,8 +678,6 @@ def normalize_origin_url(value: str) -> str:
 
 def configured_cors_origins() -> list[str]:
     defaults = [
-        # "https://floodredfl.onrender.com",
-        # "https://kolhapurfloodred.onrender.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:4173",
@@ -1263,8 +1266,6 @@ def discover_model_bundles(artifacts: list[Dict[str, Any]]) -> Dict[str, Dict[st
 
 # ============= 1. PYDANTIC SCHEMA =============
 class FloodPredictionInput(BaseModel):
-    # Defaults tuned to represent LOW/MODERATE input conditions
-    # (prevents UI default from immediately biasing toward SEVERE).
     Peak_Flood_Level_m: float = 8.5
     Event_Duration_days: float = 1
     Time_to_Peak_days: float = 1
@@ -1283,13 +1284,12 @@ class FloodPredictionInput(BaseModel):
 # ============= 2. FASTAPI SETUP =============
 app = FastAPI(title="🌧️ INDIA_FLOODS ML API", version="8.5")
 
-# 🛡️ SECURE PRODUCTION CORS
 origins = configured_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,    
-    allow_credentials=False,   
+    allow_origins=origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1304,17 +1304,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ============= REGISTER ROUTERS =============
-# Include all modular routers into the main FastAPI app
 app.include_router(core_router)
 app.include_router(predict_router)
 app.include_router(weather_router)
 app.include_router(telemetry_router)
 app.include_router(ingestion_router)
 app.include_router(live_levels_router)
+app.include_router(wrd_bihar_router)  # WRD Bihar live station data
 
 
 # ============= 3. DATA ACQUISITION (CWC SCRAPER) =============
-# Import CWCRiverScraper from dedicated module to avoid duplication
 cwc_scraper = CWCRiverScraper()
 
 
@@ -1491,11 +1490,15 @@ data_ingestion_scheduler = ScheduledIngestionService(
 async def startup_ingestion_scheduler():
     data_pipeline.update_targets(get_data_ingestion_targets())
     data_ingestion_scheduler.start()
+    # ── WRD Bihar auto-refresh scheduler ──────────────────────────────────
+    wrd_start_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown_ingestion_scheduler():
     data_ingestion_scheduler.stop()
+    # ── WRD Bihar auto-refresh scheduler ──────────────────────────────────
+    wrd_stop_scheduler()
 
 
 @app.get("/weather/status")

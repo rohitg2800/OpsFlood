@@ -18,7 +18,6 @@ class RealTimeService extends ChangeNotifier {
     };
   }
 
-  // ── ChangeNotifier lifecycle ──────────────────────────────────────────
   @override
   void dispose() {
     _disposed = true;
@@ -30,7 +29,7 @@ class RealTimeService extends ChangeNotifier {
   // ── Status passthrough ────────────────────────────────────────────────
   bool      get isLoading           => _fetchEngine.isLoading;
   bool      get isOnline            => _fetchEngine.isOnline;
-  bool      get isUsingFallback     => _fetchEngine.isUsingFallback;
+  bool      get isUsingFallback     => !_fetchEngine.isOnline && _fetchEngine.liveFloodData.isNotEmpty;
   bool      get isWakingUp          => _fetchEngine.isWakingUp;
   bool      get isUsingCache        => _fetchEngine.isUsingCache;
   DateTime? get lastFetchTime       => _fetchEngine.lastFetchTime;
@@ -63,12 +62,12 @@ class RealTimeService extends ChangeNotifier {
   FloodData? dataForCity(String city) =>
       _fetchEngine.floodDataForCity(city);
 
-  List<dynamic> imdAlertsForState(String state)       => _fetchEngine.imdAlertsForState(state);
-  List<dynamic> ndmaAdvisoriesForState(String state)  => _fetchEngine.ndmaAdvisoriesForState(state);
+  List<dynamic> imdAlertsForState(String state)         => _fetchEngine.imdAlertsForState(state);
+  List<dynamic> ndmaAdvisoriesForState(String state)    => _fetchEngine.ndmaAdvisoriesForState(state);
   List<dynamic> emergencyContactsForState(String state) => _fetchEngine.emergencyContactsForState(state);
 
-  // ── Actions ───────────────────────────────────────────────────────────
-  Future<void> refreshData()   async => _fetchEngine.refreshData();
-  Future<void> startPolling()  async => _fetchEngine.startPolling();
-  void         stopPolling()         => _fetchEngine.stopPolling();
+  // ── Actions ────────────────────────────────────────────────────────────
+  Future<void> refreshData()  async => _fetchEngine.refreshData();
+  Future<void> startPolling() async => _fetchEngine.startPolling();
+  void         stopPolling()        => _fetchEngine.stopPolling();
 }

@@ -32,7 +32,6 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   final RealTimeService _service = RealTimeService();
-  String? _selectedCity;
 
   late AnimationController _pulseCtrl;
   late AnimationController _arcCtrl;
@@ -180,6 +179,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   Widget build(BuildContext context) {
     final data = _sorted;
+    final t    = RiverColors.of(context);   // ← single theme handle
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(

@@ -31,7 +31,33 @@ class AppPalette {
   static const abyssStroke = Color(0xFF5A4000);  // golden border edge
   static const abyssGlass  = Color(0xCC251800);  // frosted warm bronze overlay
 
-  // ── Keep old names as aliases so existing code compiles ──────────────────
+  // ── Sunset palette ────────────────────────────────────────────────────────
+  static const sunset0      = Color(0xFF12000A);  // deepest — dark magenta-black
+  static const sunset1      = Color(0xFF1F0510);  // scaffold
+  static const sunset2      = Color(0xFF2E0C1A);  // card
+  static const sunset3      = Color(0xFF3D1525);  // elevated card
+  static const sunset4      = Color(0xFF4F2030);  // chip
+  static const sunsetStroke = Color(0xFF8B3A50);  // border
+  static const sunsetAccent = Color(0xFFFF6B35);  // vivid orange-red CTA
+  static const sunsetGold   = Color(0xFFFFAA00);  // warm amber highlight
+
+  // ── Ocean palette ─────────────────────────────────────────────────────────
+  static const ocean0      = Color(0xFF00060F);  // deepest navy-black
+  static const ocean1      = Color(0xFF000D1A);  // scaffold
+  static const ocean2      = Color(0xFF001628);  // card
+  static const ocean3      = Color(0xFF002038);  // elevated card
+  static const ocean4      = Color(0xFF002B4A);  // chip
+  static const oceanStroke = Color(0xFF00456E);  // border
+  static const oceanAccent = Color(0xFF00C6FF);  // same cyan — LIVE status
+  static const oceanGlow   = Color(0x4400C6FF);
+
+  // ── Light palette ────────────────────────────────────────────────────────
+  static const light0      = Color(0xFFFFF8E7);  // cream scaffold
+  static const light1      = Color(0xFFFFF3CC);  // card
+  static const light2      = Color(0xFFFFE999);  // chip
+  static const lightStroke = Color(0xFFE8C84A);
+
+  // ── Keep old names as aliases ────────────────────────────────────────────
   static const navy0      = abyss0;
   static const navy1      = abyss1;
   static const navy2      = abyss2;
@@ -61,7 +87,7 @@ class AppPalette {
   static const amberLight = Color(0xFFFFD966);
   static const amberDim   = Color(0xFF7A5200);
 
-  // ── Status palette ────────────────────────────────────────────────────────
+  // ── Status ────────────────────────────────────────────────────────────────
   static const safe        = Color(0xFF10E88A);
   static const warning     = Color(0xFFFFA520);
   static const danger      = Color(0xFFFF5500);
@@ -76,7 +102,7 @@ class AppPalette {
   static const textGrey  = Color(0xFF9A8060);  // warm tan-grey
   static const textDim   = Color(0xFF4A3410);  // dark warm-brown
 
-  // ── Gradient helpers ──────────────────────────────────────────────────────
+  // ── Gradients / decorations ───────────────────────────────────────────────
   static const LinearGradient abyssGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -148,6 +174,10 @@ class AppPalette {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RiverColors ThemeExtension
+// ─────────────────────────────────────────────────────────────────────────────
+
 class RiverColors extends ThemeExtension<RiverColors> {
   const RiverColors({
     required this.riverNormal,
@@ -169,6 +199,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     required this.navBg,
     required this.navActive,
     required this.navInactive,
+    required this.scaffoldBg,   // ← NEW: actual scaffold color for this theme
   });
 
   final Color riverNormal;
@@ -190,6 +221,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
   final Color navBg;
   final Color navActive;
   final Color navInactive;
+  final Color scaffoldBg;
 
   static RiverColors of(BuildContext context) =>
       Theme.of(context).extension<RiverColors>() ?? _golden;
@@ -214,8 +246,10 @@ class RiverColors extends ThemeExtension<RiverColors> {
     navBg:          AppPalette.abyss0,
     navActive:      AppPalette.gold,
     navInactive:    AppPalette.textDim,
+    scaffoldBg:     AppPalette.abyss1,
   );
 
+  // ── LIGHT (warm cream-gold) ───────────────────────────────────────────────
   static const RiverColors _light = RiverColors(
     riverNormal:    Color(0xFF00897B),
     riverWarning:   AppPalette.warning,
@@ -238,6 +272,64 @@ class RiverColors extends ThemeExtension<RiverColors> {
     navInactive:    Color(0xFF9A8060),
   );
 
+  // ── SUNSET (deep rose-orange) ─────────────────────────────────────────────
+  static const RiverColors _sunset = RiverColors(
+    riverNormal:    AppPalette.safe,
+    riverWarning:   Color(0xFFFFAA00),
+    riverDanger:    AppPalette.danger,
+    riverCritical:  AppPalette.critical,
+    riverSurface:   AppPalette.sunset2,
+    riverGlow:      Color(0x55FF6B35),
+    cardBg:         AppPalette.sunset2,
+    cardBgElevated: AppPalette.sunset3,
+    chipBg:         AppPalette.sunset4,
+    stroke:         AppPalette.sunsetStroke,
+    textPrimary:    Color(0xFFFFF0E8),
+    textSecondary:  Color(0xFFBB8878),
+    sparklineColor: AppPalette.sunsetAccent,
+    accent:         AppPalette.sunsetAccent,
+    accentGlow:     Color(0x55FF6B35),
+    metricColor:    AppPalette.sunsetGold,
+    navBg:          AppPalette.sunset0,
+    navActive:      AppPalette.sunsetAccent,
+    navInactive:    Color(0xFF6B3040),
+    scaffoldBg:     AppPalette.sunset1,
+  );
+
+  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────
+  static const RiverColors _ocean = RiverColors(
+    riverNormal:    AppPalette.safe,
+    riverWarning:   AppPalette.warning,
+    riverDanger:    AppPalette.danger,
+    riverCritical:  AppPalette.critical,
+    riverSurface:   AppPalette.ocean2,
+    riverGlow:      AppPalette.oceanGlow,
+    cardBg:         AppPalette.ocean2,
+    cardBgElevated: AppPalette.ocean3,
+    chipBg:         AppPalette.ocean4,
+    stroke:         AppPalette.oceanStroke,
+    textPrimary:    Color(0xFFE0F7FF),
+    textSecondary:  Color(0xFF5A9AB5),
+    sparklineColor: AppPalette.cyan,
+    accent:         AppPalette.cyan,
+    accentGlow:     AppPalette.cyanGlow,
+    metricColor:    AppPalette.cyan,
+    navBg:          AppPalette.ocean0,
+    navActive:      AppPalette.cyan,
+    navInactive:    Color(0xFF1A4A60),
+    scaffoldBg:     AppPalette.ocean1,
+  );
+
+  /// Returns the [RiverColors] extension for the given [AppThemeMode] name.
+  static RiverColors forMode(String modeName) {
+    switch (modeName) {
+      case 'light':  return _light;
+      case 'sunset': return _sunset;
+      case 'ocean':  return _ocean;
+      default:       return _dark;   // dark + system
+    }
+  }
+
   @override
   RiverColors copyWith({
     Color? riverNormal, Color? riverWarning, Color? riverDanger,
@@ -245,29 +337,29 @@ class RiverColors extends ThemeExtension<RiverColors> {
     Color? cardBg, Color? cardBgElevated, Color? chipBg, Color? stroke,
     Color? textPrimary, Color? textSecondary, Color? sparklineColor,
     Color? accent, Color? accentGlow, Color? metricColor,
-    Color? navBg, Color? navActive, Color? navInactive,
-  }) =>
-      RiverColors(
-        riverNormal:    riverNormal    ?? this.riverNormal,
-        riverWarning:   riverWarning   ?? this.riverWarning,
-        riverDanger:    riverDanger    ?? this.riverDanger,
-        riverCritical:  riverCritical  ?? this.riverCritical,
-        riverSurface:   riverSurface   ?? this.riverSurface,
-        riverGlow:      riverGlow      ?? this.riverGlow,
-        cardBg:         cardBg         ?? this.cardBg,
-        cardBgElevated: cardBgElevated ?? this.cardBgElevated,
-        chipBg:         chipBg         ?? this.chipBg,
-        stroke:         stroke         ?? this.stroke,
-        textPrimary:    textPrimary    ?? this.textPrimary,
-        textSecondary:  textSecondary  ?? this.textSecondary,
-        sparklineColor: sparklineColor ?? this.sparklineColor,
-        accent:         accent         ?? this.accent,
-        accentGlow:     accentGlow     ?? this.accentGlow,
-        metricColor:    metricColor    ?? this.metricColor,
-        navBg:          navBg          ?? this.navBg,
-        navActive:      navActive      ?? this.navActive,
-        navInactive:    navInactive    ?? this.navInactive,
-      );
+    Color? navBg, Color? navActive, Color? navInactive, Color? scaffoldBg,
+  }) => RiverColors(
+    riverNormal:    riverNormal    ?? this.riverNormal,
+    riverWarning:   riverWarning   ?? this.riverWarning,
+    riverDanger:    riverDanger    ?? this.riverDanger,
+    riverCritical:  riverCritical  ?? this.riverCritical,
+    riverSurface:   riverSurface   ?? this.riverSurface,
+    riverGlow:      riverGlow      ?? this.riverGlow,
+    cardBg:         cardBg         ?? this.cardBg,
+    cardBgElevated: cardBgElevated ?? this.cardBgElevated,
+    chipBg:         chipBg         ?? this.chipBg,
+    stroke:         stroke         ?? this.stroke,
+    textPrimary:    textPrimary    ?? this.textPrimary,
+    textSecondary:  textSecondary  ?? this.textSecondary,
+    sparklineColor: sparklineColor ?? this.sparklineColor,
+    accent:         accent         ?? this.accent,
+    accentGlow:     accentGlow     ?? this.accentGlow,
+    metricColor:    metricColor    ?? this.metricColor,
+    navBg:          navBg          ?? this.navBg,
+    navActive:      navActive      ?? this.navActive,
+    navInactive:    navInactive    ?? this.navInactive,
+    scaffoldBg:     scaffoldBg     ?? this.scaffoldBg,
+  );
 
   @override
   RiverColors lerp(RiverColors? other, double t) {
@@ -292,6 +384,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
       navBg:          Color.lerp(navBg,          other.navBg,          t)!,
       navActive:      Color.lerp(navActive,      other.navActive,      t)!,
       navInactive:    Color.lerp(navInactive,    other.navInactive,    t)!,
+      scaffoldBg:     Color.lerp(scaffoldBg,     other.scaffoldBg,     t)!,
     );
   }
 
@@ -306,9 +399,14 @@ class RiverColors extends ThemeExtension<RiverColors> {
   static ThemeData _buildTheme({
     required Brightness brightness,
     required RiverColors ext,
-    required Color scaffoldBg,
+    required Brightness brightness,
   }) {
-    final isDark = brightness == Brightness.dark;
+    final isDark   = brightness == Brightness.dark;
+    final scaffold = ext.scaffoldBg;
+    final accent   = ext.accent;
+    final card     = ext.cardBg;
+    final stroke   = ext.stroke;
+
     final cs = ColorScheme.fromSeed(
       seedColor: AppPalette.gold,
       brightness: brightness,
@@ -324,37 +422,37 @@ class RiverColors extends ThemeExtension<RiverColors> {
     return ThemeData(
       useMaterial3:            true,
       colorScheme:             cs,
-      scaffoldBackgroundColor: scaffoldBg,
+      scaffoldBackgroundColor: scaffold,
       extensions:              <ThemeExtension<dynamic>>[ext],
       fontFamily:              'Roboto',
       textTheme: TextTheme(
-        displayLarge: const TextStyle(
+        displayLarge: TextStyle(
           fontWeight: FontWeight.w900, letterSpacing: -1.5,
-          color: AppPalette.textWhite,
+          color: ext.textPrimary,
         ),
-        displaySmall: const TextStyle(
+        displaySmall: TextStyle(
           fontWeight: FontWeight.w800, letterSpacing: -1.0,
-          color: AppPalette.textWhite,
+          color: ext.textPrimary,
         ),
-        titleLarge: const TextStyle(
+        titleLarge: TextStyle(
           fontWeight: FontWeight.w700, letterSpacing: -0.5,
-          color: AppPalette.textWhite,
+          color: ext.textPrimary,
         ),
-        titleMedium: const TextStyle(
+        titleMedium: TextStyle(
           fontWeight: FontWeight.w600, letterSpacing: -0.2,
-          color: AppPalette.textWhite,
+          color: ext.textPrimary,
         ),
         bodyMedium: TextStyle(
           fontWeight: FontWeight.w400,
-          color: isDark ? AppPalette.textGrey : AppPalette.textWhite,
+          color: ext.textSecondary,
         ),
-        labelSmall: const TextStyle(
+        labelSmall: TextStyle(
           fontWeight: FontWeight.w600, letterSpacing: 1.0,
-          color: AppPalette.textGrey,
+          color: ext.textSecondary,
         ),
       ),
       cardTheme: CardThemeData(
-        color:     isDark ? AppPalette.abyss2 : Colors.white,
+        color:     card,
         elevation: 0,
         shape:     RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(22),
@@ -370,8 +468,8 @@ class RiverColors extends ThemeExtension<RiverColors> {
         elevation:        0,
         centerTitle:      false,
         surfaceTintColor: Colors.transparent,
-        titleTextStyle: const TextStyle(
-          color: AppPalette.textWhite, fontSize: 20,
+        titleTextStyle: TextStyle(
+          color: ext.textPrimary, fontSize: 20,
           fontWeight: FontWeight.w800, letterSpacing: -0.5,
         ),
         iconTheme: const IconThemeData(color: AppPalette.gold),
@@ -384,7 +482,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
           if (states.contains(WidgetState.selected)) {
             return const IconThemeData(color: AppPalette.gold, size: 24);
           }
-          return const IconThemeData(color: AppPalette.textDim, size: 22);
+          return IconThemeData(color: ext.navInactive, size: 22);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
@@ -392,8 +490,8 @@ class RiverColors extends ThemeExtension<RiverColors> {
               color: AppPalette.gold, fontSize: 10,
               fontWeight: FontWeight.w700, letterSpacing: 0.3);
           }
-          return const TextStyle(
-            color: AppPalette.textDim, fontSize: 10, letterSpacing: 0.2);
+          return TextStyle(
+            color: ext.navInactive, fontSize: 10, letterSpacing: 0.2);
         }),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -423,31 +521,32 @@ class RiverColors extends ThemeExtension<RiverColors> {
           color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
           width: 1,
         ),
+        side: BorderSide(color: stroke, width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: AppPalette.gold,
         linearTrackColor: AppPalette.abyss3,
       ),
-      dividerTheme: const DividerThemeData(
-        color: AppPalette.abyssStroke, space: 1, thickness: 1,
+      dividerTheme: DividerThemeData(
+        color: stroke, space: 1, thickness: 1,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled:    true,
-        fillColor: isDark ? AppPalette.abyss2 : Colors.white,
+        fillColor: card,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.abyssStroke),
+          borderSide: BorderSide(color: stroke),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.abyssStroke),
+          borderSide: BorderSide(color: stroke),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppPalette.gold, width: 2),
         ),
-        hintStyle: const TextStyle(color: AppPalette.textDim),
+        hintStyle: TextStyle(color: ext.textSecondary),
       ),
     );
   }

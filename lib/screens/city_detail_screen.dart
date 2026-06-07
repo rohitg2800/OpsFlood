@@ -1,15 +1,11 @@
 // lib/screens/city_detail_screen.dart
-//
-// Full city detail screen — opened by tapping any city on the India Map
-// or in the Stations list.  Shows:
-//  - Real gauge level + CWC source badge
-//  - 24-hr trend sparkline (from RealTimeService._historyByCity)
-//  - IMD colour alert badge + rainfall
-//  - NDMA advisories for the state
-//  - Emergency contacts for the state
-//  - "Run Prediction" CTA → PredictScreen with city pre-filled
+// EQUINOX-BH — CityDetailScreen v5  (full RiverColors token migration)
+library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,149 +13,294 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../providers/flood_providers.dart';
-import '../services/ndma_service.dart';
+import '../theme/river_theme.dart';
+import '../widgets/sparkline_chart.dart';
 
-const _kBg     = Color(0xFF060D14);
-const _kCard   = Color(0xFF0D1B26);
-const _kCyan   = Color(0xFF00C2DE);
-const _kGreen  = Color(0xFF22C55E);
-const _kYellow = Color(0xFFF59E0B);
-const _kOrange = Color(0xFFEA580C);
-const _kRed    = Color(0xFFEF4444);
-const _kText   = Color(0xFFE2EAF0);
-const _kSub    = Color(0xFF6B8699);
+class CityDetailScreen extends ConsumerStatefulWidget {
+  static const String route = '/city_detail';
 
-Color _riskColor(String r) {
-  switch (r.toUpperCase()) {
-    case 'CRITICAL': return _kRed;
-    case 'HIGH':     return _kOrange;
-    case 'MODERATE': return _kYellow;
-    default:         return _kGreen;
-  }
-}
-
-Color _imdColor(String s) {
-  switch (s.toUpperCase()) {
-    case 'RED':    return _kRed;
-    case 'ORANGE': return _kOrange;
-    case 'YELLOW': return _kYellow;
-    default:       return _kGreen;
-  }
-}
-
-/// Push this screen via:
-///   Navigator.push(context,
-///     MaterialPageRoute(builder: (_) => CityDetailScreen(cityName: 'Patna')));
-class CityDetailScreen extends ConsumerWidget {
   final String cityName;
   const CityDetailScreen({super.key, required this.cityName});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data         = ref.watch(cityDataProvider(cityName));
-    final trend        = ref.watch(cityTrendProvider(cityName)).cast<RiverLevelSnapshot>();
-    final imdAlerts    = ref.watch(stateImdAlertsProvider(data?.state ?? ''));
-    final advisories   = ref.watch(stateNdmaAdvisoriesProvider(data?.state ?? ''));
-    // FIX: cast<EmergencyContact>() to convert List<dynamic> → List<EmergencyContact>
-    final contacts     = ref.watch(stateEmergencyContactsProvider(data?.state ?? '')).cast<EmergencyContact>();
+  ConsumerState<CityDetailScreen> createState() => _CityDetailScreenState();
+}
+
+class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entryCtrl;
+  late final List<Animation<double>>  _sectionFades;
+  late final List<Animation<Offset>>  _sectionSlides;
+
+  bool _contactsExpanded = false;
+  bool _refreshing       = false;
+
+  static const int _sectionCount = 6;
+
+  @override
+  void initState() {
+    super.initState();
+    _entryCtrl = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 900));
+
+    _sectionFades  = [];
+    _sectionSlides = [];
+    for (int i = 0; i < _sectionCount; i++) {
+      final start = i * 0.12;
+      final end   = (start + 0.28).clamp(0.0, 1.0);
+      _sectionFades.add(
+        Tween<double>(begin: 0, end: 1).animate(
+            CurvedAnimation(
+                parent: _entryCtrl,
+                curve: Interval(start, end, curve: Curves.easeOut))),
+      );
+      _sectionSlides.add(
+        Tween<Offset>(
+                begin: const Offset(0, 0.06), end: Offset.zero)
+            .animate(CurvedAnimation(
+                parent: _entryCtrl,
+                curve: Interval(start, end, curve: Curves.easeOutCubic))),
+      );
+    }
+    _entryCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    HapticFeedback.mediumImpact();
+    try {
+      await ref.read(realTimeProvider).refreshData();
+      _entryCtrl
+        ..reset()
+        ..forward();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  void _share(BuildContext context, FloodData data) {
+    final t = RiverColors.of(context);
+    final text =
+        'EQUINOX-BH · ${widget.cityName}\n'
+        'Level: ${data.currentLevel.toStringAsFixed(2)} m · '
+        'Risk: ${data.riskLevel}\n'
+        'W ${data.warningLevel.toStringAsFixed(1)} m  '
+        'D ${data.dangerLevel.toStringAsFixed(1)} m\n'
+        'Updated: ${DateFormat("dd MMM HH:mm").format(data.lastUpdated.toLocal())}';
+    Clipboard.setData(ClipboardData(text: text));
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Copied city summary to clipboard'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: t.cardBg,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _section(int idx, Widget child) => FadeTransition(
+        opacity: _sectionFades[idx],
+        child: SlideTransition(
+          position: _sectionSlides[idx],
+          child: child,
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final t          = RiverColors.of(context);
+    final data       = ref.watch(cityDataProvider(widget.cityName));
+    final trend      = ref.watch(cityTrendProvider(widget.cityName));
+    final imdAlerts  = ref.watch(
+        stateImdAlertsProvider(data?.state ?? ''));
+    final advisories = ref.watch(
+        stateNdmaAdvisoriesProvider(data?.state ?? ''));
+    final contacts   = ref
+        .watch(stateEmergencyContactsProvider(data?.state ?? ''))
+        .cast<EmergencyContact>();
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: t.scaffoldBg,
+      floatingActionButton: data != null
+          ? FloatingActionButton.small(
+              heroTag: 'share_${widget.cityName}',
+              backgroundColor: t.cardBg,
+              foregroundColor: t.accent,
+              tooltip: 'Copy city summary',
+              onPressed: () => _share(context, data),
+              child: const Icon(Icons.share_rounded, size: 17),
+            )
+          : null,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0A1E2C), _kBg],
-          ),
-        ),
+        color: t.scaffoldBg,
         child: SafeArea(
-          child: CustomScrollView(
-            physics: const BouncingScrollPhysics(),
-            slivers: [
-              // ── App bar ──────────────────────────────────────────────────
-              SliverAppBar(
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                pinned: true,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_rounded,
-                      color: _kText, size: 18),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                title: Text(
-                  cityName,
-                  style: const TextStyle(
-                      color: _kText,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18),
-                ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.refresh_rounded,
-                        color: _kSub, size: 20),
-                    onPressed: () =>
-                        ref.read(realTimeProvider).refreshData(),
-                  ),
-                ],
-              ),
+          child: RefreshIndicator(
+            color: t.accent,
+            backgroundColor: t.cardBg,
+            onRefresh: _refresh,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics()),
+              slivers: [
 
-              if (data == null)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.location_off_rounded,
-                            color: _kSub, size: 40),
+                // ── App Bar ────────────────────────────────────────────────
+                SliverAppBar(
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  pinned: true,
+                  leading: IconButton(
+                    icon: Icon(Icons.arrow_back_ios_rounded,
+                        color: t.textPrimary, size: 18),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.cityName,
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                        ),
+                      ),
+                      if (data != null)
+                        Text(
+                          '${data.riverName ?? "River"}  ·  ${data.state}',
+                          style: TextStyle(
+                              color: t.textSecondary,
+                              fontSize: 10),
+                        ),
+                    ],
+                  ),
+                  actions: [
+                    if (_refreshing)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 14),
+                        child: SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: t.accent),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        icon: Icon(Icons.refresh_rounded,
+                            color: t.textSecondary, size: 20),
+                        onPressed: _refresh,
+                      ),
+                  ],
+                ),
+
+                // ── threshold banner ───────────────────────────────────────
+                if (data != null)
+                  SliverToBoxAdapter(
+                    child: _ThresholdBanner(data: data),
+                  ),
+
+                // ── no-data skeleton ───────────────────────────────────────
+                if (data == null)
+                  SliverFillRemaining(
+                    child: _SkeletonView(cityName: widget.cityName),
+                  )
+
+                // ── loaded body ────────────────────────────────────────────
+                else
+                  SliverPadding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 10, 16, 100),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+
+                        _section(0, _GaugeHeroCard(data: data)),
                         const SizedBox(height: 12),
-                        Text('No data for $cityName',
-                            style: const TextStyle(
-                                color: _kSub, fontSize: 14)),
-                      ],
+
+                        if (trend.length >= 2) ...[
+                          _section(
+                            1,
+                            _TrendCard(
+                              trend:        trend,
+                              warningLevel: data.warningLevel,
+                              dangerLevel:  data.dangerLevel,
+                              riskColor:    _riskColor(data.riskLevel),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        if (imdAlerts.isNotEmpty) ...[
+                          _section(
+                            2,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _SectionLabel('🌧  IMD Weather Alerts'),
+                                ...imdAlerts.take(3).map((a) => _ImdAlertTile(alert: a)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        if (advisories.isNotEmpty) ...[
+                          _section(
+                            3,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _SectionLabel('🚨  NDMA Advisories'),
+                                ...advisories.take(2).map((a) => _NdmaAdvisoryTile(adv: a)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        _section(
+                          4,
+                          _CollapsibleContacts(
+                            contacts:  contacts,
+                            state:     data.state,
+                            expanded:  _contactsExpanded,
+                            onToggle:  () => setState(
+                                () => _contactsExpanded = !_contactsExpanded),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        _section(
+                          5,
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: _PredictCta(
+                                    cityName:     widget.cityName,
+                                    currentLevel: data.currentLevel),
+                              ),
+                              const SizedBox(width: 10),
+                              _MapChip(cityName: widget.cityName),
+                            ],
+                          ),
+                        ),
+                      ]),
                     ),
                   ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 40),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      // ── Gauge hero card ─────────────────────────────────
-                      _GaugeHeroCard(data: data),
-                      const SizedBox(height: 14),
-
-                      // ── 24-hr trend ──────────────────────────────────────
-                      if (trend.isNotEmpty) ...[
-                        _TrendCard(trend: trend),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── IMD alerts ───────────────────────────────────────
-                      if (imdAlerts.isNotEmpty) ...[
-                        _SectionLabel('\uD83C\uDF27  IMD Weather Alerts'),
-                        ...imdAlerts.take(3).map((a) => _ImdAlertTile(alert: a)),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── NDMA advisories ──────────────────────────────────
-                      if (advisories.isNotEmpty) ...[
-                        _SectionLabel('\uD83D\uDEA8  NDMA Advisories'),
-                        ...advisories.take(2).map((a) => _NdmaAdvisoryTile(adv: a)),
-                        const SizedBox(height: 14),
-                      ],
-
-                      // ── Emergency contacts ───────────────────────────────
-                      _SectionLabel('\uD83D\uDCDE  Emergency Contacts'),
-                      _EmergencyContactsCard(contacts: contacts, state: data.state),
-                      const SizedBox(height: 20),
-
-                      // ── Predict CTA ──────────────────────────────────────
-                      _PredictCta(cityName: cityName, currentLevel: data.currentLevel),
-                    ]),
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -167,28 +308,182 @@ class CityDetailScreen extends ConsumerWidget {
   }
 }
 
-// ─── Gauge Hero Card ──────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+Color _riskColor(String r) {
+  switch (r.toUpperCase()) {
+    case 'CRITICAL': return AppPalette.critical;
+    case 'HIGH':     return AppPalette.danger;
+    case 'SEVERE':   return AppPalette.danger;
+    case 'MODERATE': return AppPalette.warning;
+    default:         return AppPalette.safe;
+  }
+}
+
+Color _imdColor(String s) {
+  switch (s.toUpperCase()) {
+    case 'RED':    return AppPalette.critical;
+    case 'ORANGE': return AppPalette.danger;
+    case 'YELLOW': return AppPalette.warning;
+    default:       return AppPalette.safe;
+  }
+}
+
+// ── Threshold Banner ──────────────────────────────────────────────────────────
+
+class _ThresholdBanner extends StatelessWidget {
+  final FloodData data;
+  const _ThresholdBanner({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final level  = data.currentLevel;
+    final Color col;
+    final String label;
+    final IconData ico;
+
+    if (level >= data.dangerLevel) {
+      col   = AppPalette.critical;
+      label = '⚠ ABOVE DANGER LEVEL  (+${(level - data.dangerLevel).toStringAsFixed(2)} m)';
+      ico   = Icons.crisis_alert_rounded;
+    } else if (level >= data.warningLevel) {
+      col   = AppPalette.amber;
+      label = '△ ABOVE WARNING LEVEL  (+${(level - data.warningLevel).toStringAsFixed(2)} m)';
+      ico   = Icons.warning_rounded;
+    } else {
+      col   = AppPalette.safe;
+      label = '✓ Below warning level  (${(data.warningLevel - level).toStringAsFixed(2)} m buffer)';
+      ico   = Icons.check_circle_rounded;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      color: col.withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          Icon(ico, color: col, size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                  color: col, fontSize: 11,
+                  fontWeight: FontWeight.w700, letterSpacing: 0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Skeleton loading view ─────────────────────────────────────────────────────
+
+class _SkeletonView extends StatefulWidget {
+  final String cityName;
+  const _SkeletonView({required this.cityName});
+  @override
+  State<_SkeletonView> createState() => _SkeletonViewState();
+}
+
+class _SkeletonViewState extends State<_SkeletonView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, __) {
+        final alpha = 0.04 + 0.06 * _pulse.value;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _bone(height: 100, alpha: alpha, t: t),
+              const SizedBox(height: 12),
+              _bone(height: 80, alpha: alpha, t: t),
+              const SizedBox(height: 12),
+              _bone(height: 60, alpha: alpha, t: t),
+              const SizedBox(height: 24),
+              Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.location_off_rounded,
+                        color: t.textSecondary, size: 36),
+                    const SizedBox(height: 10),
+                    Text(
+                      'No live data for ${widget.cityName}',
+                      style: TextStyle(color: t.textSecondary, fontSize: 13),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Pull down to refresh',
+                      style: TextStyle(color: t.stroke, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _bone({required double height, required double alpha, required RiverColors t}) =>
+      Container(
+        width: double.infinity,
+        height: height,
+        decoration: BoxDecoration(
+          color: t.textPrimary.withValues(alpha: alpha),
+          borderRadius: BorderRadius.circular(14),
+        ),
+      );
+}
+
+// ── Gauge Hero Card ───────────────────────────────────────────────────────────
+
 class _GaugeHeroCard extends StatelessWidget {
   final FloodData data;
   const _GaugeHeroCard({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    final rc  = _riskColor(data.riskLevel);
-    final pct = data.capacityPercent.clamp(0.0, 100.0);
-
-    final s      = data.status.toUpperCase();
-    final isLive = s != 'ESTIMATED';
-    final badgeLabel = isLive ? 'LIVE · CWC' : 'ESTIMATED';
-    final badgeColor = isLive ? _kCyan : _kSub;
+    final t      = RiverColors.of(context);
+    final rc     = _riskColor(data.riskLevel);
+    final pct    = data.capacityPercent.clamp(0.0, 100.0);
+    final isLive = data.status.toUpperCase() != 'ESTIMATED';
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: _kCard,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: rc.withValues(alpha: 0.4)),
-        boxShadow: [BoxShadow(color: rc.withValues(alpha: 0.08), blurRadius: 20)],
+        border: Border.all(color: rc.withValues(alpha: 0.35)),
+        boxShadow: [
+          BoxShadow(
+              color: rc.withValues(alpha: 0.10),
+              blurRadius: 22,
+              offset: const Offset(0, 6)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,76 +495,51 @@ class _GaugeHeroCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(data.riverName ?? 'River',
-                        style: const TextStyle(color: _kSub, fontSize: 12)),
+                        style: TextStyle(color: t.textSecondary, fontSize: 12)),
                     const SizedBox(height: 2),
                     Text(data.state,
-                        style: const TextStyle(
-                            color: _kText,
+                        style: TextStyle(
+                            color: t.textPrimary,
                             fontWeight: FontWeight.w600,
                             fontSize: 13)),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color: rc.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: rc.withValues(alpha: 0.5)),
-                ),
-                child: Text(data.riskLevel,
-                    style: TextStyle(
-                        color: rc, fontWeight: FontWeight.w800, fontSize: 12)),
-              ),
+              _badge(
+                  label: data.riskLevel,
+                  bg: rc.withValues(alpha: 0.15),
+                  fg: rc,
+                  border: rc.withValues(alpha: 0.5)),
             ],
           ),
           const SizedBox(height: 16),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('${data.currentLevel.toStringAsFixed(2)} m',
-                  style: TextStyle(
-                      color: rc,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 38,
-                      letterSpacing: -1)),
+              Text(
+                '${data.currentLevel.toStringAsFixed(2)} m',
+                style: TextStyle(
+                    color: rc, fontWeight: FontWeight.w900,
+                    fontSize: 38, letterSpacing: -1),
+              ),
               const SizedBox(width: 10),
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: badgeColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: badgeColor.withValues(alpha: 0.5)),
-                  ),
-                  child: Text(badgeLabel,
-                      style: TextStyle(
-                          color: badgeColor,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700)),
-                ),
+                child: _badge(
+                    label: isLive ? 'LIVE · CWC' : 'ESTIMATED',
+                    bg: (isLive ? t.accent : t.textSecondary).withValues(alpha: 0.12),
+                    fg: isLive ? t.accent : t.textSecondary,
+                    border: (isLive ? t.accent : t.textSecondary).withValues(alpha: 0.45)),
               ),
               if (data.imdSeverity != null) ...[
                 const SizedBox(width: 6),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _imdColor(data.imdSeverity!).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: _imdColor(data.imdSeverity!).withValues(alpha: 0.5)),
-                    ),
-                    child: Text('IMD ${data.imdSeverity}',
-                        style: TextStyle(
-                            color: _imdColor(data.imdSeverity!),
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700)),
-                  ),
+                  child: _badge(
+                      label: 'IMD ${data.imdSeverity}',
+                      bg: _imdColor(data.imdSeverity!).withValues(alpha: 0.15),
+                      fg: _imdColor(data.imdSeverity!),
+                      border: _imdColor(data.imdSeverity!).withValues(alpha: 0.5)),
                 ),
               ],
             ],
@@ -279,15 +549,14 @@ class _GaugeHeroCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
             child: Stack(
               children: [
-                Container(
-                    height: 8, color: Colors.white.withValues(alpha: 0.06)),
+                Container(height: 8, color: t.cardBgElevated),
                 FractionallySizedBox(
                   widthFactor: pct / 100,
                   child: Container(
                     height: 8,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                          colors: [rc.withValues(alpha: 0.6), rc]),
+                          colors: [rc.withValues(alpha: 0.55), rc]),
                     ),
                   ),
                 ),
@@ -298,14 +567,14 @@ class _GaugeHeroCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('${pct.toStringAsFixed(0)}% capacity',
-                  style: TextStyle(
-                      color: rc, fontWeight: FontWeight.w700, fontSize: 12)),
               Text(
-                'W ${data.warningLevel.toStringAsFixed(1)}  '
-                'D ${data.dangerLevel.toStringAsFixed(1)} m',
-                style:
-                    const TextStyle(color: _kSub, fontSize: 11),
+                '${pct.toStringAsFixed(0)}% capacity',
+                style: TextStyle(
+                    color: rc, fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+              Text(
+                'W ${data.warningLevel.toStringAsFixed(1)}  D ${data.dangerLevel.toStringAsFixed(1)} m',
+                style: TextStyle(color: t.textSecondary, fontSize: 11),
               ),
             ],
           ),
@@ -332,6 +601,22 @@ class _GaugeHeroCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _badge({
+    required String label,
+    required Color bg,
+    required Color fg,
+    required Color border,
+  }) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: border),
+        ),
+        child: Text(label,
+            style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 10)),
+      );
 }
 
 class _StatChip extends StatelessWidget {
@@ -341,29 +626,30 @@ class _StatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: t.cardBgElevated,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        border: Border.all(color: t.stroke),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: _kSub),
+          Icon(icon, size: 11, color: t.textSecondary),
           const SizedBox(width: 5),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(value,
-                  style: const TextStyle(
-                      color: _kText,
+                  style: TextStyle(
+                      color: t.textPrimary,
                       fontWeight: FontWeight.w700,
                       fontSize: 11)),
               Text(label,
-                  style: const TextStyle(color: _kSub, fontSize: 9)),
+                  style: TextStyle(color: t.textSecondary, fontSize: 9)),
             ],
           ),
         ],
@@ -372,61 +658,75 @@ class _StatChip extends StatelessWidget {
   }
 }
 
-// ─── 24-hr Trend Sparkline ────────────────────────────────────────────────────
+// ── 24-hr Trend Card ──────────────────────────────────────────────────────────
+
 class _TrendCard extends StatelessWidget {
   final List<RiverLevelSnapshot> trend;
-  const _TrendCard({required this.trend});
+  final double warningLevel, dangerLevel;
+  final Color  riskColor;
+  const _TrendCard({
+    required this.trend,
+    required this.warningLevel,
+    required this.dangerLevel,
+    required this.riskColor,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final t      = RiverColors.of(context);
     final levels = trend.map((s) => s.level).toList();
     final minL   = levels.reduce((a, b) => a < b ? a : b);
     final maxL   = levels.reduce((a, b) => a > b ? a : b);
-    final range  = (maxL - minL).abs();
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _kCard,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('24-hr River Level Trend',
-              style: TextStyle(
-                  color: _kText,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13)),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 60,
-            child: CustomPaint(
-              painter: _SparklinePainter(
-                  levels: levels, minL: minL, range: range),
-              size: Size.infinite,
-            ),
+          Row(
+            children: [
+              Icon(Icons.show_chart_rounded, color: t.accent, size: 15),
+              const SizedBox(width: 6),
+              Text(
+                '24-hr River Level Trend',
+                style: TextStyle(
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13),
+              ),
+              const Spacer(),
+              Text(
+                '${trend.length} pts  ${minL.toStringAsFixed(2)}–${maxL.toStringAsFixed(2)} m',
+                style: TextStyle(color: t.textSecondary, fontSize: 9),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SparklineChart(
+            snapshots:    trend,
+            warningLevel: warningLevel,
+            dangerLevel:  dangerLevel,
+            color:        riskColor,
+            height:       72,
+            showLabels:   true,
           ),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                DateFormat('HH:mm').format(
-                    trend.first.timestamp.toLocal()),
-                style:
-                    const TextStyle(color: _kSub, fontSize: 9)),
+                DateFormat('HH:mm').format(trend.first.timestamp.toLocal()),
+                style: TextStyle(color: t.textSecondary, fontSize: 9),
+              ),
               Text(
-                '${trend.length} readings  '
-                '${minL.toStringAsFixed(2)}–${maxL.toStringAsFixed(2)} m',
-                style:
-                    const TextStyle(color: _kSub, fontSize: 9)),
-              Text(
-                DateFormat('HH:mm').format(
-                    trend.last.timestamp.toLocal()),
-                style:
-                    const TextStyle(color: _kSub, fontSize: 9)),
+                DateFormat('HH:mm').format(trend.last.timestamp.toLocal()),
+                style: TextStyle(color: t.textSecondary, fontSize: 9),
+              ),
             ],
           ),
         ],
@@ -435,49 +735,16 @@ class _TrendCard extends StatelessWidget {
   }
 }
 
-class _SparklinePainter extends CustomPainter {
-  final List<double> levels;
-  final double minL, range;
-  const _SparklinePainter(
-      {required this.levels, required this.minL, required this.range});
+// ── IMD Alert Tile ────────────────────────────────────────────────────────────
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (levels.length < 2) return;
-    final paint = Paint()
-      ..color = const Color(0xFF00C2DE)
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path();
-    for (var i = 0; i < levels.length; i++) {
-      final x = i / (levels.length - 1) * size.width;
-      final y = range < 0.01
-          ? size.height / 2
-          : size.height - ((levels[i] - minL) / range) * size.height;
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_SparklinePainter old) =>
-      old.levels != levels || old.minL != minL || old.range != range;
-}
-
-// ─── IMD Alert Tile ───────────────────────────────────────────────────────────
 class _ImdAlertTile extends StatelessWidget {
   final dynamic alert;
   const _ImdAlertTile({required this.alert});
 
   @override
   Widget build(BuildContext context) {
-    final c = _imdColor(alert.severity as String? ?? '');
+    final t = RiverColors.of(context);
+    final c = _imdColor((alert.severity as String?) ?? '');
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -493,10 +760,7 @@ class _ImdAlertTile extends StatelessWidget {
             decoration: BoxDecoration(
                 color: c,
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: c.withValues(alpha: 0.5), blurRadius: 5)
-                ]),
+                boxShadow: [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 5)]),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -504,78 +768,74 @@ class _ImdAlertTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                    (alert.title as String?) ??
-                        (alert.severity as String? ?? 'IMD Alert'),
-                    style: const TextStyle(
-                        color: _kText,
+                    (alert.title as String?) ?? (alert.severity as String? ?? 'IMD Alert'),
+                    style: TextStyle(
+                        color: t.textPrimary,
                         fontWeight: FontWeight.w700,
                         fontSize: 13)),
                 if ((alert.description as String?)?.isNotEmpty == true)
                   Text(alert.description as String,
-                      style: const TextStyle(
-                          color: Colors.white60, fontSize: 11),
+                      style: TextStyle(color: t.stroke, fontSize: 11),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: c.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: c.withValues(alpha: 0.5)),
-            ),
-            child: Text(
-                (alert.severity as String? ?? '').toUpperCase(),
-                style: TextStyle(
-                    color: c,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 10)),
-          ),
+          const SizedBox(width: 8),
+          _badge(label: (alert.severity as String? ?? '').toUpperCase(), color: c),
         ],
       ),
     );
   }
+
+  Widget _badge({required String label, required Color color}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Text(label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 10)),
+      );
 }
 
-// ─── NDMA Advisory Tile ───────────────────────────────────────────────────────
+// ── NDMA Advisory Tile ────────────────────────────────────────────────────────
+
 class _NdmaAdvisoryTile extends StatelessWidget {
   final dynamic adv;
   const _NdmaAdvisoryTile({required this.adv});
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: _kOrange.withValues(alpha: 0.06),
+        color: AppPalette.warning.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kOrange.withValues(alpha: 0.3)),
+        border: Border.all(color: AppPalette.warning.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: _kOrange, size: 16),
+          const Icon(Icons.warning_amber_rounded, color: AppPalette.warning, size: 16),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text((adv.title as String? ?? 'NDMA Advisory'),
-                    style: const TextStyle(
-                        color: _kText,
+                Text((adv.title as String?) ?? 'NDMA Advisory',
+                    style: TextStyle(
+                        color: t.textPrimary,
                         fontWeight: FontWeight.w700,
                         fontSize: 13)),
                 if ((adv.advisory as String?)?.isNotEmpty == true)
                   Padding(
                     padding: const EdgeInsets.only(top: 3),
                     child: Text(adv.advisory as String,
-                        style: const TextStyle(
-                            color: Colors.white60, fontSize: 11),
+                        style: TextStyle(color: t.textSecondary, fontSize: 11),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis),
                   ),
@@ -588,12 +848,19 @@ class _NdmaAdvisoryTile extends StatelessWidget {
   }
 }
 
-// ─── Emergency Contacts ───────────────────────────────────────────────────────
-class _EmergencyContactsCard extends StatelessWidget {
+// ── Collapsible Emergency Contacts ────────────────────────────────────────────
+
+class _CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
-  final String state;
-  const _EmergencyContactsCard(
-      {required this.contacts, required this.state});
+  final String       state;
+  final bool         expanded;
+  final VoidCallback onToggle;
+  const _CollapsibleContacts({
+    required this.contacts,
+    required this.state,
+    required this.expanded,
+    required this.onToggle,
+  });
 
   Future<void> _call(String phone) async {
     final uri = Uri(scheme: 'tel', path: phone);
@@ -602,51 +869,100 @@ class _EmergencyContactsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    const always = [
+      ('NDMA Helpline', '1078'),
+      ('NDRF',          '011-24363260'),
+      ('Police',        '100'),
+      ('Ambulance',     '108'),
+    ];
+
     return Container(
       decoration: BoxDecoration(
-        color: _kCard,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: t.stroke),
       ),
       child: Column(
         children: [
-          _buildRow('NDMA Helpline', '1078'),
-          _buildRow('NDRF', '011-24363260'),
-          _buildRow('Police', '100'),
-          _buildRow('Ambulance', '108'),
-          if (contacts.isNotEmpty) ...[
-            Divider(height: 1, color: Colors.white.withValues(alpha: 0.07)),
-            ...contacts.take(4).map(
-                (c) => _buildRow(c.role.isNotEmpty ? c.role : c.name, c.phone)),
-          ],
+          InkWell(
+            onTap: onToggle,
+            borderRadius: expanded
+                ? const BorderRadius.vertical(top: Radius.circular(14))
+                : BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              child: Row(
+                children: [
+                  Icon(Icons.phone_rounded, color: t.riverNormal, size: 14),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '📞  Emergency Contacts',
+                      style: TextStyle(
+                          color: t.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Icon(Icons.keyboard_arrow_down_rounded,
+                        color: t.textSecondary, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 280),
+            crossFadeState: expanded
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Column(
+              children: [
+                for (final e in always) _row(context, e.$1, e.$2),
+                if (contacts.isNotEmpty) ...[
+                  Divider(height: 1, color: t.stroke),
+                  ...contacts.take(4).map((c) => _row(
+                      context,
+                      c.role.isNotEmpty ? c.role : c.name,
+                      c.phone)),
+                ],
+              ],
+            ),
+            secondChild: const SizedBox.shrink(),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildRow(String label, String phone) {
+  Widget _row(BuildContext context, String label, String phone) {
+    final t = RiverColors.of(context);
     return InkWell(
       onTap: () => _call(phone),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            const Icon(Icons.phone_rounded, color: _kGreen, size: 14),
+            Icon(Icons.phone_rounded, color: t.riverNormal, size: 14),
             const SizedBox(width: 10),
             Expanded(
               child: Text(label,
-                  style: const TextStyle(color: _kText, fontSize: 13)),
+                  style: TextStyle(color: t.textPrimary, fontSize: 13)),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: _kGreen.withValues(alpha: 0.10),
+                color: t.riverNormal.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _kGreen.withValues(alpha: 0.4)),
+                border: Border.all(color: t.riverNormal.withValues(alpha: 0.4)),
               ),
               child: Text(phone,
-                  style: const TextStyle(
-                      color: _kGreen,
+                  style: TextStyle(
+                      color: t.riverNormal,
                       fontWeight: FontWeight.w700,
                       fontSize: 12)),
             ),
@@ -657,39 +973,37 @@ class _EmergencyContactsCard extends StatelessWidget {
   }
 }
 
-// ─── Predict CTA ──────────────────────────────────────────────────────────────
+// ── Predict CTA ───────────────────────────────────────────────────────────────
+
 class _PredictCta extends StatelessWidget {
   final String cityName;
   final double currentLevel;
-  const _PredictCta(
-      {required this.cityName, required this.currentLevel});
+  const _PredictCta({required this.cityName, required this.currentLevel});
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return GestureDetector(
       onTap: () {
+        HapticFeedback.lightImpact();
         Navigator.pushNamed(
-          context,
-          '/predict',
-          arguments: {
-            'city':          cityName,
-            'river_level':   currentLevel,
-          },
+          context, '/predict',
+          arguments: {'city': cityName, 'river_level': currentLevel},
         );
       },
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF005C6E), Color(0xFF00C2DE)],
+          gradient: LinearGradient(
+            colors: [t.cardBgElevated, t.accent],
           ),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-                color: _kCyan.withValues(alpha: 0.2),
-                blurRadius: 16,
-                spreadRadius: 1)
+                color: t.accentGlow,
+                blurRadius: 18,
+                spreadRadius: 1),
           ],
         ),
         child: const Row(
@@ -702,7 +1016,7 @@ class _PredictCta extends StatelessWidget {
               style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
-                  fontSize: 15,
+                  fontSize: 14,
                   letterSpacing: 0.3),
             ),
           ],
@@ -712,19 +1026,63 @@ class _PredictCta extends StatelessWidget {
   }
 }
 
-// ─── Section label helper ─────────────────────────────────────────────────────
+// ── Map Chip CTA ──────────────────────────────────────────────────────────────
+
+class _MapChip extends StatelessWidget {
+  final String cityName;
+  const _MapChip({required this.cityName});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        Navigator.pushNamed(context, '/bihar_river_map');
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+        decoration: BoxDecoration(
+          color: t.accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.accent.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.map_rounded, color: t.accent, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              'Map',
+              style: TextStyle(
+                  color: t.accent,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Section Label ─────────────────────────────────────────────────────────────
+
 class _SectionLabel extends StatelessWidget {
   final String text;
   const _SectionLabel(this.text);
 
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         text,
-        style: const TextStyle(
-            color: _kText, fontWeight: FontWeight.w700, fontSize: 13),
+        style: TextStyle(
+            color: t.textPrimary,
+            fontWeight: FontWeight.w700,
+            fontSize: 13),
       ),
     );
   }

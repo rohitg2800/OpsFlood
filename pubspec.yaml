@@ -54,6 +54,18 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.6
 
+  # ── Phase 2 ─────────────────────────────────────────────────────
+  # GPS — "Am I in danger?" proximity banner
+  geolocator: ^13.0.4
+
+  # ── Phase 3 ─────────────────────────────────────────────────────
+  # Real map tiles + GeoJSON overlays — Bihar River Map
+  flutter_map: ^8.1.1
+  latlong2:    ^0.9.1
+
+  # AI flood background monitoring service
+  flutter_background_service: ^5.0.10
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

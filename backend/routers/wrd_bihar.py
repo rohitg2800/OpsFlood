@@ -1,223 +1,340 @@
 """
-WRD Bihar Live Data Router
-Scrapes fldcontrolbihar.org flood monitoring table and exposes
-GET /api/wrd-bihar/stations  — live station data for Bihar rivers
+WRD Bihar Live River Level Router
+Scrapes BeFIQR portal (irrigation.befiqr.in) — the official Central Flood
+Control Cell, Water Resources Department, Govt of Bihar.
+
+Routes:
+  GET /api/wrd-bihar/stations            — all 31 stations (live or fallback)
+  GET /api/wrd-bihar/stations/{name}     — single station by name
+  GET /api/wrd-bihar/summary             — danger/warning/normal counts + top alerts
+  GET /api/wrd-bihar/health              — portal reachability check
+  GET /api/wrd-bihar/refresh             — force immediate scrape + cache update
+  GET /api/wrd-bihar/scheduler/status    — APScheduler next-run info
+
+AUTO-REFRESH:
+  APScheduler runs _scheduled_refresh() every WRD_BIHAR_POLL_INTERVAL_MIN
+  minutes (default 15). It only replaces the cache when the portal returns
+  fresh data, detected by comparing the newest current_level_m values.
+
+DATA SOURCE: WRD Bihar BeFIQR only.
+Live URL: https://irrigation.befiqr.in/state/table/rivers
 """
 
 from __future__ import annotations
 
 import datetime
+import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from cachetools import TTLCache
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/wrd-bihar", tags=["WRD Bihar"])
 
 # ---------------------------------------------------------------------------
-# Cache — 10-minute TTL (WRD Bihar updates ~every 15 min)
+# Cache — TTL slightly longer than poll interval so scheduler always owns it
 # ---------------------------------------------------------------------------
-_CACHE: TTLCache = TTLCache(maxsize=64, ttl=600)
+_POLL_MINUTES: int = int(os.getenv("WRD_BIHAR_POLL_INTERVAL_MIN", "15"))
+_CACHE: TTLCache = TTLCache(maxsize=32, ttl=(_POLL_MINUTES + 2) * 60)
+_CACHE_KEY = "wrd_bihar_stations_v4"
+
+# Scheduler singleton
+_scheduler: Optional[BackgroundScheduler] = None
 
 # ---------------------------------------------------------------------------
-# Known Bihar WRD station metadata (lat/lon for map pins)
-# ---------------------------------------------------------------------------
-_STATION_META: Dict[str, Dict[str, Any]] = {
-    "gandhi setu": {"district": "Patna", "river": "Ganga", "lat": 25.736, "lon": 85.004},
-    "patna": {"district": "Patna", "river": "Ganga", "lat": 25.594, "lon": 85.138},
-    "hajipur": {"district": "Vaishali", "river": "Ganga", "lat": 25.686, "lon": 85.208},
-    "dumariaghat": {"district": "Sitamarhi", "river": "Bagmati", "lat": 26.804, "lon": 85.513},
-    "raxaul": {"district": "East Champaran", "river": "Gandak", "lat": 26.986, "lon": 84.850},
-    "muzaffarpur": {"district": "Muzaffarpur", "river": "Burhi Gandak", "lat": 26.121, "lon": 85.391},
-    "darbhanga": {"district": "Darbhanga", "river": "Kamla Balan", "lat": 26.152, "lon": 85.901},
-    "bhagalpur": {"district": "Bhagalpur", "river": "Ganga", "lat": 25.244, "lon": 86.972},
-    "munger": {"district": "Munger", "river": "Ganga", "lat": 25.375, "lon": 86.473},
-    "araria": {"district": "Araria", "river": "Kosi", "lat": 26.147, "lon": 87.471},
-    "supaul": {"district": "Supaul", "river": "Kosi", "lat": 26.124, "lon": 86.604},
-    "saharsa": {"district": "Saharsa", "river": "Kosi", "lat": 25.877, "lon": 86.594},
-    "gopalganj": {"district": "Gopalganj", "river": "Gandak", "lat": 26.469, "lon": 84.436},
-    "saran": {"district": "Saran", "river": "Ghaghara", "lat": 25.919, "lon": 84.733},
-    "siwan": {"district": "Siwan", "river": "Ghaghara", "lat": 26.219, "lon": 84.358},
-}
-
-# ---------------------------------------------------------------------------
-# Scraper targets (in priority order)
+# BeFIQR scraper targets
 # ---------------------------------------------------------------------------
 _WRD_URLS = [
-    "http://fldcontrolbihar.org/",
-    "http://fldcontrolbihar.org/flood-monitoring",
-    "http://fldcontrolbihar.org/river-data",
+    "https://irrigation.befiqr.in/state/table/rivers",
+    "https://irrigation.befiqr.in/state/table/wrd-manual-stations/water-level-obs",
+    "http://irrigation.befiqr.in/state/table/rivers",
 ]
 
 _HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-IN,en;q=0.9",
-    "Referer": "http://fldcontrolbihar.org/",
+    "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
+    "Referer": "https://irrigation.befiqr.in/",
 }
+
+# ---------------------------------------------------------------------------
+# Station registry — 31 WRD Bihar gauge stations
+# ---------------------------------------------------------------------------
+_STATION_REGISTRY: List[Dict[str, Any]] = [
+    # Adhwara
+    {"station": "Ekmighat",       "river": "Adhwara",      "district": "Darbhanga / Bahadurpur",  "hfl": 49.52, "danger_level_m": 46.94, "lat": 26.095, "lon": 85.902},
+    {"station": "Kamtaul",        "river": "Adhwara",      "district": "Darbhanga / Jale",         "hfl": 53.05, "danger_level_m": 50.00, "lat": 26.272, "lon": 85.959},
+    {"station": "Sonbarsa",       "river": "Adhwara",      "district": "Sitamarhi / Sonbarsa",     "hfl": 83.20, "danger_level_m": 81.85, "lat": 26.799, "lon": 85.483},
+    # Bagmati
+    {"station": "Benibad",        "river": "Bagmati",      "district": "Muzaffarpur / Gaighat",    "hfl": 50.12, "danger_level_m": 48.68, "lat": 26.005, "lon": 85.608},
+    {"station": "Dheng Bridge",   "river": "Bagmati",      "district": "Sitamarhi / Suppi",        "hfl": 73.47, "danger_level_m": 71.00, "lat": 26.587, "lon": 85.480},
+    {"station": "Hayaghat",       "river": "Bagmati",      "district": "Darbhanga / Hayaghat",     "hfl": 48.96, "danger_level_m": 45.72, "lat": 25.985, "lon": 85.806},
+    # Burhi Gandak
+    {"station": "Khagaria",       "river": "Burhi Gandak", "district": "Khagaria / Khagaria",      "hfl": 39.22, "danger_level_m": 36.58, "lat": 25.502, "lon": 86.467},
+    {"station": "Rosera",         "river": "Burhi Gandak", "district": "Samastipur / Rosera",      "hfl": 46.56, "danger_level_m": 42.63, "lat": 25.868, "lon": 85.992},
+    {"station": "Samastipur",     "river": "Burhi Gandak", "district": "Samastipur / Samastipur",  "hfl": 49.40, "danger_level_m": 46.00, "lat": 25.877, "lon": 85.782},
+    {"station": "Sikandarpur",    "river": "Burhi Gandak", "district": "Muzaffarpur / Musahari",   "hfl": 54.29, "danger_level_m": 52.53, "lat": 26.098, "lon": 85.396},
+    # Gandak
+    {"station": "Chatia",         "river": "Gandak",       "district": "East Champaran / Areraj", "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
+    {"station": "Dumariaghat",    "river": "Gandak",       "district": "Gopalganj / Sidhwalia",   "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
+    {"station": "Hajipur",        "river": "Gandak",       "district": "Vaishali / Hajipur",       "hfl": 50.93, "danger_level_m": 50.32, "lat": 25.686, "lon": 85.208},
+    {"station": "Rewaghat",       "river": "Gandak",       "district": "Muzaffarpur / Saraiya",    "hfl": 55.46, "danger_level_m": 54.41, "lat": 25.940, "lon": 85.383},
+    # Ganga
+    {"station": "Bhagalpur",      "river": "Ganga",        "district": "Bhagalpur / Nathnagar",   "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
+    {"station": "Buxar",          "river": "Ganga",        "district": "Buxar / Buxar",            "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
+    {"station": "Dighaghat",      "river": "Ganga",        "district": "Patna / Patna Rural",     "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
+    {"station": "Gandhighat",     "river": "Ganga",        "district": "Patna / Patna Rural",     "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
+    {"station": "Hathidah",       "river": "Ganga",        "district": "Patna / Mokameh",         "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
+    {"station": "Kahalgaon",      "river": "Ganga",        "district": "Bhagalpur / Gopalpur",    "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
+    {"station": "Munger",         "river": "Ganga",        "district": "Munger / Sadar Munger",   "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
+    # Ghaghra
+    {"station": "Darauli",        "river": "Ghaghra",      "district": "Siwan / Darauli",          "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
+    {"station": "Gangpur Siswan", "river": "Ghaghra",      "district": "Siwan / Siswan",           "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
+    # Kamalabalan
+    {"station": "Jhanjharpur",    "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur", "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
+    # Kamla
+    {"station": "Jainagar",       "river": "Kamla",        "district": "Madhubani / Jainagar",     "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
+    # Kosi
+    {"station": "Baltara",        "river": "Kosi",         "district": "Khagaria / Beldaur",      "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
+    {"station": "Basua",          "river": "Kosi",         "district": "Supaul / Supaul",         "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
+    {"station": "Kursela",        "river": "Kosi",         "district": "Katihar / Kursela",       "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
+    # Mahananda
+    {"station": "Dhengraghat",    "river": "Mahananda",    "district": "Purnia / Baisi",           "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
+    {"station": "Taibpur",        "river": "Mahananda",    "district": "Kishanganj / Thakurganj", "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
+    # Punpun
+    {"station": "Sripalpur",      "river": "Punpun",       "district": "Patna / Phulwari",        "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
+]
+
+_REGISTRY_MAP: Dict[str, Dict[str, Any]] = {
+    " ".join(s["station"].lower().split()): s for s in _STATION_REGISTRY
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _normalize(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _safe_float(value: Any) -> Optional[float]:
+    """Parse float from scraped cell. Returns None for missing/invalid.
+    0.0 is a valid value (e.g. zero 24h change)."""
     try:
-        return float(str(value).strip().replace(",", "")) if value not in (None, "", "--", "N/A") else default
+        v = str(value).strip().replace(",", "")
+        if v in ("", "--", "N/A", "NA", "-", ".", "nil", "NIL"):
+            return None
+        return round(float(v), 3)
     except (ValueError, TypeError):
-        return default
+        return None
 
 
-def _enrich_station(name: str) -> Dict[str, Any]:
-    """Return lat/lon/district/river for a station name via fuzzy key match."""
-    key = _normalize(name)
-    for meta_key, meta in _STATION_META.items():
-        if meta_key in key or key in meta_key:
-            return meta
-    # Unknown station — synthetic coords near Bihar centre
-    return {"district": "Bihar", "river": "Unknown", "lat": 25.8 + hash(key) % 100 / 500, "lon": 85.4}
+def _enrich(station_name: str) -> Dict[str, Any]:
+    key = _normalize(station_name)
+    if key in _REGISTRY_MAP:
+        return _REGISTRY_MAP[key]
+    for rk, rv in _REGISTRY_MAP.items():
+        if rk in key or key in rk:
+            return rv
+    return {"station": station_name, "river": "Unknown", "district": "Bihar",
+            "hfl": None, "danger_level_m": None, "lat": 25.8, "lon": 85.4}
 
 
-def _status_label(current: float, warning: float, danger: float) -> str:
-    if danger > 0 and current >= danger:
-        return "CRITICAL"
-    if warning > 0 and current >= warning:
+def _status_label(current: Optional[float], danger: Optional[float], hfl: Optional[float]) -> str:
+    """
+    CRITICAL — at/above HFL (or within 3% of HFL) AND above danger
+    DANGER   — at/above danger level
+    WARNING  — within 3 metres below danger level
+    NORMAL   — below warning threshold, level known
+    UNKNOWN  — no current reading
+    """
+    if current is None:
+        return "UNKNOWN"
+    if danger is not None and current >= danger:
+        return "CRITICAL" if (hfl and current >= hfl * 0.97) else "DANGER"
+    if danger is not None and current >= (danger - 3.0):
         return "WARNING"
     if current > 0:
         return "NORMAL"
     return "UNKNOWN"
 
 
-def _parse_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
-    """
-    Try to extract station rows from any HTML table on the WRD Bihar page.
-    Handles both named-column headers and positional fallback.
-    """
+# ---------------------------------------------------------------------------
+# BeFIQR table parser
+# Column order (0-indexed): 0=SL 1=River 2=Site 3=HFL 4=DL 5=Yest
+#                           6=Current 7=Diff24h 8=AboveBelowDL 9=Trend 10=District
+# ---------------------------------------------------------------------------
+_BEFIQR_COL = {"river": 1, "site": 2, "hfl": 3, "dl": 4, "yest": 5,
+               "current": 6, "diff": 7, "above": 8, "trend": 9, "dist": 10}
+
+
+def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
     stations: List[Dict[str, Any]] = []
+    now = _now_iso()
 
     for table in soup.find_all("table"):
-        headers_raw = [th.get_text(strip=True).lower() for th in table.find_all("th")]
+        rows = table.find_all("tr")
+        if len(rows) < 3:
+            continue
+        all_text = table.get_text(" ", strip=True).lower()
+        if not any(k in all_text for k in ["river", "site", "hfl", "danger"]):
+            continue
 
-        # Detect column positions
-        def col(keywords: list[str]) -> int:
+        header_cells: List[str] = []
+        for hr in rows[:3]:
+            cells = [c.get_text(" ", strip=True).lower() for c in hr.find_all(["th", "td"])]
+            if len(cells) > len(header_cells):
+                header_cells = cells
+
+        def col_idx(keywords: List[str], default: int) -> int:
             for kw in keywords:
-                for i, h in enumerate(headers_raw):
+                for i, h in enumerate(header_cells):
                     if kw in h:
                         return i
-            return -1
+            return default
 
-        idx_station = col(["station", "gauge", "site", "location"])
-        idx_river = col(["river", "nadi"])
-        idx_current = col(["current", "observed", "water level", "wl", "level (m)", "gauge reading"])
-        idx_warning = col(["warning", "warn"])
-        idx_danger = col(["danger", "hfl", "flood level"])
-        idx_status = col(["status", "remark", "flood situation"])
+        i_river   = col_idx(["river", "nadi"],                        _BEFIQR_COL["river"])
+        i_site    = col_idx(["site", "station", "gauge"],             _BEFIQR_COL["site"])
+        i_hfl     = col_idx(["hfl"],                                  _BEFIQR_COL["hfl"])
+        i_dl      = col_idx(["dl", "danger level", "danger"],        _BEFIQR_COL["dl"])
+        i_yest    = col_idx(["yesterday", "previous", "yest"],        _BEFIQR_COL["yest"])
+        i_current = col_idx(["current observed", "current wl",
+                             "current level", "observed wl"],         _BEFIQR_COL["current"])
+        i_diff    = col_idx(["diff", "24", "change"],                 _BEFIQR_COL["diff"])
+        i_above   = col_idx(["above", "below danger"],                _BEFIQR_COL["above"])
+        i_trend   = col_idx(["trend", "today"],                       _BEFIQR_COL["trend"])
+        i_dist    = col_idx(["district", "block"],                    _BEFIQR_COL["dist"])
 
-        for row in table.find_all("tr"):
-            cells = [td.get_text(strip=True) for td in row.find_all("td")]
-            if len(cells) < 3:
+        for row in rows[1:]:
+            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+            if len(cells) < 5:
                 continue
 
-            def cell(idx: int, fallback: str = "") -> str:
-                return cells[idx] if 0 <= idx < len(cells) else fallback
+            def c(idx: int) -> str:
+                return cells[idx].strip() if 0 <= idx < len(cells) else ""
 
-            station_name = cell(idx_station, cell(0))
-            if not station_name or station_name.lower() in ("station", "s.no", "#", ""):
+            site = c(i_site)
+            if not site or site.lower() in ("site", "station", "sl", "#", "(3)", "",
+                                            "river", "hfl (mts)", "dl (mts)"):
                 continue
 
-            river_name = cell(idx_river, "")
-            current_level = _safe_float(cell(idx_current, cell(2)))
-            warning_level = _safe_float(cell(idx_warning, cell(3) if len(cells) > 3 else ""))
-            danger_level = _safe_float(cell(idx_danger, cell(4) if len(cells) > 4 else ""))
-            raw_status = cell(idx_status, "")
+            river    = c(i_river)
+            hfl      = _safe_float(c(i_hfl))
+            dl       = _safe_float(c(i_dl))
+            yest     = _safe_float(c(i_yest))
+            current  = _safe_float(c(i_current))
+            diff_24h = _safe_float(c(i_diff))
+            above_dl = _safe_float(c(i_above))
+            trend    = c(i_trend) or "—"
+            district = c(i_dist)
 
-            meta = _enrich_station(station_name)
-            if not river_name:
-                river_name = meta.get("river", "Unknown")
+            meta = _enrich(site)
+            if not river:    river    = meta.get("river", "Unknown")
+            if not district: district = meta.get("district", "Bihar")
+            if hfl is None:  hfl      = meta.get("hfl")
+            if dl is None:   dl       = meta.get("danger_level_m")
 
-            status = (
-                raw_status.upper()
-                if raw_status.upper() in ("CRITICAL", "WARNING", "NORMAL", "SAFE")
-                else _status_label(current_level, warning_level, danger_level)
-            )
+            below_danger: Optional[float] = None
+            if dl and current is not None:
+                below_danger = round(dl - current, 3)
 
             stations.append({
-                "station": station_name,
-                "river": river_name,
-                "district": meta["district"],
-                "lat": meta["lat"],
-                "lon": meta["lon"],
-                "current_level_m": round(current_level, 3),
-                "warning_level_m": round(warning_level, 3),
-                "danger_level_m": round(danger_level, 3),
-                "below_danger_m": round(max(danger_level - current_level, 0.0), 3) if danger_level > 0 else None,
-                "status": status,
-                "source": "WRD_BIHAR",
-                "last_update": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "station":              site,
+                "river":                river,
+                "district":             district,
+                "lat":                  meta.get("lat", 25.8),
+                "lon":                  meta.get("lon", 85.4),
+                "hfl_m":                hfl,
+                "danger_level_m":       dl,
+                "yesterday_level_m":    yest,
+                "current_level_m":      current,
+                "change_24h_m":         diff_24h,
+                "above_below_danger_m": above_dl if above_dl is not None else below_danger,
+                "trend":                trend,
+                "status":               _status_label(current, dl, hfl),
+                "source":               "WRD_BIHAR_BEFIQR",
+                "last_update":          now,
             })
+
+        if stations:
+            break
 
     return stations
 
 
-def _fetch_wrd_bihar_live() -> Dict[str, Any]:
-    """Attempt each WRD Bihar URL in order; return parsed stations or raise."""
-    errors: list[str] = []
-    timeout = (
-        max(1.0, float(os.getenv("WRD_BIHAR_CONNECT_TIMEOUT", "4"))),
-        max(1.0, float(os.getenv("WRD_BIHAR_READ_TIMEOUT", "10"))),
-    )
+# ---------------------------------------------------------------------------
+# Live fetch
+# ---------------------------------------------------------------------------
 
+def _fetch_befiqr_live() -> Dict[str, Any]:
+    errors: List[str] = []
+    timeout = (
+        max(3.0, float(os.getenv("WRD_BIHAR_CONNECT_TIMEOUT", "6"))),
+        max(8.0, float(os.getenv("WRD_BIHAR_READ_TIMEOUT", "20"))),
+    )
     for url in _WRD_URLS:
         try:
             resp = requests.get(url, headers=_HEADERS, timeout=timeout)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
-            stations = _parse_table(soup)
+            stations = _parse_befiqr_table(soup)
             if stations:
                 return {
                     "status": "LIVE",
-                    "data_source": "WRD_BIHAR",
+                    "data_source": "WRD_BIHAR_BEFIQR",
                     "source_url": url,
                     "station_count": len(stations),
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": _now_iso(),
                     "stations": stations,
                 }
-            errors.append(f"{url}: page loaded but no table rows found")
+            errors.append(f"{url}: page loaded (HTTP {resp.status_code}) but no table rows extracted")
         except requests.Timeout:
             errors.append(f"{url}: timeout")
         except requests.RequestException as exc:
-            errors.append(f"{url}: {exc.__class__.__name__} — {str(exc)[:120]}")
-
+            errors.append(f"{url}: {exc.__class__.__name__} — {str(exc)[:140]}")
     raise RuntimeError(" | ".join(errors))
 
 
-def _tactical_fallback() -> Dict[str, Any]:
-    """Return known-static Bihar station data when live scrape fails."""
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    stations = []
-    for name, meta in _STATION_META.items():
-        stations.append({
-            "station": name.title(),
-            "river": meta["river"],
-            "district": meta["district"],
-            "lat": meta["lat"],
-            "lon": meta["lon"],
-            "current_level_m": None,
-            "warning_level_m": None,
-            "danger_level_m": None,
-            "below_danger_m": None,
-            "status": "UNKNOWN",
-            "source": "WRD_BIHAR_FALLBACK",
-            "last_update": now,
-        })
-    return {
+# ---------------------------------------------------------------------------
+# Fallback
+# ---------------------------------------------------------------------------
+
+def _tactical_fallback(scrape_error: str = "") -> Dict[str, Any]:
+    now = _now_iso()
+    stations = [{
+        "station":              s["station"],
+        "river":                s["river"],
+        "district":             s["district"],
+        "lat":                  s["lat"],
+        "lon":                  s["lon"],
+        "hfl_m":                s["hfl"],
+        "danger_level_m":       s["danger_level_m"],
+        "yesterday_level_m":    None,
+        "current_level_m":      None,
+        "change_24h_m":         None,
+        "above_below_danger_m": None,
+        "trend":                "—",
+        "status":               "UNKNOWN",
+        "source":               "WRD_BIHAR_FALLBACK",
+        "last_update":          now,
+    } for s in _STATION_REGISTRY]
+    result = {
         "status": "FALLBACK",
         "data_source": "WRD_BIHAR_FALLBACK",
         "source_url": None,
@@ -225,6 +342,91 @@ def _tactical_fallback() -> Dict[str, Any]:
         "timestamp": now,
         "stations": stations,
     }
+    if scrape_error:
+        result["_scrape_error"] = scrape_error[:500]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Shared getter (used by all route handlers)
+# ---------------------------------------------------------------------------
+
+async def _get_stations(force_refresh: bool = False) -> Dict[str, Any]:
+    if not force_refresh and _CACHE_KEY in _CACHE:
+        cached = dict(_CACHE[_CACHE_KEY])
+        cached["_cache_hit"] = True
+        return cached
+    try:
+        result = _fetch_befiqr_live()
+        _CACHE[_CACHE_KEY] = result
+        result = dict(result)
+        result["_cache_hit"] = False
+        return result
+    except RuntimeError as exc:
+        fallback = _tactical_fallback(str(exc))
+        fallback["_cache_hit"] = False
+        return fallback
+
+
+# ---------------------------------------------------------------------------
+# APScheduler — background auto-refresh
+# ---------------------------------------------------------------------------
+
+def _scheduled_refresh() -> None:
+    """
+    Called by APScheduler every _POLL_MINUTES.
+    Fetches fresh data and only updates the cache if data has changed
+    (detected by comparing Gandhighat current_level_m as a canary).
+    """
+    log.info("[WRD Bihar] Scheduled refresh started")
+    try:
+        fresh = _fetch_befiqr_live()
+
+        # Change detection: compare canary station level
+        new_levels = {s["station"]: s["current_level_m"] for s in fresh["stations"]}
+        old_result = _CACHE.get(_CACHE_KEY)
+        if old_result:
+            old_levels = {s["station"]: s["current_level_m"] for s in old_result["stations"]}
+            if new_levels == old_levels:
+                log.info("[WRD Bihar] Portal not yet updated — cache kept (levels unchanged)")
+                return
+            log.info("[WRD Bihar] Portal data changed — updating cache")
+        else:
+            log.info("[WRD Bihar] Cache was empty — populating")
+
+        _CACHE[_CACHE_KEY] = fresh
+        log.info(f"[WRD Bihar] Cache refreshed: {fresh['station_count']} stations at {fresh['timestamp']}")
+
+    except RuntimeError as exc:
+        log.warning(f"[WRD Bihar] Scheduled refresh failed: {exc}")
+
+
+def start_scheduler() -> None:
+    """Start APScheduler background job. Call once from app startup."""
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        log.info("[WRD Bihar] Scheduler already running — skipping start")
+        return
+    _scheduler = BackgroundScheduler(timezone="Asia/Kolkata", daemon=True)
+    _scheduler.add_job(
+        _scheduled_refresh,
+        trigger=IntervalTrigger(minutes=_POLL_MINUTES),
+        id="wrd_bihar_refresh",
+        name=f"WRD Bihar BeFIQR scrape every {_POLL_MINUTES} min",
+        replace_existing=True,
+        max_instances=1,         # prevent overlapping runs
+        misfire_grace_time=120,  # allow 2 min delay before skipping
+    )
+    _scheduler.start()
+    log.info(f"[WRD Bihar] Scheduler started — polling every {_POLL_MINUTES} min (IST)")
+
+
+def stop_scheduler() -> None:
+    """Gracefully stop the scheduler. Call from app shutdown."""
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        log.info("[WRD Bihar] Scheduler stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -232,68 +434,132 @@ def _tactical_fallback() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @router.get("/stations")
-async def get_wrd_bihar_stations(force_refresh: bool = False) -> Dict[str, Any]:
-    """
-    Fetch live WRD Bihar flood station data.
-
-    - Returns scraped table from fldcontrolbihar.org
-    - Cached for 10 minutes to avoid hammering the government portal
-    - Falls back to known static station list if portal is unreachable
-    - Pass ?force_refresh=true to bypass cache
-    """
-    cache_key = "wrd_bihar_stations"
-
-    if not force_refresh and cache_key in _CACHE:
-        cached = _CACHE[cache_key]
-        cached["_cache_hit"] = True
-        return cached
-
-    try:
-        result = _fetch_wrd_bihar_live()
-        _CACHE[cache_key] = result
-        result["_cache_hit"] = False
-        return result
-    except RuntimeError as exc:
-        fallback = _tactical_fallback()
-        fallback["_scrape_error"] = str(exc)
-        fallback["_cache_hit"] = False
-        return fallback
+async def get_wrd_bihar_stations(
+    force_refresh: bool = False,
+    river: Optional[str] = None,
+    district: Optional[str] = None,
+) -> Dict[str, Any]:
+    """All 31 WRD Bihar stations. Filters: ?river=Ganga ?district=Patna ?force_refresh=true"""
+    result = await _get_stations(force_refresh=force_refresh)
+    stations = result.get("stations", [])
+    if river:
+        rk = _normalize(river)
+        stations = [s for s in stations if rk in _normalize(s.get("river", ""))]
+    if district:
+        dk = _normalize(district)
+        stations = [s for s in stations if dk in _normalize(s.get("district", ""))]
+    return {**result, "station_count": len(stations), "stations": stations}
 
 
 @router.get("/stations/{station_name}")
-async def get_wrd_bihar_station(station_name: str) -> Dict[str, Any]:
-    """Get data for a single WRD Bihar station by name (case-insensitive partial match)."""
-    all_data = await get_wrd_bihar_stations()
+async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """Single station by name (case-insensitive partial match)."""
+    all_data = await _get_stations(force_refresh=force_refresh)
     key = _normalize(station_name)
     matches = [
         s for s in all_data.get("stations", [])
         if key in _normalize(s.get("station", "")) or _normalize(s.get("station", "")) in key
     ]
     if not matches:
-        raise HTTPException(status_code=404, detail=f"No WRD Bihar station found matching '{station_name}'")
+        return {"status": "NOT_FOUND", "data_source": all_data["data_source"],
+                "timestamp": all_data["timestamp"], "query": station_name, "station": None}
+    return {"status": all_data["status"], "data_source": all_data["data_source"],
+            "timestamp": all_data["timestamp"], "station": matches[0]}
+
+
+@router.get("/summary")
+async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
+    """Bihar flood summary — alert level, counts, top 5 alerts."""
+    all_data = await _get_stations(force_refresh=force_refresh)
+    stations = all_data.get("stations", [])
+
+    counts: Dict[str, int] = {"CRITICAL": 0, "DANGER": 0, "WARNING": 0, "NORMAL": 0, "UNKNOWN": 0}
+    alert_stations: List[Dict[str, Any]] = []
+
+    for s in stations:
+        status = s.get("status", "UNKNOWN")
+        counts[status] = counts.get(status, 0) + 1
+        current = s.get("current_level_m")
+        dl = s.get("danger_level_m")
+        if current is not None and dl and dl > 0:
+            alert_stations.append({**s, "_pct": round((current / dl) * 100, 1)})
+
+    alert_stations.sort(key=lambda x: x["_pct"], reverse=True)
+
+    if counts["CRITICAL"] > 0:  state_alert = "RED"
+    elif counts["DANGER"] > 0:  state_alert = "ORANGE"
+    elif counts["WARNING"] > 0: state_alert = "YELLOW"
+    elif counts["NORMAL"] > 0:  state_alert = "GREEN"
+    else:                        state_alert = "GREY"
+
     return {
-        "status": all_data["status"],
-        "data_source": all_data["data_source"],
-        "timestamp": all_data["timestamp"],
-        "station": matches[0],
+        "status":            all_data["status"],
+        "data_source":       all_data["data_source"],
+        "timestamp":         all_data["timestamp"],
+        "state":             "Bihar",
+        "total_stations":    len(stations),
+        "state_alert_level": state_alert,
+        "station_counts":    counts,
+        "top_alerts": [
+            {"station": s["station"], "river": s["river"], "district": s["district"],
+             "current_level_m": s["current_level_m"], "danger_level_m": s["danger_level_m"],
+             "pct_of_danger": s["_pct"], "status": s["status"]}
+            for s in alert_stations[:5]
+        ],
+    }
+
+
+@router.get("/refresh")
+async def force_refresh_wrd_bihar() -> Dict[str, Any]:
+    """
+    Force immediate scrape of BeFIQR and update the cache.
+    Returns new data directly. Useful for manual trigger or testing.
+    """
+    log.info("[WRD Bihar] Manual /refresh triggered")
+    result = await _get_stations(force_refresh=True)
+    return {
+        "refreshed": True,
+        "status": result["status"],
+        "data_source": result["data_source"],
+        "timestamp": result["timestamp"],
+        "station_count": result["station_count"],
+        "_cache_hit": result.get("_cache_hit", False),
+    }
+
+
+@router.get("/scheduler/status")
+async def scheduler_status() -> Dict[str, Any]:
+    """APScheduler job info — next run time, poll interval, running state."""
+    global _scheduler
+    if not _scheduler or not _scheduler.running:
+        return {"running": False, "message": "Scheduler not started. Call start_scheduler() on app startup."}
+
+    job = _scheduler.get_job("wrd_bihar_refresh")
+    next_run = None
+    if job and job.next_run_time:
+        next_run = job.next_run_time.isoformat()
+
+    cached = _CACHE.get(_CACHE_KEY)
+    last_cached_at = cached["timestamp"] if cached else None
+
+    return {
+        "running":            True,
+        "poll_interval_min":  _POLL_MINUTES,
+        "next_run_ist":       next_run,
+        "last_cached_at_utc": last_cached_at,
+        "cache_has_data":     cached is not None,
+        "job_id":             "wrd_bihar_refresh",
     }
 
 
 @router.get("/health")
 async def wrd_bihar_health() -> Dict[str, Any]:
-    """Quick health check — does WRD Bihar portal respond?"""
+    """Check if BeFIQR portal is reachable."""
+    primary_url = _WRD_URLS[0]
     try:
-        resp = requests.get(_WRD_URLS[0], headers=_HEADERS, timeout=(3, 6))
-        return {
-            "reachable": resp.ok,
-            "status_code": resp.status_code,
-            "url": _WRD_URLS[0],
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
+        resp = requests.get(primary_url, headers=_HEADERS, timeout=(4, 10))
+        return {"reachable": resp.ok, "status_code": resp.status_code,
+                "url": primary_url, "timestamp": _now_iso()}
     except requests.RequestException as exc:
-        return {
-            "reachable": False,
-            "error": str(exc)[:200],
-            "url": _WRD_URLS[0],
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
+        return {"reachable": False, "error": str(exc)[:250],
+                "url": primary_url, "timestamp": _now_iso()}

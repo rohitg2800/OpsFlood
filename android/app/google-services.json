@@ -7,7 +7,7 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1071864126219:android:fc5dc962ef143d4ae7e00e",
+        "mobilesdk_app_id": "1:1071864126219:android:5f5149d0b9bed892e7e00e",
         "android_client_info": {
           "package_name": "in.rohitg.floodwatch"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "REDACTED"
+          "current_key": "AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU"
         }
       ],
       "services": {

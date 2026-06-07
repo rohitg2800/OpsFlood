@@ -1,3 +1,7 @@
+// lib/providers/theme_provider.dart
+// Riverpod v3 — StateNotifier/StateNotifierProvider removed in v3.
+// Migrated to Notifier<T> + NotifierProvider.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,7 +50,36 @@ class ThemeProvider extends ChangeNotifier {
     _appMode = mode;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, mode.name);
+    final raw   = prefs.getString(_prefsKey);
+    return AppThemeMode.values.firstWhere(
+      (m) => m.name == raw,
+      orElse: () => AppThemeMode.system,
+    );
+  }
+
+  Future<void> save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKey, name);
+  }
+}
+
+// ── Riverpod v3: Notifier<AppThemeMode> ─────────────────────────────────────────
+// ThemeCycleButton calls: ref.watch(themeModeProvider)
+//                         ref.read(themeModeProvider.notifier).cycle()
+class ThemeModeNotifier extends Notifier<AppThemeMode> {
+  @override
+  AppThemeMode build() {
+    // Load persisted value asynchronously after first build
+    Future.microtask(() async {
+      final saved = await AppThemeMode.load();
+      state = saved;
+    });
+    return AppThemeMode.system;
+  }
+
+  Future<void> set(AppThemeMode mode) async {
+    state = mode;
+    await mode.save();
   }
 
   void cycle() {

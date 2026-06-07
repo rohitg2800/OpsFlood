@@ -3,9 +3,8 @@
 // OpsFlood — IndiaStationsService
 // Fetches ALL stations from opsflood.onrender.com/api/v1/stations/all
 // and merges with GloFAS discharge for every lat/lon.
-// Falls back to CWC direct scrape per known state endpoint.
 //
-// Output: List<FloodData> covering all 36 states/UTs returned by backend.
+// Output: List<FloodData> covering all states returned by backend.
 library;
 
 import 'dart:async';
@@ -26,12 +25,8 @@ class IndiaStationsService {
   // GloFAS discharge cache — keyed by "lat2:lon2"
   final Map<String, _CE> _glofasCache = {};
 
-  static const _kTtl = Duration(minutes: 20);
-
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Returns FloodData for every station the backend knows about.
-  /// Merges CWC level + GloFAS discharge + risk from backend.
   Future<List<FloodData>> fetchAll() async {
     try {
       final uri = Uri.parse('${AppConfig.baseUrl}/api/v1/stations/all');
@@ -55,7 +50,7 @@ class IndiaStationsService {
       }
       if (raw.isEmpty) return [];
 
-      // Fan-out GloFAS fetch for unique lat/lon pairs (cached, batched)
+      // Fan-out GloFAS fetch for unique lat/lon pairs (cached)
       final coords = <String, Map<String, double>>{};
       for (final s in raw) {
         if (s is! Map) continue;
@@ -65,9 +60,9 @@ class IndiaStationsService {
         final k = '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
         coords[k] = {'lat': lat, 'lon': lon};
       }
-
       await Future.wait(
-        coords.entries.map((e) => _ensureGloFas(e.key, e.value['lat']!, e.value['lon']!)),
+        coords.entries.map((e) =>
+            _ensureGloFas(e.key, e.value['lat']!, e.value['lon']!)),
         eagerError: false,
       );
 
@@ -101,16 +96,15 @@ class IndiaStationsService {
       final j    = jsonDecode(res.body) as Map<String, dynamic>;
       final vals = _doubles((j['daily'] as Map?)?['river_discharge']);
       if (vals.isEmpty) return;
-      _glofasCache[key] = _CE({'discharge': vals.last, 'discharge7d': vals});
+      _glofasCache[key] = _CE({'discharge': vals.last});
     } catch (_) {}
   }
 
-  double? _glofasFlow(double? lat, double? lon) {
-    if (lat == null || lon == null) return null;
-    final k = '${lat.toStringAsFixed(2)}:${lon.toStringAsFixed(2)}';
-    final entry = _glofasCache[k];
-    if (entry == null || !entry.valid) return null;
-    return _d(entry.data['discharge']);
+  double? _glofasFlow(dynamic lat, dynamic lon) {
+    final la = _d(lat), lo = _d(lon);
+    if (la == null || lo == null) return null;
+    final k = '${la.toStringAsFixed(2)}:${lo.toStringAsFixed(2)}';
+    return _d(_glofasCache[k]?.data['discharge']);
   }
 
   // ── FloodData builder ──────────────────────────────────────────────────────
@@ -120,54 +114,51 @@ class IndiaStationsService {
     final state = raw['state']?.toString() ?? raw['state_name']?.toString() ?? '';
     if (city.isEmpty || state.isEmpty) return null;
 
-    final lat     = _d(raw['latitude'] ?? raw['lat']);
-    final lon     = _d(raw['longitude'] ?? raw['lon']);
-    final current = _d(raw['current_level'] ?? raw['river_level']);
-    final danger  = _d(raw['danger_level']);
-    final warning = _d(raw['warning_level']);
-    final safe    = _d(raw['safe_level']) ?? ((warning ?? 0) - 2).clamp(0.0, 999.0);
+    final current = _d(raw['current_level'] ?? raw['river_level']) ?? 0.0;
+    final danger  = _d(raw['danger_level'])  ?? 0.0;
+    final warning = _d(raw['warning_level']) ?? 0.0;
+    final safe    = _d(raw['safe_level'])    ?? ((warning - 2).clamp(0.0, 999.0));
     final flow    = _d(raw['flow_rate'] ?? raw['river_discharge'])
-                 ?? _glofasFlow(lat, lon);
+                 ?? _glofasFlow(raw['latitude'] ?? raw['lat'],
+                                raw['longitude'] ?? raw['lon']);
+    final rain    = _d(raw['rainfall_24h']) ?? 0.0;
     final rawRisk = (raw['risk_level'] as String?)?.toUpperCase() ?? 'LOW';
     final risk    = _normaliseRisk(rawRisk, current, danger, warning);
-    final river   = raw['river_name']?.toString() ?? raw['river']?.toString();
-    final src     = raw['data_source']?.toString() ?? 'BACKEND';
+    final cap     = danger > 0
+        ? (current / danger * 100).clamp(0.0, 100.0)
+        : 0.0;
 
     return FloodData(
-      id:            raw['id']?.toString() ?? '$state-$city',
-      city:          city,
-      state:         state,
-      latitude:      lat ?? 20.5937,
-      longitude:     lon ?? 78.9629,
-      currentLevel:  current ?? 0.0,
-      dangerLevel:   danger  ?? 0.0,
-      warningLevel:  warning ?? 0.0,
-      safeLevel:     safe,
-      riskLevel:     risk,
-      lastUpdated:   DateTime.now(),
-      riverName:     river,
-      flowRate:      flow,
-      rainfall24h:   _d(raw['rainfall_24h']) ?? 0.0,
-      status:        src,
-      imdRainfallMm: _d(raw['rainfall_24h']) ?? 0.0,
-      imdSeverity:   'GREEN',
+      city:                city,
+      district:            raw['district']?.toString() ?? '',
+      state:               state,
+      riverName:           raw['river_name']?.toString() ?? raw['river']?.toString(),
+      currentLevel:        current,
+      warningLevel:        warning,
+      dangerLevel:         danger,
+      safeLevel:           safe,
+      capacityPercent:     cap,
+      riskLevel:           risk,
+      status:              raw['data_source']?.toString() ?? 'BACKEND',
+      imdSeverity:         'GREEN',
+      imdRainfallMm:       rain,
+      effectiveRainfallMm: rain,
+      flowRate:            flow,
+      lastUpdated:         DateTime.now(),
     );
   }
 
   String _normaliseRisk(
-    String raw, double? current, double? danger, double? warning,
+    String raw, double current, double danger, double warning,
   ) {
-    // Trust backend risk label if it's valid
-    if (['CRITICAL', 'HIGH', 'MODERATE', 'LOW', 'NORMAL'].contains(raw)) {
-      // Re-evaluate if CWC level data says worse
-      if (current != null && danger != null && danger > 0) {
-        final r = current / danger;
-        if (r >= 1.0  && raw != 'CRITICAL') return 'CRITICAL';
-        if (r >= 0.85 && raw == 'LOW')      return 'HIGH';
-      }
-      return raw;
+    const valid = {'CRITICAL', 'HIGH', 'MODERATE', 'LOW', 'NORMAL'};
+    final base = valid.contains(raw) ? raw : 'LOW';
+    if (current > 0 && danger > 0) {
+      final r = current / danger;
+      if (r >= 1.0  && base != 'CRITICAL') return 'CRITICAL';
+      if (r >= 0.85 && base == 'LOW')      return 'HIGH';
     }
-    return 'LOW';
+    return base;
   }
 
   double? _d(dynamic v) {

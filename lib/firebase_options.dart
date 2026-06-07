@@ -6,17 +6,8 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
-/// SECURITY: API keys have been redacted from version control.
-/// Run `flutterfire configure` locally to regenerate this file,
-/// or set keys via environment variables / CI secrets.
-///
-/// Example:
-/// ```dart
-/// import 'firebase_options.dart';
-/// await Firebase.initializeApp(
-///   options: DefaultFirebaseOptions.currentPlatform,
-/// );
-/// ```
+/// Package:  com.equinox_bh.android
+/// Firebase: device-streaming-e762727d
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
@@ -53,13 +44,11 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // SECURITY: Replace FIREBASE_API_KEY and FIREBASE_APP_ID with your actual
-  // values from the Firebase console. Never commit real keys to git.
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey:             String.fromEnvironment('FIREBASE_API_KEY',    defaultValue: 'REPLACE_WITH_YOUR_API_KEY'),
-    appId:              String.fromEnvironment('FIREBASE_APP_ID',     defaultValue: 'REPLACE_WITH_YOUR_APP_ID'),
-    messagingSenderId:  String.fromEnvironment('FIREBASE_SENDER_ID',  defaultValue: '1071864126219'),
-    projectId:          'device-streaming-e762727d',
-    storageBucket:      'device-streaming-e762727d.firebasestorage.app',
+    apiKey: 'AIzaSyBCURE2ta3sKTakAy8Cu679h7EdLyFYIuU',
+    appId: '1:1071864126219:android:5f5149d0b9bed892e7e00e',
+    messagingSenderId: '1071864126219',
+    projectId: 'device-streaming-e762727d',
+    storageBucket: 'device-streaming-e762727d.firebasestorage.app',
   );
 }
