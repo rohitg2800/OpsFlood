@@ -77,11 +77,17 @@ class _AlertCard extends StatelessWidget {
   Color get _severityColor {
     final sev = _field('severity', _field('alert_level', 'low')).toLowerCase();
     if (sev.contains('extreme') || sev.contains('critical') ||
-        sev.contains('red'))   return AppPalette.critical;
+        sev.contains('red')) {
+      return AppPalette.critical;
+    }
     if (sev.contains('severe') || sev.contains('orange') ||
-        sev.contains('high'))  return AppPalette.danger;
+        sev.contains('high')) {
+      return AppPalette.danger;
+    }
     if (sev.contains('moderate') || sev.contains('yellow') ||
-        sev.contains('medium')) return AppPalette.amber;
+        sev.contains('medium')) {
+      return AppPalette.amber;
+    }
     return AppPalette.safe;
   }
 

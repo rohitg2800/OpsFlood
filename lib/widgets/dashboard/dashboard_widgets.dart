@@ -2,6 +2,7 @@
 /// Barrel export for all dashboard sub-widgets.
 /// Import this single file in dashboard_screen.dart:
 ///   import '../widgets/dashboard/dashboard_widgets.dart';
+library;
 export 'command_header.dart';
 export 'hero_section.dart';
 export 'quick_access_grid.dart';

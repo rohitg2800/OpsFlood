@@ -575,7 +575,7 @@ class _HeroCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${current.tempC.toStringAsFixed(1)}',
+                      current.tempC.toStringAsFixed(1),
                       style: TextStyle(
                         fontSize: 58, fontWeight: FontWeight.w900,
                         color: AppPalette.textWhite, height: 1.0,
@@ -942,7 +942,7 @@ class _RainfallChart extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 3),
                   child: Column(
                     children: [
-                      Text('${day.rainMm.toStringAsFixed(0)}',
+                      Text(day.rainMm.toStringAsFixed(0),
                           style: TextStyle(
                             color: col, fontSize: 8,
                             fontWeight: FontWeight.w700)),

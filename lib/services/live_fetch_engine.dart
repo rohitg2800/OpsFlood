@@ -75,7 +75,7 @@ class LiveFetchEngine {
   String?    _error;
   int        _queuedOffline = 0;
   int        _retryCount    = 0;
-  int        _wakeAttempts  = 0;
+  final int        _wakeAttempts  = 0;
 
   void Function()? onStateChanged;
 
@@ -254,7 +254,7 @@ class LiveFetchEngine {
     final res = await http.get(uri).timeout(_httpTimeout);
     if (res.statusCode != 200) throw Exception('GloFAS HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
-    final items = body is List ? body : [body] as List<dynamic>;
+    final items = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar').toList();
     final discharge = <String, List<double?>>{};
@@ -279,7 +279,7 @@ class LiveFetchEngine {
     final res = await http.get(uri).timeout(_httpTimeout);
     if (res.statusCode != 200) throw Exception('Open-Meteo HTTP \${res.statusCode}');
     final body  = jsonDecode(res.body);
-    final items = body is List ? body : [body] as List<dynamic>;
+    final items = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar').toList();
     final result = <String, double?>{};

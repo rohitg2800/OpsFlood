@@ -88,8 +88,8 @@ class FloodData {
     final imdRain = dNull(j['imd_rainfall_mm'] ?? j['imdRainfallMm']);
     final cwcRain = d(j['rainfall_24h_mm'] ?? j['effectiveRainfallMm']);
     final raw  = (j['risk_level'] ?? j['riskLevel'] ?? 'LOW').toString().toUpperCase();
-    const _valid = {'CRITICAL', 'SEVERE', 'MODERATE', 'LOW'};
-    final level = _valid.contains(raw) ? raw : 'LOW';
+    const valid = {'CRITICAL', 'SEVERE', 'MODERATE', 'LOW'};
+    final level = valid.contains(raw) ? raw : 'LOW';
 
     return FloodData(
       city:                (j['city']      as String?) ?? '',

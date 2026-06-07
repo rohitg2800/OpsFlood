@@ -298,11 +298,11 @@ class WeatherNotifier extends Notifier<WeatherState> {
       date:        dates[i],
       maxC:        (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
       minC:        (minT.elementAtOrNull(i)  ?? 0).toDouble(),
-      rainMm:      (rains.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-      precipProb:  (probs.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-      windMaxKph:  (winds.elementAtOrNull(i) ?? 0)?.toDouble() ?? 0,
-      uvIndex:     (uvs.elementAtOrNull(i)   ?? 0)?.toDouble() ?? 0,
-      weatherCode: (codes.elementAtOrNull(i) ?? 0)?.toInt()   ?? 0,
+      rainMm:      (rains.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
+      precipProb:  (probs.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
+      windMaxKph:  (winds.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
+      uvIndex:     (uvs.elementAtOrNull(i)   ?? 0).toDouble() ?? 0,
+      weatherCode: (codes.elementAtOrNull(i) ?? 0).toInt()   ?? 0,
     ));
 
     _applySuccess(lat, lon, cur, forecast);

@@ -41,7 +41,7 @@ class _QuickItem {
 
 class _GridCell extends StatelessWidget {
   final _QuickItem item;
-  const _GridCell({super.key, required this.item});
+  const _GridCell({required this.item});
 
   @override
   Widget build(BuildContext context) {
@@ -53,9 +53,9 @@ class _GridCell extends StatelessWidget {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.06),
+          color: Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

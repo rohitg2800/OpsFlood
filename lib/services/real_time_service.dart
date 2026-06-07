@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'live_fetch_engine.dart';
-import 'ml_inference.dart'; // kept for backwards compat — is an empty library
+// kept for backwards compat — is an empty library
 
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();

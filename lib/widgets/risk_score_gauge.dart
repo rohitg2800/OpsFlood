@@ -132,7 +132,7 @@ class _GaugePainter extends CustomPainter {
 
     // Background arc
     final bgPaint = Paint()
-      ..color = Colors.grey.withOpacity(0.2)
+      ..color = Colors.grey.withValues(alpha: 0.2)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
@@ -150,14 +150,14 @@ class _GaugePainter extends CustomPainter {
     ];
     for (final zone in zones) {
       final zonePaint = Paint()
-        ..color = (zone.$1 as Color).withOpacity(0.3)
+        ..color = (zone.$1).withValues(alpha: 0.3)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 14
         ..strokeCap = StrokeCap.butt;
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius),
-        startAngle + (zone.$2 as double) * sweepAngle,
-        (zone.$3 as double) * sweepAngle,
+        startAngle + (zone.$2) * sweepAngle,
+        (zone.$3) * sweepAngle,
         false, zonePaint);
     }
 

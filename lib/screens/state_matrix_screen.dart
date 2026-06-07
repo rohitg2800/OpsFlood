@@ -128,8 +128,9 @@ class _StateMatrixScreenState extends ConsumerState<StateMatrixScreen>
     int critical = 0, danger = 0, warning = 0, normal = 0;
     for (final fd in live) {
       final s = FloodSeverityHelper.fromString(fd.status);
-      if (s.index >= FloodSeverity.critical.index)     critical++;
-      else if (s.index >= FloodSeverity.danger.index)  danger++;
+      if (s.index >= FloodSeverity.critical.index) {
+        critical++;
+      } else if (s.index >= FloodSeverity.danger.index)  danger++;
       else if (s.index >= FloodSeverity.warning.index) warning++;
       else                                             normal++;
     }

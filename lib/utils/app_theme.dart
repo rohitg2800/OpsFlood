@@ -40,7 +40,7 @@ class AppTheme {
       backgroundColor: floodBlue, foregroundColor: Colors.white,
     ),
     navigationBarTheme: NavigationBarThemeData(
-      indicatorColor: floodBlue.withOpacity(0.15),
+      indicatorColor: floodBlue.withValues(alpha: 0.15),
       labelTextStyle: WidgetStateProperty.all(
         const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
       ),
@@ -159,7 +159,7 @@ class _ShimmerBoxState extends State<ShimmerBox>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(widget.borderRadius),
           color: (isDark ? Colors.grey[800] : Colors.grey[300])
-              ?.withOpacity(_animation.value),
+              ?.withValues(alpha: _animation.value),
         ),
       ),
     );

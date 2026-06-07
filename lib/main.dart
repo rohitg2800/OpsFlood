@@ -11,7 +11,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'ads/admob_init.dart';
 import 'firebase_options.dart';
 import 'l10n/app_localizations.dart';
-import 'providers/flood_providers.dart';
 import 'providers/locale_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/alerts_screen.dart';

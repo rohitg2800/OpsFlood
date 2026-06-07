@@ -30,7 +30,7 @@ DateTime _dt(dynamic v) {
 class _CacheResult {
   final String? value;
   final bool isStale;
-  const _CacheResult(this.value, {this.isStale = false});
+  const _CacheResult(this.value) : isStale = false;
 }
 
 class DbStation {

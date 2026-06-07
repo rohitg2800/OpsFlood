@@ -14,10 +14,10 @@ class RiverPulseCard extends StatelessWidget {
     final riskColor = _riskColor(data.riskLevel);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      color: Colors.white.withOpacity(0.06),
+      color: Colors.white.withValues(alpha: 0.06),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: riskColor.withOpacity(0.35)),
+        side: BorderSide(color: riskColor.withValues(alpha: 0.35)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
