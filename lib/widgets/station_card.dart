@@ -97,15 +97,6 @@ class _StationCardState extends State<StationCard>
     _expanded ? _ctrl.forward() : _ctrl.reverse();
   }
 
-  /// Sub-label under city: "Kosi · Supaul · Bihar"
-  String get _subLabel {
-    final parts = <String>[];
-    if (river.isNotEmpty)    parts.add(river);
-    if (district.isNotEmpty) parts.add(district);
-    if (state.isNotEmpty)    parts.add(state);
-    return parts.join('  ·  ');
-  }
-
   @override
   Widget build(BuildContext context) {
     final col = _statusColor;
@@ -181,9 +172,9 @@ class _StationCardState extends State<StationCard>
                         overflow: TextOverflow.ellipsis,
                       ),
                       // district chip only if non-empty
-                      if (district.isNotEmpty) ...[
+                      if (widget.district.isNotEmpty) ...[
                         const SizedBox(height: 3),
-                        _DistrictChip(district: district),
+                        _DistrictChip(district: widget.district),
                       ],
                     ],
                   ),
@@ -232,9 +223,9 @@ class _StationCardState extends State<StationCard>
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
-              if (danger > 0 && warning > 0)
+              if (widget.danger > 0 && widget.warning > 0)
                 Positioned(
-                  left: (warning / danger).clamp(0.0, 1.0) *
+                  left: (widget.warning / widget.danger).clamp(0.0, 1.0) *
                       (MediaQuery.of(context).size.width - 92),
                   top: 0, bottom: 0,
                   child: Container(
@@ -455,7 +446,8 @@ class _DetailTile extends StatelessWidget {
       );
 }
 
-// ── Level Fill Bar ────────────────────────────────────────────────────────────
+// ── Level Fill Bar (unused — kept for future use) ─────────────────────────────
+// ignore: unused_element
 class _LevelFillBar extends StatelessWidget {
   const _LevelFillBar({
     required this.fillPct,
@@ -663,7 +655,8 @@ class _StatusChip extends StatelessWidget {
       );
 }
 
-// ── Trend chip ────────────────────────────────────────────────────────────────
+// ── Trend chip (unused — kept for future use) ─────────────────────────────────
+// ignore: unused_element
 class _TrendChip extends StatelessWidget {
   final String trend;
   const _TrendChip({required this.trend});

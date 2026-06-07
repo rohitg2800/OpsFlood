@@ -17,7 +17,7 @@ class RiverDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = data.priorityColor;
     return Scaffold(
-      backgroundColor: AppPalette.abyss,
+      backgroundColor: AppPalette.abyss1,
       appBar: AppBar(
         backgroundColor: AppPalette.abyss2,
         foregroundColor: AppPalette.textWhite,
@@ -70,9 +70,11 @@ class RiverDetailScreen extends StatelessWidget {
             // ── Risk bar ────────────────────────────────────────────
             _SectionTitle('Risk Gauge'),
             RiskBar(
-              currentLevel: data.currentLevel,
-              warningLevel: data.warningLevel,
-              dangerLevel:  data.dangerLevel,
+              value:   data.capacityPercent.clamp(0, 100),
+              warning: data.warningLevel > 0 && data.dangerLevel > 0
+                  ? (data.warningLevel / data.dangerLevel * 100).clamp(0, 100)
+                  : 60,
+              danger:  80,
             ),
             const SizedBox(height: 14),
 
