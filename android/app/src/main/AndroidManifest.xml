@@ -1,10 +1,12 @@
 <!-- android/app/src/main/AndroidManifest.xml -->
 <!-- Added ACCESS_FINE_LOCATION + ACCESS_COARSE_LOCATION for geolocator -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-   >
+    xmlns:tools="http://schemas.android.com/tools">
+
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="EQUINOX-BH"
         android:name="${applicationName}"
@@ -50,8 +52,8 @@
             </intent-filter>
         </service>
 
-        <!-- ── AI Prediction Background Service (flutter_background_service) ────
-             tools:replace overrides the plugin’s android:exported="true"
+        <!-- AI Prediction Background Service (flutter_background_service)
+             tools:replace overrides the plugin's android:exported="true"
              with our safer android:exported="false".                    -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
@@ -59,7 +61,7 @@
             android:exported="false"
             tools:replace="android:exported" />
 
-        <!-- ── Auto-restart service on device reboot ──────────────────── -->
+        <!-- Auto-restart service on device reboot -->
         <receiver
             android:name="id.flutter.flutter_background_service.BootReceiver"
             android:exported="true">
