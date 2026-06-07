@@ -1,9 +1,13 @@
 // lib/screens/bihar_river_map_screen.dart
-// BiharRiverMapScreen v6.2
-// Fixes:
-//  1. GeoJSON URL: Bihar.json (404) → bihar.geojson, branch main → master
-//  2. River polyline strokeWidth 2.5 → 3.5 so lines are visible over polygons
-//  3. District polygon fill alpha 0.04 → 0.10 (normal) so boundaries show on dark tile
+// BiharRiverMapScreen v7.0 — custom map legend
+//
+// Legend (_MapLegend widget, bottom-left):
+//   • Collapsible glass panel with legend toggle button
+//   • Section 1 — Flood Alert Levels: 5 severity rows with icon + colour + English + Hindi label
+//   • Section 2 — Water Level Bar: annotated bar showing Normal / Watch / Warning / Danger / Extreme zones
+//   • Section 3 — Rivers: coloured line swatch + name for every river drawn on the map
+//   • Section 4 — District Shading: a gradient swatch explaining fill-intensity → severity mapping
+//   Legend auto-hides when a station sheet is open.
 library;
 
 import 'dart:convert';
@@ -23,7 +27,7 @@ import '../utils/flood_severity_helper.dart';
 import '../screens/city_detail_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Coordinate resolver — priority: API lat/lng > registry > null
+// Coordinate + district helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 LatLng? _coordsFor(FloodData fd) {
@@ -83,10 +87,9 @@ const _biharRivers = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GeoJSON provider — FIXED URL: bihar.geojson on master branch
+// GeoJSON provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-// FIX 1: was 'Bihar.json' on 'main' — correct path is 'bihar.geojson' on 'master'
 const _biharGeoJsonUrl =
     'https://cdn.jsdelivr.net/gh/udit-001/india-maps-data@master/geojson/states/bihar.geojson';
 
@@ -150,11 +153,17 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             _coordsFor(fd) != null)
         .toList();
 
+    // Count active alert stations for legend summary
+    final alertCount = biharStations
+        .where((fd) => FloodSeverityHelper.fromString(fd.status).requiresAction)
+        .length;
+
     return Scaffold(
       backgroundColor: t.scaffoldBg,
       body: Stack(
         children: [
 
+          // ── MAP ──────────────────────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -171,7 +180,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                 maxZoom: 19,
               ),
 
-              // Districts — rendered first so rivers draw on top
               if (_showDistricts)
                 geoAsync.when(
                   data:    (geo) => _DistrictLayer(geoJson: geo, districtData: districtData),
@@ -179,12 +187,11 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                   error:   (_, __) => const SizedBox.shrink(),
                 ),
 
-              // FIX 2: strokeWidth 2.5 → 3.5, alpha 0.85 → 1.0 — always on top of polygons
               if (_showRivers)
                 PolylineLayer(
                   polylines: _biharRivers.map((r) => Polyline(
                     points: r.points,
-                    color: r.color,           // full opacity
+                    color: r.color,
                     strokeWidth: 3.5,
                   )).toList(),
                 ),
@@ -246,7 +253,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ],
           ),
 
-          // ── App bar
+          // ── App bar ───────────────────────────────────────────────────────────
           Positioned(
             top: 0, left: 0, right: 0,
             child: SafeArea(
@@ -265,6 +272,18 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                             Text('Bihar River Map', style: TextStyle(
                                 color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w800)),
                             const Spacer(),
+                            if (alertCount > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppPalette.danger.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: AppPalette.danger.withValues(alpha: 0.40)),
+                                ),
+                                child: Text('$alertCount alerts',
+                                    style: const TextStyle(color: AppPalette.danger, fontSize: 9, fontWeight: FontWeight.w800)),
+                              ),
+                            if (alertCount > 0) const SizedBox(width: 6),
                             if (biharStations.isNotEmpty)
                               Text('${biharStations.length} stations',
                                   style: TextStyle(color: t.textSecondary, fontSize: 10)),
@@ -278,7 +297,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ── Layer toggles
+          // ── Layer toggles (right side) ─────────────────────────────────────
           Positioned(
             right: 12,
             bottom: _selected != null ? 290 : 120,
@@ -293,34 +312,18 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ── River legend
-          if (_showRivers && _selected == null)
+          // ── Custom Map Legend (bottom-left, hides when sheet is open) ──────
+          if (_selected == null)
             Positioned(
-              left: 12, bottom: 100,
-              child: _GlassCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Rivers', style: TextStyle(
-                        color: t.textSecondary, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-                    const SizedBox(height: 6),
-                    ..._biharRivers.map((r) => Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(width: 18, height: 3, color: r.color),
-                          const SizedBox(width: 5),
-                          Text(r.name, style: TextStyle(color: r.color, fontSize: 9, fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    )),
-                  ],
-                ),
+              left: 12,
+              bottom: 100,
+              child: _MapLegend(
+                showRivers:    _showRivers,
+                showDistricts: _showDistricts,
               ),
             ),
 
-          // ── Station sheet
+          // ── Station sheet ──────────────────────────────────────────────────
           if (_selected != null)
             Positioned(
               left: 0, right: 0, bottom: 0,
@@ -335,7 +338,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
               ),
             ),
 
-          // ── GeoJSON loading / error feedback
+          // ── GeoJSON loading / error ─────────────────────────────────────────
           if (geoAsync.isLoading)
             Positioned(
               top: 80, left: 0, right: 0,
@@ -371,8 +374,453 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// _MapLegend — collapsible map legend panel
+//
+// Sections (each collapsible individually):
+//   1. Flood Alert Levels — severity rows with icon + colour dot + labels
+//   2. Water Level Bar   — annotated horizontal bar showing zone thresholds
+//   3. Rivers            — coloured line swatch + river name
+//   4. District Shading  — gradient bar explaining fill colour intensity
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _MapLegend extends StatefulWidget {
+  final bool showRivers;
+  final bool showDistricts;
+  const _MapLegend({required this.showRivers, required this.showDistricts});
+
+  @override
+  State<_MapLegend> createState() => _MapLegendState();
+}
+
+class _MapLegendState extends State<_MapLegend> with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+
+  // Individual section collapse state
+  bool _showAlerts    = true;
+  bool _showLevelBar  = true;
+  bool _showRiversSec = true;
+  bool _showDistrSec  = true;
+
+  late final AnimationController _anim;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() { _anim.dispose(); super.dispose(); }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    _expanded ? _anim.forward() : _anim.reverse();
+  }
+
+  // ── severity level rows ────────────────────────────────────────────────────
+  static const _levels = [
+    (FloodSeverity.normal,  'Normal',  'सामान्य'),
+    (FloodSeverity.watch,   'Watch',   'सतर्क'),
+    (FloodSeverity.warning, 'Warning', 'चेतावनी'),
+    (FloodSeverity.danger,  'Danger',  'खतरा'),
+    (FloodSeverity.extreme, 'Extreme', 'अतिखतरा'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      alignment: Alignment.bottomLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 200),
+        decoration: BoxDecoration(
+          color: t.cardBg.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.stroke, width: 1),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 16)],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // ── Header row ─────────────────────────────────────────────────
+            GestureDetector(
+              onTap: _toggle,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+                child: Row(
+                  children: [
+                    Icon(Icons.legend_toggle_rounded, color: t.accent, size: 13),
+                    const SizedBox(width: 6),
+                    Text('Legend', style: TextStyle(
+                        color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4)),
+                    const Spacer(),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(Icons.keyboard_arrow_down_rounded,
+                          color: t.textSecondary, size: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── Expandable body ─────────────────────────────────────────────
+            FadeTransition(
+              opacity: _fade,
+              child: _expanded
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _LegendDivider(t),
+
+                        // ① Flood Alert Levels
+                        _SectionHeader(
+                          title: 'Alert Levels',
+                          icon: Icons.warning_amber_rounded,
+                          expanded: _showAlerts,
+                          onToggle: () => setState(() => _showAlerts = !_showAlerts),
+                          t: t,
+                        ),
+                        if (_showAlerts) ...[
+                          const SizedBox(height: 4),
+                          for (final row in _levels)
+                            _AlertLevelRow(sev: row.$1, label: row.$2, hindi: row.$3, t: t),
+                          const SizedBox(height: 6),
+                        ],
+
+                        _LegendDivider(t),
+
+                        // ② Water Level Bar
+                        _SectionHeader(
+                          title: 'Water Level Zones',
+                          icon: Icons.straighten_rounded,
+                          expanded: _showLevelBar,
+                          onToggle: () => setState(() => _showLevelBar = !_showLevelBar),
+                          t: t,
+                        ),
+                        if (_showLevelBar) ...[
+                          const SizedBox(height: 6),
+                          const _WaterLevelBar(),
+                          const SizedBox(height: 6),
+                        ],
+
+                        // ③ Rivers
+                        if (widget.showRivers) ...[
+                          _LegendDivider(t),
+                          _SectionHeader(
+                            title: 'Rivers',
+                            icon: Icons.water_rounded,
+                            expanded: _showRiversSec,
+                            onToggle: () => setState(() => _showRiversSec = !_showRiversSec),
+                            t: t,
+                          ),
+                          if (_showRiversSec) ...[
+                            const SizedBox(height: 4),
+                            for (final r in _biharRivers) _RiverRow(river: r, t: t),
+                            const SizedBox(height: 4),
+                          ],
+                        ],
+
+                        // ④ District Shading
+                        if (widget.showDistricts) ...[
+                          _LegendDivider(t),
+                          _SectionHeader(
+                            title: 'District Fill',
+                            icon: Icons.grid_view_rounded,
+                            expanded: _showDistrSec,
+                            onToggle: () => setState(() => _showDistrSec = !_showDistrSec),
+                            t: t,
+                          ),
+                          if (_showDistrSec) ...[
+                            const SizedBox(height: 6),
+                            const _DistrictShadingBar(),
+                            const SizedBox(height: 8),
+                          ],
+                        ],
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legend sub-widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LegendDivider extends StatelessWidget {
+  final RiverColors t;
+  const _LegendDivider(this.t);
+  @override
+  Widget build(BuildContext context) =>
+      Divider(height: 1, thickness: 1, color: t.stroke.withValues(alpha: 0.60));
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final RiverColors t;
+  const _SectionHeader({
+    required this.title, required this.icon,
+    required this.expanded, required this.onToggle, required this.t,
+  });
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onToggle,
+    behavior: HitTestBehavior.opaque,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 7, 10, 3),
+      child: Row(
+        children: [
+          Icon(icon, color: t.accent, size: 10),
+          const SizedBox(width: 5),
+          Text(title, style: TextStyle(
+              color: t.textSecondary, fontSize: 9,
+              fontWeight: FontWeight.w700, letterSpacing: 0.7)),
+          const Spacer(),
+          Icon(expanded ? Icons.remove_rounded : Icons.add_rounded,
+              color: t.textSecondary, size: 11),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Single severity row: colour dot · icon · English · Hindi
+class _AlertLevelRow extends StatelessWidget {
+  final FloodSeverity sev;
+  final String label;
+  final String hindi;
+  final RiverColors t;
+  const _AlertLevelRow({
+    required this.sev, required this.label, required this.hindi, required this.t,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final color = FloodSeverityHelper.color(sev);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 10, 4),
+      child: Row(
+        children: [
+          // Coloured dot
+          Container(
+            width: 8, height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4)],
+            ),
+          ),
+          const SizedBox(width: 5),
+          // Severity icon
+          Icon(FloodSeverityHelper.icon(sev), color: color, size: 11),
+          const SizedBox(width: 5),
+          // English label
+          Expanded(
+            child: Text(label, style: TextStyle(
+                color: color, fontSize: 9.5, fontWeight: FontWeight.w700)),
+          ),
+          // Hindi label
+          Text(hindi, style: TextStyle(
+              color: color.withValues(alpha: 0.65), fontSize: 8.5,
+              fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Horizontal segmented bar showing water level zones with threshold labels
+class _WaterLevelBar extends StatelessWidget {
+  const _WaterLevelBar();
+
+  static const _segments = [
+    (Color(0xFF10E88A), 'Normal',  ''),
+    (Color(0xFF00C6FF), 'Watch',   '90%W'),
+    (Color(0xFFFFA520), 'Warning', 'W'),
+    (Color(0xFFFF5500), 'Danger',  'D'),
+    (Color(0xFFFF1A44), 'Extreme', '115%D'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Segmented bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: SizedBox(
+              height: 10,
+              child: Row(
+                children: _segments.map((s) => Expanded(
+                  child: Container(color: s.$1),
+                )).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          // Threshold tick labels
+          Row(
+            children: List.generate(_segments.length, (i) {
+              final label = _segments[i].$3;
+              return Expanded(
+                child: label.isEmpty
+                    ? const SizedBox.shrink()
+                    : Text(label,
+                        style: TextStyle(color: t.textSecondary, fontSize: 7.5,
+                            fontWeight: FontWeight.w600),
+                        textAlign: i == 0 ? TextAlign.start : TextAlign.center),
+              );
+            }),
+          ),
+          const SizedBox(height: 4),
+          // Compact legend row
+          Row(
+            children: _segments.map((s) => Expanded(
+              child: Text(s.$2,
+                style: TextStyle(color: s.$1, fontSize: 7, fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+            )).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Single river row: coloured line swatch + name
+class _RiverRow extends StatelessWidget {
+  final _RiverLine river;
+  final RiverColors t;
+  const _RiverRow({required this.river, required this.t});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 0, 10, 3),
+    child: Row(
+      children: [
+        // Line swatch with rounded caps
+        SizedBox(
+          width: 20, height: 10,
+          child: CustomPaint(painter: _LinePainter(river.color)),
+        ),
+        const SizedBox(width: 6),
+        Text(river.name, style: TextStyle(
+            color: river.color, fontSize: 9, fontWeight: FontWeight.w600)),
+      ],
+    ),
+  );
+}
+
+/// Draws a short horizontal line with rounded caps for the river legend swatch
+class _LinePainter extends CustomPainter {
+  final Color color;
+  const _LinePainter(this.color);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(0, size.height / 2),
+      Offset(size.width, size.height / 2),
+      paint,
+    );
+  }
+  @override
+  bool shouldRepaint(_LinePainter old) => old.color != color;
+}
+
+/// Gradient bar explaining district fill colour intensity → severity
+class _DistrictShadingBar extends StatelessWidget {
+  const _DistrictShadingBar();
+
+  static const _stops = [
+    (Color(0xFF10E88A), 'Normal'),
+    (Color(0xFF00C6FF), 'Watch'),
+    (Color(0xFFFFA520), 'Warning'),
+    (Color(0xFFFF5500), 'Danger'),
+    (Color(0xFFFF1A44), 'Extreme'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Gradient bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: SizedBox(
+              height: 8,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: _stops.map((s) => s.$1.withValues(alpha: 0.70)).toList(),
+                  ),
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Low risk', style: TextStyle(color: t.textSecondary, fontSize: 7.5)),
+              Text('High risk', style: TextStyle(color: AppPalette.danger, fontSize: 7.5)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          // Colour chips
+          Row(
+            children: _stops.map((s) => Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 6, height: 6,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: s.$1),
+                  ),
+                  const SizedBox(width: 2),
+                  Flexible(child: Text(s.$2,
+                    style: TextStyle(color: s.$1, fontSize: 6.5, fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis)),
+                ],
+              ),
+            )).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // District polygon layer
-// FIX 3: normal-state fill alpha 0.04 → 0.10, border alpha 0.20 → 0.35
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DistrictLayer extends StatelessWidget {
@@ -391,15 +839,14 @@ class _DistrictLayer extends StatelessWidget {
 
     for (final feat in features) {
       final props    = feat['properties'] as Map? ?? {};
-      // This dataset uses 'district' key (lowercase)
       final name     = (props['district'] ?? props['District'] ?? props['NAME_2'] ?? props['name'] ?? '').toString();
       final geometry = feat['geometry'] as Map? ?? {};
       final type     = geometry['type'] as String? ?? '';
       final coords   = geometry['coordinates'] as List? ?? [];
 
-      final fd  = districtData[name];
-      final sev = fd != null ? FloodSeverityHelper.fromString(fd.status) : FloodSeverity.normal;
-      final isNormal    = sev == FloodSeverity.normal;
+      final fd        = districtData[name];
+      final sev       = fd != null ? FloodSeverityHelper.fromString(fd.status) : FloodSeverity.normal;
+      final isNormal  = sev == FloodSeverity.normal;
       final fillColor   = FloodSeverityHelper.color(sev).withValues(alpha: isNormal ? 0.10 : 0.22);
       final borderColor = FloodSeverityHelper.color(sev).withValues(alpha: isNormal ? 0.35 : 0.60);
 
