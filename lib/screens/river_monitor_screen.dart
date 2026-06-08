@@ -1,4 +1,7 @@
 // lib/screens/river_monitor_screen.dart
+// UI v2 — richer data-driven cards, stale-data warning, district line,
+//          IMD rainfall chip, safe-level stat, 2-row 3-chip stat grid.
+// Logic unchanged: same providers, same FloodData fields.
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +25,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     return levels.where((fd) =>
         fd.city.toLowerCase().contains(q) ||
         fd.state.toLowerCase().contains(q) ||
+        fd.district.toLowerCase().contains(q) ||
         (fd.riverName?.toLowerCase().contains(q) ?? false)).toList();
   }
 
@@ -30,17 +34,44 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
     final rt     = ref.watch(realTimeServiceProvider);
     final levels = _filtered(rt.liveLevels);
 
+    // summary counts for header strip
+    final critCount = rt.liveLevels
+        .where((d) => d.riskLevel.toUpperCase() == 'CRITICAL').length;
+    final sevCount  = rt.liveLevels
+        .where((d) => d.riskLevel.toUpperCase() == 'SEVERE').length;
+
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
       appBar: AppBar(
         backgroundColor: AppPalette.abyss1,
         elevation: 0,
-        title: const Text('Rivers',
-            style: TextStyle(
+        scrolledUnderElevation: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'River Monitor',
+              style: TextStyle(
                 color: AppPalette.textWhite,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1)),
-        centerTitle: true,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+                letterSpacing: 0.2,
+              ),
+            ),
+            if (rt.liveLevels.isNotEmpty)
+              Text(
+                '${rt.liveLevels.length} stations · '
+                '${critCount > 0 ? "$critCount critical · " : ""}'
+                '${sevCount > 0 ? "$sevCount severe · " : ""}'
+                '${rt.liveLevels.length - critCount - sevCount} normal',
+                style: const TextStyle(
+                  color: AppPalette.textGrey,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+          ],
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Padding(
@@ -48,7 +79,7 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
             child: TextField(
               style: const TextStyle(color: AppPalette.textWhite),
               decoration: InputDecoration(
-                hintText: 'Search city, state or river…',
+                hintText: 'Search city, district, state or river…',
                 hintStyle:
                     const TextStyle(color: AppPalette.textGrey, fontSize: 13),
                 prefixIcon:
@@ -82,11 +113,20 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
               child: CircularProgressIndicator(color: AppPalette.cyan))
           : levels.isEmpty
               ? Center(
-                  child: Text(
-                    _query.isEmpty
-                        ? 'No live data available.'
-                        : 'No results for “$_query”.',
-                    style: const TextStyle(color: AppPalette.textGrey),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.water_drop_outlined,
+                          color: AppPalette.textGrey, size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        _query.isEmpty
+                            ? 'No live data available.'
+                            : 'No results for "$_query".',
+                        style:
+                            const TextStyle(color: AppPalette.textGrey),
+                      ),
+                    ],
                   ),
                 )
               : ListView.builder(
@@ -101,12 +141,20 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Premium River Card
+// River Card v2
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RiverCard extends StatelessWidget {
   final FloodData data;
   const _RiverCard({required this.data});
+
+  static const _staleThreshold = Duration(hours: 3);
+  static const _outdatedThreshold = Duration(hours: 12);
+
+  bool get _isStale =>
+      DateTime.now().difference(data.lastUpdated) > _staleThreshold;
+  bool get _isOutdated =>
+      DateTime.now().difference(data.lastUpdated) > _outdatedThreshold;
 
   @override
   Widget build(BuildContext context) {
@@ -122,16 +170,57 @@ class _RiverCard extends StatelessWidget {
         color: AppPalette.abyss1,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: color.withValues(alpha: 0.30), width: 1),
+            color: color.withValues(alpha: _isOutdated ? 0.12 : 0.30), width: 1),
         boxShadow: [
           BoxShadow(
-              color: color.withValues(alpha: 0.10),
+              color: color.withValues(alpha: _isOutdated ? 0.04 : 0.10),
               blurRadius: 20,
               offset: const Offset(0, 6)),
         ],
       ),
       child: Column(
         children: [
+          // ── Stale/Outdated banner ─────────────────────────────────────────
+          if (_isStale)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: (_isOutdated
+                        ? const Color(0xFFEF5350)
+                        : const Color(0xFFFFA726))
+                    .withValues(alpha: 0.10),
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isOutdated
+                        ? Icons.error_outline_rounded
+                        : Icons.access_time_rounded,
+                    size: 12,
+                    color: _isOutdated
+                        ? const Color(0xFFEF5350)
+                        : const Color(0xFFFFA726),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    _isOutdated
+                        ? 'Outdated data · last seen ${_timeAgo(data.lastUpdated)}'
+                        : 'Stale · last updated ${_timeAgo(data.lastUpdated)}',
+                    style: TextStyle(
+                      color: _isOutdated
+                          ? const Color(0xFFEF5350)
+                          : const Color(0xFFFFA726),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // ── Header row ────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 14, 0),
@@ -142,13 +231,13 @@ class _RiverCard extends StatelessWidget {
                   percent: pct,
                   warnAt: warnPct,
                   color: color,
-                  size: 72,
+                  size: 76,
                   centerLabel:
                       '${data.capacityPercent.toStringAsFixed(0)}%',
                   subLabel: 'fill',
                 ),
                 const SizedBox(width: 14),
-                // Name + river
+                // Name + river + district
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -162,7 +251,29 @@ class _RiverCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
+                      // District line (new)
+                      if (data.district.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.location_city_rounded,
+                                  size: 11,
+                                  color: AppPalette.textGrey),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  '${data.district} · ${data.state}',
+                                  style: const TextStyle(
+                                      color: AppPalette.textGrey,
+                                      fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       Row(
                         children: [
                           const Icon(Icons.waves,
@@ -170,7 +281,7 @@ class _RiverCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
-                              '${data.riverName ?? 'N/A'}  •  ${data.state}',
+                              data.riverName ?? 'N/A',
                               style: const TextStyle(
                                   color: AppPalette.textGrey,
                                   fontSize: 12),
@@ -180,7 +291,7 @@ class _RiverCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Risk badge + status badge
+                      // Badges row
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
@@ -199,6 +310,13 @@ class _RiverCard extends StatelessWidget {
                                 bg: _imdColor(data.imdSeverity!)
                                     .withValues(alpha: 0.15),
                                 fg: _imdColor(data.imdSeverity!)),
+                          // Fresh/Stale indicator badge
+                          if (!_isStale)
+                            _Badge(
+                                label: '● LIVE',
+                                bg: const Color(0xFF4CAF50)
+                                    .withValues(alpha: 0.12),
+                                fg: const Color(0xFF4CAF50)),
                         ],
                       ),
                     ],
@@ -209,10 +327,11 @@ class _RiverCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 14),
-          const Divider(color: Color(0x1800C6FF), height: 1, indent: 14, endIndent: 14),
+          const Divider(
+              color: Color(0x1800C6FF), height: 1, indent: 14, endIndent: 14),
           const SizedBox(height: 12),
 
-          // ── Stat chips row ─────────────────────────────────────────────────
+          // ── Row 1: Level · Warning · Rain24h ───────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
@@ -243,7 +362,7 @@ class _RiverCard extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // ── Second stat row (flow + danger + updated) ──────────────────────
+          // ── Row 2: Danger · Flow · Safe · Updated ──────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
@@ -255,27 +374,83 @@ class _RiverCard extends StatelessWidget {
                   accent: const Color(0xFFEF5350),
                 ),
                 const SizedBox(width: 8),
-                if (data.flowRate != null)
+                _StatChip(
+                  icon: Icons.check_circle_outline,
+                  label: 'Safe',
+                  value: '${data.safeLevel.toStringAsFixed(1)} m',
+                  accent: const Color(0xFF66BB6A),
+                ),
+                const SizedBox(width: 8),
+                // IMD Rainfall if available, else Flow
+                if (data.imdRainfallMm != null)
+                  _StatChip(
+                    icon: Icons.grain_rounded,
+                    label: 'IMD Rain',
+                    value: '${data.imdRainfallMm!.toStringAsFixed(1)} mm',
+                    accent: const Color(0xFF42A5F5),
+                  )
+                else if (data.flowRate != null)
                   _StatChip(
                     icon: Icons.speed,
                     label: 'Flow',
-                    value: '${(data.flowRate! / 1000).toStringAsFixed(1)}k m³/s',
+                    value:
+                        '${(data.flowRate! / 1000).toStringAsFixed(1)}k m³/s',
                     accent: const Color(0xFF66BB6A),
                   )
                 else
                   _StatChip(
-                    icon: Icons.speed,
-                    label: 'Flow',
-                    value: 'N/A',
-                    accent: AppPalette.textGrey,
+                    icon: Icons.access_time,
+                    label: 'Updated',
+                    value: _timeAgo(data.lastUpdated),
+                    accent: _isOutdated
+                        ? const Color(0xFFEF5350)
+                        : _isStale
+                            ? const Color(0xFFFFA726)
+                            : AppPalette.textGrey,
                   ),
-                const SizedBox(width: 8),
-                _StatChip(
-                  icon: Icons.access_time,
-                  label: 'Updated',
-                  value: _timeAgo(data.lastUpdated),
-                  accent: AppPalette.textGrey,
+              ],
+            ),
+          ),
+
+          // ── Updated timestamp row ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.access_time_rounded,
+                  size: 11,
+                  color: _isOutdated
+                      ? const Color(0xFFEF5350)
+                      : _isStale
+                          ? const Color(0xFFFFA726)
+                          : AppPalette.textGrey,
                 ),
+                const SizedBox(width: 4),
+                Text(
+                  'Updated ${_timeAgo(data.lastUpdated)}',
+                  style: TextStyle(
+                    color: _isOutdated
+                        ? const Color(0xFFEF5350)
+                        : _isStale
+                            ? const Color(0xFFFFA726)
+                            : AppPalette.textGrey,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (data.flowRate != null && data.imdRainfallMm != null) ...[
+                  const Spacer(),
+                  Icon(Icons.speed, size: 11, color: AppPalette.textGrey),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${(data.flowRate! / 1000).toStringAsFixed(1)}k m³/s',
+                    style: const TextStyle(
+                        color: AppPalette.textGrey,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ],
               ],
             ),
           ),
@@ -289,6 +464,7 @@ class _RiverCard extends StatelessWidget {
               current: data.currentLevel,
               warning: data.warningLevel,
               danger:  data.dangerLevel,
+              safe:    data.safeLevel,
               color:   color,
             ),
           ),
@@ -308,7 +484,7 @@ class _RiverCard extends StatelessWidget {
 
   String _timeAgo(DateTime t) {
     final diff = DateTime.now().difference(t);
-    if (diff.inMinutes < 1)  return 'now';
+    if (diff.inMinutes < 1)  return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours   < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
@@ -316,12 +492,12 @@ class _RiverCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Arc Gauge (CustomPaint circular progress with tick marks)
+// Arc Gauge (CustomPaint — unchanged logic)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ArcGauge extends StatelessWidget {
-  final double percent;   // 0–1 filled
-  final double warnAt;    // 0–1 position to draw warning tick
+  final double percent;
+  final double warnAt;
   final Color  color;
   final double size;
   final String centerLabel;
@@ -386,18 +562,16 @@ class _ArcPainter extends CustomPainter {
     required this.color,
   });
 
-  static const _start  = math.pi * 0.75;     // 7:30 o'clock position
-  static const _sweep  = math.pi * 1.5;      // 270°
+  static const _start  = math.pi * 0.75;
+  static const _sweep  = math.pi * 1.5;
 
   @override
   void paint(Canvas canvas, Size size) {
     final cx    = size.width  / 2;
     final cy    = size.height / 2;
     final outer = size.width  / 2 - 4;
-    final inner = outer - 8;
     final rect  = Rect.fromCircle(center: Offset(cx, cy), radius: outer);
 
-    // Track
     canvas.drawArc(
       rect, _start, _sweep, false,
       Paint()
@@ -407,7 +581,6 @@ class _ArcPainter extends CustomPainter {
         ..color       = AppPalette.abyss2,
     );
 
-    // Filled arc
     if (percent > 0) {
       canvas.drawArc(
         rect, _start, _sweep * percent.clamp(0, 1), false,
@@ -423,7 +596,6 @@ class _ArcPainter extends CustomPainter {
       );
     }
 
-    // Warning tick
     final wAngle = _start + _sweep * warnAt;
     final tickR  = outer + 3;
     final p1 = Offset(
@@ -440,14 +612,12 @@ class _ArcPainter extends CustomPainter {
         ..strokeCap   = StrokeCap.round,
     );
 
-    // Dot at current position
     if (percent > 0.01) {
       final dAngle = _start + _sweep * percent;
       final dotC   = Offset(
           cx + outer * math.cos(dAngle),
           cy + outer * math.sin(dAngle));
-      canvas.drawCircle(dotC, 4,
-          Paint()..color = color);
+      canvas.drawCircle(dotC, 4, Paint()..color = color);
       canvas.drawCircle(dotC, 4,
           Paint()
             ..color       = Colors.white.withValues(alpha: 0.3)
@@ -545,16 +715,17 @@ class _Badge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Level Bar
+// Level Bar v2 — shows safe level marker too
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LevelBar extends StatelessWidget {
-  final double current, warning, danger;
+  final double current, warning, danger, safe;
   final Color  color;
   const _LevelBar({
     required this.current,
     required this.warning,
     required this.danger,
+    required this.safe,
     required this.color,
   });
 
@@ -562,6 +733,7 @@ class _LevelBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final pct  = danger > 0 ? (current / danger).clamp(0.0, 1.0) : 0.0;
     final wPct = danger > 0 ? (warning / danger).clamp(0.0, 1.0) : 0.65;
+    final sPct = danger > 0 ? (safe    / danger).clamp(0.0, 1.0) : 0.20;
 
     return Column(
       children: [
@@ -593,7 +765,20 @@ class _LevelBar extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Warning marker
+                // Safe marker (green)
+                Positioned(
+                  left: box.maxWidth * sPct - 1,
+                  top: -3,
+                  child: Container(
+                    width: 2,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4CAF50),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Warning marker (orange)
                 Positioned(
                   left: box.maxWidth * wPct - 1,
                   top: -3,
@@ -614,15 +799,21 @@ class _LevelBar extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Safe  ${current.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                    fontSize: 10, color: AppPalette.textGrey)),
-            Text('⚠ ${warning.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                    fontSize: 10, color: Color(0xFFFFA726))),
-            Text('🔴 ${danger.toStringAsFixed(1)} m',
-                style: const TextStyle(
-                    fontSize: 10, color: Color(0xFFEF5350))),
+            Text(
+              '🟢 ${safe.toStringAsFixed(1)} m',
+              style: const TextStyle(
+                  fontSize: 10, color: Color(0xFF4CAF50)),
+            ),
+            Text(
+              '⚠ ${warning.toStringAsFixed(1)} m',
+              style: const TextStyle(
+                  fontSize: 10, color: Color(0xFFFFA726)),
+            ),
+            Text(
+              '🔴 ${danger.toStringAsFixed(1)} m',
+              style: const TextStyle(
+                  fontSize: 10, color: Color(0xFFEF5350)),
+            ),
           ],
         ),
       ],
