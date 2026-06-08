@@ -32,7 +32,6 @@ class RiverDetailScreen extends StatelessWidget {
                 color: AppPalette.textWhite,
               ),
             ),
-            // River · District · State
             Text(
               _headerSub,
               style: const TextStyle(
@@ -53,7 +52,6 @@ class RiverDetailScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Location meta card ──────────────────────────────────
             _MetaCard(
               river:    data.riverName ?? '—',
               district: data.district,
@@ -61,13 +59,9 @@ class RiverDetailScreen extends StatelessWidget {
               color:    col,
             ),
             const SizedBox(height: 14),
-
-            // ── Level stats ─────────────────────────────────────────
             _SectionTitle('Water Level'),
             _LevelGrid(data: data, col: col),
             const SizedBox(height: 14),
-
-            // ── Risk bar ────────────────────────────────────────────
             _SectionTitle('Risk Gauge'),
             RiskBar(
               value:   data.capacityPercent.clamp(0, 100),
@@ -77,25 +71,37 @@ class RiverDetailScreen extends StatelessWidget {
               danger:  80,
             ),
             const SizedBox(height: 14),
-
-            // ── Rainfall ────────────────────────────────────────────
             _SectionTitle('Rainfall & Flow'),
             _RainfallCard(data: data, col: col),
             const SizedBox(height: 14),
-
-            // ── Probability bar ─────────────────────────────────────
             _SectionTitle('Flood Probability'),
             ProbabilityBarWidget(
-              probability: data.capacityPercent / 100,
-              riskLevel:   data.riskLevel,
+              probabilities: {
+                'LOW':      (100 - data.capacityPercent.clamp(0, 100)),
+                'MODERATE': (data.capacityPercent.clamp(0, 60) > 30 ? 40.0 : 15.0),
+                'SEVERE':   (data.capacityPercent.clamp(0, 90) > 60 ? 35.0 : 10.0),
+                'CRITICAL': data.capacityPercent.clamp(0, 100) > 80
+                    ? (data.capacityPercent - 80).clamp(0, 100)
+                    : 0.0,
+              },
+              topSeverity: data.riskLevel,
             ),
             const SizedBox(height: 14),
-
-            // ── Trend chart ─────────────────────────────────────────
             _SectionTitle('Recent Trend'),
             OpsAreaChart(
-              floodData: data,
-              height:    180,
+              values:  [
+                data.currentLevel,
+                data.warningLevel * 0.85,
+                data.currentLevel * 0.95,
+                data.currentLevel,
+                data.dangerLevel  * 0.75,
+                data.currentLevel * 1.02,
+              ],
+              labels:   ['T-5h', 'T-4h', 'T-3h', 'T-2h', 'T-1h', 'Now'],
+              warningY: data.warningLevel > 0 ? data.warningLevel : null,
+              dangerY:  data.dangerLevel  > 0 ? data.dangerLevel  : null,
+              yUnit:    ' m',
+              height:   180,
             ),
             const SizedBox(height: 24),
           ],
@@ -136,28 +142,11 @@ class _MetaCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _MetaRow(
-            icon:  Icons.water_outlined,
-            label: 'River',
-            value: river,
-            color: color,
-          ),
-          if (district.isNotEmpty) ...[
-            const Divider(color: AppPalette.abyss4, height: 14),
-            _MetaRow(
-              icon:  Icons.location_city_outlined,
-              label: 'District (Zila)',
-              value: district,
-              color: color,
-            ),
-          ],
+          _MetaRow(icon: Icons.water_outlined,        label: 'River',            value: river,    color: color),
+          if (district.isNotEmpty) ...[const Divider(color: AppPalette.abyss4, height: 14),
+            _MetaRow(icon: Icons.location_city_outlined, label: 'District (Zila)', value: district, color: color)],
           const Divider(color: AppPalette.abyss4, height: 14),
-          _MetaRow(
-            icon:  Icons.map_outlined,
-            label: 'State',
-            value: state,
-            color: color,
-          ),
+          _MetaRow(icon: Icons.map_outlined,           label: 'State',            value: state,    color: color),
         ],
       ),
     );
@@ -169,67 +158,30 @@ class _MetaRow extends StatelessWidget {
   final String   label;
   final String   value;
   final Color    color;
-  const _MetaRow({
-    required this.icon, required this.label,
-    required this.value, required this.color,
-  });
+  const _MetaRow({required this.icon, required this.label, required this.value, required this.color});
   @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          Icon(icon, size: 15, color: color.withValues(alpha: 0.80)),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppPalette.textGrey, fontSize: 11),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              color:      AppPalette.textWhite,
-              fontSize:   12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      );
+  Widget build(BuildContext context) => Row(children: [
+    Icon(icon, size: 15, color: color.withValues(alpha: 0.80)),
+    const SizedBox(width: 8),
+    Text(label, style: const TextStyle(color: AppPalette.textGrey, fontSize: 11)),
+    const Spacer(),
+    Text(value, style: const TextStyle(color: AppPalette.textWhite, fontSize: 12, fontWeight: FontWeight.w700)),
+  ]);
 }
 
-// ── Level grid ────────────────────────────────────────────────────────────────
 class _LevelGrid extends StatelessWidget {
   final FloodData data;
   final Color     col;
   const _LevelGrid({required this.data, required this.col});
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _StatTile(
-            label: 'Current',
-            value: '${data.currentLevel.toStringAsFixed(2)} m',
-            color: col,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatTile(
-            label: 'Warning',
-            value: '${data.warningLevel.toStringAsFixed(2)} m',
-            color: AppPalette.amber,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatTile(
-            label: 'Danger',
-            value: '${data.dangerLevel.toStringAsFixed(2)} m',
-            color: AppPalette.danger,
-          ),
-        ),
-      ],
-    );
+    return Row(children: [
+      Expanded(child: _StatTile(label: 'Current', value: '${data.currentLevel.toStringAsFixed(2)} m',  color: col)),
+      const SizedBox(width: 8),
+      Expanded(child: _StatTile(label: 'Warning', value: '${data.warningLevel.toStringAsFixed(2)} m',  color: AppPalette.amber)),
+      const SizedBox(width: 8),
+      Expanded(child: _StatTile(label: 'Danger',  value: '${data.dangerLevel.toStringAsFixed(2)} m',   color: AppPalette.critical)),
+    ]);
   }
 }
 
@@ -237,110 +189,66 @@ class _StatTile extends StatelessWidget {
   final String label;
   final String value;
   final Color  color;
-  const _StatTile({
-    required this.label, required this.value, required this.color});
+  const _StatTile({required this.label, required this.value, required this.color});
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        decoration: BoxDecoration(
-          color:        AppPalette.abyss2,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
-        ),
-        child: Column(
-          children: [
-            Text(value, style: TextStyle(
-              color: color, fontSize: 14, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 4),
-            Text(label, style: const TextStyle(
-              color: AppPalette.textGrey, fontSize: 10)),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: AppPalette.textGrey, fontSize: 10)),
+          const SizedBox(height: 4),
+          Text(value,  style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
 }
 
-// ── Rainfall card ─────────────────────────────────────────────────────────────
 class _RainfallCard extends StatelessWidget {
   final FloodData data;
   final Color     col;
   const _RainfallCard({required this.data, required this.col});
   @override
-  Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color:        AppPalette.abyss2,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: col.withValues(alpha: 0.20)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _RainStat(
-              label: 'Rainfall',
-              value: '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
-              icon:  Icons.water_drop_outlined,
-              color: const Color(0xFF38BDF8),
-            ),
-            if (data.imdRainfallMm != null)
-              _RainStat(
-                label: 'IMD Rain',
-                value: '${data.imdRainfallMm!.toStringAsFixed(1)} mm',
-                icon:  Icons.cloud_outlined,
-                color: const Color(0xFF818CF8),
-              ),
-            if (data.flowRate != null)
-              _RainStat(
-                label: 'Flow',
-                value: '${data.flowRate!.toStringAsFixed(0)} m³/s',
-                icon:  Icons.water_outlined,
-                color: col,
-              ),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _InfoPill(label: 'Rainfall', value: '${data.rainfall?.toStringAsFixed(1) ?? "—"} mm', color: col),
+          _InfoPill(label: 'Discharge', value: data.discharge != null ? '${data.discharge!.toStringAsFixed(0)} m³/s' : '—', color: col),
+          _InfoPill(label: 'Capacity', value: '${data.capacityPercent.toStringAsFixed(0)}%', color: col),
+        ],
+      ),
+    );
+  }
 }
 
-class _RainStat extends StatelessWidget {
-  final String   label;
-  final String   value;
-  final IconData icon;
-  final Color    color;
-  const _RainStat({
-    required this.label, required this.value,
-    required this.icon,  required this.color,
-  });
+class _InfoPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+  const _InfoPill({required this.label, required this.value, required this.color});
   @override
   Widget build(BuildContext context) => Column(
-        children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(height: 4),
-          Text(value, style: TextStyle(
-            color: color, fontSize: 13, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(
-            color: AppPalette.textGrey, fontSize: 10)),
-        ],
-      );
-}
-
-// ── Misc helpers ──────────────────────────────────────────────────────────────
-class _SectionTitle extends StatelessWidget {
-  final String text;
-  const _SectionTitle(this.text);
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text.toUpperCase(),
-          style: const TextStyle(
-            color:         AppPalette.textGrey,
-            fontSize:      10,
-            fontWeight:    FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-      );
+    children: [
+      Text(label, style: const TextStyle(color: AppPalette.textGrey, fontSize: 10)),
+      const SizedBox(height: 4),
+      Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+    ],
+  );
 }
 
 class _RiskBadge extends StatelessWidget {
@@ -349,19 +257,22 @@ class _RiskBadge extends StatelessWidget {
   const _RiskBadge({required this.risk, required this.color});
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color:        color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
-          border:       Border.all(color: color.withValues(alpha: 0.40)),
-        ),
-        child: Text(
-          risk,
-          style: TextStyle(
-            color:      color,
-            fontSize:   11,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: color.withValues(alpha: 0.40)),
+    ),
+    child: Text(risk, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+  );
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: const TextStyle(color: AppPalette.textGrey, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1)),
+  );
 }

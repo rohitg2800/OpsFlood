@@ -76,7 +76,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => const PremiumThemeSheet(),
+      builder: (_) => PremiumThemeSheet(),
     );
   }
 
