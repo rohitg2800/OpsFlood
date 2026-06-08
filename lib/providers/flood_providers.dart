@@ -1,5 +1,5 @@
 // lib/providers/flood_providers.dart
-// v3 — bridged to mergedStationsProvider
+// v4 — bridged to mergedStationsProvider
 //
 // All KPI values that DashboardScreen, OverviewCard, and any widget
 // consuming FloodData now come from the same WRD+CWC merged pipeline.
@@ -8,6 +8,7 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/flood_data.dart';
 import '../models/river_station.dart';
 import 'real_time_river_provider.dart';
 
@@ -112,13 +113,91 @@ final floodMaxLevelStationProvider  = Provider<String>((ref) => ref.watch(floodS
 final floodDataSourceProvider       = Provider<String>((ref) => ref.watch(floodSummaryProvider).dataSource);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy: liveLevelsProvider shim
-// Old code that did `ref.watch(liveLevelsProvider)` returns a List<RiverStation>
-// (same type as mergedStationsProvider) so widget code compiles unchanged.
+// Helper: RiverStation → FloodData
+// Used by liveLevelsProvider so RiverMonitorScreen compiles unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// @Deprecated — use mergedStationsProvider directly.
-/// Kept as alias so DashboardScreen and any widget referencing
-/// liveLevelsProvider still compiles without modification.
-final liveLevelsProvider = Provider<List<RiverStation>>((ref) =>
-    ref.watch(mergedStationsProvider));
+FloodData _riverStationToFloodData(RiverStation s) {
+  String riskLevel;
+  switch (s.dangerClass) {
+    case DangerClass.extreme:     riskLevel = 'CRITICAL'; break;
+    case DangerClass.severe:      riskLevel = 'SEVERE';   break;
+    case DangerClass.aboveNormal: riskLevel = 'MODERATE'; break;
+    default:                      riskLevel = 'LOW';      break;
+  }
+  final cap = s.danger > 0
+      ? (s.current / s.danger * 100).clamp(0.0, 100.0)
+      : 0.0;
+  return FloodData(
+    city:                s.station,
+    district:            '',
+    state:               s.state,
+    riverName:           s.river,
+    currentLevel:        s.current,
+    warningLevel:        s.warning,
+    dangerLevel:         s.danger,
+    safeLevel:           s.warning * 0.75,
+    capacityPercent:     cap,
+    riskLevel:           riskLevel,
+    status:              s.isLive ? 'LIVE' : 'ESTIMATED',
+    effectiveRainfallMm: 0.0,
+    lastUpdated:         DateTime.now(),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy: liveLevelsProvider shim — returns List<FloodData> for RiverMonitorScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns merged stations as List<FloodData> so RiverMonitorScreen compiles
+/// without any changes.
+final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
+    ref.watch(mergedStationsProvider)
+        .map(_riverStationToFloodData)
+        .toList());
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Loading / offline / timestamp providers — used by RiverMonitorScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// True while the WRD fetch is in-flight and no cached data exists yet.
+final isLoadingProvider = Provider<bool>((ref) =>
+    ref.watch(wrdIsLoadingProvider) && ref.watch(mergedStationsProvider).isEmpty);
+
+/// True when the last WRD fetch failed (no network / scrape error).
+final isOfflineProvider = Provider<bool>((ref) =>
+    ref.watch(wrdErrorProvider) != null);
+
+/// Timestamp of the most-recently updated station, or null when no data yet.
+final lastFetchTimeProvider = Provider<DateTime?>((ref) {
+  final stations = ref.watch(mergedStationsProvider);
+  if (stations.isEmpty) return null;
+  // All WRD stations share the same fetchedAt; take the first one as proxy.
+  // The lastUpdated string on RiverStation is a formatted HH:mm, so we
+  // reconstruct a today-DateTime from it (good enough for "last updated" UI).
+  final raw = stations.first.lastUpdated; // e.g. "14:35"
+  if (raw == null || raw.isEmpty) return DateTime.now();
+  final parts = raw.split(':');
+  if (parts.length < 2) return DateTime.now();
+  final h = int.tryParse(parts[0]) ?? 0;
+  final m = int.tryParse(parts[1]) ?? 0;
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day, h, m);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMD / NDMA alert providers — used by AlertsScreen
+//
+// These are static stub lists that keep AlertsScreen compiling while a real
+// IMD/NDMA HTTP integration is wired in a future sprint. The screen correctly
+// displays river-station counts via mergedCriticalCountProvider; these lists
+// only populate the text-alert tiles.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Raw IMD alert maps — replace with a real FutureProvider once the IMD
+/// RSS/API integration is available.
+final imdAlertsProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
+
+/// Raw NDMA advisory maps — replace with a real FutureProvider once the NDMA
+/// API integration is available.
+final ndmaAdvisoriesProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
