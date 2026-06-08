@@ -1,6 +1,6 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v5.2 — on-device + offline persistence)
+// OpsFlood — WRD Bihar Service (v5.3 — cachedStations getter)
 //
 // SOURCE: Central Flood Control Cell, WRD Patna
 // PRIMARY:  https://irrigation.befiqr.in/state/table/rivers  (direct scrape)
@@ -214,6 +214,12 @@ class WrdBiharService {
   Map<String, WrdStation>? _stationByCity;
 
   // ── Public API ────────────────────────────────────────────────────────────
+
+  /// Exposes the current in-memory cache (may be null before first fetch).
+  /// Used by LiveFetchEngine for fuzzy city→station matching without
+  /// triggering a redundant network fetch.
+  List<WrdStation>? get cachedStations => _cache;
+
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
     // 1. Serve hot in-memory cache if still fresh
     if (!forceRefresh &&
