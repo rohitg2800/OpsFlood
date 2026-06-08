@@ -1,7 +1,8 @@
 // lib/widgets/map/map_legend.dart
 // MapSourceLegend — collapsible overlay showing data sources + risk scale.
 import 'package:flutter/material.dart';
-import '../../providers/map_command_provider.dart';
+import '../../models/river_station.dart'; // DangerClass
+import '../../providers/map_command_provider.dart'; // SyncMeta
 import '../../theme/rx.dart';
 import 'map_risk_helpers.dart';
 
@@ -21,7 +22,8 @@ class MapSourceLegend extends StatelessWidget {
     ('GLOFAS',    '🛰', 'GloFAS Global Forecast'),
   ];
 
-  static const _legend = [
+  // NOT const — DangerClass enum values are not const-safe in record literals
+  static final _legend = [
     (DangerClass.extreme,     'Critical'),
     (DangerClass.severe,      'High'),
     (DangerClass.aboveNormal, 'Moderate'),
@@ -35,12 +37,12 @@ class MapSourceLegend extends StatelessWidget {
       width: 200,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color:        rc.cardBg.withOpacity(0.95),
+        color:        rc.cardBg.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(12),
         border:       Border.all(color: rc.stroke),
         boxShadow: [
           BoxShadow(
-            color:      Colors.black.withOpacity(0.2),
+            color:      Colors.black.withValues(alpha: 0.2),
             blurRadius: 10,
             offset:     const Offset(0, 4),
           ),
@@ -99,7 +101,7 @@ class MapSourceLegend extends StatelessWidget {
                       Text(
                         'Updated: ${syncMeta.labelFor(src)}',
                         style: TextStyle(
-                          color:    rc.textSecondary.withOpacity(0.6),
+                          color:    rc.textSecondary.withValues(alpha: 0.6),
                           fontSize: 10,
                         ),
                       ),
@@ -135,7 +137,7 @@ class MapSourceLegend extends StatelessWidget {
                       color:        riskColor(dc, opacity: 0.8),
                       borderRadius: BorderRadius.circular(3),
                       border:       Border.all(
-                          color: riskColorSolid(dc).withOpacity(0.6)),
+                          color: riskColorSolid(dc).withValues(alpha: 0.6)),
                     ),
                   ),
                   const SizedBox(width: 8),

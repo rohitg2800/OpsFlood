@@ -6,7 +6,7 @@ import '../../models/river_station.dart';
 import '../../theme/rx.dart';
 import 'map_risk_helpers.dart';
 
-// ── RiverPulsePopup ──────────────────────────────────────────────────────────
+// ── RiverPulsePopup ───────────────────────────────────────────────────────────
 class RiverPulsePopup extends StatelessWidget {
   final RiverStation station;
   const RiverPulsePopup({super.key, required this.station});
@@ -72,10 +72,10 @@ class RiverPulsePopup extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color:        color.withOpacity(0.15),
+                  color:        color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                   border:       Border.all(
-                      color: color.withOpacity(0.5)),
+                      color: color.withValues(alpha: 0.5)),
                 ),
                 child: Text(
                   riskLabel(dc),
@@ -191,7 +191,7 @@ class RiverPulsePopup extends StatelessWidget {
   }
 }
 
-// ── MetricTile ───────────────────────────────────────────────────────────────
+// ── MetricTile ────────────────────────────────────────────────────────────────
 class MetricTile extends StatelessWidget {
   final String label;
   final String value;

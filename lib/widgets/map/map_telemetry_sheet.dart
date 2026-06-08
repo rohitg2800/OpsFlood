@@ -34,7 +34,7 @@ class MapTelemetrySheet extends StatelessWidget {
           border: Border(top: BorderSide(color: rc.stroke, width: 1)),
           boxShadow: [
             BoxShadow(
-              color:      Colors.black.withOpacity(0.3),
+              color:      Colors.black.withValues(alpha: 0.3),
               blurRadius: 20,
               offset:     const Offset(0, -4),
             ),
@@ -157,7 +157,7 @@ class MapTelemetrySheet extends StatelessWidget {
                                       riskLabel(dc),
                                       style: TextStyle(
                                         color: riskColorSolid(dc)
-                                            .withOpacity(0.8),
+                                            .withValues(alpha: 0.8),
                                         fontSize:      11,
                                         fontWeight:    FontWeight.w600,
                                         letterSpacing: 0.5,

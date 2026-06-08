@@ -2,10 +2,10 @@
 // PulseMarker  — animated ring for CRITICAL / HIGH stations.
 // StaticMarker — plain dot for MODERATE / LOW stations.
 import 'package:flutter/material.dart';
-import '../../providers/map_command_provider.dart';
+import '../../models/river_station.dart'; // DangerClass
 import 'map_risk_helpers.dart';
 
-// ── PulseMarker ─────────────────────────────────────────────────────────────
+// ── PulseMarker ───────────────────────────────────────────────────────────────
 class PulseMarker extends StatelessWidget {
   final DangerClass dangerClass;
   final AnimationController ctrl;
@@ -33,9 +33,9 @@ class PulseMarker extends StatelessWidget {
                 width: 40, height: 40,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color:  color.withOpacity(0.15 * (1 - ctrl.value)),
+                  color:  color.withValues(alpha: 0.15 * (1 - ctrl.value)),
                   border: Border.all(
-                    color: color.withOpacity(0.4 * (1 - ctrl.value)),
+                    color: color.withValues(alpha: 0.4 * (1 - ctrl.value)),
                     width: 1.5,
                   ),
                 ),
@@ -49,7 +49,7 @@ class PulseMarker extends StatelessWidget {
                 color: color,
                 boxShadow: [
                   BoxShadow(
-                    color:      color.withOpacity(0.5),
+                    color:      color.withValues(alpha: 0.5),
                     blurRadius: 8,
                     spreadRadius: 2,
                   ),
@@ -68,7 +68,7 @@ class PulseMarker extends StatelessWidget {
   }
 }
 
-// ── StaticMarker ─────────────────────────────────────────────────────────────
+// ── StaticMarker ──────────────────────────────────────────────────────────────
 class StaticMarker extends StatelessWidget {
   final DangerClass dangerClass;
   const StaticMarker({super.key, required this.dangerClass});
@@ -80,11 +80,12 @@ class StaticMarker extends StatelessWidget {
       width: 28, height: 28,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color.withOpacity(0.85),
+        color: color.withValues(alpha: 0.85),
         border: Border.all(
-            color: Colors.white.withOpacity(0.6), width: 2),
+            color: Colors.white.withValues(alpha: 0.6), width: 2),
         boxShadow: [
-          BoxShadow(color: color.withOpacity(0.3), blurRadius: 6),
+          BoxShadow(
+              color: color.withValues(alpha: 0.3), blurRadius: 6),
         ],
       ),
       child: const Icon(

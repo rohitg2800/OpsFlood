@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../../providers/map_command_provider.dart';
 import '../../theme/rx.dart';
 
-// ── MapTopBar ────────────────────────────────────────────────────────────────
+// ── MapTopBar ─────────────────────────────────────────────────────────────────
 class MapTopBar extends StatelessWidget {
   final MapViewMode  mode;
   final SyncMeta     syncMeta;
@@ -38,7 +38,7 @@ class MapTopBar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color:        rc.cardBg.withOpacity(0.92),
+                  color:        rc.cardBg.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(12),
                   border:       Border.all(color: rc.stroke, width: 1),
                 ),
@@ -90,10 +90,10 @@ class MapTopBar extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
-            color:        rc.cardBg.withOpacity(0.85),
+            color:        rc.cardBg.withValues(alpha: 0.85),
             borderRadius: BorderRadius.circular(8),
             border:       Border.all(
-                color: rc.stroke.withOpacity(0.5)),
+                color: rc.stroke.withValues(alpha: 0.5)),
           ),
           child: Row(
             children: [
@@ -115,7 +115,7 @@ class MapTopBar extends StatelessWidget {
   }
 }
 
-// ── MapIconBtn ───────────────────────────────────────────────────────────────
+// ── MapIconBtn ────────────────────────────────────────────────────────────────
 class MapIconBtn extends StatelessWidget {
   final IconData     icon;
   final VoidCallback onTap;
@@ -138,7 +138,7 @@ class MapIconBtn extends StatelessWidget {
         child: Container(
           width: 42, height: 42,
           decoration: BoxDecoration(
-            color:        rc.cardBg.withOpacity(0.92),
+            color:        rc.cardBg.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(12),
             border:       Border.all(color: rc.stroke),
           ),
@@ -149,7 +149,7 @@ class MapIconBtn extends StatelessWidget {
   }
 }
 
-// ── MapToggleChip ────────────────────────────────────────────────────────────
+// ── MapToggleChip ─────────────────────────────────────────────────────────────
 class MapToggleChip extends StatelessWidget {
   final String        label;
   final bool          active;
@@ -173,8 +173,8 @@ class MapToggleChip extends StatelessWidget {
             horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: active
-              ? rc.accent.withOpacity(0.15)
-              : rc.cardBg.withOpacity(0.9),
+              ? rc.accent.withValues(alpha: 0.15)
+              : rc.cardBg.withValues(alpha: 0.9),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: active ? rc.accent : rc.stroke,
