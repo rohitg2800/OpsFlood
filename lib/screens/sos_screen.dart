@@ -1,6 +1,11 @@
 // lib/screens/sos_screen.dart
 // Bihar Flood Command — SOS / Emergency HUD v3
 // Bihar emergency contacts, SDRF, NDRF, BSDMA helplines.
+//
+// P1 fixes applied (2026-06-08):
+//   1. All fontSize values floored at 10px minimum (was: 7, 8, 9, 9.5, 11)
+//   2. _clock Timer isolated into _SosClockWidget — only the time Text
+//      rebuilds every second instead of the entire screen Column tree.
 library;
 
 import 'dart:async';
@@ -97,26 +102,25 @@ const _biharEmergency = [
   ),
 ];
 
-class SosScreen extends StatefulWidget {
-  static const route = '/sos';
-  const SosScreen({super.key});
+// ─────────────────────────────────────────────────────────────────────────────
+// P1 FIX: Isolated SOS clock widget — only this rebuilds every second.
+// Previously the Timer called setState on _SosScreenState which caused
+// the entire screen Column (including SOS button + ListView) to rebuild
+// on every tick.
+// ─────────────────────────────────────────────────────────────────────────────
+class _SosClockWidget extends StatefulWidget {
+  const _SosClockWidget();
   @override
-  State<SosScreen> createState() => _SosScreenState();
+  State<_SosClockWidget> createState() => _SosClockWidgetState();
 }
 
-class _SosScreenState extends State<SosScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
+class _SosClockWidgetState extends State<_SosClockWidget> {
   late final Timer _clock;
   String _timeStr = '';
-  bool _calling = false;
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800))
-      ..repeat(reverse: true);
     _tick();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
@@ -132,8 +136,47 @@ class _SosScreenState extends State<SosScreen>
 
   @override
   void dispose() {
-    _pulse.dispose();
     _clock.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'SYS $_timeStr · BSDMA / SDRF / NDRF',
+      style: const TextStyle(
+        color: AppPalette.textDim,
+        fontSize: 10, // P1 FIX: was 9
+        letterSpacing: 1,
+      ),
+    );
+  }
+}
+
+class SosScreen extends StatefulWidget {
+  static const route = '/sos';
+  const SosScreen({super.key});
+  @override
+  State<SosScreen> createState() => _SosScreenState();
+}
+
+class _SosScreenState extends State<SosScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  // P1 FIX: _clock Timer and _timeStr removed — now live in _SosClockWidget.
+  bool _calling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800))
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
     super.dispose();
   }
 
@@ -162,7 +205,8 @@ class _SosScreenState extends State<SosScreen>
               children: [
                 Text('BIHAR EMERGENCY CONTACTS',
                     style: TextStyle(
-                      color: AppPalette.textDim, fontSize: 9,
+                      color: AppPalette.textDim,
+                      fontSize: 10, // P1 FIX: was 9
                       fontWeight: FontWeight.w700, letterSpacing: 2,
                     )),
               ],
@@ -224,11 +268,8 @@ class _SosScreenState extends State<SosScreen>
                     color: AppPalette.critical, fontSize: 13,
                     fontWeight: FontWeight.w800, letterSpacing: 2,
                   )),
-              Text('SYS $_timeStr · BSDMA / SDRF / NDRF',
-                  style: const TextStyle(
-                    color: AppPalette.textDim, fontSize: 9,
-                    letterSpacing: 1,
-                  )),
+              // P1 FIX: Replaced inline Text + Timer.setState with isolated widget
+              const _SosClockWidget(),
             ],
           ),
         ),
@@ -245,7 +286,8 @@ class _SosScreenState extends State<SosScreen>
             ),
             child: const Text('EMERGENCY',
                 style: TextStyle(
-                  color: AppPalette.critical, fontSize: 8.5,
+                  color: AppPalette.critical,
+                  fontSize: 10, // P1 FIX: was 8.5
                   fontWeight: FontWeight.w900, letterSpacing: 1.2,
                 )),
           ),
@@ -294,7 +336,8 @@ class _SosScreenState extends State<SosScreen>
               const Text('NATIONAL EMERGENCY · BIHAR',
                   style: TextStyle(
                     color: AppPalette.textGrey,
-                    fontSize: 9, letterSpacing: 2,
+                    fontSize: 10, // P1 FIX: was 9
+                    letterSpacing: 2,
                   )),
             ],
           ),
@@ -349,7 +392,9 @@ class _ContactTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(desc,
                     style: const TextStyle(
-                      color: AppPalette.textGrey, fontSize: 9.5)),
+                      color: AppPalette.textGrey,
+                      fontSize: 10, // P1 FIX: was 9.5
+                    )),
                 const SizedBox(height: 3),
                 Row(
                   children: [
@@ -363,7 +408,8 @@ class _ContactTile extends StatelessWidget {
                       ),
                       child: Text(type,
                           style: TextStyle(
-                            color: color, fontSize: 7,
+                            color: color,
+                            fontSize: 10, // P1 FIX: was 7
                             fontWeight: FontWeight.w800, letterSpacing: 0.8,
                           )),
                     ),

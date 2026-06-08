@@ -1,6 +1,11 @@
 // lib/screens/alerts_screen.dart
 // Bihar Flood Command — Alerts HUD v3
 // Robotic HUD aesthetic, Bihar-only districts/rivers, live CWC+IMD+NDMA data.
+//
+// P1 fixes applied (2026-06-08):
+//   1. All fontSize values floored at 10px minimum (was: 7, 7.5, 8, 8.5, 9)
+//   2. _clock Timer isolated into _HudClockWidget — only the time Text
+//      rebuilds every second instead of the entire screen tree.
 library;
 
 import 'dart:async';
@@ -23,27 +28,24 @@ const _biharDistricts = [
   'Rohtas','Kaimur','Aurangabad','Jehanabad','Arwal',
 ];
 
-class AlertsScreen extends ConsumerStatefulWidget {
-  static const route = '/alerts';
-  const AlertsScreen({super.key});
+// ─────────────────────────────────────────────────────────────────────────────
+// P1 FIX: Isolated clock widget — only this rebuilds every second.
+// Previously the Timer called setState on _AlertsScreenState which caused
+// the entire NestedScrollView + ListView tree to rebuild on every tick.
+// ─────────────────────────────────────────────────────────────────────────────
+class _HudClockWidget extends StatefulWidget {
+  const _HudClockWidget();
   @override
-  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
+  State<_HudClockWidget> createState() => _HudClockWidgetState();
 }
 
-class _AlertsScreenState extends ConsumerState<AlertsScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
+class _HudClockWidgetState extends State<_HudClockWidget> {
   late final Timer _clock;
   String _timeStr = '';
-  String _filter = 'ALL';
-  final _filters = ['ALL', 'CRITICAL', 'SEVERE', 'MODERATE', 'SAFE'];
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(
-      vsync: this, duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
     _tick();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
@@ -57,8 +59,49 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   void dispose() {
-    _pulse.dispose();
     _clock.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'SYS CLOCK $_timeStr · BSDMA FEED',
+      style: const TextStyle(
+        color: AppPalette.textDim,
+        fontSize: 10, // P1 FIX: was 9
+        letterSpacing: 1,
+      ),
+    );
+  }
+}
+
+class AlertsScreen extends ConsumerStatefulWidget {
+  static const route = '/alerts';
+  const AlertsScreen({super.key});
+  @override
+  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
+}
+
+class _AlertsScreenState extends ConsumerState<AlertsScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  // P1 FIX: _clock Timer and _timeStr removed from this class.
+  // The clock now lives entirely inside _HudClockWidget.
+  String _filter = 'ALL';
+  final _filters = ['ALL', 'CRITICAL', 'SEVERE', 'MODERATE', 'SAFE'];
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this, duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
     super.dispose();
   }
 
@@ -129,11 +172,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                       fontSize: 13, fontWeight: FontWeight.w800,
                       letterSpacing: 2,
                     )),
-                Text('SYS CLOCK $_timeStr · BSDMA FEED',
-                    style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 9,
-                      letterSpacing: 1,
-                    )),
+                // P1 FIX: Replaced inline Text + Timer.setState with isolated widget
+                const _HudClockWidget(),
               ],
             ),
           ),
@@ -163,7 +203,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                   const Text('LIVE',
                       style: TextStyle(
                         color: AppPalette.critical,
-                        fontSize: 9, fontWeight: FontWeight.w800,
+                        fontSize: 10, // P1 FIX: was 9
+                        fontWeight: FontWeight.w800,
                         letterSpacing: 1.5,
                       )),
                 ],
@@ -221,7 +262,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                 const SizedBox(height: 2),
                 Text(t.$1,
                     style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 7,
+                      color: AppPalette.textDim,
+                      fontSize: 10, // P1 FIX: was 7
                       fontWeight: FontWeight.w700, letterSpacing: 0.8,
                     )),
               ],
@@ -257,7 +299,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                 child: Text(f,
                     style: TextStyle(
                       color: active ? col : AppPalette.textDim,
-                      fontSize: 9, fontWeight: FontWeight.w800,
+                      fontSize: 10, // P1 FIX: was 9
+                      fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
                     )),
               ),
@@ -412,7 +455,8 @@ class _AlertTile extends StatelessWidget {
                                     child: const Text('BIHAR',
                                         style: TextStyle(
                                           color: AppPalette.cyan,
-                                          fontSize: 7, fontWeight: FontWeight.w800,
+                                          fontSize: 10, // P1 FIX: was 7
+                                          fontWeight: FontWeight.w800,
                                           letterSpacing: 0.8,
                                         )),
                                   ),
@@ -438,7 +482,8 @@ class _AlertTile extends StatelessWidget {
                                 .toUpperCase()
                                 .replaceAll('_', ' '),
                             style: TextStyle(
-                              color: col, fontSize: 7.5,
+                              color: col,
+                              fontSize: 10, // P1 FIX: was 7.5
                               fontWeight: FontWeight.w900, letterSpacing: 0.8,
                             ),
                           ),
@@ -448,7 +493,7 @@ class _AlertTile extends StatelessWidget {
                           Text(dateStr,
                               style: const TextStyle(
                                 color: AppPalette.textDim,
-                                fontSize: 8.5,
+                                fontSize: 10, // P1 FIX: was 8.5
                               )),
                         ],
                       ],
@@ -480,7 +525,8 @@ class _AlertTile extends StatelessWidget {
                     Text(source,
                         style: const TextStyle(
                           color: AppPalette.textDim,
-                          fontSize: 9, fontWeight: FontWeight.w600,
+                          fontSize: 10, // P1 FIX: was 9
+                          fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
                         )),
                   ]),
@@ -533,7 +579,8 @@ class _NoSignal extends StatelessWidget {
             const SizedBox(height: 6),
             const Text('38 BIHAR DISTRICTS MONITORED',
                 style: TextStyle(
-                  color: AppPalette.textDim, fontSize: 9,
+                  color: AppPalette.textDim,
+                  fontSize: 10, // P1 FIX: was 9
                   letterSpacing: 1,
                 )),
           ],

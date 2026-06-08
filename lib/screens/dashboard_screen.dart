@@ -13,6 +13,13 @@
 // Widgets provided by dashboard_screen_part2.dart (same library):
 //   AnimatedAreaChart, AlertLog, SystemStats, DashboardFooter,
 //   DashboardEmptyState
+//
+// P1 fixes applied (2026-06-08):
+//   1. All fontSize values floored at 10px minimum.
+//      Affected: _KpiStrip label (8.5→10), _SectionHeader label (10 kept),
+//      _StationTile river/state sub-text (10 kept), capacity label (9→10),
+//      capacity % value (9→10), _LevelChip label (9→10),
+//      _DashboardAppBar subtitle (10 kept), _CriticalBadge text (11 kept).
 library;
 
 import 'dart:async';
@@ -585,7 +592,7 @@ class _KpiStrip extends StatelessWidget {
         icon: Icons.warning_amber_rounded,
       ),
       _KpiItem(
-        label: 'AVG CAPACITY',
+        label: 'AVG CAP',
         value: '${avgCapacity.toStringAsFixed(0)}%',
         color: avgCapacity > 80
             ? AppPalette.critical
@@ -664,7 +671,7 @@ class _KpiStrip extends StatelessWidget {
                       kpi.label,
                       style: TextStyle(
                         color: t.textSecondary,
-                        fontSize: 8.5,
+                        fontSize: 10, // P1 FIX: was 8.5
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                       ),
@@ -841,7 +848,7 @@ class _StationTile extends StatelessWidget {
                         data.riskLevel,
                         style: TextStyle(
                           color: col,
-                          fontSize: 9,
+                          fontSize: 10, // P1 FIX: was 9
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -865,7 +872,7 @@ class _StationTile extends StatelessWidget {
                           'Capacity',
                           style: TextStyle(
                             color: t.textSecondary,
-                            fontSize: 9,
+                            fontSize: 10, // P1 FIX: was 9
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -873,7 +880,7 @@ class _StationTile extends StatelessWidget {
                           '${(data.capacityPercent * gaugeAnim.value).toStringAsFixed(0)}%',
                           style: TextStyle(
                             color: col,
-                            fontSize: 9,
+                            fontSize: 10, // P1 FIX: was 9
                             fontWeight: FontWeight.w800,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
@@ -944,7 +951,7 @@ class _LevelChip extends StatelessWidget {
         '$label $value',
         style: TextStyle(
           color: color,
-          fontSize: 9,
+          fontSize: 10, // P1 FIX: was 9
           fontWeight: FontWeight.w700,
         ),
       ),
