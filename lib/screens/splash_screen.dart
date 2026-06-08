@@ -1,261 +1,304 @@
 // lib/screens/splash_screen.dart
-// Bihar Flood Command — Splash / Boot HUD v3
-// Robotic boot sequence with Bihar branding.
-library;
+// OpsFlood Universe Splash — 3-layer architecture:
+//   Layer 1: Generative starfield (CustomPainter)
+//   Layer 2: OpsFlood branding (FadeTransition)
+//   Layer 3: Data-fetch progress indicator (pulsing with galactic core)
+//
+// Lifecycle:
+//   1. Universe starts animating immediately.
+//   2. WrdBiharService + CwcDirectService cold-start in parallel.
+//   3. On both complete → 800ms fade-out → HomeScreen.
 
-import 'dart:async';
-import 'dart:math' as math;
+import 'dart:ui' show Size;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-import '../theme/river_theme.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../widgets/universe_splash_painter.dart';
 import 'home_screen.dart';
 
-class SplashScreen extends StatefulWidget {
-  static const route = '/';
-  const SplashScreen({super.key});
+// ─── Minimum display time so the universe is always seen ────────────────────
+const _kMinSplashMs = 2800;
+
+// ─── SplashPage ─────────────────────────────────────────────────────────────
+
+class SplashPage extends ConsumerStatefulWidget {
+  const SplashPage({super.key});
+
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashPage> createState() => _SplashPageState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashPageState extends ConsumerState<SplashPage>
     with TickerProviderStateMixin {
-  late final AnimationController _ring;
-  late final AnimationController _boot;
-  late final AnimationController _fade;
-  late final Animation<double> _fadeAnim;
 
-  final List<String> _bootLines = [
-    'INITIALIZING BIHAR FLOOD COMMAND CENTER...',
-    'CONNECTING TO CWC LIVE FEED...',
-    'LOADING 38 DISTRICT NODES...',
-    'SYNCING KOSI · GANDAK · GANGA · BAGMATI...',
-    'BSDMA ADVISORY FEED ACTIVE...',
-    'IMD PRECIPITATION DATA RECEIVED...',
-    'NDMA ALERT CHANNEL OPEN...',
-    'ALL SYSTEMS OPERATIONAL · BIHAR',
-  ];
-  int _lineIdx = 0;
-  String _currentLine = '';
-  bool _done = false;
+  // Controllers
+  late final AnimationController _universeCtrl;  // drives starfield + rotation
+  late final AnimationController _pulseCtrl;     // drives galactic core pulse
+  late final AnimationController _brandCtrl;     // drives branding fade-in
+  late final AnimationController _exitCtrl;      // drives fade-out on completion
+
+  // Animations
+  late final Animation<double> _coreGlow;
+  late final Animation<double> _brandFade;
+  late final Animation<double> _exitFade;  // 0→1 when data done
+
+  // Stars — built once after first layout
+  List<_Star> _stars = [];
+  bool        _starsReady = false;
+
+  // Data state
+  bool   _dataReady  = false;
+  double _fetchProg  = 0.0;    // 0.0 .. 1.0
+  String _fetchLabel = 'INITIALISING SYSTEMS...';
+
+  // Timing
+  late final DateTime _startTime;
 
   @override
   void initState() {
     super.initState();
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-    ));
+    _startTime = DateTime.now();
 
-    _ring = AnimationController(
-        vsync: this, duration: const Duration(seconds: 4))
-      ..repeat();
+    // Universe — runs forever until we stop it
+    _universeCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(seconds: 60),
+    )..repeat();
 
-    _boot = AnimationController(
-        vsync: this, duration: const Duration(seconds: 3))
-      ..forward();
+    // Core pulse — 2.4s sine wave
+    _pulseCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
+    _coreGlow = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
 
-    _fade = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
-    _fadeAnim = CurvedAnimation(parent: _fade, curve: Curves.easeOut);
+    // Brand logo fades in after 600ms
+    _brandCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _brandFade = CurvedAnimation(parent: _brandCtrl, curve: Curves.easeOut);
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _brandCtrl.forward();
+    });
 
-    _runBootSequence();
-  }
+    // Exit fade-out
+    _exitCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _exitFade = CurvedAnimation(parent: _exitCtrl, curve: Curves.easeIn);
+    _exitCtrl.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const HomeScreen(),
+            transitionDuration: Duration.zero,
+          ),
+        );
+      }
+    });
 
-  Future<void> _runBootSequence() async {
-    for (int i = 0; i < _bootLines.length; i++) {
-      await Future.delayed(const Duration(milliseconds: 380));
-      if (!mounted) return;
-      setState(() {
-        _lineIdx = i;
-        _currentLine = _bootLines[i];
-      });
-    }
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    setState(() => _done = true);
-    await Future.delayed(const Duration(milliseconds: 200));
-    _fade.forward();
-    await Future.delayed(const Duration(milliseconds: 700));
-    if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(HomeScreen.route);
+    // Kick off data fetch
+    _initializeData();
   }
 
   @override
   void dispose() {
-    _ring.dispose();
-    _boot.dispose();
-    _fade.dispose();
+    _universeCtrl.dispose();
+    _pulseCtrl.dispose();
+    _brandCtrl.dispose();
+    _exitCtrl.dispose();
     super.dispose();
   }
+
+  // ── Data initialisation ──────────────────────────────────────────────────
+
+  Future<void> _initializeData() async {
+    try {
+      // Step 1 — WRD Bihar
+      _setStatus('CONNECTING WRD BIHAR...', 0.0);
+      await _fetchWrd();
+      _setStatus('WRD SYNC COMPLETE', 0.5);
+
+      // Step 2 — CWC Direct
+      _setStatus('CONNECTING CWC DIRECT...', 0.5);
+      await _fetchCwc();
+      _setStatus('ALL SYSTEMS ONLINE', 1.0);
+    } catch (e) {
+      _setStatus('PARTIAL DATA — CONTINUING', 1.0);
+    } finally {
+      // Honour minimum display time
+      final elapsed = DateTime.now().difference(_startTime).inMilliseconds;
+      final remaining = _kMinSplashMs - elapsed;
+      if (remaining > 0) {
+        await Future.delayed(Duration(milliseconds: remaining));
+      }
+      if (mounted) {
+        setState(() => _dataReady = true);
+        _exitCtrl.forward();
+      }
+    }
+  }
+
+  void _setStatus(String label, double progress) {
+    if (!mounted) return;
+    setState(() {
+      _fetchLabel = label;
+      _fetchProg  = progress;
+    });
+  }
+
+  // Replace these with your actual service calls:
+  Future<void> _fetchWrd() async {
+    // await WrdBiharService.instance.fetch();
+    await Future.delayed(const Duration(milliseconds: 900));
+  }
+
+  Future<void> _fetchCwc() async {
+    // await CwcDirectService.instance.fetchAll();
+    await Future.delayed(const Duration(milliseconds: 700));
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
-      body: Stack(
+      backgroundColor: const Color(0xFF030508),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = Size(constraints.maxWidth, constraints.maxHeight);
+
+          // Build stars once
+          if (!_starsReady) {
+            _stars      = buildStarField(320, size);
+            _starsReady = true;
+          }
+
+          return AnimatedBuilder(
+            animation: Listenable.merge([_universeCtrl, _pulseCtrl, _exitCtrl]),
+            builder: (context, _) {
+              final fadeOut = _exitFade.value;
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  // ── Layer 1: Universe ──────────────────────────────
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      painter: UniversePainter(
+                        animation: _universeCtrl,
+                        stars:     _stars,
+                        coreGlow:  _coreGlow,
+                        fadeOut:   fadeOut,
+                      ),
+                      size: size,
+                    ),
+                  ),
+
+                  // ── Layer 2: Branding ──────────────────────────────
+                  FadeTransition(
+                    opacity: _brandFade,
+                    child: Opacity(
+                      opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
+                      child: _BrandingOverlay(
+                        coreGlow: _coreGlow,
+                        size: size,
+                      ),
+                    ),
+                  ),
+
+                  // ── Layer 3: Progress indicator ────────────────────
+                  Positioned(
+                    bottom: 60,
+                    left:   40,
+                    right:  40,
+                    child: Opacity(
+                      opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
+                      child: _ProgressLayer(
+                        label:    _fetchLabel,
+                        progress: _fetchProg,
+                        pulse:    _coreGlow,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Branding overlay (Layer 2) ────────────────────────────────────────────
+
+class _BrandingOverlay extends StatelessWidget {
+  const _BrandingOverlay({
+    required this.coreGlow,
+    required this.size,
+  });
+
+  final Animation<double> coreGlow;
+  final Size              size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Animated rings background
-          Center(
-            child: AnimatedBuilder(
-              animation: _ring,
-              builder: (_, __) {
-                return CustomPaint(
-                  size: const Size(300, 300),
-                  painter: _RingPainter(_ring.value),
-                );
-              },
+          // Logo mark — hexagonal glow frame
+          AnimatedBuilder(
+            animation: coreGlow,
+            builder: (_, __) {
+              const accent = Color(0xFF00FFB2);
+              final pulse  = coreGlow.value;
+              return Container(
+                width:  72,
+                height: 72,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.6 + 0.4 * pulse),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color:      accent.withValues(alpha: 0.25 + 0.15 * pulse),
+                      blurRadius: 18 + 10 * pulse,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.water_drop_outlined,
+                  color: accent,
+                  size:  38,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+          // App name
+          const Text(
+            'OPSFLOOD',
+            style: TextStyle(
+              fontFamily:    'RobotoMono',
+              fontSize:      26,
+              fontWeight:    FontWeight.w700,
+              color:         Color(0xFFE0F0FF),
+              letterSpacing: 5,
             ),
           ),
-          // Content
-          SafeArea(
-            child: Column(
-              children: [
-                const Spacer(flex: 2),
-                // Logo
-                Center(
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 80, height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(colors: [
-                            AppPalette.cyan.withValues(alpha: 0.20),
-                            AppPalette.abyss2,
-                          ]),
-                          border: Border.all(
-                              color: AppPalette.cyan.withValues(alpha: 0.35), width: 1.5),
-                        ),
-                        child: const Icon(Icons.water_damage_rounded,
-                            color: AppPalette.cyan, size: 36),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text('EQUINOX',
-                          style: TextStyle(
-                            color: AppPalette.textWhite,
-                            fontSize: 28, fontWeight: FontWeight.w900,
-                            letterSpacing: 8,
-                          )),
-                      const SizedBox(height: 4),
-                      Text('BIHAR FLOOD COMMAND CENTER',
-                          style: TextStyle(
-                            color: AppPalette.cyan.withValues(alpha: 0.85),
-                            fontSize: 10, fontWeight: FontWeight.w700,
-                            letterSpacing: 3,
-                          )),
-                      const SizedBox(height: 4),
-                      Container(
-                        width: 120, height: 1,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [
-                            AppPalette.cyan.withValues(alpha: 0),
-                            AppPalette.cyan.withValues(alpha: 0.60),
-                            AppPalette.cyan.withValues(alpha: 0),
-                          ]),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text('BSDMA · CWC · IMD · NDMA',
-                          style: TextStyle(
-                            color: AppPalette.textDim.withValues(alpha: 0.6),
-                            fontSize: 8, letterSpacing: 2,
-                          )),
-                    ],
-                  ),
-                ),
-                const Spacer(flex: 2),
-                // Boot log
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppPalette.abyss2,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: AppPalette.cyan.withValues(alpha: 0.15)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 6, height: 6,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _done
-                                  ? AppPalette.safe
-                                  : AppPalette.cyan.withValues(alpha: 0.8),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _done ? 'BOOT COMPLETE' : 'BOOTING SYSTEM...',
-                            style: TextStyle(
-                              color: _done ? AppPalette.safe : AppPalette.cyan,
-                              fontSize: 9, fontWeight: FontWeight.w800,
-                              letterSpacing: 1.5,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text('${_lineIdx + 1}/${_bootLines.length}',
-                              style: const TextStyle(
-                                color: AppPalette.textDim, fontSize: 9)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Progress bar
-                      AnimatedBuilder(
-                        animation: _boot,
-                        builder: (_, __) {
-                          final pct = (_lineIdx + 1) / _bootLines.length;
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(2),
-                                child: LinearProgressIndicator(
-                                  value: pct,
-                                  backgroundColor: AppPalette.abyss4,
-                                  valueColor: AlwaysStoppedAnimation(
-                                      _done ? AppPalette.safe : AppPalette.cyan),
-                                  minHeight: 2,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              Text(_currentLine,
-                                  style: TextStyle(
-                                    color: _done
-                                        ? AppPalette.safe
-                                        : AppPalette.textGrey,
-                                    fontSize: 9.5, height: 1.4,
-                                    fontWeight: _done
-                                        ? FontWeight.w700
-                                        : FontWeight.w400,
-                                  )),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Version
-                Text('v3.0 · BIHAR EDITION · 38 DISTRICTS',
-                    style: const TextStyle(
-                      color: AppPalette.textDim, fontSize: 8.5,
-                      letterSpacing: 1.5,
-                    )),
-                const SizedBox(height: 32),
-              ],
+          const SizedBox(height: 6),
+          const Text(
+            'REAL-TIME FLOOD INTELLIGENCE',
+            style: TextStyle(
+              fontFamily:    'RobotoMono',
+              fontSize:      10,
+              color:         Color(0xFF5A7080),
+              letterSpacing: 2.4,
             ),
-          ),
-          // Fade-to-black transition
-          FadeTransition(
-            opacity: _fadeAnim,
-            child: Container(color: AppPalette.abyss0),
           ),
         ],
       ),
@@ -263,38 +306,100 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-class _RingPainter extends CustomPainter {
-  final double t;
-  _RingPainter(this.t);
+// ─── Progress layer (Layer 3) ──────────────────────────────────────────────
+
+class _ProgressLayer extends StatelessWidget {
+  const _ProgressLayer({
+    required this.label,
+    required this.progress,
+    required this.pulse,
+  });
+
+  final String            label;
+  final double            progress;
+  final Animation<double> pulse;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radii = [60.0, 100.0, 140.0];
-    for (int i = 0; i < radii.length; i++) {
-      final phase = (t + i * 0.33) % 1.0;
-      final alpha = (math.sin(phase * math.pi) * 0.18).clamp(0.0, 1.0);
-      final paint = Paint()
-        ..color = const Color(0xFF00E5FF).withValues(alpha: alpha)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0;
-      canvas.drawCircle(center, radii[i], paint);
-    }
-    // Scan line
-    final angle = t * 2 * math.pi;
-    final scanPaint = Paint()
-      ..shader = SweepGradient(
-        startAngle: angle - 0.8,
-        endAngle: angle,
-        colors: [
-          const Color(0xFF00E5FF).withValues(alpha: 0),
-          const Color(0xFF00E5FF).withValues(alpha: 0.25),
-        ],
-      ).createShader(Rect.fromCircle(center: center, radius: 140))
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 140, scanPaint);
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: pulse,
+      builder: (_, __) {
+        const accent = Color(0xFF00FFB2);
+        final p = pulse.value;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Status label
+            Row(
+              children: [
+                // Pulsing dot synced with core
+                Container(
+                  width: 6, height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent.withValues(alpha: 0.5 + 0.5 * p),
+                    boxShadow: [
+                      BoxShadow(
+                        color:      accent.withValues(alpha: 0.4 * p),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 400),
+                    child: Text(
+                      label,
+                      key: ValueKey(label),
+                      style: const TextStyle(
+                        fontFamily:    'RobotoMono',
+                        fontSize:      10,
+                        color:         Color(0xFF5A7080),
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+                Text(
+                  '${(progress * 100).toInt()}%',
+                  style: TextStyle(
+                    fontFamily:    'RobotoMono',
+                    fontSize:      10,
+                    color:         accent.withValues(alpha: 0.8),
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Progress bar — glows with the core
+            Container(
+              height: 2,
+              decoration: const BoxDecoration(
+                color: Color(0xFF111620),
+              ),
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: progress,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: accent,
+                    boxShadow: [
+                      BoxShadow(
+                        color:      accent.withValues(alpha: 0.6 * p),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
-
-  @override
-  bool shouldRepaint(_RingPainter old) => old.t != t;
 }
