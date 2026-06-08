@@ -1,7 +1,19 @@
 // lib/screens/river_monitor_screen.dart
-// UI v2 — richer data-driven cards, stale-data warning, district line,
-//          IMD rainfall chip, safe-level stat, 2-row 3-chip stat grid.
-// Logic unchanged: same providers, same FloodData fields.
+// UI v3 — provider-driven, RiverColors themed, typography floor 11px.
+//
+// Provider migration (v2 → v3):
+//   BEFORE: ref.watch(realTimeServiceProvider) → rt.liveLevels / rt.isLoading
+//   AFTER:
+//     liveLevelsProvider           → List<FloodData>
+//     isLoadingProvider            → bool skeleton gate
+//     criticalStationCountProvider → pre-aggregated int
+//     severeStationCountProvider   → pre-aggregated int
+//     normalStationCountProvider   → pre-aggregated int
+//
+// Typography floor: all visible text ≥ 11px.
+// Surfaces / text colours: routed through RiverColors.of(context).
+// Status / risk colours (critical, danger, amber, safe, cyan) remain as
+// AppPalette.* constants — they are intentionally theme-invariant.
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,20 +21,59 @@ import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 
-class RiverMonitorScreen extends ConsumerStatefulWidget {
+class RiverMonitorScreen extends ConsumerWidget {
   const RiverMonitorScreen({super.key});
   static const String route = '/river_monitor';
+
   @override
-  ConsumerState<RiverMonitorScreen> createState() => _RiverMonitorScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Narrow provider watches — each rebuilds only its dependents.
+    final levels     = ref.watch(liveLevelsProvider);
+    final isLoading  = ref.watch(isLoadingProvider);
+    final critCount  = ref.watch(criticalStationCountProvider);
+    final sevCount   = ref.watch(severeStationCountProvider);
+    final normCount  = ref.watch(normalStationCountProvider);
+
+    return _RiverMonitorView(
+      levels:    levels,
+      isLoading: isLoading,
+      critCount: critCount,
+      sevCount:  sevCount,
+      normCount: normCount,
+    );
+  }
 }
 
-class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
+// ───────────────────────────────────────────────────────────────────────────────
+// _RiverMonitorView  —  StatefulWidget that owns only local search state
+// ───────────────────────────────────────────────────────────────────────────────
+
+class _RiverMonitorView extends StatefulWidget {
+  final List<FloodData> levels;
+  final bool            isLoading;
+  final int             critCount;
+  final int             sevCount;
+  final int             normCount;
+
+  const _RiverMonitorView({
+    required this.levels,
+    required this.isLoading,
+    required this.critCount,
+    required this.sevCount,
+    required this.normCount,
+  });
+
+  @override
+  State<_RiverMonitorView> createState() => _RiverMonitorViewState();
+}
+
+class _RiverMonitorViewState extends State<_RiverMonitorView> {
   String _query = '';
 
-  List<FloodData> _filtered(List<FloodData> levels) {
-    if (_query.isEmpty) return levels;
+  List<FloodData> get _filtered {
+    if (_query.isEmpty) return widget.levels;
     final q = _query.toLowerCase();
-    return levels.where((fd) =>
+    return widget.levels.where((fd) =>
         fd.city.toLowerCase().contains(q) ||
         fd.state.toLowerCase().contains(q) ||
         fd.district.toLowerCase().contains(q) ||
@@ -31,42 +82,36 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final rt     = ref.watch(realTimeServiceProvider);
-    final levels = _filtered(rt.liveLevels);
-
-    // summary counts for header strip
-    final critCount = rt.liveLevels
-        .where((d) => d.riskLevel.toUpperCase() == 'CRITICAL').length;
-    final sevCount  = rt.liveLevels
-        .where((d) => d.riskLevel.toUpperCase() == 'SEVERE').length;
+    final t        = RiverColors.of(context);
+    final filtered = _filtered;
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      backgroundColor: t.scaffoldBg,
       appBar: AppBar(
-        backgroundColor: AppPalette.abyss1,
+        backgroundColor: t.cardBg,
         elevation: 0,
         scrolledUnderElevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'River Monitor',
               style: TextStyle(
-                color: AppPalette.textWhite,
+                color: t.textPrimary,
                 fontWeight: FontWeight.w800,
                 fontSize: 18,
                 letterSpacing: 0.2,
               ),
             ),
-            if (rt.liveLevels.isNotEmpty)
+            if (widget.levels.isNotEmpty)
               Text(
-                '${rt.liveLevels.length} stations · '
-                '${critCount > 0 ? "$critCount critical · " : ""}'
-                '${sevCount > 0 ? "$sevCount severe · " : ""}'
-                '${rt.liveLevels.length - critCount - sevCount} normal',
-                style: const TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 10,
+                '${widget.levels.length} stations · '
+                '${widget.critCount > 0 ? "${widget.critCount} critical · " : ""}'
+                '${widget.sevCount  > 0 ? "${widget.sevCount}  severe · "   : ""}'
+                '${widget.normCount} normal',
+                style: TextStyle(
+                  color: t.textSecondary,
+                  fontSize: 11,          // floor: was 10
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -77,30 +122,29 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: TextField(
-              style: const TextStyle(color: AppPalette.textWhite),
+              style: TextStyle(color: t.textPrimary, fontSize: 14),
               decoration: InputDecoration(
                 hintText: 'Search city, district, state or river…',
-                hintStyle:
-                    const TextStyle(color: AppPalette.textGrey, fontSize: 13),
+                hintStyle: TextStyle(color: t.textSecondary, fontSize: 13),
                 prefixIcon:
-                    const Icon(Icons.search, color: AppPalette.cyan, size: 20),
+                    Icon(Icons.search, color: AppPalette.cyan, size: 20),
                 filled: true,
-                fillColor: AppPalette.abyss2,
+                fillColor: t.scaffoldBg,
                 contentPadding: EdgeInsets.zero,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
-                  borderSide:
-                      BorderSide(color: AppPalette.cyan.withValues(alpha: 0.18)),
+                  borderSide: BorderSide(
+                      color: AppPalette.cyan.withValues(alpha: 0.18)),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
-                  borderSide:
-                      BorderSide(color: AppPalette.cyan.withValues(alpha: 0.18)),
+                  borderSide: BorderSide(
+                      color: AppPalette.cyan.withValues(alpha: 0.18)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
-                  borderSide:
-                      BorderSide(color: AppPalette.cyan.withValues(alpha: 0.6)),
+                  borderSide: BorderSide(
+                      color: AppPalette.cyan.withValues(alpha: 0.60)),
                 ),
               ),
               onChanged: (v) => setState(() => _query = v),
@@ -108,47 +152,85 @@ class _RiverMonitorScreenState extends ConsumerState<RiverMonitorScreen> {
           ),
         ),
       ),
-      body: rt.isLoading && levels.isEmpty
-          ? const Center(
+      body: widget.isLoading && widget.levels.isEmpty
+          ? Center(
               child: CircularProgressIndicator(color: AppPalette.cyan))
-          : levels.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.water_drop_outlined,
-                          color: AppPalette.textGrey, size: 48),
-                      const SizedBox(height: 12),
-                      Text(
-                        _query.isEmpty
-                            ? 'No live data available.'
-                            : 'No results for "$_query".',
-                        style:
-                            const TextStyle(color: AppPalette.textGrey),
-                      ),
-                    ],
-                  ),
-                )
+          : filtered.isEmpty
+              ? _EmptyState(query: _query, t: t)
               : ListView.builder(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-                  itemCount: levels.length,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 16),
+                  itemCount: filtered.length,
                   itemBuilder: (context, i) =>
-                      _RiverCard(data: levels[i]),
+                      _RiverCard(data: filtered[i], t: t),
                 ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// River Card v2
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+// _EmptyState  —  improved empty/no-results state
+// ───────────────────────────────────────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  final String     query;
+  final RiverColors t;
+  const _EmptyState({required this.query, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final isSearch = query.isNotEmpty;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSearch
+                  ? Icons.search_off_rounded
+                  : Icons.water_drop_outlined,
+              color: t.textSecondary,
+              size: 52,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isSearch ? 'No results for “$query”' : 'No live data yet',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: t.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              isSearch
+                  ? 'Try a different city, district, state, or river name.'
+                  : 'Data will appear once the service connects.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: t.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// River Card v3
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _RiverCard extends StatelessWidget {
-  final FloodData data;
-  const _RiverCard({required this.data});
+  final FloodData   data;
+  final RiverColors t;
+  const _RiverCard({required this.data, required this.t});
 
-  static const _staleThreshold = Duration(hours: 3);
+  static const _staleThreshold    = Duration(hours: 3);
   static const _outdatedThreshold = Duration(hours: 12);
 
   bool get _isStale =>
@@ -167,10 +249,11 @@ class _RiverCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: AppPalette.abyss1,
+        color: t.cardBg,                                          // ← themed
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: color.withValues(alpha: _isOutdated ? 0.12 : 0.30), width: 1),
+            color: color.withValues(alpha: _isOutdated ? 0.12 : 0.30),
+            width: 1),
         boxShadow: [
           BoxShadow(
               color: color.withValues(alpha: _isOutdated ? 0.04 : 0.10),
@@ -180,18 +263,19 @@ class _RiverCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // ── Stale/Outdated banner ─────────────────────────────────────────
+          // ── Stale / Outdated banner ────────────────────────────────────────
           if (_isStale)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
                 color: (_isOutdated
                         ? const Color(0xFFEF5350)
                         : const Color(0xFFFFA726))
                     .withValues(alpha: 0.10),
-                borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(20)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Row(
                 children: [
@@ -207,13 +291,13 @@ class _RiverCard extends StatelessWidget {
                   const SizedBox(width: 5),
                   Text(
                     _isOutdated
-                        ? 'Outdated data · last seen ${_timeAgo(data.lastUpdated)}'
-                        : 'Stale · last updated ${_timeAgo(data.lastUpdated)}',
+                        ? 'Outdated · last seen ${_timeAgo(data.lastUpdated)}'
+                        : 'Stale · updated ${_timeAgo(data.lastUpdated)}',
                     style: TextStyle(
                       color: _isOutdated
                           ? const Color(0xFFEF5350)
                           : const Color(0xFFFFA726),
-                      fontSize: 10,
+                      fontSize: 11,          // floor: was 10
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -221,52 +305,48 @@ class _RiverCard extends StatelessWidget {
               ),
             ),
 
-          // ── Header row ────────────────────────────────────────────────────
+          // ── Header row ────────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 14, 0),
             child: Row(
               children: [
-                // Arc gauge
                 _ArcGauge(
-                  percent: pct,
-                  warnAt: warnPct,
-                  color: color,
-                  size: 76,
-                  centerLabel:
-                      '${data.capacityPercent.toStringAsFixed(0)}%',
-                  subLabel: 'fill',
+                  percent:     pct,
+                  warnAt:      warnPct,
+                  color:       color,
+                  size:        76,
+                  centerLabel: '${data.capacityPercent.toStringAsFixed(0)}%',
+                  subLabel:    'fill',
+                  t:           t,
                 ),
                 const SizedBox(width: 14),
-                // Name + river + district
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         data.city,
-                        style: const TextStyle(
-                            color: AppPalette.textWhite,
-                            fontSize: 18,
+                        style: TextStyle(
+                            color:      t.textPrimary,        // ← themed
+                            fontSize:   18,
                             fontWeight: FontWeight.w700),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        maxLines:  1,
+                        overflow:  TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
-                      // District line (new)
                       if (data.district.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 2),
                           child: Row(
                             children: [
-                              const Icon(Icons.location_city_rounded,
-                                  size: 11,
-                                  color: AppPalette.textGrey),
+                              Icon(Icons.location_city_rounded,
+                                  size: 11, color: t.textSecondary),
                               const SizedBox(width: 4),
                               Flexible(
                                 child: Text(
                                   '${data.district} · ${data.state}',
-                                  style: const TextStyle(
-                                      color: AppPalette.textGrey,
+                                  style: TextStyle(
+                                      color:    t.textSecondary, // ← themed
                                       fontSize: 11),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -282,8 +362,8 @@ class _RiverCard extends StatelessWidget {
                           Flexible(
                             child: Text(
                               data.riverName ?? 'N/A',
-                              style: const TextStyle(
-                                  color: AppPalette.textGrey,
+                              style: TextStyle(
+                                  color: t.textSecondary, // ← themed
                                   fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -291,7 +371,6 @@ class _RiverCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      // Badges row
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
@@ -306,11 +385,11 @@ class _RiverCard extends StatelessWidget {
                               fg: AppPalette.cyan),
                           if (data.imdSeverity != null)
                             _Badge(
-                                label: 'IMD ● ${data.imdSeverity}',
+                                label:
+                                    'IMD ● ${data.imdSeverity}',
                                 bg: _imdColor(data.imdSeverity!)
                                     .withValues(alpha: 0.15),
                                 fg: _imdColor(data.imdSeverity!)),
-                          // Fresh/Stale indicator badge
                           if (!_isStale)
                             _Badge(
                                 label: '● LIVE',
@@ -327,34 +406,37 @@ class _RiverCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 14),
-          const Divider(
-              color: Color(0x1800C6FF), height: 1, indent: 14, endIndent: 14),
+          Divider(
+              color: t.stroke, height: 1, indent: 14, endIndent: 14),
           const SizedBox(height: 12),
 
-          // ── Row 1: Level · Warning · Rain24h ───────────────────────────────
+          // ── Row 1: Level · Warning · Rain 24h ────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 _StatChip(
-                  icon: Icons.height,
-                  label: 'Level',
-                  value: '${data.currentLevel.toStringAsFixed(2)} m',
+                  icon:   Icons.height,
+                  label:  'Level',
+                  value:  '${data.currentLevel.toStringAsFixed(2)} m',
                   accent: color,
+                  t:      t,
                 ),
                 const SizedBox(width: 8),
                 _StatChip(
-                  icon: Icons.warning_amber_rounded,
-                  label: 'Warning',
-                  value: '${data.warningLevel.toStringAsFixed(1)} m',
+                  icon:   Icons.warning_amber_rounded,
+                  label:  'Warning',
+                  value:  '${data.warningLevel.toStringAsFixed(1)} m',
                   accent: const Color(0xFFFFA726),
+                  t:      t,
                 ),
                 const SizedBox(width: 8),
                 _StatChip(
-                  icon: Icons.water_drop_outlined,
-                  label: 'Rain 24h',
-                  value: '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
+                  icon:   Icons.water_drop_outlined,
+                  label:  'Rain 24h',
+                  value:  '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
                   accent: AppPalette.cyan,
+                  t:      t,
                 ),
               ],
             ),
@@ -362,57 +444,61 @@ class _RiverCard extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // ── Row 2: Danger · Flow · Safe · Updated ──────────────────────────
+          // ── Row 2: Danger · Safe · Flow / IMD Rain ────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 _StatChip(
-                  icon: Icons.stream,
-                  label: 'Danger',
-                  value: '${data.dangerLevel.toStringAsFixed(1)} m',
+                  icon:   Icons.stream,
+                  label:  'Danger',
+                  value:  '${data.dangerLevel.toStringAsFixed(1)} m',
                   accent: const Color(0xFFEF5350),
+                  t:      t,
                 ),
                 const SizedBox(width: 8),
                 _StatChip(
-                  icon: Icons.check_circle_outline,
-                  label: 'Safe',
-                  value: '${data.safeLevel.toStringAsFixed(1)} m',
+                  icon:   Icons.check_circle_outline,
+                  label:  'Safe',
+                  value:  '${data.safeLevel.toStringAsFixed(1)} m',
                   accent: const Color(0xFF66BB6A),
+                  t:      t,
                 ),
                 const SizedBox(width: 8),
-                // IMD Rainfall if available, else Flow
                 if (data.imdRainfallMm != null)
                   _StatChip(
-                    icon: Icons.grain_rounded,
-                    label: 'IMD Rain',
-                    value: '${data.imdRainfallMm!.toStringAsFixed(1)} mm',
+                    icon:   Icons.grain_rounded,
+                    label:  'IMD Rain',
+                    value:  '${data.imdRainfallMm!.toStringAsFixed(1)} mm',
                     accent: const Color(0xFF42A5F5),
+                    t:      t,
                   )
                 else if (data.flowRate != null)
                   _StatChip(
-                    icon: Icons.speed,
-                    label: 'Flow',
+                    icon:   Icons.speed,
+                    label:  'Flow',
                     value:
                         '${(data.flowRate! / 1000).toStringAsFixed(1)}k m³/s',
                     accent: const Color(0xFF66BB6A),
+                    t:      t,
                   )
                 else
                   _StatChip(
-                    icon: Icons.access_time,
-                    label: 'Updated',
-                    value: _timeAgo(data.lastUpdated),
+                    icon:   Icons.access_time,
+                    label:  'Updated',
+                    value:  _timeAgo(data.lastUpdated),
                     accent: _isOutdated
                         ? const Color(0xFFEF5350)
                         : _isStale
                             ? const Color(0xFFFFA726)
-                            : AppPalette.textGrey,
+                            : t.textSecondary,
+                    t: t,
                   ),
               ],
             ),
           ),
 
-          // ── Updated timestamp row ──────────────────────────────────────────
+          // ── Updated timestamp ───────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
             child: Row(
@@ -424,7 +510,7 @@ class _RiverCard extends StatelessWidget {
                       ? const Color(0xFFEF5350)
                       : _isStale
                           ? const Color(0xFFFFA726)
-                          : AppPalette.textGrey,
+                          : t.textSecondary,
                 ),
                 const SizedBox(width: 4),
                 Text(
@@ -434,20 +520,20 @@ class _RiverCard extends StatelessWidget {
                         ? const Color(0xFFEF5350)
                         : _isStale
                             ? const Color(0xFFFFA726)
-                            : AppPalette.textGrey,
-                    fontSize: 10,
+                            : t.textSecondary,
+                    fontSize: 11,        // floor: was 10
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 if (data.flowRate != null && data.imdRainfallMm != null) ...[
                   const Spacer(),
-                  Icon(Icons.speed, size: 11, color: AppPalette.textGrey),
+                  Icon(Icons.speed, size: 11, color: t.textSecondary),
                   const SizedBox(width: 4),
                   Text(
                     '${(data.flowRate! / 1000).toStringAsFixed(1)}k m³/s',
-                    style: const TextStyle(
-                        color: AppPalette.textGrey,
-                        fontSize: 10,
+                    style: TextStyle(
+                        color:      t.textSecondary,
+                        fontSize:   11,  // floor: was 10
                         fontWeight: FontWeight.w500),
                   ),
                 ],
@@ -457,7 +543,7 @@ class _RiverCard extends StatelessWidget {
 
           const SizedBox(height: 14),
 
-          // ── Level progress bar ─────────────────────────────────────────────
+          // ── Level progress bar ───────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             child: _LevelBar(
@@ -466,6 +552,7 @@ class _RiverCard extends StatelessWidget {
               danger:  data.dangerLevel,
               safe:    data.safeLevel,
               color:   color,
+              t:       t,
             ),
           ),
         ],
@@ -482,8 +569,8 @@ class _RiverCard extends StatelessWidget {
     }
   }
 
-  String _timeAgo(DateTime t) {
-    final diff = DateTime.now().difference(t);
+  String _timeAgo(DateTime time) {
+    final diff = DateTime.now().difference(time);
     if (diff.inMinutes < 1)  return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours   < 24) return '${diff.inHours}h ago';
@@ -491,17 +578,18 @@ class _RiverCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Arc Gauge (CustomPaint — unchanged logic)
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+// Arc Gauge
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _ArcGauge extends StatelessWidget {
-  final double percent;
-  final double warnAt;
-  final Color  color;
-  final double size;
-  final String centerLabel;
-  final String subLabel;
+  final double      percent;
+  final double      warnAt;
+  final Color       color;
+  final double      size;
+  final String      centerLabel;
+  final String      subLabel;
+  final RiverColors t;
 
   const _ArcGauge({
     required this.percent,
@@ -510,20 +598,21 @@ class _ArcGauge extends StatelessWidget {
     required this.size,
     required this.centerLabel,
     required this.subLabel,
+    required this.t,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: size,
-      height: size,
+      width: size, height: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
           CustomPaint(
             size: Size(size, size),
             painter: _ArcPainter(
-                percent: percent, warnAt: warnAt, color: color),
+                percent: percent, warnAt: warnAt, color: color,
+                trackColor: t.stroke),   // ← themed track
           ),
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -531,16 +620,16 @@ class _ArcGauge extends StatelessWidget {
               Text(
                 centerLabel,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 14,
+                    color:      color,
+                    fontSize:   14,
                     fontWeight: FontWeight.w800,
-                    height: 1.1),
+                    height:     1.1),
               ),
               Text(
                 subLabel,
-                style: const TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 9,
+                style: TextStyle(
+                    color:         t.textSecondary, // ← themed
+                    fontSize:      11,              // floor: was 9
                     letterSpacing: 0.5),
               ),
             ],
@@ -555,15 +644,17 @@ class _ArcPainter extends CustomPainter {
   final double percent;
   final double warnAt;
   final Color  color;
+  final Color  trackColor;
 
   const _ArcPainter({
     required this.percent,
     required this.warnAt,
     required this.color,
+    required this.trackColor,
   });
 
-  static const _start  = math.pi * 0.75;
-  static const _sweep  = math.pi * 1.5;
+  static const _start = math.pi * 0.75;
+  static const _sweep = math.pi * 1.5;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -578,7 +669,7 @@ class _ArcPainter extends CustomPainter {
         ..style       = PaintingStyle.stroke
         ..strokeWidth = 8
         ..strokeCap   = StrokeCap.round
-        ..color       = AppPalette.abyss2,
+        ..color       = trackColor,       // ← themed
     );
 
     if (percent > 0) {
@@ -604,13 +695,11 @@ class _ArcPainter extends CustomPainter {
     final p2 = Offset(
         cx + tickR * math.cos(wAngle),
         cy + tickR * math.sin(wAngle));
-    canvas.drawLine(
-      p1, p2,
-      Paint()
-        ..color       = const Color(0xFFFFA726)
-        ..strokeWidth = 2.5
-        ..strokeCap   = StrokeCap.round,
-    );
+    canvas.drawLine(p1, p2,
+        Paint()
+          ..color       = const Color(0xFFFFA726)
+          ..strokeWidth = 2.5
+          ..strokeCap   = StrokeCap.round);
 
     if (percent > 0.01) {
       final dAngle = _start + _sweep * percent;
@@ -618,7 +707,8 @@ class _ArcPainter extends CustomPainter {
           cx + outer * math.cos(dAngle),
           cy + outer * math.sin(dAngle));
       canvas.drawCircle(dotC, 4, Paint()..color = color);
-      canvas.drawCircle(dotC, 4,
+      canvas.drawCircle(
+          dotC, 4,
           Paint()
             ..color       = Colors.white.withValues(alpha: 0.3)
             ..style       = PaintingStyle.stroke
@@ -628,24 +718,26 @@ class _ArcPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ArcPainter o) =>
-      o.percent != percent || o.color != color;
+      o.percent != percent || o.color != color || o.trackColor != trackColor;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Stat Chip
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+// Stat Chip v3  —  themed surfaces, 11px label floor
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final String   value;
-  final Color    accent;
+  final IconData    icon;
+  final String      label;
+  final String      value;
+  final Color       accent;
+  final RiverColors t;
 
   const _StatChip({
     required this.icon,
     required this.label,
     required this.value,
     required this.accent,
+    required this.t,
   });
 
   @override
@@ -656,8 +748,8 @@ class _StatChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: accent.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(10),
-          border:
-              Border.all(color: accent.withValues(alpha: 0.18), width: 0.8),
+          border: Border.all(
+              color: accent.withValues(alpha: 0.18), width: 0.8),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -667,17 +759,19 @@ class _StatChip extends StatelessWidget {
             Text(
               value,
               style: TextStyle(
-                  color: accent,
-                  fontSize: 12,
+                  color:      accent,
+                  fontSize:   12,
                   fontWeight: FontWeight.w700,
-                  height: 1.1),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                  height:     1.1),
+              maxLines:  1,
+              overflow:  TextOverflow.ellipsis,
             ),
             Text(
               label,
-              style: const TextStyle(
-                  color: AppPalette.textGrey, fontSize: 9, height: 1.2),
+              style: TextStyle(
+                  color:    t.textSecondary, // ← themed
+                  fontSize: 11,              // floor: was 9
+                  height:   1.2),
             ),
           ],
         ),
@@ -686,9 +780,9 @@ class _StatChip extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 // Badge
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _Badge extends StatelessWidget {
   final String label;
@@ -700,33 +794,35 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color: bg, borderRadius: BorderRadius.circular(20)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(
         label,
         style: TextStyle(
-            color: fg,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
+            color:         fg,
+            fontSize:      11,   // floor: was 10
+            fontWeight:    FontWeight.w700,
             letterSpacing: 0.4),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Level Bar v2 — shows safe level marker too
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
+// Level Bar v3 — themed track colour
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _LevelBar extends StatelessWidget {
-  final double current, warning, danger, safe;
-  final Color  color;
+  final double      current, warning, danger, safe;
+  final Color       color;
+  final RiverColors t;
   const _LevelBar({
     required this.current,
     required this.warning,
     required this.danger,
     required this.safe,
     required this.color,
+    required this.t,
   });
 
   @override
@@ -747,19 +843,17 @@ class _LevelBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
                     height: 10,
-                    color: AppPalette.abyss2,
+                    color: t.stroke,          // ← themed: was AppPalette.abyss2
                     child: FractionallySizedBox(
                       widthFactor: pct,
                       alignment: Alignment.centerLeft,
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
-                          gradient: LinearGradient(
-                            colors: [
-                              color.withValues(alpha: 0.55),
-                              color,
-                            ],
-                          ),
+                          gradient: LinearGradient(colors: [
+                            color.withValues(alpha: 0.55),
+                            color,
+                          ]),
                         ),
                       ),
                     ),
@@ -767,28 +861,22 @@ class _LevelBar extends StatelessWidget {
                 ),
                 // Safe marker (green)
                 Positioned(
-                  left: box.maxWidth * sPct - 1,
-                  top: -3,
+                  left: box.maxWidth * sPct - 1, top: -3,
                   child: Container(
-                    width: 2,
-                    height: 16,
+                    width: 2, height: 16,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF4CAF50),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                        color: const Color(0xFF4CAF50),
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 // Warning marker (orange)
                 Positioned(
-                  left: box.maxWidth * wPct - 1,
-                  top: -3,
+                  left: box.maxWidth * wPct - 1, top: -3,
                   child: Container(
-                    width: 2.5,
-                    height: 16,
+                    width: 2.5, height: 16,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFA726),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                        color: const Color(0xFFFFA726),
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
               ],
@@ -799,21 +887,15 @@ class _LevelBar extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              '🟢 ${safe.toStringAsFixed(1)} m',
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFF4CAF50)),
-            ),
-            Text(
-              '⚠ ${warning.toStringAsFixed(1)} m',
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFFFFA726)),
-            ),
-            Text(
-              '🔴 ${danger.toStringAsFixed(1)} m',
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFFEF5350)),
-            ),
+            Text('🟢 ${safe.toStringAsFixed(1)} m',
+                style: const TextStyle(
+                    fontSize: 11, color: Color(0xFF4CAF50))),  // floor: was 10
+            Text('⚠ ${warning.toStringAsFixed(1)} m',
+                style: const TextStyle(
+                    fontSize: 11, color: Color(0xFFFFA726))),  // floor: was 10
+            Text('🔴 ${danger.toStringAsFixed(1)} m',
+                style: const TextStyle(
+                    fontSize: 11, color: Color(0xFFEF5350))),  // floor: was 10
           ],
         ),
       ],
