@@ -10,7 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'l10n/app_localizations.dart';           // ← ADD: needed for delegate
+import 'l10n/app_localizations.dart';
 import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
@@ -34,8 +34,10 @@ import 'screens/cwc_station_detail_screen.dart';
 import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
-import 'screens/map_screen.dart';               // ← ADD: flood command map
+import 'screens/map_screen.dart';
 import 'theme/app_theme.dart';
+import 'theme/river_theme.dart';
+import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
@@ -76,32 +78,65 @@ Future<void> main() async {
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
-// ─── Root app — reactive to theme changes via Riverpod ───────────────────────
+// ─── Root app ─────────────────────────────────────────────────────────────────
+// Each AppThemeMode gets its own fully-wired ThemeData that carries the correct
+// RiverColors ThemeExtension.  MaterialApp.themeMode selects light vs dark;
+// we ensure both slots are filled with the right palette so there is never a
+// fallback to the wrong palette regardless of system brightness.
 class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
 
+  // Build a ThemeData for the chosen mode, putting it in BOTH the light and
+  // dark slot so Flutter always picks it regardless of ThemeMode.light/dark.
+  static ThemeData _themeFor(AppThemeMode mode) {
+    switch (mode) {
+      case AppThemeMode.light:
+        return RiverColors.lightTheme();
+      case AppThemeMode.dark:
+        return RiverColors.darkTheme();
+      case AppThemeMode.sunset:
+        return RiverColors.sunsetTheme();
+      case AppThemeMode.ocean:
+        return RiverColors.oceanTheme();
+      case AppThemeMode.roboticDark:
+        return const RoboticTheme(isDark: true).toThemeData();
+      case AppThemeMode.roboticLight:
+        return const RoboticTheme(isDark: false).toThemeData();
+      case AppThemeMode.system:
+        // For system mode provide both light and dark river themes;
+        // MaterialApp.themeMode = ThemeMode.system picks the right one.
+        return RiverColors.darkTheme(); // placeholder; overridden below
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final roboticTheme  = ref.watch(roboticThemeProvider);
+    final mode          = ref.watch(themeModeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
 
-    final lightTheme = (roboticTheme != null && !roboticTheme.isDark)
-        ? roboticTheme.toFlutterTheme()
-        : AppTheme.light;
+    // For system mode: provide separate light/dark; for every other mode
+    // stuff the same theme in both slots so ThemeMode.light/dark are both
+    // correctly served.
+    final ThemeData lightSlot;
+    final ThemeData darkSlot;
 
-    final darkTheme = (roboticTheme != null && roboticTheme.isDark)
-        ? roboticTheme.toFlutterTheme()
-        : AppTheme.dark;
+    if (mode == AppThemeMode.system) {
+      lightSlot = RiverColors.lightTheme();
+      darkSlot  = RiverColors.darkTheme();
+    } else {
+      final t = _themeFor(mode);
+      lightSlot = t;
+      darkSlot  = t;
+    }
 
     return MaterialApp(
       title:                  'FloodWatch',
       debugShowCheckedModeBanner: false,
-      theme:                  lightTheme,
-      darkTheme:              darkTheme,
+      theme:                  lightSlot,
+      darkTheme:              darkSlot,
       themeMode:              themeNotifier.flutterMode,
-      // ── FIX: AppLocalizations.delegate MUST be first so context.l10n works ──
       localizationsDelegates: const [
-        AppLocalizations.delegate,                      // ← ADDED
+        AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
@@ -149,7 +184,7 @@ class FloodWatchApp extends ConsumerWidget {
             return _fade(const LiveStationsScreen());
           case NewsFeedScreen.route:
             return _fade(const NewsFeedScreen());
-          case MapScreen.route:                          // ← ADDED
+          case MapScreen.route:
             return _fade(const MapScreen());
           case '/city_detail':
             final cityName = settings.arguments as String? ?? '';

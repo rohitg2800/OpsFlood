@@ -15,8 +15,8 @@ enum AppThemeMode {
   dark,          // Night River
   sunset,        // Sunset Warm  (premium)
   ocean,         // Deep Ocean   (premium)
-  roboticDark,   // Tactical Dark (robotic)
-  roboticLight,  // System Light  (robotic)
+  roboticDark,   // Tactical Dark
+  roboticLight,  // Tactical Light
 }
 
 // ─── Legacy ChangeNotifier singleton (kept for non-Riverpod init()) ──────────
@@ -35,7 +35,7 @@ class ThemeProvider extends ChangeNotifier {
       case AppThemeMode.system:       return ThemeMode.system;
       case AppThemeMode.light:        return ThemeMode.light;
       case AppThemeMode.dark:         return ThemeMode.dark;
-      case AppThemeMode.sunset:       return ThemeMode.light;
+      case AppThemeMode.sunset:       return ThemeMode.dark;
       case AppThemeMode.ocean:        return ThemeMode.dark;
       case AppThemeMode.roboticDark:  return ThemeMode.dark;
       case AppThemeMode.roboticLight: return ThemeMode.light;
@@ -103,7 +103,7 @@ class _ThemeModeNotifier extends Notifier<AppThemeMode> {
     AppThemeMode.sunset       => 'Sunset Warm',
     AppThemeMode.ocean        => 'Deep Ocean',
     AppThemeMode.roboticDark  => 'Tactical Dark',
-    AppThemeMode.roboticLight => 'System Light',
+    AppThemeMode.roboticLight => 'Tactical Light',
   };
 
   IconData get icon => switch (state) {
@@ -116,11 +116,14 @@ class _ThemeModeNotifier extends Notifier<AppThemeMode> {
     AppThemeMode.roboticLight => Icons.developer_board_rounded,
   };
 
+  // Every mode maps to ThemeMode.dark so MaterialApp always picks darkTheme
+  // slot — which main.dart fills with the correct per-mode ThemeData.
+  // system is the only exception where Flutter decides based on OS setting.
   ThemeMode get flutterMode => switch (state) {
     AppThemeMode.system       => ThemeMode.system,
     AppThemeMode.light        => ThemeMode.light,
     AppThemeMode.dark         => ThemeMode.dark,
-    AppThemeMode.sunset       => ThemeMode.light,
+    AppThemeMode.sunset       => ThemeMode.dark,
     AppThemeMode.ocean        => ThemeMode.dark,
     AppThemeMode.roboticDark  => ThemeMode.dark,
     AppThemeMode.roboticLight => ThemeMode.light,
@@ -134,7 +137,6 @@ final themeModeProvider = NotifierProvider<_ThemeModeNotifier, AppThemeMode>(
 // ─── Robotic theme providers ──────────────────────────────────────────────────
 
 /// Returns RoboticTheme when mode is robotic, null otherwise.
-/// Widgets NOT in robotic mode are never rebuilt by this provider.
 final roboticThemeProvider = Provider<RoboticTheme?>((ref) {
   final mode = ref.watch(themeModeProvider);
   return switch (mode) {

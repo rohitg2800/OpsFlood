@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EQUINOX-BR05  –  Golden Ops Design Language  (v6 — Warm Gold Rebuild)
+//  EQUINOX-BR05  –  Golden Ops Design Language  (v7 — Full Theme Wiring)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppPalette {
@@ -180,6 +180,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
   static RiverColors of(BuildContext context) =>
       Theme.of(context).extension<RiverColors>() ?? _golden;
 
+  // ── DARK (warm gold on deep abyss) ────────────────────────────────────────
   static const RiverColors _golden = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
@@ -203,7 +204,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.abyss1,
   );
 
-  // ── LIGHT (warm cream-gold) ────────────────────────────────────────────────────
+  // ── LIGHT (warm cream-gold) ───────────────────────────────────────────────
   static const RiverColors _light = RiverColors(
     riverNormal:    Color(0xFF00897B),
     riverWarning:   AppPalette.warning,
@@ -227,7 +228,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     Color(0xFFFFF8E7),
   );
 
-  // ── SUNSET (deep rose-orange) ────────────────────────────────────────────────
+  // ── SUNSET (deep rose-orange) ─────────────────────────────────────────────
   static const RiverColors _sunset = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   Color(0xFFFFAA00),
@@ -251,7 +252,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.sunset1,
   );
 
-  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────────
+  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────
   static const RiverColors _ocean = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
@@ -342,12 +343,11 @@ class RiverColors extends ThemeExtension<RiverColors> {
     );
   }
 
-  // ── Theme builders ───────────────────────────────────────────────────────────
-  static ThemeData lightTheme() => _buildTheme(
-      brightness: Brightness.light, ext: _light);
-
-  static ThemeData darkTheme() => _buildTheme(
-      brightness: Brightness.dark, ext: _golden);
+  // ── Theme builders ────────────────────────────────────────────────────────
+  static ThemeData lightTheme()  => _buildTheme(brightness: Brightness.light,  ext: _light);
+  static ThemeData darkTheme()   => _buildTheme(brightness: Brightness.dark,   ext: _golden);
+  static ThemeData sunsetTheme() => _buildTheme(brightness: Brightness.dark,   ext: _sunset);
+  static ThemeData oceanTheme()  => _buildTheme(brightness: Brightness.dark,   ext: _ocean);
 
   static ThemeData _buildTheme({
     required Brightness brightness,
@@ -355,19 +355,19 @@ class RiverColors extends ThemeExtension<RiverColors> {
   }) {
     final isDark   = brightness == Brightness.dark;
     final scaffold = ext.scaffoldBg;
-    final accent   = ext.accent;
     final card     = ext.cardBg;
     final stroke   = ext.stroke;
+    final accent   = ext.accent;
 
     final cs = ColorScheme.fromSeed(
-      seedColor: AppPalette.gold,
+      seedColor:  accent,
       brightness: brightness,
     ).copyWith(
-      primary:     AppPalette.gold,
-      secondary:   AppPalette.goldLight,
-      surface:     isDark ? AppPalette.abyss2 : Colors.white,
-      onPrimary:   AppPalette.abyss0,
-      onSecondary: AppPalette.abyss0,
+      primary:     accent,
+      secondary:   ext.metricColor,
+      surface:     card,
+      onPrimary:   isDark ? ext.scaffoldBg : Colors.white,
+      onSecondary: isDark ? ext.scaffoldBg : Colors.white,
       error:       AppPalette.critical,
     );
 
@@ -406,17 +406,14 @@ class RiverColors extends ThemeExtension<RiverColors> {
       cardTheme: CardThemeData(
         color:     card,
         elevation: 0,
-        shape:     RoundedRectangleBorder(
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(22),
-          side: BorderSide(
-            color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
-            width: 1,
-          ),
+          side: BorderSide(color: stroke, width: 1),
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF1A1000),
-        foregroundColor:  AppPalette.textWhite,
+        backgroundColor:  ext.navBg,
+        foregroundColor:  ext.textPrimary,
         elevation:        0,
         centerTitle:      false,
         surfaceTintColor: Colors.transparent,
@@ -424,22 +421,22 @@ class RiverColors extends ThemeExtension<RiverColors> {
           color: ext.textPrimary, fontSize: 20,
           fontWeight: FontWeight.w800, letterSpacing: -0.5,
         ),
-        iconTheme: const IconThemeData(color: AppPalette.gold),
+        iconTheme: IconThemeData(color: accent),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor:  isDark ? AppPalette.abyss0 : const Color(0xFF1A1000),
-        indicatorColor:   AppPalette.goldGlow,
-        height:           64,
+        backgroundColor: ext.navBg,
+        indicatorColor:  ext.accentGlow,
+        height:          64,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: AppPalette.gold, size: 24);
+            return IconThemeData(color: ext.navActive, size: 24);
           }
           return IconThemeData(color: ext.navInactive, size: 22);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const TextStyle(
-              color: AppPalette.gold, fontSize: 10,
+            return TextStyle(
+              color: ext.navActive, fontSize: 10,
               fontWeight: FontWeight.w700, letterSpacing: 0.3);
           }
           return TextStyle(
@@ -448,8 +445,8 @@ class RiverColors extends ThemeExtension<RiverColors> {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppPalette.gold,
-          foregroundColor: AppPalette.abyss0,
+          backgroundColor: accent,
+          foregroundColor: isDark ? ext.scaffoldBg : Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           textStyle: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
@@ -457,27 +454,24 @@ class RiverColors extends ThemeExtension<RiverColors> {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppPalette.gold,
-          side: const BorderSide(color: AppPalette.gold, width: 1.5),
+          foregroundColor: accent,
+          side: BorderSide(color: accent, width: 1.5),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: isDark ? AppPalette.abyss4 : const Color(0xFFFFE999),
+        backgroundColor: ext.chipBg,
         labelStyle: TextStyle(
           fontSize: 12, fontWeight: FontWeight.w600,
-          color: isDark ? AppPalette.textWhite : AppPalette.abyss2,
+          color: ext.textPrimary,
         ),
-        side: BorderSide(
-          color: isDark ? AppPalette.abyssStroke : const Color(0xFFE8C84A),
-          width: 1,
-        ),
+        side: BorderSide(color: stroke, width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: AppPalette.gold,
-        linearTrackColor: AppPalette.abyss3,
+        color:            accent,
+        linearTrackColor: ext.cardBgElevated,
       ),
       dividerTheme: DividerThemeData(
         color: stroke, space: 1, thickness: 1,
@@ -495,9 +489,10 @@ class RiverColors extends ThemeExtension<RiverColors> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppPalette.gold, width: 2),
+          borderSide: BorderSide(color: accent, width: 2),
         ),
         hintStyle: TextStyle(color: ext.textSecondary),
+        labelStyle: TextStyle(color: accent),
       ),
     );
   }
