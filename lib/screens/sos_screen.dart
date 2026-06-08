@@ -1,5 +1,5 @@
 // lib/screens/sos_screen.dart
-// Bihar Flood Command — SOS / Emergency HUD v3
+// Bihar Flood Command — SOS / Emergency HUD v4
 // Bihar emergency contacts, SDRF, NDRF, BSDMA helplines.
 //
 // P1 fixes applied (2026-06-08):
@@ -8,15 +8,10 @@
 //      rebuilds every second instead of the entire screen Column tree.
 //
 // P2 fixes applied (2026-06-08):
-//   3. All surface/text colours routed through RiverColors.of(context):
-//        AppPalette.abyss0       → t.scaffoldBg
-//        AppPalette.abyss2       → t.cardBg
-//        AppPalette.abyssStroke  → t.stroke (unused here but consistent)
-//        AppPalette.textWhite    → t.textPrimary
-//        AppPalette.textGrey     → t.textSecondary
-//        AppPalette.textDim      → t.textSecondary (dimmed via opacity)
-//      Status / alert colours (critical, cyan, amber, safe) remain as
-//      AppPalette.* constants — they are theme-invariant.
+//   3. All surface/text colours routed through RiverColors.of(context).
+//   4. Confirmation dialog added for all non-112 contacts.
+//      112 remains instant-dial (national emergency speed matters).
+//
 library;
 
 import 'dart:async';
@@ -150,7 +145,6 @@ class _SosClockWidgetState extends State<_SosClockWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // P2: use theme token instead of hardcoded AppPalette.textDim
     final t = RiverColors.of(context);
     return Text(
       'SYS $_timeStr · BSDMA / SDRF / NDRF',
@@ -189,7 +183,8 @@ class _SosScreenState extends State<SosScreen>
     super.dispose();
   }
 
-  Future<void> _call(String number) async {
+  // ── Dial immediately — used for 112 (no confirmation needed). ────────────
+  Future<void> _callDirect(String number) async {
     setState(() => _calling = true);
     HapticFeedback.heavyImpact();
     final uri = Uri.parse('tel:$number');
@@ -200,12 +195,99 @@ class _SosScreenState extends State<SosScreen>
     if (mounted) setState(() => _calling = false);
   }
 
+  // ── Confirm then dial — used for all non-112 contacts. ───────────────────
+  Future<void> _callWithConfirm({
+    required String name,
+    required String number,
+    required Color accentColor,
+  }) async {
+    final t = RiverColors.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.70),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: t.cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: accentColor.withValues(alpha: 0.30)),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.call_rounded, color: accentColor, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                name,
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: RichText(
+          text: TextSpan(
+            style: TextStyle(color: t.textSecondary, fontSize: 13, height: 1.5),
+            children: [
+              const TextSpan(text: 'Call '),
+              TextSpan(
+                text: number,
+                style: TextStyle(
+                  color: accentColor,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const TextSpan(text: '?'),
+            ],
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          // Cancel
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: t.textSecondary,
+              minimumSize: const Size(72, 40),
+            ),
+            child: const Text('Cancel', style: TextStyle(fontSize: 13)),
+          ),
+          // Confirm call
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentColor.withValues(alpha: 0.15),
+              foregroundColor: accentColor,
+              side: BorderSide(color: accentColor.withValues(alpha: 0.45)),
+              elevation: 0,
+              minimumSize: const Size(88, 40),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            icon: const Icon(Icons.call_rounded, size: 15),
+            label: const Text(
+              'CALL',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _callDirect(number);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // P2: single context lookup, passed down to all sub-widgets
     final t = RiverColors.of(context);
     return Scaffold(
-      // P2: t.scaffoldBg (was AppPalette.abyss0)
       backgroundColor: t.scaffoldBg,
       body: Column(
         children: [
@@ -217,7 +299,6 @@ class _SosScreenState extends State<SosScreen>
               children: [
                 Text('BIHAR EMERGENCY CONTACTS',
                     style: TextStyle(
-                      // P2: t.textSecondary (was AppPalette.textDim)
                       color: t.textSecondary.withValues(alpha: 0.6),
                       fontSize: 10,
                       fontWeight: FontWeight.w700, letterSpacing: 2,
@@ -239,7 +320,14 @@ class _SosScreenState extends State<SosScreen>
                   type: e.type,
                   color: col,
                   t: t,
-                  onCall: () => _call(e.number),
+                  // 112 → direct; everything else → confirmation dialog
+                  onCall: e.number == '112'
+                      ? () => _callDirect(e.number)
+                      : () => _callWithConfirm(
+                            name: e.name,
+                            number: e.number,
+                            accentColor: col,
+                          ),
                 );
               },
             ),
@@ -252,7 +340,6 @@ class _SosScreenState extends State<SosScreen>
   Widget _buildHeader(RiverColors t) => Container(
     padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
     decoration: BoxDecoration(
-      // P2: t.scaffoldBg
       color: t.scaffoldBg,
       border: Border(bottom:
           BorderSide(color: AppPalette.critical.withValues(alpha: 0.20))),
@@ -260,14 +347,13 @@ class _SosScreenState extends State<SosScreen>
     child: Row(
       children: [
         GestureDetector(
-          onTap: () => Navigator.pop(context),
+          onTap: () => Navigator.maybePop(context),
           child: Container(
             width: 36, height: 36,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border:
                   Border.all(color: AppPalette.critical.withValues(alpha: 0.35)),
-              // P2: t.cardBg (was AppPalette.abyss2)
               color: t.cardBg,
             ),
             child: const Icon(Icons.arrow_back_ios_new_rounded,
@@ -314,7 +400,7 @@ class _SosScreenState extends State<SosScreen>
   Widget _buildSOSButton(RiverColors t) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
     child: GestureDetector(
-      onTap: () => _call('112'),
+      onTap: () => _callDirect('112'),
       child: AnimatedBuilder(
         animation: _pulse,
         builder: (_, __) => Container(
@@ -350,7 +436,6 @@ class _SosScreenState extends State<SosScreen>
               const SizedBox(height: 4),
               Text('NATIONAL EMERGENCY · BIHAR',
                   style: TextStyle(
-                    // P2: t.textSecondary (was AppPalette.textGrey)
                     color: t.textSecondary,
                     fontSize: 10,
                     letterSpacing: 2,
@@ -382,7 +467,6 @@ class _ContactTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        // P2: t.cardBg (was AppPalette.abyss2)
         color: t.cardBg,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.18)),
@@ -405,14 +489,12 @@ class _ContactTile extends StatelessWidget {
               children: [
                 Text(name,
                     style: TextStyle(
-                      // P2: t.textPrimary (was AppPalette.textWhite)
                       color: t.textPrimary,
                       fontSize: 11.5, fontWeight: FontWeight.w800,
                     )),
                 const SizedBox(height: 2),
                 Text(desc,
                     style: TextStyle(
-                      // P2: t.textSecondary (was AppPalette.textGrey)
                       color: t.textSecondary,
                       fontSize: 10,
                     )),

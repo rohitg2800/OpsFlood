@@ -1,6 +1,8 @@
 // lib/screens/home_screen.dart
-// Bihar Flood Command — Home (Tab Shell) v5
-// CHANGE: Added Map tab (index 3); Settings pushed to index 6.
+// Bihar Flood Command — Home (Tab Shell) v6
+// CHANGE v6: Added SOS tab (index 3) between Alerts and Map.
+//            SOS tab uses a red-badged emergency icon to signal priority.
+//            Total tabs: 8 (Dashboard, Monitors, Alerts, SOS, Map, Weather, Rivers, Settings).
 library;
 
 import 'package:flutter/material.dart';
@@ -16,6 +18,7 @@ import 'map_screen.dart';
 import 'monitors_screen.dart';
 import 'river_monitor_screen.dart';
 import 'settings_screen.dart';
+import 'sos_screen.dart';
 import 'weather_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -31,48 +34,85 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   // ── Tab bodies ────────────────────────────────────────────────────────────
   static const _tabs = [
-    DashboardScreen(),
-    MonitorsScreen(),
-    AlertsScreen(),
-    MapScreen(),          // ← MAP tab restored
-    WeatherScreen(),
-    RiverMonitorScreen(),
-    SettingsScreen(),
+    DashboardScreen(),    // 0
+    MonitorsScreen(),     // 1
+    AlertsScreen(),       // 2
+    SosScreen(),          // 3  ← SOS (new, preferred emergency tab)
+    MapScreen(),          // 4
+    WeatherScreen(),      // 5
+    RiverMonitorScreen(), // 6
+    SettingsScreen(),     // 7
   ];
 
   // ── Bottom nav destinations ───────────────────────────────────────────────
-  static const _navItems = [
-    NavigationDestination(
+  static List<Widget> _buildNavItems(Color sosColor) => [
+    const NavigationDestination(
       icon:         Icon(Icons.dashboard_outlined),
       selectedIcon: Icon(Icons.dashboard_rounded),
       label: 'Dashboard',
     ),
-    NavigationDestination(
+    const NavigationDestination(
       icon:         Icon(Icons.sensors_outlined),
       selectedIcon: Icon(Icons.sensors_rounded),
       label: 'Monitors',
     ),
-    NavigationDestination(
+    const NavigationDestination(
       icon:         Icon(Icons.notifications_outlined),
       selectedIcon: Icon(Icons.notifications_rounded),
       label: 'Alerts',
     ),
+    // SOS tab — red badge dot marks emergency priority
     NavigationDestination(
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.local_hospital_outlined),
+          Positioned(
+            top: -2, right: -2,
+            child: Container(
+              width: 7, height: 7,
+              decoration: BoxDecoration(
+                color: sosColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ],
+      ),
+      selectedIcon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.local_hospital_rounded),
+          Positioned(
+            top: -2, right: -2,
+            child: Container(
+              width: 7, height: 7,
+              decoration: BoxDecoration(
+                color: sosColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ],
+      ),
+      label: 'SOS',
+    ),
+    const NavigationDestination(
       icon:         Icon(Icons.map_outlined),
       selectedIcon: Icon(Icons.map_rounded),
       label: 'Map',
     ),
-    NavigationDestination(
+    const NavigationDestination(
       icon:         Icon(Icons.wb_sunny_outlined),
       selectedIcon: Icon(Icons.wb_sunny_rounded),
       label: 'Weather',
     ),
-    NavigationDestination(
+    const NavigationDestination(
       icon:         Icon(Icons.water_outlined),
       selectedIcon: Icon(Icons.water_rounded),
       label: 'Rivers',
     ),
-    NavigationDestination(
+    const NavigationDestination(
       icon:         Icon(Icons.settings_outlined),
       selectedIcon: Icon(Icons.settings_rounded),
       label: 'Settings',
@@ -93,7 +133,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Watch theme so the nav bar colour rebuilds on theme switch.
     ref.watch(themeModeProvider);
     final rc = context.rc;
 
@@ -109,7 +148,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           HapticFeedback.selectionClick();
           setState(() => _idx = i);
         },
-        destinations: _navItems,
+        destinations: _buildNavItems(AppPalette.critical),
       ),
       floatingActionButton: FloatingActionButton.small(
         onPressed: _onThemeTap,
