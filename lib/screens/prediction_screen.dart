@@ -14,6 +14,7 @@ import '../data/bihar_rivers.dart';
 
 class PredictionScreen extends ConsumerStatefulWidget {
   const PredictionScreen({super.key});
+  static const String route = '/prediction';
   @override
   ConsumerState<PredictionScreen> createState() => _PredictionScreenState();
 }

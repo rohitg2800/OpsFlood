@@ -83,7 +83,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    ref.watch(themeProvider); // rebuild on theme change
+    ref.watch(themeModeProvider); // rebuild on theme change
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,

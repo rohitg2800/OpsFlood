@@ -8,6 +8,7 @@ import '../theme/river_theme.dart';
 
 class RiverMonitorScreen extends ConsumerStatefulWidget {
   const RiverMonitorScreen({super.key});
+  static const String route = '/river_monitor';
   @override
   ConsumerState<RiverMonitorScreen> createState() => _RiverMonitorScreenState();
 }

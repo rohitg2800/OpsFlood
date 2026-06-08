@@ -9,6 +9,7 @@ import '../l10n/context_l10n.dart';
 
 class ManualPredictScreen extends StatefulWidget {
   const ManualPredictScreen({super.key});
+  static const String route = '/manual_predict';
 
   @override
   State<ManualPredictScreen> createState() => _ManualPredictScreenState();

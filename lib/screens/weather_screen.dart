@@ -17,6 +17,7 @@ import '../theme/river_theme.dart';
 
 class WeatherScreen extends ConsumerStatefulWidget {
   const WeatherScreen({super.key});
+  static const String route = '/weather';
   @override
   ConsumerState<WeatherScreen> createState() => _WeatherScreenState();
 }

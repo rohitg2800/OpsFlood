@@ -4,6 +4,7 @@ import '../l10n/context_l10n.dart';
 
 class ModelInfoScreen extends StatelessWidget {
   const ModelInfoScreen({super.key});
+  static const String route = '/model_info';
 
   @override
   Widget build(BuildContext context) {

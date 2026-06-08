@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class IndiaRiverExplorerScreen extends StatelessWidget {
   const IndiaRiverExplorerScreen({super.key});
+  static const String route = '/india_river_explorer';
   @override
   Widget build(BuildContext context) {
     return const Center(

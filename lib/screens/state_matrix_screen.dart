@@ -33,6 +33,7 @@ enum _Sort { alpha, risk, count }
 
 class StateMatrixScreen extends ConsumerStatefulWidget {
   const StateMatrixScreen({super.key});
+  static const String route = '/state_matrix';
 
   @override
   ConsumerState<StateMatrixScreen> createState() =>

@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -29,6 +30,7 @@ import 'screens/manual_predict_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
 import 'screens/india_river_explorer_screen.dart';
 import 'screens/cwc_station_detail_screen.dart';
+import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'theme/app_theme.dart';
@@ -138,11 +140,13 @@ class FloodWatchApp extends StatelessWidget {
             final cityName = settings.arguments as String? ?? '';
             return _fade(CityDetailScreen(cityName: cityName));
           case '/river_detail':
-            final river = settings.arguments as String? ?? '';
-            return _fade(RiverDetailScreen(riverName: river));
+            final rdArgs = settings.arguments;
+            if (rdArgs is! FloodData) return _fade(const SplashScreen());
+            return _fade(RiverDetailScreen(data: rdArgs));
           case '/cwc_station':
-            final args = settings.arguments;
-            return _fade(CwcStationDetailScreen(station: args));
+            final cwcArgs = settings.arguments;
+            if (cwcArgs is! CwcStation) return _fade(const SplashScreen());
+            return _fade(CwcStationDetailScreen(station: cwcArgs));
           default:
             return _fade(const SplashScreen());
         }

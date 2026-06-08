@@ -7,6 +7,7 @@ import '../l10n/context_l10n.dart';
 
 class PredictScreen extends StatefulWidget {
   const PredictScreen({super.key});
+  static const String route = '/predict';
 
   @override
   State<PredictScreen> createState() => _PredictScreenState();

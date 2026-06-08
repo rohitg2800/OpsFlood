@@ -13,6 +13,7 @@ import '../widgets/premium_theme_sheet.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
+  static const String route = '/settings';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
