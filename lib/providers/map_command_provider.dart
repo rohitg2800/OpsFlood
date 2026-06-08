@@ -1,28 +1,39 @@
 // lib/providers/map_command_provider.dart
+// Riverpod v3 — StateProvider was removed; use NotifierProvider instead.
 
-// ── Imports ──────────────────────────────────────────────────────────────────
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/river_station.dart';
 import '../providers/real_time_river_provider.dart';
-import '../providers/cwc_provider.dart'; // cwcStationsProvider, biharGeoJsonProvider
-import '../services/befiqr_cwc_service.dart'; // CwcStation
+import '../providers/cwc_provider.dart';
+import '../services/befiqr_cwc_service.dart';
 
-// ── Re-export (MUST be before any declarations) ──────────────────────────────
-// So map_screen.dart only needs to import map_command_provider.dart.
+// Export must come before all declarations (Dart directive rule)
 export 'cwc_provider.dart' show biharGeoJsonProvider;
 
-// ─── View-mode toggle ────────────────────────────────────────────────────────
+// ─── View-mode toggle ─────────────────────────────────────────────────────────
 enum MapViewMode { bihar, national }
 
+class MapViewModeNotifier extends Notifier<MapViewMode> {
+  @override
+  MapViewMode build() => MapViewMode.bihar;
+}
+
 final mapViewModeProvider =
-    StateProvider<MapViewMode>((_) => MapViewMode.bihar);
+    NotifierProvider<MapViewModeNotifier, MapViewMode>(
+        MapViewModeNotifier.new);
 
-// ─── Selected station (popup) ────────────────────────────────────────────────
+// ─── Selected station (popup) ─────────────────────────────────────────────────
+class SelectedStationNotifier extends Notifier<RiverStation?> {
+  @override
+  RiverStation? build() => null;
+}
+
 final mapSelectedStationProvider =
-    StateProvider<RiverStation?>((_) => null);
+    NotifierProvider<SelectedStationNotifier, RiverStation?>(
+        SelectedStationNotifier.new);
 
-// ─── Sync metadata ───────────────────────────────────────────────────────────
+// ─── Sync metadata ────────────────────────────────────────────────────────────
 class SyncMeta {
   final DateTime? cwcUpdated;
   final DateTime? wrdUpdated;
@@ -63,10 +74,15 @@ class SyncMeta {
       '${t.day}/${t.month}';
 }
 
-final mapSyncMetaProvider =
-    StateProvider<SyncMeta>((_) => const SyncMeta());
+class SyncMetaNotifier extends Notifier<SyncMeta> {
+  @override
+  SyncMeta build() => const SyncMeta();
+}
 
-// ─── CwcStation → RiverStation adapter ──────────────────────────────────────
+final mapSyncMetaProvider =
+    NotifierProvider<SyncMetaNotifier, SyncMeta>(SyncMetaNotifier.new);
+
+// ─── CwcStation → RiverStation adapter ───────────────────────────────────────
 extension CwcStationAdapter on CwcStation {
   RiverStation toRiverStation() => RiverStation(
     city:    site,
@@ -107,7 +123,7 @@ final mapStationsProvider = Provider<List<RiverStation>>((ref) {
   return filtered;
 });
 
-// ─── District risk map (for heatmap layer) ───────────────────────────────────
+// ─── District risk map (for heatmap layer) ────────────────────────────────────
 final biharDistrictRiskProvider = Provider<Map<String, DangerClass>>((ref) {
   final stations = ref.watch(mapStationsProvider);
   final map = <String, DangerClass>{};
