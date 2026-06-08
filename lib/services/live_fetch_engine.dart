@@ -1,5 +1,6 @@
-// lib/services/live_fetch_engine.dart  (v2.5 — WRD Bihar health wired)
-library;
+// lib/services/live_fetch_engine.dart  (v2.6 — boot crash fix)
+// Removed bare `library;` directive — two unnamed library declarations in the
+// same package cause a duplicate-library compile error that kills the isolate.
 
 import 'dart:async';
 import 'dart:convert';
@@ -12,9 +13,9 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'wrd_bihar_service.dart';
 
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 // SourceHealth — immutable snapshot for one data source
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 class SourceHealth {
   final bool      healthy;
   final int?      latencyMs;
@@ -28,7 +29,6 @@ class SourceHealth {
     this.lastError,
   });
 
-  /// A source that has never been checked yet.
   const SourceHealth.unknown()
       : healthy       = false,
         latencyMs     = null,
@@ -49,9 +49,9 @@ class SourceHealth {
       );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 // LiveCityData
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 class LiveCityData {
   final double?   currentLevel;
   final double    warningLevel;
@@ -76,14 +76,13 @@ class LiveCityData {
       'LiveCityData(flow=$flowRate m³/s, risk=$riskLevel, '
       'rain=${rainfall24h}mm, level=$currentLevel m)';
 
-  /// Returns a copy with selected fields overridden.
   LiveCityData copyWith({
-    double?  currentLevel,
-    double?  warningLevel,
-    double?  dangerLevel,
-    double?  flowRate,
-    double?  rainfall24h,
-    String?  riskLevel,
+    double?   currentLevel,
+    double?   warningLevel,
+    double?   dangerLevel,
+    double?   flowRate,
+    double?   rainfall24h,
+    String?   riskLevel,
     DateTime? lastUpdated,
   }) =>
       LiveCityData(
@@ -121,9 +120,9 @@ class LiveCityData {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 // LiveFetchEngine
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 class LiveFetchEngine {
   static const _cacheTtl     = Duration(minutes: 15);
   static const _pollInterval = Duration(seconds: 45);
@@ -132,25 +131,23 @@ class LiveFetchEngine {
   final Map<String, LiveCityData> _cache = {};
   DateTime?  _lastFetch;
   Timer?     _pollTimer;
-  bool       _isLoading     = false;
-  bool       _isOnline      = true;
-  bool       _isWakingUp    = false;
-  bool       _isUsingCache  = false;
+  bool       _isLoading    = false;
+  bool       _isOnline     = true;
+  bool       _isWakingUp   = false;
+  bool       _isUsingCache = false;
   String?    _error;
   int        _queuedOffline = 0;
   int        _retryCount    = 0;
-  final int  _wakeAttempts  = 0;
+  int        _wakeAttempts  = 0;
 
-  // ── Per-source health ──────────────────────────────────────────────────────
   SourceHealth _glofasHealth = const SourceHealth.unknown();
   SourceHealth _imdHealth    = const SourceHealth.unknown();
   SourceHealth _wrdHealth    = const SourceHealth.unknown();
-  // CWC remains a stub until real fetch logic is wired in.
   SourceHealth _cwcHealth    = const SourceHealth.unknown();
 
   void Function()? onStateChanged;
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  // ── Lifecycle ───────────────────────────────────────────────────────────
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
     await refreshData();
@@ -162,7 +159,7 @@ class LiveFetchEngine {
     _pollTimer = null;
   }
 
-  // ── Status getters ─────────────────────────────────────────────────────────
+  // ── Status getters ────────────────────────────────────────────────────────
   bool      get isLoading           => _isLoading;
   bool      get isOnline            => _isOnline;
   bool      get isUsingFallback     => !_isOnline && _cache.isNotEmpty;
@@ -174,7 +171,7 @@ class LiveFetchEngine {
   int       get debugRetryCount     => _retryCount;
   int       get debugWakeAttempts   => _wakeAttempts;
 
-  // ── Per-source health getters ──────────────────────────────────────────────
+  // ── Source health getters ──────────────────────────────────────────────
   SourceHealth get glofasHealth => _glofasHealth;
   SourceHealth get imdHealth    => _imdHealth;
   SourceHealth get wrdHealth    => _wrdHealth;
@@ -190,7 +187,7 @@ class LiveFetchEngine {
   int? get wrdLatencyMs    => _wrdHealth.latencyMs;
   int? get cwcLatencyMs    => _cwcHealth.latencyMs;
 
-  // ── Data getters ───────────────────────────────────────────────────────────
+  // ── Data getters ─────────────────────────────────────────────────────────
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
   List<FloodData> get liveFloodData {
@@ -230,7 +227,7 @@ class LiveFetchEngine {
   };
   Map<String, dynamic> get debugCwcRaw => const {};
 
-  // ── Per-city helpers ───────────────────────────────────────────────────────
+  // ── Per-city helpers ────────────────────────────────────────────────────
   LiveCityData? dataForCity(String city) {
     _maybeBackgroundRefresh();
     return _cache[city.toLowerCase().trim()];
@@ -256,7 +253,7 @@ class LiveFetchEngine {
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
 
-  // ── Refresh ────────────────────────────────────────────────────────────────
+  // ── Refresh ─────────────────────────────────────────────────────────────
   Future<void> refreshData() async {
     _isLoading = true;
     _notify();
@@ -285,17 +282,17 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  // ── Core fetch ─────────────────────────────────────────────────────────────
+  // ── Core fetch ────────────────────────────────────────────────────────────
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
         .toList();
     if (biharCities.isEmpty) return;
 
-    final lats = biharCities.map((c) => '${c['lat']}').join(',');
-    final lons = biharCities.map((c) => '${c['lon']}').join(',');
+    final lats = biharCities.map((c) => '${c["lat"]}').join(',');
+    final lons = biharCities.map((c) => '${c["lon"]}').join(',');
 
-    // ── GloFAS ──────────────────────────────────────────────────────────────
+    // ── GloFAS ────────────────────────────────────────────────────────────
     var dischargeMap = <String, List<double?>>{};
     var meanMap      = <String, List<double?>>{};
     final glofasStart = DateTime.now();
@@ -307,7 +304,6 @@ class LiveFetchEngine {
         healthy:       true,
         latencyMs:     DateTime.now().difference(glofasStart).inMilliseconds,
         lastSuccessAt: DateTime.now(),
-        lastError:     null,
       );
     } catch (e) {
       _glofasHealth = SourceHealth(
@@ -316,10 +312,10 @@ class LiveFetchEngine {
         lastSuccessAt: _glofasHealth.lastSuccessAt,
         lastError:     e.toString(),
       );
-      _log('GloFAS batch fetch failed: $e');
+      _log('GloFAS fetch failed: $e');
     }
 
-    // ── IMD / Open-Meteo rainfall ────────────────────────────────────────────
+    // ── IMD / Open-Meteo rainfall ─────────────────────────────────────────
     var rainMap = <String, double?>{};
     final imdStart = DateTime.now();
     try {
@@ -328,7 +324,6 @@ class LiveFetchEngine {
         healthy:       true,
         latencyMs:     DateTime.now().difference(imdStart).inMilliseconds,
         lastSuccessAt: DateTime.now(),
-        lastError:     null,
       );
     } catch (e) {
       _imdHealth = SourceHealth(
@@ -337,20 +332,14 @@ class LiveFetchEngine {
         lastSuccessAt: _imdHealth.lastSuccessAt,
         lastError:     e.toString(),
       );
-      _log('Open-Meteo batch fetch failed: $e');
+      _log('Open-Meteo fetch failed: $e');
     }
 
-    // ── WRD Bihar scraper ────────────────────────────────────────────────────
-    // Runs independently so a WRD failure never blocks GloFAS/IMD data.
-    // On success, real gauge levels from WRD override the GloFAS-estimated
-    // levels for matched cities, making dangerLevel and warningLevel precise.
+    // ── WRD Bihar scraper ─────────────────────────────────────────────────
     final wrdStart = DateTime.now();
     Map<String, WrdStation> wrdByCity = {};
     try {
       final stations = await WrdBiharService.instance.fetch();
-      // Consider healthy only when we got live (not disk-only) data.
-      // WrdStation.source == 'WRD_BIHAR_LIVE' for fresh scrapes;
-      // disk cache stations have source == 'WRD_BIHAR_DISK'.
       final liveFetch = stations.isNotEmpty &&
           stations.any((s) => s.source == 'WRD_BIHAR_LIVE');
       _wrdHealth = SourceHealth(
@@ -359,11 +348,8 @@ class LiveFetchEngine {
         lastSuccessAt: liveFetch ? DateTime.now() : _wrdHealth.lastSuccessAt,
         lastError:     liveFetch ? null : 'WRD returned disk-cache only',
       );
-      // Build a lowercase site/alias → station lookup for O(1) merging below.
       for (final s in stations) {
-        final alias = s.site.toLowerCase().trim();
-        wrdByCity[alias] = s;
-        // Also index by district for fuzzy matching
+        wrdByCity[s.site.toLowerCase().trim()] = s;
         final dist = s.district.toLowerCase().trim();
         if (dist.isNotEmpty) wrdByCity.putIfAbsent(dist, () => s);
       }
@@ -378,17 +364,17 @@ class LiveFetchEngine {
       _log('WRD Bihar fetch failed: $e');
     }
 
-    // ── CWC — stub (mark healthy only when real fetch succeeds) ─────────────
-    // TODO: wire real CWC direct service here and update _cwcHealth.
+    // ── CWC — stub ──────────────────────────────────────────────────────
+    // TODO: wire real CWC fetch and update _cwcHealth.
 
-    // ── Assemble / merge cache ────────────────────────────────────────────────
+    // ── Assemble / merge cache ───────────────────────────────────────────────
     final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
-      final mc        = biharCities[i];
-      final cityName  = mc['city']          as String;
-      final dl        = (mc['danger_level']  as num).toDouble();
-      final wl        = (mc['warning_level'] as num).toDouble();
-      final key       = cityName.toLowerCase().trim();
+      final mc       = biharCities[i];
+      final cityName = (mc['city']          as String);
+      final dl       = (mc['danger_level']  as num).toDouble();
+      final wl       = (mc['warning_level'] as num).toDouble();
+      final key      = cityName.toLowerCase().trim();
       final discharge = dischargeMap[key]?.firstOrNull;
       final mean      = meanMap[key]?.firstOrNull;
       final rain      = rainMap[key];
@@ -397,45 +383,36 @@ class LiveFetchEngine {
           ? (discharge / mean) * dl * 0.85
           : null;
 
-      // Try to find a matching WRD station for this city.
-      // Priority: exact city key → city name words → district.
       WrdStation? wrd = wrdByCity[key];
       if (wrd == null) {
-        // Try each word of the city name (e.g. "patna" in "patna sahib")
         for (final word in key.split(RegExp(r'\s+'))) {
-          if (word.length < 4) continue; // skip short tokens
+          if (word.length < 4) continue;
           wrd = wrdByCity[word];
           if (wrd != null) break;
         }
       }
 
       _cache[key] = LiveCityData(
-        // Prefer WRD real gauge level over GloFAS estimate when available
         currentLevel: wrd?.currentLevel ?? estLevel,
-        // Prefer WRD danger/warning levels when they are non-zero
         warningLevel: (wrd?.warningLevel != null && wrd!.warningLevel! > 0)
-            ? wrd.warningLevel!
-            : wl,
-        dangerLevel:  (wrd?.dangerLevel != null && wrd!.dangerLevel! > 0)
-            ? wrd.dangerLevel!
-            : dl,
+            ? wrd.warningLevel! : wl,
+        dangerLevel:  (wrd?.dangerLevel  != null && wrd!.dangerLevel!  > 0)
+            ? wrd.dangerLevel!  : dl,
         flowRate:     discharge,
         rainfall24h:  rain,
-        // If WRD has a clearer risk label (CRITICAL/HIGH), prefer it;
-        // otherwise fall back to GloFAS discharge ratio.
-        riskLevel: _mergeRisk(wrd?.riskLabel, risk),
-        lastUpdated: now,
+        riskLevel:    _mergeRisk(wrd?.riskLabel, risk),
+        lastUpdated:  now,
       );
     }
     _lastFetch = now;
-    _log('Bihar cache updated — ${_cache.length} cities '
+    _log('cache updated — ${_cache.length} cities '
         '(glofas=${_glofasHealth.healthy}, '
         'imd=${_imdHealth.healthy}, '
         'wrd=${_wrdHealth.healthy})');
     _notify();
   }
 
-  // ── HTTP helpers ───────────────────────────────────────────────────────────
+  // ── HTTP helpers ────────────────────────────────────────────────────────
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
       String lats, String lons, int count) async {
     final uri = Uri.parse(
@@ -445,11 +422,9 @@ class LiveFetchEngine {
       '&forecast_days=1&models=seamless_v4',
     );
     final res = await http.get(uri).timeout(_httpTimeout);
-    if (res.statusCode != 200) {
-      throw Exception('GloFAS HTTP ${res.statusCode}');
-    }
-    final body  = jsonDecode(res.body);
-    final items = body is List ? body : [body];
+    if (res.statusCode != 200) throw Exception('GloFAS HTTP ${res.statusCode}');
+    final body   = jsonDecode(res.body);
+    final items  = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar').toList();
     final discharge = <String, List<double?>>{};
@@ -472,24 +447,21 @@ class LiveFetchEngine {
       '&forecast_days=1&timezone=Asia%2FKolkata',
     );
     final res = await http.get(uri).timeout(_httpTimeout);
-    if (res.statusCode != 200) {
-      throw Exception('Open-Meteo HTTP ${res.statusCode}');
-    }
-    final body  = jsonDecode(res.body);
-    final items = body is List ? body : [body];
+    if (res.statusCode != 200) throw Exception('Open-Meteo HTTP ${res.statusCode}');
+    final body   = jsonDecode(res.body);
+    final items  = body is List ? body : [body];
     final cities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar').toList();
     final result = <String, double?>{};
     for (int i = 0; i < items.length && i < cities.length; i++) {
       final key   = (cities[i]['city'] as String).toLowerCase().trim();
       final daily = items[i]['daily'] as Map<String, dynamic>?;
-      final vals  = _extractDoubles(daily?['precipitation_sum']);
-      result[key] = vals.firstOrNull;
+      result[key] = _extractDoubles(daily?['precipitation_sum']).firstOrNull;
     }
     return result;
   }
 
-  // ── Internal helpers ───────────────────────────────────────────────────────
+  // ── Internal helpers ────────────────────────────────────────────────────
   String? _deriveRisk(double? discharge, double? mean) {
     if (discharge == null || mean == null || mean <= 0) return null;
     final ratio = discharge / mean;
@@ -499,26 +471,16 @@ class LiveFetchEngine {
     return 'LOW';
   }
 
-  /// Merges a WRD risk label with a GloFAS-derived risk label.
-  /// WRD labels use CRITICAL/HIGH/MODERATE/LOW/PRE-MONSOON.
-  /// GloFAS labels use CRITICAL/SEVERE/MODERATE/LOW.
-  /// Returns the more severe of the two, preferring WRD when both are present.
   String? _mergeRisk(String? wrd, String? glofas) {
     const severity = {
-      'CRITICAL':    5,
-      'HIGH':        4,
-      'SEVERE':      4,
-      'MODERATE':    3,
-      'LOW':         2,
-      'PRE-MONSOON': 1,
-      'NA':          0,
+      'CRITICAL': 5, 'HIGH': 4, 'SEVERE': 4,
+      'MODERATE': 3, 'LOW': 2, 'PRE-MONSOON': 1, 'NA': 0,
     };
     if (wrd == null && glofas == null) return null;
-    if (wrd == null) return glofas;
+    if (wrd    == null) return glofas;
     if (glofas == null) return wrd;
-    final ws = severity[wrd.toUpperCase()]  ?? 0;
+    final ws = severity[wrd.toUpperCase()]    ?? 0;
     final gs = severity[glofas.toUpperCase()] ?? 0;
-    // Map WRD 'HIGH' → 'SEVERE' for consistent downstream display
     final winner = ws >= gs ? wrd : glofas;
     return winner == 'HIGH' ? 'SEVERE' : winner;
   }
@@ -539,14 +501,14 @@ class LiveFetchEngine {
   void _maybeBackgroundRefresh() {
     if (_lastFetch == null ||
         DateTime.now().difference(_lastFetch!) > _cacheTtl) {
-      refreshData().catchError((e) => _log('bg refresh error: $e'));
+      refreshData().catchError((Object e) => _log('bg refresh error: $e'));
     }
   }
 
   List<double?> _extractDoubles(dynamic raw) {
     if (raw == null) return [];
     if (raw is List) {
-      return raw.map((v) {
+      return raw.map<double?>((v) {
         if (v == null)   return null;
         if (v is double) return v;
         if (v is int)    return v.toDouble();
