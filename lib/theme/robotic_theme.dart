@@ -1,13 +1,13 @@
 // lib/theme/robotic_theme.dart
 // Robotic design language — sharp corners, glow effects, monospaced type.
-// Two faces: Tactical-Dark (isDark=true) / System-Light (isDark=false).
-// toThemeData() — used by main.dart as roboticTheme.toThemeData()
-// toFlutterTheme() — alias kept for backward compat with any other callers.
+// Two faces: Tactical-Dark (isDark=true) / Tactical-Light (isDark=false).
+// toThemeData() / toFlutterTheme() — used by main.dart.
 library;
 
 import 'package:flutter/material.dart';
+import 'river_theme.dart';
 
-// ─── Robotic palette ──────────────────────────────────────────────────────────
+// ─── Robotic palette ─────────────────────────────────────────────────────
 
 class RoboticColors {
   RoboticColors._();
@@ -26,7 +26,7 @@ class RoboticColors {
   static const rdText        = Color(0xFFE0F0FF);
   static const rdTextMuted   = Color(0xFF5A7080);
 
-  // SYSTEM LIGHT
+  // TACTICAL LIGHT
   static const rlBg          = Color(0xFFF4F7FA);
   static const rlSurface     = Color(0xFFFFFFFF);
   static const rlSurface2    = Color(0xFFEBF0F5);
@@ -41,7 +41,57 @@ class RoboticColors {
   static const rlTextMuted   = Color(0xFF5A7080);
 }
 
-// ─── RoboticTheme ─────────────────────────────────────────────────────────────
+// ─── RiverColors for robotic modes ──────────────────────────────────────
+// These extend RiverColors so every screen’s rc.cardBg / rc.accent /
+// rc.scaffoldBg / rc.sparklineColor etc. all respond to tactical themes.
+
+const _roboticDarkColors = RiverColors(
+  riverNormal:    Color(0xFF00FFB2),   // neon mint — safe level
+  riverWarning:   Color(0xFFFFAA00),   // amber
+  riverDanger:    Color(0xFFFF6600),   // orange
+  riverCritical:  Color(0xFFFF3B3B),   // red
+  riverSurface:   Color(0xFF0A0D12),
+  riverGlow:      Color(0x3300FFB2),
+  cardBg:         Color(0xFF0A0D12),
+  cardBgElevated: Color(0xFF111620),
+  chipBg:         Color(0xFF1C2333),
+  stroke:         Color(0xFF1C2333),
+  textPrimary:    Color(0xFFE0F0FF),
+  textSecondary:  Color(0xFF5A7080),
+  sparklineColor: Color(0xFF00FFB2),
+  accent:         Color(0xFF00FFB2),
+  accentGlow:     Color(0x3300FFB2),
+  metricColor:    Color(0xFF00AAFF),
+  navBg:          Color(0xFF030508),
+  navActive:      Color(0xFF00FFB2),
+  navInactive:    Color(0xFF1C2333),
+  scaffoldBg:     Color(0xFF030508),
+);
+
+const _roboticLightColors = RiverColors(
+  riverNormal:    Color(0xFF00A86B),   // green — safe
+  riverWarning:   Color(0xFFF57C00),   // orange
+  riverDanger:    Color(0xFFE64A19),   // deep orange
+  riverCritical:  Color(0xFFD32F2F),   // red
+  riverSurface:   Color(0xFFFFFFFF),
+  riverGlow:      Color(0x22007ACC),
+  cardBg:         Color(0xFFFFFFFF),
+  cardBgElevated: Color(0xFFEBF0F5),
+  chipBg:         Color(0xFFCDD8E3),
+  stroke:         Color(0xFFCDD8E3),
+  textPrimary:    Color(0xFF0D1B2A),
+  textSecondary:  Color(0xFF5A7080),
+  sparklineColor: Color(0xFF007ACC),
+  accent:         Color(0xFF007ACC),
+  accentGlow:     Color(0x22007ACC),
+  metricColor:    Color(0xFF007ACC),
+  navBg:          Color(0xFF0D1B2A),
+  navActive:      Color(0xFF007ACC),
+  navInactive:    Color(0xFFCDD8E3),
+  scaffoldBg:     Color(0xFFF4F7FA),
+);
+
+// ─── RoboticTheme ─────────────────────────────────────────────────────────────────
 
 class RoboticTheme {
   final bool isDark;
@@ -60,9 +110,16 @@ class RoboticTheme {
   Color get text        => isDark ? RoboticColors.rdText        : RoboticColors.rlText;
   Color get textMuted   => isDark ? RoboticColors.rdTextMuted   : RoboticColors.rlTextMuted;
 
-  /// Primary method — called as roboticTheme.toThemeData() in main.dart
+  RiverColors get riverColors =>
+      isDark ? _roboticDarkColors : _roboticLightColors;
+
+  /// Primary method — called as roboticTheme.toThemeData() in main.dart.
+  /// RiverColors is injected as a ThemeExtension so every screen’s
+  /// RiverColors.of(context) resolves the correct tactical palette.
   ThemeData toThemeData() {
     final brightness = isDark ? Brightness.dark : Brightness.light;
+    final rc = riverColors;
+
     final cs = ColorScheme.fromSeed(
       seedColor:  accent,
       brightness: brightness,
@@ -79,6 +136,8 @@ class RoboticTheme {
       colorScheme:             cs,
       scaffoldBackgroundColor: bg,
       fontFamily:              'RobotoMono',
+      // ✔ Inject RiverColors so RiverColors.of(context) works on every screen
+      extensions: <ThemeExtension<dynamic>>[rc],
       cardTheme: CardThemeData(
         color:     surface,
         elevation: 0,
@@ -93,14 +152,70 @@ class RoboticTheme {
         elevation:        0,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
-          color:       text,
-          fontSize:    16,
-          fontWeight:  FontWeight.w700,
+          color:         text,
+          fontSize:      16,
+          fontWeight:    FontWeight.w700,
           letterSpacing: 1.5,
-          fontFamily:  'RobotoMono',
+          fontFamily:    'RobotoMono',
+        ),
+        iconTheme: IconThemeData(color: accent),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: bg,
+        indicatorColor:  accentGlow,
+        height:          64,
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return IconThemeData(color: accent, size: 24);
+          }
+          return IconThemeData(color: rc.navInactive, size: 22);
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return TextStyle(
+              color: accent, fontSize: 10,
+              fontWeight: FontWeight.w700, letterSpacing: 0.3);
+          }
+          return TextStyle(
+            color: rc.navInactive, fontSize: 10, letterSpacing: 0.2);
+        }),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: accent,
+          foregroundColor: isDark ? const Color(0xFF030508) : Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w700, letterSpacing: 1.0,
+            fontFamily: 'RobotoMono'),
         ),
       ),
-      dividerTheme: DividerThemeData(color: border, space: 1, thickness: 1),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: accent,
+          side: BorderSide(color: accent, width: 1.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w600, fontFamily: 'RobotoMono'),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: isDark ? const Color(0xFF1C2333) : const Color(0xFFEBF0F5),
+        labelStyle: TextStyle(
+          fontSize: 12, fontWeight: FontWeight.w600, color: text,
+          fontFamily: 'RobotoMono',
+        ),
+        side: BorderSide(color: border, width: 1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color:            accent,
+        linearTrackColor: surface2,
+      ),
+      dividerTheme: DividerThemeData(
+        color: border, space: 1, thickness: 1,
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled:    true,
         fillColor: surface2,
@@ -117,6 +232,15 @@ class RoboticTheme {
           borderSide: BorderSide(color: accent, width: 2),
         ),
         hintStyle: TextStyle(color: textMuted),
+        labelStyle: TextStyle(color: accent),
+      ),
+      textTheme: TextTheme(
+        displayLarge:  TextStyle(color: text, fontWeight: FontWeight.w900, letterSpacing: -1.5, fontFamily: 'RobotoMono'),
+        displaySmall:  TextStyle(color: text, fontWeight: FontWeight.w800, letterSpacing: -1.0, fontFamily: 'RobotoMono'),
+        titleLarge:    TextStyle(color: text, fontWeight: FontWeight.w700, letterSpacing: 1.0,  fontFamily: 'RobotoMono'),
+        titleMedium:   TextStyle(color: text, fontWeight: FontWeight.w600, letterSpacing: 0.5,  fontFamily: 'RobotoMono'),
+        bodyMedium:    TextStyle(color: rc.textSecondary, fontFamily: 'RobotoMono'),
+        labelSmall:    TextStyle(color: rc.textSecondary, fontWeight: FontWeight.w600, letterSpacing: 1.2, fontFamily: 'RobotoMono'),
       ),
     );
   }
