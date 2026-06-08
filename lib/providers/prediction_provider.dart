@@ -1,5 +1,5 @@
 // lib/providers/prediction_provider.dart
-// v5 — fixes: RiverStation city+hfl fields; late match; ChangeNotifier removed
+// v6 — BiharGauge correct fields; Provider<RealTimeService> in flood_providers
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,7 +29,6 @@ class PredictionPoint {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FloodPrediction {
-  // Station metadata
   final String station;
   final String river;
   final double currentLevel;
@@ -51,8 +50,8 @@ class FloodPrediction {
   final double  riskScore;
   final double  confidencePct;
   final String  modelVersion;
-  final double? cwcRiskScore;  // nullable — wired when CWC provides a %
-  final String  trend;         // 'rising' | 'falling' | 'stable'
+  final double? cwcRiskScore;
+  final String  trend;
   final String  outlook;
 
   const FloodPrediction({
@@ -78,7 +77,7 @@ class FloodPrediction {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core prediction engine
+// Core prediction engine — linear extrapolation + weather modulation
 // ─────────────────────────────────────────────────────────────────────────────
 
 FloodPrediction _predict(
@@ -92,7 +91,6 @@ FloodPrediction _predict(
   final prog = s.progressPct / 100;
   final now  = DateTime.now();
 
-  // Hourly rise rate (m/h): proportional to progress × rainfall factor
   final risePerHour = prog * rainfallModifier * 0.021;
 
   List<PredictionPoint> buildSeries(int hours) {
@@ -102,9 +100,7 @@ FloodPrediction _predict(
       double? precipMm;
       if (forecast.isNotEmpty) {
         final dayIdx = i ~/ 24;
-        if (dayIdx < forecast.length) {
-          precipMm = forecast[dayIdx].rainMm / 24;
-        }
+        if (dayIdx < forecast.length) precipMm = forecast[dayIdx].rainMm / 24;
       }
       return PredictionPoint(time: t, level: level, precipMm: precipMm);
     });
@@ -114,13 +110,12 @@ FloodPrediction _predict(
   final pts48 = pts72.sublist(0, 48);
   final pts24 = pts72.sublist(0, 24);
 
-  final p24 = pts24.last.level;
-  final p48 = pts48.last.level;
-  final p72 = pts72.last.level;
-
-  final riskScore  = ((p24 / dng) * 100).clamp(0.0, 100.0);
-  final conf       = (55.0
-      + (s.isLive ? 20.0 : 0.0)
+  final p24       = pts24.last.level;
+  final p48       = pts48.last.level;
+  final p72       = pts72.last.level;
+  final riskScore = ((p24 / dng) * 100).clamp(0.0, 100.0);
+  final conf      = (55.0
+      + (s.isLive           ? 20.0 : 0.0)
       + (forecast.isNotEmpty ? 15.0 : 0.0)
       + (rainfallModifier > 0 ? 10.0 : 0.0)).clamp(0.0, 99.0);
 
@@ -130,10 +125,10 @@ FloodPrediction _predict(
   else                           trend = 'stable';
 
   final String outlook;
-  if (p24 >= dng)       outlook = 'Expected to reach or exceed danger level within 24 h';
-  else if (p48 >= dng)  outlook = 'May reach danger level within 48 h';
-  else if (p72 >= dng)  outlook = 'Risk of reaching danger level between 48–72 h';
-  else                  outlook = 'Likely to remain below danger level for 72 h';
+  if (p24 >= dng)      outlook = 'Expected to reach or exceed danger level within 24 h';
+  else if (p48 >= dng) outlook = 'May reach danger level within 48 h';
+  else if (p72 >= dng) outlook = 'Risk of reaching danger level between 48–72 h';
+  else                 outlook = 'Likely to remain below danger level for 72 h';
 
   return FloodPrediction(
     station:       s.station,
@@ -159,9 +154,6 @@ FloodPrediction _predict(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // predictionProvider(String stationKey) — FutureProvider.family
-//
-// Used by prediction_screen.dart and ai_prediction_panel.dart.
-// Station matching: exact → partial → highest-risk → seed data fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 
 final predictionProvider =
@@ -176,21 +168,22 @@ final predictionProvider =
 
   final keyLower = stationKey.toLowerCase();
 
-  // ── Station resolution ──────────────────────────────────────────────────
-  // Uses `late` so Dart knows `match` is definitely assigned before use.
   late RiverStation match;
 
   if (stations.isNotEmpty) {
     // 1. Exact name match
-    final exact = stations.where(
-        (s) => s.station.toLowerCase() == keyLower).toList();
+    final exact = stations
+        .where((s) => s.station.toLowerCase() == keyLower)
+        .toList();
     if (exact.isNotEmpty) {
       match = exact.first;
     } else {
       // 2. Partial match
-      final partial = stations.where(
-          (s) => s.station.toLowerCase().contains(keyLower) ||
-                 keyLower.contains(s.station.toLowerCase())).toList();
+      final partial = stations
+          .where((s) =>
+              s.station.toLowerCase().contains(keyLower) ||
+              keyLower.contains(s.station.toLowerCase()))
+          .toList();
       if (partial.isNotEmpty) {
         match = partial.first;
       } else {
@@ -200,23 +193,28 @@ final predictionProvider =
       }
     }
   } else {
-    // 4. No live stations yet — build synthetic from kBiharGauges seed data
+    // 4. No live data yet — build synthetic RiverStation from kBiharGauges.
+    //
+    // BiharGauge fields available: river, station, district, lat, lon,
+    //   warningLevel, dangerLevel, hfl, cwcCode?, hflYear?
+    // BiharGauge does NOT have: state, currentLevel
+    //   • state → hardcoded 'Bihar' (all gauges are in Bihar)
+    //   • city  → seed.district (closest available geographic name)
+    //   • current → seed.warningLevel * 0.70 (safe low-season baseline
+    //     below warning level; gives a non-zero, realistic starting point)
     final seed = kBiharGauges.firstWhere(
       (g) => g.station.toLowerCase() == keyLower,
       orElse: () => kBiharGauges.first,
     );
-    // RiverStation requires city, state, river, station, current,
-    // warning, danger, hfl  (hfl = highest flood level; estimate as
-    // danger × 1.15 when the seed table doesn't carry a real HFL).
     match = RiverStation(
-      city:    seed.station,       // city ≈ station name for seed data
-      state:   seed.state,
+      city:    seed.district,
+      state:   'Bihar',
       river:   seed.river,
       station: seed.station,
-      current: seed.currentLevel,
+      current: seed.warningLevel * 0.70,
       warning: seed.warningLevel,
       danger:  seed.dangerLevel,
-      hfl:     seed.dangerLevel * 1.15,
+      hfl:     seed.hfl,
       isLive:  false,
       dataSource: 'SEED',
     );

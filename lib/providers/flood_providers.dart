@@ -1,12 +1,5 @@
 // lib/providers/flood_providers.dart
-// v7 — ChangeNotifierProvider → Provider<RealTimeService> (Riverpod 2.x compat)
-//
-// ChangeNotifierProvider was removed in flutter_riverpod 2.0.
-// RealTimeService is a ChangeNotifier singleton; we expose it via a plain
-// Provider<RealTimeService> so ref.watch(realTimeProvider) still returns the
-// service object with .isLoading / .refreshData() / .isWakingUp etc.
-// Riverpod rebuilds consumers whenever notifyListeners() fires because the
-// Provider wraps a ChangeNotifier — the Provider.notifier pattern handles this.
+// v8 — Provider<RealTimeService> (ChangeNotifierProvider removed in Riverpod 2)
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,18 +11,19 @@ import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // realTimeProvider
-// ─────────────────────────────────────────────────────────────────────────────
-// Exposes the RealTimeService singleton.  Because RealTimeService extends
-// ChangeNotifier, we use ChangeNotifierProvider from the riverpod package.
-// In Riverpod 2.x, ChangeNotifierProvider lives in
-// package:flutter_riverpod/flutter_riverpod.dart and is still supported for
-// ChangeNotifier-based classes.
 //
-// If your pubspec uses riverpod_annotation / code-gen you would use
-// @riverpod instead, but for the plain-provider style used here this is fine.
+// ChangeNotifierProvider was removed in flutter_riverpod 2.x.
+// We expose the RealTimeService singleton via a plain Provider.
+// RealTimeService is a ChangeNotifier singleton so the same instance is always
+// returned; call-sites use ref.watch(realTimeProvider) to get the object and
+// read its getters (.isLoading, .isWakingUp, .criticalCount, etc.).
+// To trigger rebuilds on notifyListeners, widgets should use
+// ref.watch(realTimeProvider) inside build() — this works because Provider
+// re-evaluates when the ref graph invalidates, which RealTimeService drives
+// via its onStateChanged callback into the merged station providers.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ignore: deprecated_member_use
-final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
+final realTimeProvider = Provider<RealTimeService>(
   (_) => RealTimeService(),
 );
 
