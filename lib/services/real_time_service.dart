@@ -36,7 +36,26 @@ class RealTimeService extends ChangeNotifier {
   String?   get error               => _fetchEngine.error;
   int       get queuedOfflineCycles => _fetchEngine.queuedOfflineCycles;
 
-  // ── Data passthrough ──────────────────────────────────────────────────
+  // ── Per-source health passthrough ──────────────────────────────────────
+  // Full SourceHealth objects (healthy bool + latencyMs + lastSuccessAt + lastError)
+  SourceHealth get glofasHealth => _fetchEngine.glofasHealth;
+  SourceHealth get imdHealth    => _fetchEngine.imdHealth;
+  SourceHealth get wrdHealth    => _fetchEngine.wrdHealth;
+  SourceHealth get cwcHealth    => _fetchEngine.cwcHealth;
+
+  // Convenience booleans — used directly by SystemStats in dashboard_screen_part2
+  bool get glofasHealthy => _fetchEngine.glofasHealthy;
+  bool get imdHealthy    => _fetchEngine.imdHealthy;
+  bool get wrdHealthy    => _fetchEngine.wrdHealthy;
+  bool get cwcHealthy    => _fetchEngine.cwcHealthy;
+
+  // Convenience latencies — null until first successful fetch
+  int? get glofasLatencyMs => _fetchEngine.glofasLatencyMs;
+  int? get imdLatencyMs    => _fetchEngine.imdLatencyMs;
+  int? get wrdLatencyMs    => _fetchEngine.wrdLatencyMs;
+  int? get cwcLatencyMs    => _fetchEngine.cwcLatencyMs;
+
+  // ── Data passthrough ─────────────────────────────────────────────────
   List<FloodData> get liveLevels    => _fetchEngine.liveFloodData;
 
   List<dynamic>            get activeCriticalAlerts => _fetchEngine.activeCriticalAlerts;
@@ -55,7 +74,7 @@ class RealTimeService extends ChangeNotifier {
   int                  get debugRetryCount  => _fetchEngine.debugRetryCount;
   int                  get debugWakeAttempts => _fetchEngine.debugWakeAttempts;
 
-  // ── Per-city ──────────────────────────────────────────────────────────
+  // ── Per-city ─────────────────────────────────────────────────────────
   List<RiverLevelSnapshot> trendForCity(String city) =>
       _fetchEngine.trendForCity(city);
 
@@ -66,7 +85,7 @@ class RealTimeService extends ChangeNotifier {
   List<dynamic> ndmaAdvisoriesForState(String state)    => _fetchEngine.ndmaAdvisoriesForState(state);
   List<dynamic> emergencyContactsForState(String state) => _fetchEngine.emergencyContactsForState(state);
 
-  // ── Actions ────────────────────────────────────────────────────────────
+  // ── Actions ─────────────────────────────────────────────────────────
   Future<void> refreshData()  async => _fetchEngine.refreshData();
   Future<void> startPolling() async => _fetchEngine.startPolling();
   void         stopPolling()        => _fetchEngine.stopPolling();
