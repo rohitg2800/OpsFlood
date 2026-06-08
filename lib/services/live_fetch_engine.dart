@@ -1,4 +1,4 @@
-// lib/services/live_fetch_engine.dart  (v2.3 — notify-on-update, fixed interpolation)
+// lib/services/live_fetch_engine.dart  (v2.4 — per-source health tracking)
 library;
 
 import 'dart:async';
@@ -11,6 +11,46 @@ import '../constants/india_geodata.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SourceHealth — immutable snapshot for one data source
+// ─────────────────────────────────────────────────────────────────────────────
+class SourceHealth {
+  final bool      healthy;
+  final int?      latencyMs;
+  final DateTime? lastSuccessAt;
+  final String?   lastError;
+
+  const SourceHealth({
+    required this.healthy,
+    this.latencyMs,
+    this.lastSuccessAt,
+    this.lastError,
+  });
+
+  /// A source that has never been checked yet.
+  const SourceHealth.unknown()
+      : healthy       = false,
+        latencyMs     = null,
+        lastSuccessAt = null,
+        lastError     = null;
+
+  SourceHealth copyWith({
+    bool?     healthy,
+    int?      latencyMs,
+    DateTime? lastSuccessAt,
+    String?   lastError,
+  }) =>
+      SourceHealth(
+        healthy:       healthy       ?? this.healthy,
+        latencyMs:     latencyMs     ?? this.latencyMs,
+        lastSuccessAt: lastSuccessAt ?? this.lastSuccessAt,
+        lastError:     lastError     ?? this.lastError,
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LiveCityData
+// ─────────────────────────────────────────────────────────────────────────────
 class LiveCityData {
   final double?   currentLevel;
   final double    warningLevel;
@@ -60,6 +100,9 @@ class LiveCityData {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LiveFetchEngine
+// ─────────────────────────────────────────────────────────────────────────────
 class LiveFetchEngine {
   static const _cacheTtl     = Duration(minutes: 15);
   static const _pollInterval = Duration(seconds: 45);
@@ -77,8 +120,17 @@ class LiveFetchEngine {
   int        _retryCount    = 0;
   final int  _wakeAttempts  = 0;
 
+  // ── Per-source health ─────────────────────────────────────────────────
+  SourceHealth _glofasHealth = const SourceHealth.unknown();
+  SourceHealth _imdHealth    = const SourceHealth.unknown();
+  // WRD Bihar and CWC are currently stub sources — they default healthy:false
+  // until real fetch logic is wired in.
+  SourceHealth _wrdHealth    = const SourceHealth.unknown();
+  SourceHealth _cwcHealth    = const SourceHealth.unknown();
+
   void Function()? onStateChanged;
 
+  // ── Lifecycle ─────────────────────────────────────────────────────────
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
     await refreshData();
@@ -90,6 +142,7 @@ class LiveFetchEngine {
     _pollTimer = null;
   }
 
+  // ── Status getters ────────────────────────────────────────────────────
   bool      get isLoading           => _isLoading;
   bool      get isOnline            => _isOnline;
   bool      get isUsingFallback     => !_isOnline && _cache.isNotEmpty;
@@ -101,6 +154,25 @@ class LiveFetchEngine {
   int       get debugRetryCount     => _retryCount;
   int       get debugWakeAttempts   => _wakeAttempts;
 
+  // ── Per-source health getters ─────────────────────────────────────────
+  SourceHealth get glofasHealth => _glofasHealth;
+  SourceHealth get imdHealth    => _imdHealth;
+  SourceHealth get wrdHealth    => _wrdHealth;
+  SourceHealth get cwcHealth    => _cwcHealth;
+
+  // Convenience booleans (used by dashboard_screen_part2 SystemStats widget)
+  bool get glofasHealthy => _glofasHealth.healthy;
+  bool get imdHealthy    => _imdHealth.healthy;
+  bool get wrdHealthy    => _wrdHealth.healthy;
+  bool get cwcHealthy    => _cwcHealth.healthy;
+
+  // Convenience latencies (nullable — null means "never measured")
+  int? get glofasLatencyMs => _glofasHealth.latencyMs;
+  int? get imdLatencyMs    => _imdHealth.latencyMs;
+  int? get wrdLatencyMs    => _wrdHealth.latencyMs;
+  int? get cwcLatencyMs    => _cwcHealth.latencyMs;
+
+  // ── Data getters ──────────────────────────────────────────────────────
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
   List<FloodData> get liveFloodData {
@@ -140,6 +212,7 @@ class LiveFetchEngine {
   };
   Map<String, dynamic> get debugCwcRaw => const {};
 
+  // ── Per-city helpers ──────────────────────────────────────────────────
   LiveCityData? dataForCity(String city) {
     _maybeBackgroundRefresh();
     return _cache[city.toLowerCase().trim()];
@@ -165,6 +238,7 @@ class LiveFetchEngine {
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
 
+  // ── Refresh ───────────────────────────────────────────────────────────
   Future<void> refreshData() async {
     _isLoading = true;
     _notify();
@@ -183,9 +257,6 @@ class LiveFetchEngine {
     } finally {
       _isLoading  = false;
       _isWakingUp = false;
-      // Always notify after refresh so UI rebuilds regardless of whether
-      // data changed. This is the key fix: without this, the monitor screen
-      // stays empty because Riverpod never learns the cache was populated.
       _notify();
     }
   }
@@ -196,6 +267,7 @@ class LiveFetchEngine {
     await refreshData();
   }
 
+  // ── Core fetch ────────────────────────────────────────────────────────
   Future<void> _fetchBiharCities() async {
     final biharCities = IndiaGeodata.monitoredCities
         .where((c) => c['state'] == 'Bihar')
@@ -205,19 +277,61 @@ class LiveFetchEngine {
     final lats = biharCities.map((c) => '${c['lat']}').join(',');
     final lons = biharCities.map((c) => '${c['lon']}').join(',');
 
-    var dischargeMap = <String, List<double?>>{};
+    // ── GloFAS ────────────────────────────────────────────────────────
+    var dischargeMap = <String, List<double?>>{}
+    ;
     var meanMap      = <String, List<double?>>{};
+    final glofasStart = DateTime.now();
     try {
       final result = await _fetchGloFAS(lats, lons, biharCities.length);
       dischargeMap = result['discharge']!;
       meanMap      = result['mean']!;
-    } catch (e) { _log('GloFAS batch fetch failed: $e'); }
+      _glofasHealth = SourceHealth(
+        healthy:       true,
+        latencyMs:     DateTime.now().difference(glofasStart).inMilliseconds,
+        lastSuccessAt: DateTime.now(),
+        lastError:     null,
+      );
+    } catch (e) {
+      _glofasHealth = SourceHealth(
+        healthy:       false,
+        latencyMs:     DateTime.now().difference(glofasStart).inMilliseconds,
+        lastSuccessAt: _glofasHealth.lastSuccessAt,
+        lastError:     e.toString(),
+      );
+      _log('GloFAS batch fetch failed: $e');
+    }
 
+    // ── IMD / Open-Meteo rainfall ─────────────────────────────────────
     var rainMap = <String, double?>{};
+    final imdStart = DateTime.now();
     try {
       rainMap = await _fetchRainfall(lats, lons, biharCities.length);
-    } catch (e) { _log('Open-Meteo batch fetch failed: $e'); }
+      _imdHealth = SourceHealth(
+        healthy:       true,
+        latencyMs:     DateTime.now().difference(imdStart).inMilliseconds,
+        lastSuccessAt: DateTime.now(),
+        lastError:     null,
+      );
+    } catch (e) {
+      _imdHealth = SourceHealth(
+        healthy:       false,
+        latencyMs:     DateTime.now().difference(imdStart).inMilliseconds,
+        lastSuccessAt: _imdHealth.lastSuccessAt,
+        lastError:     e.toString(),
+      );
+      _log('Open-Meteo batch fetch failed: $e');
+    }
 
+    // ── WRD Bihar — stub (mark healthy only when real fetch succeeds) ─
+    // TODO: wire real WRD Bihar scraper here and update _wrdHealth.
+    // For now it remains SourceHealth.unknown() from initialisation.
+
+    // ── CWC — stub (mark healthy only when real fetch succeeds) ──────
+    // TODO: wire real CWC direct service here and update _cwcHealth.
+    // For now it remains SourceHealth.unknown() from initialisation.
+
+    // ── Assemble cache ────────────────────────────────────────────────
     final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
       final mc        = biharCities[i];
@@ -244,11 +358,10 @@ class LiveFetchEngine {
     }
     _lastFetch = now;
     _log('Bihar cache updated — ${_cache.length} cities');
-    // Notify immediately after cache is populated so downstream providers
-    // rebuild without waiting for the finally block in refreshData().
     _notify();
   }
 
+  // ── HTTP helpers ──────────────────────────────────────────────────────
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
       String lats, String lons, int count) async {
     final uri = Uri.parse(
@@ -302,6 +415,7 @@ class LiveFetchEngine {
     return result;
   }
 
+  // ── Internal helpers ──────────────────────────────────────────────────
   String? _deriveRisk(double? discharge, double? mean) {
     if (discharge == null || mean == null || mean <= 0) return null;
     final ratio = discharge / mean;
