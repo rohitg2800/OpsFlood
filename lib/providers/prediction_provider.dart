@@ -1,5 +1,5 @@
 // lib/providers/prediction_provider.dart
-// v4 — PredictionPoint + rich FloodPrediction + family predictionProvider
+// v5 — fixes: RiverStation city+hfl fields; late match; ChangeNotifier removed
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,13 +10,12 @@ import 'weather_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PredictionPoint — single hourly forecast step
-// Used by _Sparkline, hourly table rows, ai_prediction_panel charts
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PredictionPoint {
   final DateTime time;
-  final double   level;    // metres (AMSL or local gauge, same datum as station)
-  final double?  precipMm; // precipitation forecast for this hour (nullable)
+  final double   level;    // metres
+  final double?  precipMm; // hourly precipitation forecast (nullable)
 
   const PredictionPoint({
     required this.time,
@@ -26,35 +25,35 @@ class PredictionPoint {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FloodPrediction — full prediction result for one station
+// FloodPrediction — full result for one station
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FloodPrediction {
-  // ── Station metadata ──────────────────────────────────────────────────
+  // Station metadata
   final String station;
   final String river;
   final double currentLevel;
   final double dangerLevel;
-  final double warningLevel;    // metres — used by chart threshold lines
+  final double warningLevel;
   final double progressPct;
 
-  // ── Scalar forecasts (backwards compat) ──────────────────────────────
+  // Scalar forecasts (backwards compat)
   final double predicted24h;
   final double predicted48h;
   final double predicted72h;
 
-  // ── Hourly forecast series ────────────────────────────────────────────
-  final List<PredictionPoint> next24h; // 24 hourly points
-  final List<PredictionPoint> next48h; // 48 hourly points
-  final List<PredictionPoint> next72h; // 72 hourly points
+  // Hourly forecast series
+  final List<PredictionPoint> next24h;
+  final List<PredictionPoint> next48h;
+  final List<PredictionPoint> next72h;
 
-  // ── Model metadata ──────────────────────────────────────────────────
-  final double  riskScore;      // 0–100 (based on predicted24h / danger)
-  final double  confidencePct;  // 0–100 heuristic confidence
-  final String  modelVersion;   // e.g. 'v3.2'
-  final double? cwcRiskScore;   // optional CWC-sourced risk %, null if unavailable
-  final String  trend;          // 'rising' | 'falling' | 'stable'
-  final String  outlook;        // human-readable one-liner
+  // Model metadata
+  final double  riskScore;
+  final double  confidencePct;
+  final String  modelVersion;
+  final double? cwcRiskScore;  // nullable — wired when CWC provides a %
+  final String  trend;         // 'rising' | 'falling' | 'stable'
+  final String  outlook;
 
   const FloodPrediction({
     required this.station,
@@ -80,7 +79,6 @@ class FloodPrediction {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core prediction engine
-// Linear extrapolation modulated by live weather + CWC risk score
 // ─────────────────────────────────────────────────────────────────────────────
 
 FloodPrediction _predict(
@@ -88,28 +86,24 @@ FloodPrediction _predict(
   double rainfallModifier, {
   List<WeatherDay> forecast = const [],
 }) {
-  final cur    = s.current;
-  final dng    = s.danger > 0 ? s.danger : cur * 1.5;
-  final warn   = s.warning > 0 ? s.warning : dng * 0.85;
-  final prog   = s.progressPct / 100;
-  final now    = DateTime.now();
+  final cur  = s.current;
+  final dng  = s.danger  > 0 ? s.danger  : cur * 1.5;
+  final warn = s.warning > 0 ? s.warning : dng * 0.85;
+  final prog = s.progressPct / 100;
+  final now  = DateTime.now();
 
-  // Hourly rise rate (m/h): proportional to progress × rainfall factor.
-  // At prog=1.0 (at danger level) + heavy rain → ~0.021 m/h (= 0.5 m/24 h)
+  // Hourly rise rate (m/h): proportional to progress × rainfall factor
   final risePerHour = prog * rainfallModifier * 0.021;
 
-  // Build hourly PredictionPoint series for 72 hours.
-  // Rainfall per hour is interpolated from the daily forecast.
   List<PredictionPoint> buildSeries(int hours) {
     return List.generate(hours, (i) {
-      final t          = now.add(Duration(hours: i + 1));
-      final level      = (cur + risePerHour * (i + 1)).clamp(0.0, dng * 1.5);
-      // Find the matching forecast day (if any)
+      final t     = now.add(Duration(hours: i + 1));
+      final level = (cur + risePerHour * (i + 1)).clamp(0.0, dng * 1.5);
       double? precipMm;
       if (forecast.isNotEmpty) {
         final dayIdx = i ~/ 24;
         if (dayIdx < forecast.length) {
-          precipMm = forecast[dayIdx].rainMm / 24; // daily → hourly
+          precipMm = forecast[dayIdx].rainMm / 24;
         }
       }
       return PredictionPoint(time: t, level: level, precipMm: precipMm);
@@ -124,55 +118,50 @@ FloodPrediction _predict(
   final p48 = pts48.last.level;
   final p72 = pts72.last.level;
 
-  final riskScore = ((p24 / dng) * 100).clamp(0.0, 100.0);
-
-  // Confidence: higher when we have live data and weather data
-  final conf = (55.0 + (s.isLive ? 20.0 : 0.0) +
-      (forecast.isNotEmpty ? 15.0 : 0.0) +
-      (rainfallModifier > 0 ? 10.0 : 0.0)).clamp(0.0, 99.0);
+  final riskScore  = ((p24 / dng) * 100).clamp(0.0, 100.0);
+  final conf       = (55.0
+      + (s.isLive ? 20.0 : 0.0)
+      + (forecast.isNotEmpty ? 15.0 : 0.0)
+      + (rainfallModifier > 0 ? 10.0 : 0.0)).clamp(0.0, 99.0);
 
   final String trend;
-  if (risePerHour > 0.005)        trend = 'rising';
-  else if (risePerHour < -0.005)  trend = 'falling';
-  else                            trend = 'stable';
+  if (risePerHour > 0.005)       trend = 'rising';
+  else if (risePerHour < -0.005) trend = 'falling';
+  else                           trend = 'stable';
 
   final String outlook;
-  if (p24 >= dng)      outlook = 'Expected to reach or exceed danger level within 24 h';
-  else if (p48 >= dng) outlook = 'May reach danger level within 48 h';
-  else if (p72 >= dng) outlook = 'Risk of reaching danger level between 48–72 h';
-  else                 outlook = 'Likely to remain below danger level for 72 h';
+  if (p24 >= dng)       outlook = 'Expected to reach or exceed danger level within 24 h';
+  else if (p48 >= dng)  outlook = 'May reach danger level within 48 h';
+  else if (p72 >= dng)  outlook = 'Risk of reaching danger level between 48–72 h';
+  else                  outlook = 'Likely to remain below danger level for 72 h';
 
   return FloodPrediction(
-    station:      s.station,
-    river:        s.river,
-    currentLevel: cur,
-    dangerLevel:  dng,
-    warningLevel: warn,
-    progressPct:  s.progressPct,
-    predicted24h: p24,
-    predicted48h: p48,
-    predicted72h: p72,
-    next24h:      pts24,
-    next48h:      pts48,
-    next72h:      pts72,
-    riskScore:    riskScore,
+    station:       s.station,
+    river:         s.river,
+    currentLevel:  cur,
+    dangerLevel:   dng,
+    warningLevel:  warn,
+    progressPct:   s.progressPct,
+    predicted24h:  p24,
+    predicted48h:  p48,
+    predicted72h:  p72,
+    next24h:       pts24,
+    next48h:       pts48,
+    next72h:       pts72,
+    riskScore:     riskScore,
     confidencePct: conf,
-    modelVersion: 'v3.2',
-    cwcRiskScore: null, // wired when CWC backend provides a risk %
-    trend:        trend,
-    outlook:      outlook,
+    modelVersion:  'v3.2',
+    cwcRiskScore:  null,
+    trend:         trend,
+    outlook:       outlook,
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // predictionProvider(String stationKey) — FutureProvider.family
 //
-// Used by:
-//   prediction_screen.dart — ref.watch(predictionProvider(_selectedStation))
-//   ai_prediction_panel.dart — ref.watch(predictionProvider(widget.stationKey))
-//
-// stationKey is matched case-insensitively against the merged station list;
-// falls back to the highest-risk station if no exact match is found.
+// Used by prediction_screen.dart and ai_prediction_panel.dart.
+// Station matching: exact → partial → highest-risk → seed data fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 
 final predictionProvider =
@@ -180,7 +169,6 @@ final predictionProvider =
   final stations = ref.watch(mergedStationsProvider);
   final wxState  = ref.watch(weatherProvider);
 
-  // Rainfall modifier 0–1
   double rainfallMod = 0.3;
   if (wxState.current != null) {
     rainfallMod = (wxState.rainfall7dMm / 200).clamp(0.0, 1.0);
@@ -188,34 +176,48 @@ final predictionProvider =
 
   final keyLower = stationKey.toLowerCase();
 
-  // Try exact station name match first, then partial, then first in kBiharGauges
-  RiverStation? match;
-  if (stations.isNotEmpty) {
-    match = stations.firstWhere(
-      (s) => s.station.toLowerCase() == keyLower,
-      orElse: () => stations.firstWhere(
-        (s) => s.station.toLowerCase().contains(keyLower) ||
-               keyLower.contains(s.station.toLowerCase()),
-        orElse: () => stations.reduce(
-            (a, b) => a.progressPct > b.progressPct ? a : b),
-      ),
-    );
-  }
+  // ── Station resolution ──────────────────────────────────────────────────
+  // Uses `late` so Dart knows `match` is definitely assigned before use.
+  late RiverStation match;
 
-  // Fall back: build a synthetic station from kBiharGauges seed data
-  if (match == null) {
+  if (stations.isNotEmpty) {
+    // 1. Exact name match
+    final exact = stations.where(
+        (s) => s.station.toLowerCase() == keyLower).toList();
+    if (exact.isNotEmpty) {
+      match = exact.first;
+    } else {
+      // 2. Partial match
+      final partial = stations.where(
+          (s) => s.station.toLowerCase().contains(keyLower) ||
+                 keyLower.contains(s.station.toLowerCase())).toList();
+      if (partial.isNotEmpty) {
+        match = partial.first;
+      } else {
+        // 3. Highest-risk fallback
+        match = stations.reduce(
+            (a, b) => a.progressPct > b.progressPct ? a : b);
+      }
+    }
+  } else {
+    // 4. No live stations yet — build synthetic from kBiharGauges seed data
     final seed = kBiharGauges.firstWhere(
       (g) => g.station.toLowerCase() == keyLower,
       orElse: () => kBiharGauges.first,
     );
+    // RiverStation requires city, state, river, station, current,
+    // warning, danger, hfl  (hfl = highest flood level; estimate as
+    // danger × 1.15 when the seed table doesn't carry a real HFL).
     match = RiverStation(
-      station:    seed.station,
-      river:      seed.river,
-      state:      seed.state,
-      current:    seed.currentLevel,
-      warning:    seed.warningLevel,
-      danger:     seed.dangerLevel,
-      isLive:     false,
+      city:    seed.station,       // city ≈ station name for seed data
+      state:   seed.state,
+      river:   seed.river,
+      station: seed.station,
+      current: seed.currentLevel,
+      warning: seed.warningLevel,
+      danger:  seed.dangerLevel,
+      hfl:     seed.dangerLevel * 1.15,
+      isLive:  false,
       dataSource: 'SEED',
     );
   }
@@ -224,7 +226,7 @@ final predictionProvider =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Existing bulk providers — kept unchanged for RiverMonitorScreen etc.
+// Bulk providers — unchanged, kept for RiverMonitorScreen etc.
 // ─────────────────────────────────────────────────────────────────────────────
 
 final floodPredictionsProvider = Provider<List<FloodPrediction>>((ref) {

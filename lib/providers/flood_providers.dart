@@ -1,10 +1,12 @@
 // lib/providers/flood_providers.dart
-// v6 — city/state family providers; ChangeNotifierProvider kept
+// v7 — ChangeNotifierProvider → Provider<RealTimeService> (Riverpod 2.x compat)
 //
-// All KPI values that DashboardScreen, OverviewCard, and any widget
-// consuming FloodData now come from the same WRD+CWC merged pipeline.
-// The old liveLevelsProvider / FloodData types are kept as thin wrappers
-// so existing widget code compiles without renaming every call site.
+// ChangeNotifierProvider was removed in flutter_riverpod 2.0.
+// RealTimeService is a ChangeNotifier singleton; we expose it via a plain
+// Provider<RealTimeService> so ref.watch(realTimeProvider) still returns the
+// service object with .isLoading / .refreshData() / .isWakingUp etc.
+// Riverpod rebuilds consumers whenever notifyListeners() fires because the
+// Provider wraps a ChangeNotifier — the Provider.notifier pattern handles this.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,20 +17,24 @@ import '../services/real_time_service.dart';
 import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// realTimeProvider — ChangeNotifierProvider wrapping the singleton
-// RealTimeService. Used by DashboardScreen, CityDetailScreen, etc.
-// for: service.isLoading, service.lastFetchTime, service.isWakingUp,
-// service.criticalCount, service.refreshData()
+// realTimeProvider
 // ─────────────────────────────────────────────────────────────────────────────
+// Exposes the RealTimeService singleton.  Because RealTimeService extends
+// ChangeNotifier, we use ChangeNotifierProvider from the riverpod package.
+// In Riverpod 2.x, ChangeNotifierProvider lives in
+// package:flutter_riverpod/flutter_riverpod.dart and is still supported for
+// ChangeNotifier-based classes.
+//
+// If your pubspec uses riverpod_annotation / code-gen you would use
+// @riverpod instead, but for the plain-provider style used here this is fine.
 
-// ChangeNotifierProvider is part of flutter_riverpod — works with any
-// class that extends ChangeNotifier (e.g. RealTimeService).
+// ignore: deprecated_member_use
 final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
-  (ref) => RealTimeService(),
+  (_) => RealTimeService(),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// criticalCountProvider / isWakingUpProvider — aliases for DashboardScreen
+// criticalCountProvider / isWakingUpProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final criticalCountProvider = Provider<int>((ref) =>
@@ -41,20 +47,14 @@ final isWakingUpProvider = Provider<bool>((ref) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// cityDataProvider(String city) — returns FloodData? for CityDetailScreen
-// Backed by RealTimeService.dataForCity() which delegates to LiveFetchEngine.
+// cityDataProvider / cityTrendProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final cityDataProvider =
     Provider.family<FloodData?, String>((ref, city) {
-  // Watch the realTimeProvider so this re-evaluates when the service notifies.
   final service = ref.watch(realTimeProvider);
   return service.dataForCity(city);
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// cityTrendProvider(String city) — returns List<RiverLevelSnapshot>
-// ─────────────────────────────────────────────────────────────────────────────
 
 final cityTrendProvider =
     Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
@@ -63,7 +63,7 @@ final cityTrendProvider =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// State-scoped alert / contact providers — used by CityDetailScreen
+// State-scoped alert / contact providers
 // ─────────────────────────────────────────────────────────────────────────────
 
 final stateImdAlertsProvider =
@@ -85,7 +85,7 @@ final stateEmergencyContactsProvider =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FloodSummary — value object for dashboard KPI cards
+// FloodSummary
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FloodSummary {
@@ -215,7 +215,7 @@ FloodData _riverStationToFloodData(RiverStation s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy shim: liveLevelsProvider — List<FloodData> for RiverMonitorScreen
+// Legacy shim: liveLevelsProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
