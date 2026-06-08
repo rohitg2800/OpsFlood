@@ -66,11 +66,17 @@ final wrdStationsProvider =
 //
 // RiverStation is the shared model used by map markers, dashboard tiles,
 // alert logic, and risk calculations.
+//
+// FIX: WrdStation fields are nullable (double?). We apply ?? 0.0 fallbacks
+// so the narrowed doubles satisfy RiverStation's required non-nullable params.
+// When thresholds are genuinely missing, 0.0 is the correct sentinel —
+// RiverStation.dangerClass guards against it (hfl==0 → progressPct==0,
+// dangerClass==normal) so the station degrades gracefully instead of crashing.
 RiverStation _wrdToRiverStation(WrdStation s) {
-  final cur = s.currentLevel;
-  final dl  = s.dangerLevel;
-  final wl  = s.warningLevel ?? (dl != null ? dl - 1.0 : null);
-  final hfl = s.hfl ?? (dl != null ? dl + 1.5 : null);
+  final cur = s.currentLevel ?? 0.0;
+  final dl  = s.dangerLevel  ?? 0.0;
+  final wl  = s.warningLevel ?? (dl > 0 ? dl - 1.0 : 0.0);
+  final hfl = s.hfl          ?? (dl > 0 ? dl + 1.5 : 0.0);
 
   return RiverStation(
     city:        s.site,
@@ -150,11 +156,12 @@ final wrdCriticalStationsProvider = Provider<List<RiverStation>>((ref) {
 });
 
 /// Stations currently above WARNING but below danger level.
+// FIX: was DangerClass.high (non-existent) → correct value is DangerClass.aboveNormal
 final wrdWarningStationsProvider = Provider<List<RiverStation>>((ref) {
   final async = ref.watch(wrdRiverStationsProvider);
   final list  = async.asData?.value ?? [];
   return list
-      .where((s) => s.dangerClass == DangerClass.high)
+      .where((s) => s.dangerClass == DangerClass.aboveNormal)
       .toList()
     ..sort((a, b) => b.riskScore.compareTo(a.riskScore));
 });
@@ -178,7 +185,7 @@ final wrdByRiverProvider = Provider<Map<String, List<RiverStation>>>((ref) {
 final wrdIsLoadingProvider = Provider<bool>((ref) =>
     ref.watch(wrdStationsProvider).isLoading);
 
-/// Last fetch error message (null = no error).
+/// Last fetch error message (null = no error)
 final wrdErrorProvider = Provider<String?>((ref) {
   final async = ref.watch(wrdStationsProvider);
   return async.hasError ? async.error.toString() : null;
