@@ -1,8 +1,7 @@
 // lib/screens/home_screen.dart
-// Bihar Flood Command — Home (Tab Shell) v6
-// CHANGE v6: Added SOS tab (index 3) between Alerts and Map.
-//            SOS tab uses a red-badged emergency icon to signal priority.
-//            Total tabs: 8 (Dashboard, Monitors, Alerts, SOS, Map, Weather, Rivers, Settings).
+// Bihar Flood Command — Home (Tab Shell) v7
+// CHANGE v7: Replaced Rivers tab (index 6) with AI Prediction tab.
+//            Total tabs: 8 (Dashboard, Monitors, Alerts, SOS, Map, Weather, AI, Settings).
 library;
 
 import 'package:flutter/material.dart';
@@ -10,14 +9,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/theme_provider.dart';
-import '../theme/river_theme.dart'; // AppPalette.critical used by SOS badge
+import '../theme/river_theme.dart';
 import '../theme/rx.dart';
 import '../widgets/premium_theme_sheet.dart';
+import 'ai_prediction_screen.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'map_screen.dart';
 import 'monitors_screen.dart';
-import 'river_monitor_screen.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 import 'weather_screen.dart';
@@ -35,14 +34,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   // ── Tab bodies ────────────────────────────────────────────────────────────
   static const _tabs = [
-    DashboardScreen(),    // 0
-    MonitorsScreen(),     // 1
-    AlertsScreen(),       // 2
-    SosScreen(),          // 3  ← SOS (new, preferred emergency tab)
-    MapScreen(),          // 4
-    WeatherScreen(),      // 5
-    RiverMonitorScreen(), // 6
-    SettingsScreen(),     // 7
+    DashboardScreen(),      // 0
+    MonitorsScreen(),       // 1
+    AlertsScreen(),         // 2
+    SosScreen(),            // 3  ← emergency
+    MapScreen(),            // 4
+    WeatherScreen(),        // 5
+    AiPredictionScreen(),   // 6  ← replaced Rivers
+    SettingsScreen(),       // 7
   ];
 
   // ── Bottom nav destinations ───────────────────────────────────────────────
@@ -62,7 +61,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       selectedIcon: Icon(Icons.notifications_rounded),
       label: 'Alerts',
     ),
-    // SOS tab — red badge dot marks emergency priority
+    // SOS — red badge dot
     NavigationDestination(
       icon: Stack(
         clipBehavior: Clip.none,
@@ -108,10 +107,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       selectedIcon: Icon(Icons.wb_sunny_rounded),
       label: 'Weather',
     ),
+    // AI Prediction tab
     const NavigationDestination(
-      icon:         Icon(Icons.water_outlined),
-      selectedIcon: Icon(Icons.water_rounded),
-      label: 'Rivers',
+      icon:         Icon(Icons.psychology_outlined),
+      selectedIcon: Icon(Icons.psychology_rounded),
+      label: 'AI',
     ),
     const NavigationDestination(
       icon:         Icon(Icons.settings_outlined),
