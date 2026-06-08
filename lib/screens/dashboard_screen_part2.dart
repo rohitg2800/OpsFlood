@@ -1,6 +1,5 @@
 // lib/screens/dashboard_screen_part2.dart
-// Continuation widgets for DashboardScreen redesign v25
-// These are private to the library so they are exported via the main file.
+// Continuation widgets for DashboardScreen redesign v26 — per-source health
 library;
 
 import 'dart:math' as math;
@@ -22,7 +21,7 @@ Color _riskCol(String lvl) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// _AnimatedAreaChart — smooth CustomPainter area chart
+// AnimatedAreaChart — smooth CustomPainter area chart
 // ───────────────────────────────────────────────────────────────────────────
 class AnimatedAreaChart extends StatelessWidget {
   final List<double> values;
@@ -78,7 +77,6 @@ class AnimatedAreaChart extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            // X labels — take every other to avoid clutter
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -115,24 +113,20 @@ class _AreaChartPainter extends CustomPainter {
     final n = values.length;
     final xStep = size.width / (n - 1).clamp(1, n);
 
-    // Grid lines
     final gridPaint = Paint()..color = gridColor..strokeWidth = 0.5;
     for (int g = 0; g <= 4; g++) {
       final y = size.height - (g / 4) * size.height;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
-    // Compute points
     List<Offset> pts = [];
     for (int i = 0; i < n; i++) {
       final x = i * xStep;
       final rawY = (1 - values[i] / maxV) * size.height;
-      // Apply wave shimmer near the top of each bar
       final shimmer = math.sin(wavePhase + i * 0.5) * 1.5 * progress;
       pts.add(Offset(x, rawY + shimmer));
     }
 
-    // Fill area
     final fillPath = Path();
     fillPath.moveTo(0, size.height);
     fillPath.lineTo(pts[0].dx, pts[0].dy * progress);
@@ -155,7 +149,6 @@ class _AreaChartPainter extends CustomPainter {
         ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
     );
 
-    // Line
     final linePath = Path();
     linePath.moveTo(pts[0].dx, pts[0].dy * progress);
     for (int i = 1; i < pts.length; i++) {
@@ -174,13 +167,10 @@ class _AreaChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
 
-    // Dots at each data point
     for (int i = 0; i < pts.length; i++) {
       final p = Offset(pts[i].dx, pts[i].dy * progress);
-      canvas.drawCircle(p, 3.5,
-          Paint()..color = dotColor);
-      canvas.drawCircle(p, 2.0,
-          Paint()..color = Colors.white.withValues(alpha: 0.6));
+      canvas.drawCircle(p, 3.5, Paint()..color = dotColor);
+      canvas.drawCircle(p, 2.0, Paint()..color = Colors.white.withValues(alpha: 0.6));
     }
   }
 
@@ -190,7 +180,7 @@ class _AreaChartPainter extends CustomPainter {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// _AlertLog — slide-in list
+// AlertLog — slide-in list
 // ───────────────────────────────────────────────────────────────────────────
 class AlertLog extends StatelessWidget {
   final List<FloodData> data;
@@ -258,7 +248,6 @@ class AlertLog extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    // Left accent line
                     Container(
                       width: 3, height: 36,
                       decoration: BoxDecoration(
@@ -306,7 +295,7 @@ class AlertLog extends StatelessWidget {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// _SystemStats
+// SystemStats — per-source health with real booleans + latency badges
 // ───────────────────────────────────────────────────────────────────────────
 class SystemStats extends StatelessWidget {
   final RealTimeService service;
@@ -323,12 +312,36 @@ class SystemStats extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    final health = [
-      (label: 'GloFAS',  ok: service.isOnline, detail: 'flood forecast'),
-      (label: 'WRD Bihar',ok: service.isOnline, detail: 'river gauge'),
-      (label: 'IMD',      ok: service.isOnline, detail: 'rainfall'),
-      (label: 'CWC',      ok: true,             detail: 'central water'),
+
+    // ── Each entry: label, subtitle, healthy?, latency ms (null = unknown)
+    final sources = [
+      (
+        label:   'GloFAS',
+        detail:  'flood forecast',
+        ok:       service.glofasHealthy,
+        latency:  service.glofasLatencyMs,
+      ),
+      (
+        label:   'WRD Bihar',
+        detail:  'river gauge',
+        ok:       service.wrdHealthy,
+        latency:  service.wrdLatencyMs,
+      ),
+      (
+        label:   'IMD',
+        detail:  'rainfall',
+        ok:       service.imdHealthy,
+        latency:  service.imdLatencyMs,
+      ),
+      (
+        label:   'CWC',
+        detail:  'central water',
+        // CWC is not yet wired — always amber until its fetch is implemented.
+        ok:       service.cwcHealthy,
+        latency:  service.cwcLatencyMs,
+      ),
     ];
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
@@ -341,62 +354,137 @@ class SystemStats extends StatelessWidget {
         child: Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: health.map((h) {
-            final col = h.ok ? AppPalette.safe : AppPalette.critical;
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: col.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: col.withValues(alpha: 0.20)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedBuilder(
-                    animation: pulseCtrl,
-                    builder: (_, __) => Container(
-                      width: 7, height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: col.withValues(
-                          alpha: h.ok
-                              ? 0.5 + pulseCtrl.value * 0.5
-                              : 0.8),
-                        boxShadow: h.ok ? [
-                          BoxShadow(
-                            color: col.withValues(
-                              alpha: pulseCtrl.value * 0.5),
-                            blurRadius: 6),
-                        ] : null,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(h.label,
-                          style: TextStyle(
-                            color: t.textPrimary, fontSize: 11,
-                            fontWeight: FontWeight.w800)),
-                      Text(h.detail,
-                          style: TextStyle(
-                            color: t.textSecondary, fontSize: 9)),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
+          children: sources.map((s) => _SourceTile(
+            source:      s,
+            pulseCtrl:   pulseCtrl,
+            reduceMotion: reduceMotion,
+            t:           t,
+          )).toList(),
         ),
       ),
     );
   }
 }
 
+// ── Single source health tile ──────────────────────────────────────────────
+class _SourceTile extends StatelessWidget {
+  final ({String label, String detail, bool ok, int? latency}) source;
+  final AnimationController pulseCtrl;
+  final bool reduceMotion;
+  final RiverColors t;
+
+  const _SourceTile({
+    required this.source,
+    required this.pulseCtrl,
+    required this.reduceMotion,
+    required this.t,
+  });
+
+  /// Amber colour for the "pending / not yet wired" state (latency == null
+  /// and ok == false together signal an unwired source vs a real failure).
+  static const _amber = Color(0xFFE6A817);
+
+  Color get _dotColor {
+    if (source.ok) return AppPalette.safe;
+    // If never checked (latency null), show amber rather than red
+    if (source.latency == null) return _amber;
+    return AppPalette.critical;
+  }
+
+  /// Human-readable latency string, e.g. "342 ms" or "1.2 s".
+  String? get _latencyLabel {
+    final ms = source.latency;
+    if (ms == null) return null;
+    if (ms < 1000) return '${ms} ms';
+    return '${(ms / 1000).toStringAsFixed(1)} s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final col = _dotColor;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: col.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: col.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Pulsing dot — only pulses when source is healthy
+          AnimatedBuilder(
+            animation: pulseCtrl,
+            builder: (_, __) {
+              final pulse = source.ok && !reduceMotion
+                  ? 0.5 + pulseCtrl.value * 0.5
+                  : 0.9;
+              return Container(
+                width: 7, height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: col.withValues(alpha: pulse),
+                  boxShadow: source.ok
+                      ? [
+                          BoxShadow(
+                            color: col.withValues(
+                                alpha: pulseCtrl.value * 0.45),
+                            blurRadius: 6,
+                          ),
+                        ]
+                      : null,
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Label + optional latency badge on the same row
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    source.label,
+                    style: TextStyle(
+                      color: t.textPrimary, fontSize: 11,
+                      fontWeight: FontWeight.w800),
+                  ),
+                  if (_latencyLabel != null) ...[
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: col.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _latencyLabel!,
+                        style: TextStyle(
+                          color: col, fontSize: 8,
+                          fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              Text(
+                source.detail,
+                style: TextStyle(
+                  color: t.textSecondary, fontSize: 9),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
-// _Footer
+// DashboardFooter
 // ───────────────────────────────────────────────────────────────────────────
 class DashboardFooter extends StatelessWidget {
   final int totalStations, riversCount, statesAtRisk;
@@ -462,7 +550,7 @@ class DashboardFooter extends StatelessWidget {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// _EmptyState
+// DashboardEmptyState
 // ───────────────────────────────────────────────────────────────────────────
 class DashboardEmptyState extends StatelessWidget {
   const DashboardEmptyState({super.key});
