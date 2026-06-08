@@ -1,5 +1,5 @@
 // lib/providers/flood_providers.dart
-// v5 — added realTimeProvider, criticalCountProvider, isWakingUpProvider
+// v6 — city/state family providers; ChangeNotifierProvider kept
 //
 // All KPI values that DashboardScreen, OverviewCard, and any widget
 // consuming FloodData now come from the same WRD+CWC merged pipeline.
@@ -9,54 +9,95 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/flood_data.dart';
+import '../models/river_monitoring.dart';
 import '../models/river_station.dart';
 import '../services/real_time_service.dart';
 import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// realTimeProvider — ChangeNotifierProvider wrapping the singleton RealTimeService
-// Used by DashboardScreen for: service.isLoading, service.lastFetchTime,
-// service.isWakingUp, service.criticalCount, service.refreshData()
+// realTimeProvider — ChangeNotifierProvider wrapping the singleton
+// RealTimeService. Used by DashboardScreen, CityDetailScreen, etc.
+// for: service.isLoading, service.lastFetchTime, service.isWakingUp,
+// service.criticalCount, service.refreshData()
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ChangeNotifierProvider is part of flutter_riverpod — works with any
+// class that extends ChangeNotifier (e.g. RealTimeService).
 final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
   (ref) => RealTimeService(),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// criticalCountProvider — alias used by DashboardScreen
-// Maps to mergedCriticalCountProvider (stations at/above danger level)
+// criticalCountProvider / isWakingUpProvider — aliases for DashboardScreen
 // ─────────────────────────────────────────────────────────────────────────────
 
 final criticalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedCriticalCountProvider));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// isWakingUpProvider — true while the initial WRD fetch is in-flight
-// and the station list is still empty ("cold start" / server wake-up).
-// ─────────────────────────────────────────────────────────────────────────────
-
 final isWakingUpProvider = Provider<bool>((ref) {
-  final loading  = ref.watch(wrdIsLoadingProvider);
-  final hasData  = ref.watch(mergedStationsProvider).isNotEmpty;
+  final loading = ref.watch(wrdIsLoadingProvider);
+  final hasData = ref.watch(mergedStationsProvider).isNotEmpty;
   return loading && !hasData;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FloodSummary — a simple value object for dashboard KPI cards.
-// Replaces the old FloodData model on the happy-path render.
+// cityDataProvider(String city) — returns FloodData? for CityDetailScreen
+// Backed by RealTimeService.dataForCity() which delegates to LiveFetchEngine.
+// ─────────────────────────────────────────────────────────────────────────────
+
+final cityDataProvider =
+    Provider.family<FloodData?, String>((ref, city) {
+  // Watch the realTimeProvider so this re-evaluates when the service notifies.
+  final service = ref.watch(realTimeProvider);
+  return service.dataForCity(city);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cityTrendProvider(String city) — returns List<RiverLevelSnapshot>
+// ─────────────────────────────────────────────────────────────────────────────
+
+final cityTrendProvider =
+    Provider.family<List<RiverLevelSnapshot>, String>((ref, city) {
+  final service = ref.watch(realTimeProvider);
+  return service.trendForCity(city);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State-scoped alert / contact providers — used by CityDetailScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+final stateImdAlertsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  final service = ref.watch(realTimeProvider);
+  return service.imdAlertsForState(state);
+});
+
+final stateNdmaAdvisoriesProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  final service = ref.watch(realTimeProvider);
+  return service.ndmaAdvisoriesForState(state);
+});
+
+final stateEmergencyContactsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) {
+  final service = ref.watch(realTimeProvider);
+  return service.emergencyContactsForState(state);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FloodSummary — value object for dashboard KPI cards
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FloodSummary {
   final int    totalStations;
-  final int    criticalCount;   // extreme DangerClass
-  final int    severeCount;     // severe DangerClass
-  final int    elevatedCount;   // aboveNormal
+  final int    criticalCount;
+  final int    severeCount;
+  final int    elevatedCount;
   final int    normalCount;
-  final double avgProgressPct;  // mean of s.progressPct across all stations
-  final double maxLevel;        // highest current reading
-  final String maxLevelStation; // station name for highest reading
-  final String dataSource;      // 'CWC+WRD' | 'WRD' | 'loading'
+  final double avgProgressPct;
+  final double maxLevel;
+  final String maxLevelStation;
+  final String dataSource;
   final DateTime updatedAt;
 
   const FloodSummary({
@@ -72,7 +113,6 @@ class FloodSummary {
     required this.updatedAt,
   });
 
-  // Quick helpers
   int    get dangerCount   => criticalCount + severeCount;
   int    get alertCount    => criticalCount + severeCount + elevatedCount;
   double get dangerPercent => totalStations == 0 ? 0 : dangerCount / totalStations * 100;
@@ -80,7 +120,7 @@ class FloodSummary {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// floodSummaryProvider  ← the canonical dashboard KPI source
+// floodSummaryProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final floodSummaryProvider = Provider<FloodSummary>((ref) {
@@ -113,38 +153,37 @@ final floodSummaryProvider = Provider<FloodSummary>((ref) {
   final hasCwc = stations.any((s) => s.dataSource?.contains('CWC') ?? false);
 
   return FloodSummary(
-    totalStations:    stations.length,
-    criticalCount:    critical,
-    severeCount:      severe,
-    elevatedCount:    elevated,
-    normalCount:      normal,
-    avgProgressPct:   totalPct / stations.length,
-    maxLevel:         maxLvl,
-    maxLevelStation:  maxStn,
-    dataSource:       hasCwc ? 'CWC+WRD' : 'WRD',
-    updatedAt:        DateTime.now(),
+    totalStations:   stations.length,
+    criticalCount:   critical,
+    severeCount:     severe,
+    elevatedCount:   elevated,
+    normalCount:     normal,
+    avgProgressPct:  totalPct / stations.length,
+    maxLevel:        maxLvl,
+    maxLevelStation: maxStn,
+    dataSource:      hasCwc ? 'CWC+WRD' : 'WRD',
+    updatedAt:       DateTime.now(),
   );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Thin scalar providers — used directly by DashboardScreen KPI tiles
+// Scalar KPI providers
 // ─────────────────────────────────────────────────────────────────────────────
 
-final floodTotalStationsProvider    = Provider<int>((ref) => ref.watch(floodSummaryProvider).totalStations);
-final floodCriticalCountProvider    = Provider<int>((ref) => ref.watch(floodSummaryProvider).criticalCount);
-final floodSevereCountProvider      = Provider<int>((ref) => ref.watch(floodSummaryProvider).severeCount);
-final floodElevatedCountProvider    = Provider<int>((ref) => ref.watch(floodSummaryProvider).elevatedCount);
-final floodNormalCountProvider      = Provider<int>((ref) => ref.watch(floodSummaryProvider).normalCount);
-final floodDangerCountProvider      = Provider<int>((ref) => ref.watch(floodSummaryProvider).dangerCount);
-final floodAlertCountProvider       = Provider<int>((ref) => ref.watch(floodSummaryProvider).alertCount);
-final floodAvgProgressPctProvider   = Provider<double>((ref) => ref.watch(floodSummaryProvider).avgProgressPct);
-final floodMaxLevelProvider         = Provider<double>((ref) => ref.watch(floodSummaryProvider).maxLevel);
-final floodMaxLevelStationProvider  = Provider<String>((ref) => ref.watch(floodSummaryProvider).maxLevelStation);
-final floodDataSourceProvider       = Provider<String>((ref) => ref.watch(floodSummaryProvider).dataSource);
+final floodTotalStationsProvider   = Provider<int>((ref) => ref.watch(floodSummaryProvider).totalStations);
+final floodCriticalCountProvider   = Provider<int>((ref) => ref.watch(floodSummaryProvider).criticalCount);
+final floodSevereCountProvider     = Provider<int>((ref) => ref.watch(floodSummaryProvider).severeCount);
+final floodElevatedCountProvider   = Provider<int>((ref) => ref.watch(floodSummaryProvider).elevatedCount);
+final floodNormalCountProvider     = Provider<int>((ref) => ref.watch(floodSummaryProvider).normalCount);
+final floodDangerCountProvider     = Provider<int>((ref) => ref.watch(floodSummaryProvider).dangerCount);
+final floodAlertCountProvider      = Provider<int>((ref) => ref.watch(floodSummaryProvider).alertCount);
+final floodAvgProgressPctProvider  = Provider<double>((ref) => ref.watch(floodSummaryProvider).avgProgressPct);
+final floodMaxLevelProvider        = Provider<double>((ref) => ref.watch(floodSummaryProvider).maxLevel);
+final floodMaxLevelStationProvider = Provider<String>((ref) => ref.watch(floodSummaryProvider).maxLevelStation);
+final floodDataSourceProvider      = Provider<String>((ref) => ref.watch(floodSummaryProvider).dataSource);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: RiverStation → FloodData
-// Used by liveLevelsProvider so RiverMonitorScreen compiles unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 FloodData _riverStationToFloodData(RiverStation s) {
@@ -176,29 +215,24 @@ FloodData _riverStationToFloodData(RiverStation s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy: liveLevelsProvider shim — returns List<FloodData> for RiverMonitorScreen
+// Legacy shim: liveLevelsProvider — List<FloodData> for RiverMonitorScreen
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Returns merged stations as List<FloodData> so RiverMonitorScreen compiles
-/// without any changes.
 final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
     ref.watch(mergedStationsProvider)
         .map(_riverStationToFloodData)
         .toList());
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Loading / offline / timestamp providers — used by RiverMonitorScreen
+// Loading / offline / timestamp providers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// True while the WRD fetch is in-flight and no cached data exists yet.
 final isLoadingProvider = Provider<bool>((ref) =>
     ref.watch(wrdIsLoadingProvider) && ref.watch(mergedStationsProvider).isEmpty);
 
-/// True when the last WRD fetch failed (no network / scrape error).
 final isOfflineProvider = Provider<bool>((ref) =>
     ref.watch(wrdErrorProvider) != null);
 
-/// Timestamp of the most-recently updated station, or null when no data yet.
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   final stations = ref.watch(mergedStationsProvider);
   if (stations.isEmpty) return null;
@@ -213,7 +247,7 @@ final lastFetchTimeProvider = Provider<DateTime?>((ref) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IMD / NDMA alert providers — used by AlertsScreen
+// IMD / NDMA global stubs (kept for AlertsScreen)
 // ─────────────────────────────────────────────────────────────────────────────
 
 final imdAlertsProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
