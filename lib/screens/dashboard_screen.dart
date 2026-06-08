@@ -20,6 +20,14 @@
 //      _StationTile river/state sub-text (10 kept), capacity label (9→10),
 //      capacity % value (9→10), _LevelChip label (9→10),
 //      _DashboardAppBar subtitle (10 kept), _CriticalBadge text (11 kept).
+//
+// P2 fixes applied (2026-06-08):
+//   2. _SectionHeader visual weight upgrade:
+//        - fontSize 10 → 12, letterSpacing 0.8 → 1.5
+//        - icon size 14 → 15
+//        - top padding 20 → 24
+//        - Divider added above label row for clear section breaks
+//        - colour: textSecondary → textPrimary.withValues(alpha:0.55)
 library;
 
 import 'dart:async';
@@ -671,7 +679,7 @@ class _KpiStrip extends StatelessWidget {
                       kpi.label,
                       style: TextStyle(
                         color: t.textSecondary,
-                        fontSize: 10, // P1 FIX: was 8.5
+                        fontSize: 10,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                       ),
@@ -700,7 +708,7 @@ class _KpiItem {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SectionHeader
+// _SectionHeader — P2 visual weight upgrade
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -718,23 +726,50 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: t.textSecondary,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Subtle full-width divider — visually breaks sections apart
+        Divider(
+          height: 1,
+          thickness: 1,
+          color: t.stroke,
+          indent: 16,
+          endIndent: 16,
+        ),
+        Padding(
+          // top: 24 (was 20), bottom: 10 (was 8)
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Row(
+            children: [
+              // Accent colour pip left of icon — visual anchor for each section
+              Container(
+                width: 3,
+                height: 14,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Icon(icon, color: color, size: 15),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  // P2: textPrimary @ 55% opacity (was textSecondary)
+                  // Result: label is clearly readable but stays subdued
+                  // relative to the card content directly below it.
+                  color: t.textPrimary.withValues(alpha: 0.55),
+                  fontSize: 12,            // was 10
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.5,      // was 0.8
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -848,7 +883,7 @@ class _StationTile extends StatelessWidget {
                         data.riskLevel,
                         style: TextStyle(
                           color: col,
-                          fontSize: 10, // P1 FIX: was 9
+                          fontSize: 10,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -872,7 +907,7 @@ class _StationTile extends StatelessWidget {
                           'Capacity',
                           style: TextStyle(
                             color: t.textSecondary,
-                            fontSize: 10, // P1 FIX: was 9
+                            fontSize: 10,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -880,7 +915,7 @@ class _StationTile extends StatelessWidget {
                           '${(data.capacityPercent * gaugeAnim.value).toStringAsFixed(0)}%',
                           style: TextStyle(
                             color: col,
-                            fontSize: 10, // P1 FIX: was 9
+                            fontSize: 10,
                             fontWeight: FontWeight.w800,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
@@ -951,7 +986,7 @@ class _LevelChip extends StatelessWidget {
         '$label $value',
         style: TextStyle(
           color: color,
-          fontSize: 10, // P1 FIX: was 9
+          fontSize: 10,
           fontWeight: FontWeight.w700,
         ),
       ),
