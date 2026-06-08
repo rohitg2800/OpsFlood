@@ -1,31 +1,23 @@
 // lib/screens/ai_prediction_screen.dart
-// OpsFlood — AI Prediction Tab  (v2 — all compiler errors resolved)
+// OpsFlood — AI Prediction Tab  (v3 — weatherState.daily → .forecast)
 //
-// FIX SUMMARY v2:
-//   1. forecastProvider  → not a Riverpod provider (it's a ChangeNotifier class).
-//                          Replaced with weatherProvider.daily (List<WeatherDay>)
-//                          for the 7-day rainfall chart.
-//   2. predictionProvider → FutureProviderFamily<FloodPrediction, String>.
-//                           Must be called with a station arg: predictionProvider('kosi').
-//   3. riskScoreProvider  → not a Riverpod provider (it's a ChangeNotifier class).
-//                           Replaced with inline score computed from FloodData fields.
-//   4. alertsState.alerts → field is alertsState.cwcAlerts (List<ThresholdAlert>).
-//   5. currentWx?.rainfall1h → field is currentWx.precipMm  (double).
-//   6. currentWx?.temperature → field is currentWx.tempC     (double).
+// FIX SUMMARY v3:
+//   7. weatherState.daily  → field is weatherState.forecast (List<WeatherDay>)
+//      WeatherState has no .daily getter — the forecast list is stored as .forecast
+//
+// All previous fixes from v2 remain intact:
+//   1. forecastProvider  → removed (not a Riverpod provider); uses weatherState.forecast
+//   2. predictionProvider → watched as predictionProvider('kosi') (FutureProviderFamily)
+//   3. riskScoreProvider  → removed; replaced with inline _stationScore()
+//   4. alertsState.alerts → alertsState.cwcAlerts
+//   5. currentWx?.rainfall1h → currentWx?.precipMm
+//   6. currentWx?.temperature → currentWx?.tempC
 //
 // Wired data sources (all real Riverpod providers):
-//   • liveLevelsProvider  → List<FloodData>  (river levels, capacity%, severity)
-//   • alertsProvider      → AlertsState      (cwcAlerts, imdAlerts, active, badgeCount)
-//   • weatherProvider     → WeatherState     (current: WeatherCurrent, daily: List<WeatherDay>)
+//   • liveLevelsProvider  → List<FloodData>
+//   • alertsProvider      → AlertsState  (.cwcAlerts, .badgeCount)
+//   • weatherProvider     → WeatherState (.current: WeatherCurrent, .forecast: List<WeatherDay>)
 //   • predictionProvider  → FutureProviderFamily<FloodPrediction, String>
-//                           (watched as predictionProvider('kosi') for key station)
-//
-// Layout:
-//   1. Verdict card  — overall AI risk + confidence bar + live pulse
-//   2. Driver strip  — 4 input tiles (level, rainfall, alerts, humidity)
-//   3. Station list  — per-station risk rows sorted by inline score, SliverList
-//   4. 7-day outlook — animated bar chart from weatherProvider.daily
-//   5. Model footer  — architecture + confidence% from FloodPrediction
 // ignore_for_file: avoid_function_literals_in_foreach_calls
 library;
 
@@ -50,7 +42,6 @@ import '../theme/river_theme.dart';
 enum _RiskLevel { extreme, high, moderate, low }
 
 _RiskLevel _riskFromFloodData(FloodData d) {
-  // Use riskLevel string set by RealTimeService
   switch (d.riskLevel.toUpperCase()) {
     case 'CRITICAL': return _RiskLevel.extreme;
     case 'SEVERE':   return _RiskLevel.high;
@@ -59,6 +50,7 @@ _RiskLevel _riskFromFloodData(FloodData d) {
   }
 }
 
+// ignore: unused_element
 _RiskLevel _riskFromString(String? s) {
   switch ((s ?? '').toUpperCase()) {
     case 'CRITICAL':
@@ -98,14 +90,12 @@ String _riskEmoji(_RiskLevel r) {
 }
 
 /// Inline risk score 0–100 from a single FloodData entry.
-/// No external provider needed — derived purely from model fields.
 double _stationScore(FloodData d) {
   final cap  = d.capacityPercent.clamp(0.0, 100.0);
   final lvl  = d.dangerLevel > 0
       ? (d.currentLevel / d.dangerLevel * 100).clamp(0.0, 100.0)
       : cap;
   final rain = (d.effectiveRainfallMm / 60.0 * 100).clamp(0.0, 100.0);
-  // Weighted: level 40%, capacity 40%, rainfall 20%
   return lvl * 0.4 + cap * 0.4 + rain * 0.2;
 }
 
@@ -131,7 +121,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
   late AnimationController _pulseCtrl;
   late AnimationController _barCtrl;
 
-  // Key station for predictionProvider family
   static const _kKeyStation = 'kosi';
 
   @override
@@ -160,7 +149,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
     super.dispose();
   }
 
-  // ── overall risk from live data ───────────────────────────────────────────
   _RiskLevel _overallRisk({
     required List<FloodData> stations,
     required int alertCount,
@@ -186,7 +174,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
     return _RiskLevel.low;
   }
 
-  // ── model confidence from data richness ───────────────────────────────────
   double _confidence(List<FloodData> stations, bool hasWeather) {
     double base = 60;
     if (stations.isNotEmpty) base += 20;
@@ -200,21 +187,19 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
     super.build(context);
 
     final rc           = RiverColors.of(context);
-    // ── real Riverpod providers ───────────────────────────────────────────
-    final stations     = ref.watch(liveLevelsProvider);           // List<FloodData>
-    final alertsState  = ref.watch(alertsProvider);               // AlertsState
-    final weatherState = ref.watch(weatherProvider);              // WeatherState
-    // predictionProvider is FutureProviderFamily — watch with station arg
-    final predState    = ref.watch(predictionProvider(_kKeyStation)); // AsyncValue<FloodPrediction>
+    final stations     = ref.watch(liveLevelsProvider);
+    final alertsState  = ref.watch(alertsProvider);
+    final weatherState = ref.watch(weatherProvider);
+    final predState    = ref.watch(predictionProvider(_kKeyStation));
 
-    // ── extract typed fields ──────────────────────────────────────────────
-    // AlertsState.cwcAlerts — the actual field name (not .alerts)
-    final alertCount  = alertsState.cwcAlerts.length;
-    final currentWx   = weatherState.current;               // WeatherCurrent?
-    // WeatherCurrent fields: tempC, humidity (int), precipMm, windKph
-    final rainfall    = currentWx?.precipMm ?? 0.0;         // was rainfall1h — fix #5
-    final humidity    = currentWx?.humidity.toDouble();      // int → double
-    final temp        = currentWx?.tempC;                   // was temperature — fix #6
+    // ── correct field names ───────────────────────────────────────────────
+    final alertCount  = alertsState.cwcAlerts.length;           // fix #4
+    final currentWx   = weatherState.current;
+    final rainfall    = currentWx?.precipMm ?? 0.0;             // fix #5
+    final humidity    = currentWx?.humidity.toDouble();
+    final temp        = currentWx?.tempC;                       // fix #6
+    // fix #7: field is .forecast, NOT .daily
+    final dailyForecast = weatherState.forecast;                 // List<WeatherDay>
 
     final overall      = _overallRisk(
       stations:   stations,
@@ -224,19 +209,15 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
     final overallColor = _riskColor(overall);
     final confidence   = _confidence(stations, currentWx != null);
 
-    // ── sort stations by inline score descending ──────────────────────────
     final sorted = [...stations]
       ..sort((a, b) => _stationScore(b).compareTo(_stationScore(a)));
-
-    // ── 7-day rainfall from weatherProvider.daily (List<WeatherDay>) ──────
-    final dailyForecast = weatherState.daily; // List<WeatherDay>
 
     return Scaffold(
       backgroundColor: rc.scaffoldBg,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── App bar ────────────────────────────────────────────────────
+          // ── App bar ───────────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
             expandedHeight: 0,
@@ -287,7 +268,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
                 IconButton(
                   onPressed: () {
                     HapticFeedback.selectionClick();
-                    // invalidate only real Riverpod providers
                     ref.invalidate(liveLevelsProvider);
                     ref.invalidate(alertsProvider);
                     ref.invalidate(weatherProvider);
@@ -319,7 +299,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 1. Verdict card ────────────────────────────────
                     _VerdictCard(
                       rc:           rc,
                       overall:      overall,
@@ -330,10 +309,7 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
                       alertCount:   alertCount,
                       predState:    predState,
                     ),
-
                     const SizedBox(height: 14),
-
-                    // ── 2. Driver inputs strip ─────────────────────────
                     _SectionHeader(
                         rc: rc,
                         icon: Icons.input_rounded,
@@ -347,10 +323,7 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
                       humidity:   humidity,
                       temp:       temp,
                     ),
-
                     const SizedBox(height: 16),
-
-                    // ── 3. Station list header ─────────────────────────
                     _SectionHeader(
                         rc: rc,
                         icon: Icons.sensors_rounded,
@@ -362,7 +335,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
             ),
           ),
 
-          // Station list — SliverList avoids nested viewport errors
           if (sorted.isEmpty)
             SliverToBoxAdapter(child: _EmptyStations(rc: rc))
           else
@@ -379,7 +351,6 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
               ),
             ),
 
-          // ── 4. 7-day outlook + model footer ───────────────────────────
           SliverToBoxAdapter(
             child: AnimatedBuilder(
               animation: _entryCtrl,
@@ -396,9 +367,9 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
                         label: '7-DAY FLOOD OUTLOOK'),
                     const SizedBox(height: 8),
                     _ForecastOutlook(
-                      rc:             rc,
-                      dailyForecast:  dailyForecast,
-                      barCtrl:        _barCtrl,
+                      rc:            rc,
+                      dailyForecast: dailyForecast,  // weatherState.forecast
+                      barCtrl:       _barCtrl,
                     ),
                     const SizedBox(height: 16),
                     _ModelFooter(rc: rc, predState: predState),
@@ -457,7 +428,6 @@ class _VerdictCard extends StatelessWidget {
   final AnimationController pulseCtrl;
   final int stationCount;
   final int alertCount;
-  // AsyncValue<FloodPrediction> from predictionProvider(_kKeyStation)
   final AsyncValue<FloodPrediction> predState;
 
   const _VerdictCard({
@@ -517,7 +487,6 @@ class _VerdictCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // live pulse dot
               AnimatedBuilder(
                 animation: pulseCtrl,
                 builder: (_, __) => Container(
@@ -566,10 +535,8 @@ class _VerdictCard extends StatelessWidget {
 
           const SizedBox(height: 14),
 
-          // confidence bar — uses predState.confidencePct when available
           predState.when(
             data: (pred) {
-              // prefer the model's own confidence over our heuristic
               final conf = pred.confidencePct > 0
                   ? pred.confidencePct
                   : confidence;
@@ -579,7 +546,6 @@ class _VerdictCard extends StatelessWidget {
             error:   (_, __) => _ConfidenceBar(rc: rc, confidence: confidence),
           ),
 
-          // model version tag
           predState.when(
             data: (pred) => Padding(
               padding: const EdgeInsets.only(top: 10),
@@ -668,9 +634,9 @@ class _DriverStrip extends StatelessWidget {
   final RiverColors rc;
   final List<FloodData> stations;
   final int alertCount;
-  final double rainfall;     // precipMm from WeatherCurrent
-  final double? humidity;    // WeatherCurrent.humidity as double
-  final double? temp;        // WeatherCurrent.tempC
+  final double rainfall;
+  final double? humidity;
+  final double? temp;
 
   const _DriverStrip({
     required this.rc,
@@ -687,7 +653,6 @@ class _DriverStrip extends StatelessWidget {
         ? 0.0
         : stations.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
             stations.length;
-
     final critCount = stations
         .where((d) => _riskFromFloodData(d) == _RiskLevel.extreme)
         .length;
@@ -971,13 +936,14 @@ class _StationRiskRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7-day forecast outlook — built from weatherProvider.daily (List<WeatherDay>)
-// WeatherDay fields: date (String), rainMm (double), maxC, minC
+// 7-day forecast outlook
+// Uses weatherState.forecast (List<WeatherDay>) — NOT .daily (doesn't exist)
+// WeatherDay fields: date (String YYYY-MM-DD), rainMm, maxC, minC
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ForecastOutlook extends StatelessWidget {
   final RiverColors rc;
-  final List<WeatherDay> dailyForecast;   // from weatherState.daily
+  final List<WeatherDay> dailyForecast;
   final AnimationController barCtrl;
 
   const _ForecastOutlook({
@@ -995,9 +961,7 @@ class _ForecastOutlook extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: rc.stroke),
       ),
-      child: dailyForecast.isEmpty
-          ? _noData()
-          : _chart(),
+      child: dailyForecast.isEmpty ? _noData() : _chart(),
     );
   }
 
@@ -1027,8 +991,7 @@ class _ForecastOutlook extends StatelessWidget {
                 )),
             const Spacer(),
             Text('7 days · mm/day',
-                style:
-                    TextStyle(color: rc.textSecondary, fontSize: 11)),
+                style: TextStyle(color: rc.textSecondary, fontSize: 11)),
           ],
         ),
         const SizedBox(height: 12),
@@ -1044,7 +1007,6 @@ class _ForecastOutlook extends StatelessWidget {
                   : d.rainMm > 15
                       ? AppPalette.warning
                       : rc.accent;
-              // Parse date string "YYYY-MM-DD" → short day label
               String dayLabel = '–';
               try {
                 final dt = DateTime.parse(d.date);
@@ -1090,9 +1052,7 @@ class _ForecastOutlook extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Model metadata footer — uses FloodPrediction from predictionProvider
-// FloodPrediction fields: confidencePct (double), modelVersion (String),
-//                         currentLevel, dangerLevel, warningLevel
+// Model metadata footer
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ModelFooter extends StatelessWidget {
