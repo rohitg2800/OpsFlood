@@ -34,6 +34,7 @@ import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'theme/app_theme.dart';
+import 'providers/theme_provider.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
     FlutterLocalNotificationsPlugin();
@@ -47,23 +48,17 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load .env
   await dotenv.load(fileName: '.env').catchError((_) {});
 
-  // Firebase
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // Local notifications
-  const androidSettings =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
   const iosSettings = DarwinInitializationSettings();
   await _localNotifications.initialize(
-    const InitializationSettings(
-        android: androidSettings, iOS: iosSettings),
+    const InitializationSettings(android: androidSettings, iOS: iosSettings),
   );
 
-  // Lock to portrait
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -71,7 +66,7 @@ Future<void> main() async {
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
+      statusBarColor:          Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
@@ -79,15 +74,30 @@ Future<void> main() async {
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
-class FloodWatchApp extends StatelessWidget {
+// ─── Root app — reactive to theme changes via Riverpod ───────────────────────
+class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final roboticTheme  = ref.watch(roboticThemeProvider);
+    final themeNotifier = ref.read(themeModeProvider.notifier);
+
+    // Robotic mode swaps ThemeData live; all other modes use existing river themes.
+    final lightTheme = (roboticTheme != null && !roboticTheme.isDark)
+        ? roboticTheme.toFlutterTheme()
+        : AppTheme.light;
+
+    final darkTheme = (roboticTheme != null && roboticTheme.isDark)
+        ? roboticTheme.toFlutterTheme()
+        : AppTheme.dark;
+
     return MaterialApp(
-      title: 'FloodWatch',
+      title:                  'FloodWatch',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
+      theme:                  lightTheme,
+      darkTheme:              darkTheme,
+      themeMode:              themeNotifier.flutterMode,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -155,7 +165,7 @@ class FloodWatchApp extends StatelessWidget {
   }
 
   PageRoute<T> _fade<T>(Widget page) => PageRouteBuilder<T>(
-        pageBuilder: (_, __, ___) => page,
+        pageBuilder:        (_, __, ___) => page,
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 220),

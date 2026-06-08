@@ -6,16 +6,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ─── Extended theme modes ────────────────────────────────────────────
+import '../theme/robotic_theme.dart';
+
+// ─── Extended theme modes ─────────────────────────────────────────────────────
 enum AppThemeMode {
-  system,
-  light,   // Day River
-  dark,    // Night River
-  sunset,  // 🌅 Sunset Warm  (premium)
-  ocean,   // 🌊 Deep Ocean   (premium)
+  system,        // Auto
+  light,         // Day River
+  dark,          // Night River
+  sunset,        // Sunset Warm  (premium)
+  ocean,         // Deep Ocean   (premium)
+  roboticDark,   // Tactical Dark (robotic)
+  roboticLight,  // System Light  (robotic)
 }
 
-// ─── Legacy ChangeNotifier singleton (kept for non-Riverpod init() in main.dart) ──
+// ─── Legacy ChangeNotifier singleton (kept for non-Riverpod init()) ──────────
 class ThemeProvider extends ChangeNotifier {
   static final ThemeProvider _instance = ThemeProvider._internal();
   factory ThemeProvider() => _instance;
@@ -28,11 +32,13 @@ class ThemeProvider extends ChangeNotifier {
 
   ThemeMode get mode {
     switch (_appMode) {
-      case AppThemeMode.system:  return ThemeMode.system;
-      case AppThemeMode.light:   return ThemeMode.light;
-      case AppThemeMode.dark:    return ThemeMode.dark;
-      case AppThemeMode.sunset:  return ThemeMode.light;
-      case AppThemeMode.ocean:   return ThemeMode.dark;
+      case AppThemeMode.system:       return ThemeMode.system;
+      case AppThemeMode.light:        return ThemeMode.light;
+      case AppThemeMode.dark:         return ThemeMode.dark;
+      case AppThemeMode.sunset:       return ThemeMode.light;
+      case AppThemeMode.ocean:        return ThemeMode.dark;
+      case AppThemeMode.roboticDark:  return ThemeMode.dark;
+      case AppThemeMode.roboticLight: return ThemeMode.light;
     }
   }
 
@@ -54,7 +60,7 @@ class ThemeProvider extends ChangeNotifier {
   }
 }
 
-// ─── Riverpod 3 Notifier ────────────────────────────────────────────────────
+// ─── Riverpod 3 Notifier ──────────────────────────────────────────────────────
 class _ThemeModeNotifier extends Notifier<AppThemeMode> {
   static const _key = 'equinox_theme_mode';
 
@@ -84,41 +90,62 @@ class _ThemeModeNotifier extends Notifier<AppThemeMode> {
 
   void cycle() {
     switch (state) {
-      case AppThemeMode.system:  setMode(AppThemeMode.light);  break;
-      case AppThemeMode.light:   setMode(AppThemeMode.dark);   break;
+      case AppThemeMode.system:  setMode(AppThemeMode.light); break;
+      case AppThemeMode.light:   setMode(AppThemeMode.dark);  break;
       default:                   setMode(AppThemeMode.system); break;
     }
   }
 
-  String get label {
-    switch (state) {
-      case AppThemeMode.system:  return 'Auto';
-      case AppThemeMode.light:   return 'Day River';
-      case AppThemeMode.dark:    return 'Night River';
-      case AppThemeMode.sunset:  return 'Sunset Warm';
-      case AppThemeMode.ocean:   return 'Deep Ocean';
-    }
-  }
+  String get label => switch (state) {
+    AppThemeMode.system       => 'Auto',
+    AppThemeMode.light        => 'Day River',
+    AppThemeMode.dark         => 'Night River',
+    AppThemeMode.sunset       => 'Sunset Warm',
+    AppThemeMode.ocean        => 'Deep Ocean',
+    AppThemeMode.roboticDark  => 'Tactical Dark',
+    AppThemeMode.roboticLight => 'System Light',
+  };
 
-  IconData get icon {
-    switch (state) {
-      case AppThemeMode.system:  return Icons.brightness_auto;
-      case AppThemeMode.light:   return Icons.wb_sunny;
-      case AppThemeMode.dark:    return Icons.nights_stay;
-      case AppThemeMode.sunset:  return Icons.wb_twilight;
-      case AppThemeMode.ocean:   return Icons.water;
-    }
-  }
+  IconData get icon => switch (state) {
+    AppThemeMode.system       => Icons.brightness_auto,
+    AppThemeMode.light        => Icons.wb_sunny,
+    AppThemeMode.dark         => Icons.nights_stay,
+    AppThemeMode.sunset       => Icons.wb_twilight,
+    AppThemeMode.ocean        => Icons.water,
+    AppThemeMode.roboticDark  => Icons.memory_rounded,
+    AppThemeMode.roboticLight => Icons.developer_board_rounded,
+  };
 
   ThemeMode get flutterMode => switch (state) {
-    AppThemeMode.system => ThemeMode.system,
-    AppThemeMode.light  => ThemeMode.light,
-    AppThemeMode.dark   => ThemeMode.dark,
-    AppThemeMode.sunset => ThemeMode.light,
-    AppThemeMode.ocean  => ThemeMode.dark,
+    AppThemeMode.system       => ThemeMode.system,
+    AppThemeMode.light        => ThemeMode.light,
+    AppThemeMode.dark         => ThemeMode.dark,
+    AppThemeMode.sunset       => ThemeMode.light,
+    AppThemeMode.ocean        => ThemeMode.dark,
+    AppThemeMode.roboticDark  => ThemeMode.dark,
+    AppThemeMode.roboticLight => ThemeMode.light,
   };
 }
 
 final themeModeProvider = NotifierProvider<_ThemeModeNotifier, AppThemeMode>(
   _ThemeModeNotifier.new,
+);
+
+// ─── Robotic theme providers ──────────────────────────────────────────────────
+
+/// Returns RoboticTheme when mode is robotic, null otherwise.
+/// Widgets NOT in robotic mode are never rebuilt by this provider.
+final roboticThemeProvider = Provider<RoboticTheme?>((ref) {
+  final mode = ref.watch(themeModeProvider);
+  return switch (mode) {
+    AppThemeMode.roboticDark  => const RoboticTheme(isDark: true),
+    AppThemeMode.roboticLight => const RoboticTheme(isDark: false),
+    _                         => null,
+  };
+});
+
+/// Non-null convenience provider — always returns a RoboticTheme.
+/// Use only inside widgets that exclusively render in robotic mode.
+final robTheme = Provider<RoboticTheme>(
+  (ref) => ref.watch(roboticThemeProvider) ?? const RoboticTheme(isDark: true),
 );
