@@ -2,12 +2,10 @@
 // OpsFlood Universe Splash — 3-layer architecture:
 //   Layer 1: Generative starfield (CustomPainter)
 //   Layer 2: OpsFlood branding (FadeTransition)
-//   Layer 3: Data-fetch progress indicator (pulsing with galactic core)
+//   Layer 3: Data-fetch progress (pulses with galactic core)
 //
-// Lifecycle:
-//   1. Universe starts animating immediately.
-//   2. WrdBiharService + CwcDirectService cold-start in parallel.
-//   3. On both complete → 800ms fade-out → HomeScreen.
+// NOTE: Class is named SplashScreen (not SplashPage) to match existing
+//       routes in main.dart that reference SplashScreen.route.
 
 import 'dart:ui' show Size;
 import 'package:flutter/material.dart';
@@ -15,42 +13,43 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets/universe_splash_painter.dart';
 import 'home_screen.dart';
 
-// ─── Minimum display time so the universe is always seen ────────────────────
+// ─── Minimum splash display time ─────────────────────────────────────────────
 const _kMinSplashMs = 2800;
 
-// ─── SplashPage ─────────────────────────────────────────────────────────────
+// ─── SplashScreen ─────────────────────────────────────────────────────────────
 
-class SplashPage extends ConsumerStatefulWidget {
-  const SplashPage({super.key});
+class SplashScreen extends ConsumerStatefulWidget {
+  const SplashScreen({super.key});
+
+  // Route constant expected by main.dart
+  static const String route = '/';
 
   @override
-  ConsumerState<SplashPage> createState() => _SplashPageState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashPageState extends ConsumerState<SplashPage>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
 
-  // Controllers
-  late final AnimationController _universeCtrl;  // drives starfield + rotation
-  late final AnimationController _pulseCtrl;     // drives galactic core pulse
-  late final AnimationController _brandCtrl;     // drives branding fade-in
-  late final AnimationController _exitCtrl;      // drives fade-out on completion
+  // Animation controllers
+  late final AnimationController _universeCtrl;
+  late final AnimationController _pulseCtrl;
+  late final AnimationController _brandCtrl;
+  late final AnimationController _exitCtrl;
 
-  // Animations
+  // Derived animations
   late final Animation<double> _coreGlow;
   late final Animation<double> _brandFade;
-  late final Animation<double> _exitFade;  // 0→1 when data done
+  late final Animation<double> _exitFade;
 
-  // Stars — built once after first layout
-  List<_Star> _stars = [];
-  bool        _starsReady = false;
+  // Star field — built once after first layout
+  List<StarParticle> _stars      = [];
+  bool               _starsReady = false;
 
-  // Data state
-  bool   _dataReady  = false;
-  double _fetchProg  = 0.0;    // 0.0 .. 1.0
+  // Data fetch state
+  double _fetchProg  = 0.0;
   String _fetchLabel = 'INITIALISING SYSTEMS...';
 
-  // Timing
   late final DateTime _startTime;
 
   @override
@@ -58,20 +57,20 @@ class _SplashPageState extends ConsumerState<SplashPage>
     super.initState();
     _startTime = DateTime.now();
 
-    // Universe — runs forever until we stop it
+    // Universe runs continuously until exit
     _universeCtrl = AnimationController(
       vsync:    this,
       duration: const Duration(seconds: 60),
     )..repeat();
 
-    // Core pulse — 2.4s sine wave
+    // Core pulse — 2.4 s sine wave
     _pulseCtrl = AnimationController(
       vsync:    this,
       duration: const Duration(milliseconds: 2400),
     )..repeat(reverse: true);
     _coreGlow = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
 
-    // Brand logo fades in after 600ms
+    // Brand logo fades in after 600 ms
     _brandCtrl = AnimationController(
       vsync:    this,
       duration: const Duration(milliseconds: 900),
@@ -81,7 +80,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
       if (mounted) _brandCtrl.forward();
     });
 
-    // Exit fade-out
+    // Exit fade
     _exitCtrl = AnimationController(
       vsync:    this,
       duration: const Duration(milliseconds: 800),
@@ -89,16 +88,10 @@ class _SplashPageState extends ConsumerState<SplashPage>
     _exitFade = CurvedAnimation(parent: _exitCtrl, curve: Curves.easeIn);
     _exitCtrl.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const HomeScreen(),
-            transitionDuration: Duration.zero,
-          ),
-        );
+        Navigator.of(context).pushReplacementNamed(HomeScreen.route);
       }
     });
 
-    // Kick off data fetch
     _initializeData();
   }
 
@@ -111,44 +104,33 @@ class _SplashPageState extends ConsumerState<SplashPage>
     super.dispose();
   }
 
-  // ── Data initialisation ──────────────────────────────────────────────────
+  // ─── Data initialisation ───────────────────────────────────────────────────
 
   Future<void> _initializeData() async {
     try {
-      // Step 1 — WRD Bihar
       _setStatus('CONNECTING WRD BIHAR...', 0.0);
       await _fetchWrd();
       _setStatus('WRD SYNC COMPLETE', 0.5);
 
-      // Step 2 — CWC Direct
       _setStatus('CONNECTING CWC DIRECT...', 0.5);
       await _fetchCwc();
       _setStatus('ALL SYSTEMS ONLINE', 1.0);
-    } catch (e) {
+    } catch (_) {
       _setStatus('PARTIAL DATA — CONTINUING', 1.0);
     } finally {
-      // Honour minimum display time
-      final elapsed = DateTime.now().difference(_startTime).inMilliseconds;
+      final elapsed   = DateTime.now().difference(_startTime).inMilliseconds;
       final remaining = _kMinSplashMs - elapsed;
-      if (remaining > 0) {
-        await Future.delayed(Duration(milliseconds: remaining));
-      }
-      if (mounted) {
-        setState(() => _dataReady = true);
-        _exitCtrl.forward();
-      }
+      if (remaining > 0) await Future.delayed(Duration(milliseconds: remaining));
+      if (mounted) _exitCtrl.forward();
     }
   }
 
   void _setStatus(String label, double progress) {
     if (!mounted) return;
-    setState(() {
-      _fetchLabel = label;
-      _fetchProg  = progress;
-    });
+    setState(() { _fetchLabel = label; _fetchProg = progress; });
   }
 
-  // Replace these with your actual service calls:
+  // ── Replace these stubs with your actual service calls: ───────────────────
   Future<void> _fetchWrd() async {
     // await WrdBiharService.instance.fetch();
     await Future.delayed(const Duration(milliseconds: 900));
@@ -159,7 +141,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
     await Future.delayed(const Duration(milliseconds: 700));
   }
 
-  // ── Build ────────────────────────────────────────────────────────────────
+  // ─── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -168,8 +150,6 @@ class _SplashPageState extends ConsumerState<SplashPage>
       body: LayoutBuilder(
         builder: (context, constraints) {
           final size = Size(constraints.maxWidth, constraints.maxHeight);
-
-          // Build stars once
           if (!_starsReady) {
             _stars      = buildStarField(320, size);
             _starsReady = true;
@@ -182,7 +162,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
               return Stack(
                 fit: StackFit.expand,
                 children: [
-                  // ── Layer 1: Universe ──────────────────────────────
+                  // Layer 1 — Starfield universe
                   RepaintBoundary(
                     child: CustomPaint(
                       painter: UniversePainter(
@@ -195,23 +175,18 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     ),
                   ),
 
-                  // ── Layer 2: Branding ──────────────────────────────
+                  // Layer 2 — Branding
                   FadeTransition(
                     opacity: _brandFade,
                     child: Opacity(
                       opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
-                      child: _BrandingOverlay(
-                        coreGlow: _coreGlow,
-                        size: size,
-                      ),
+                      child: _BrandingOverlay(coreGlow: _coreGlow),
                     ),
                   ),
 
-                  // ── Layer 3: Progress indicator ────────────────────
+                  // Layer 3 — Progress / service monitor
                   Positioned(
-                    bottom: 60,
-                    left:   40,
-                    right:  40,
+                    bottom: 60, left: 40, right: 40,
                     child: Opacity(
                       opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
                       child: _ProgressLayer(
@@ -231,16 +206,11 @@ class _SplashPageState extends ConsumerState<SplashPage>
   }
 }
 
-// ─── Branding overlay (Layer 2) ────────────────────────────────────────────
+// ─── Branding overlay ─────────────────────────────────────────────────────────
 
 class _BrandingOverlay extends StatelessWidget {
-  const _BrandingOverlay({
-    required this.coreGlow,
-    required this.size,
-  });
-
+  const _BrandingOverlay({required this.coreGlow});
   final Animation<double> coreGlow;
-  final Size              size;
 
   @override
   Widget build(BuildContext context) {
@@ -248,56 +218,49 @@ class _BrandingOverlay extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Logo mark — hexagonal glow frame
           AnimatedBuilder(
             animation: coreGlow,
             builder: (_, __) {
               const accent = Color(0xFF00FFB2);
-              final pulse  = coreGlow.value;
+              final p = coreGlow.value;
               return Container(
-                width:  72,
-                height: 72,
+                width: 72, height: 72,
                 decoration: BoxDecoration(
                   border: Border.all(
-                    color: accent.withValues(alpha: 0.6 + 0.4 * pulse),
+                    color: accent.withValues(alpha: 0.6 + 0.4 * p),
                     width: 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color:      accent.withValues(alpha: 0.25 + 0.15 * pulse),
-                      blurRadius: 18 + 10 * pulse,
+                      color:      accent.withValues(alpha: 0.25 + 0.15 * p),
+                      blurRadius: 18 + 10 * p,
                       spreadRadius: 2,
                     ),
                   ],
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.water_drop_outlined,
-                  color: accent,
-                  size:  38,
+                  color: Color(0xFF00FFB2),
+                  size: 38,
                 ),
               );
             },
           ),
           const SizedBox(height: 20),
-          // App name
           const Text(
             'OPSFLOOD',
             style: TextStyle(
-              fontFamily:    'RobotoMono',
-              fontSize:      26,
-              fontWeight:    FontWeight.w700,
-              color:         Color(0xFFE0F0FF),
-              letterSpacing: 5,
+              fontFamily: 'RobotoMono', fontSize: 26,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFFE0F0FF), letterSpacing: 5,
             ),
           ),
           const SizedBox(height: 6),
           const Text(
             'REAL-TIME FLOOD INTELLIGENCE',
             style: TextStyle(
-              fontFamily:    'RobotoMono',
-              fontSize:      10,
-              color:         Color(0xFF5A7080),
-              letterSpacing: 2.4,
+              fontFamily: 'RobotoMono', fontSize: 10,
+              color: Color(0xFF5A7080), letterSpacing: 2.4,
             ),
           ),
         ],
@@ -306,7 +269,7 @@ class _BrandingOverlay extends StatelessWidget {
   }
 }
 
-// ─── Progress layer (Layer 3) ──────────────────────────────────────────────
+// ─── Progress layer ───────────────────────────────────────────────────────────
 
 class _ProgressLayer extends StatelessWidget {
   const _ProgressLayer({
@@ -330,20 +293,15 @@ class _ProgressLayer extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Status label
             Row(
               children: [
-                // Pulsing dot synced with core
                 Container(
                   width: 6, height: 6,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: accent.withValues(alpha: 0.5 + 0.5 * p),
                     boxShadow: [
-                      BoxShadow(
-                        color:      accent.withValues(alpha: 0.4 * p),
-                        blurRadius: 6,
-                      ),
+                      BoxShadow(color: accent.withValues(alpha: 0.4 * p), blurRadius: 6),
                     ],
                   ),
                 ),
@@ -355,10 +313,8 @@ class _ProgressLayer extends StatelessWidget {
                       label,
                       key: ValueKey(label),
                       style: const TextStyle(
-                        fontFamily:    'RobotoMono',
-                        fontSize:      10,
-                        color:         Color(0xFF5A7080),
-                        letterSpacing: 1.4,
+                        fontFamily: 'RobotoMono', fontSize: 10,
+                        color: Color(0xFF5A7080), letterSpacing: 1.4,
                       ),
                     ),
                   ),
@@ -366,21 +322,16 @@ class _ProgressLayer extends StatelessWidget {
                 Text(
                   '${(progress * 100).toInt()}%',
                   style: TextStyle(
-                    fontFamily:    'RobotoMono',
-                    fontSize:      10,
-                    color:         accent.withValues(alpha: 0.8),
-                    letterSpacing: 1,
+                    fontFamily: 'RobotoMono', fontSize: 10,
+                    color: accent.withValues(alpha: 0.8), letterSpacing: 1,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Progress bar — glows with the core
             Container(
               height: 2,
-              decoration: const BoxDecoration(
-                color: Color(0xFF111620),
-              ),
+              color: const Color(0xFF111620),
               child: FractionallySizedBox(
                 alignment: Alignment.centerLeft,
                 widthFactor: progress,
@@ -388,10 +339,7 @@ class _ProgressLayer extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: accent,
                     boxShadow: [
-                      BoxShadow(
-                        color:      accent.withValues(alpha: 0.6 * p),
-                        blurRadius: 6,
-                      ),
+                      BoxShadow(color: accent.withValues(alpha: 0.6 * p), blurRadius: 6),
                     ],
                   ),
                 ),

@@ -1,11 +1,13 @@
 // lib/theme/robotic_theme.dart
-// Robotic design language — sharp corners, glow effects, monospaced type
-// Two faces: Tactical Dark (isDark=true) / System Light (isDark=false)
+// Robotic design language — sharp corners, glow effects, monospaced type.
+// Two faces: Tactical-Dark (isDark=true) / System-Light (isDark=false).
+// toThemeData() — used by main.dart as roboticTheme.toThemeData()
+// toFlutterTheme() — alias kept for backward compat with any other callers.
 library;
 
 import 'package:flutter/material.dart';
 
-// ─── Robotic palette ─────────────────────────────────────────────────────────
+// ─── Robotic palette ──────────────────────────────────────────────────────────
 
 class RoboticColors {
   RoboticColors._();
@@ -45,23 +47,24 @@ class RoboticTheme {
   final bool isDark;
   const RoboticTheme({required this.isDark});
 
-  Color get bg          => isDark ? RoboticColors.rdBg       : RoboticColors.rlBg;
-  Color get surface     => isDark ? RoboticColors.rdSurface  : RoboticColors.rlSurface;
-  Color get surface2    => isDark ? RoboticColors.rdSurface2 : RoboticColors.rlSurface2;
-  Color get border      => isDark ? RoboticColors.rdBorder   : RoboticColors.rlBorder;
-  Color get accent      => isDark ? RoboticColors.rdAccent   : RoboticColors.rlAccent;
-  Color get accentGlow  => isDark ? RoboticColors.rdAccentGlow: RoboticColors.rlAccentGlow;
-  Color get accent2     => isDark ? RoboticColors.rdAccent2  : RoboticColors.rlAccent2;
-  Color get accent2Glow => isDark ? RoboticColors.rdAccent2Glow: RoboticColors.rlAccent2Glow;
-  Color get danger      => isDark ? RoboticColors.rdDanger   : RoboticColors.rlDanger;
-  Color get warning     => isDark ? RoboticColors.rdWarning  : RoboticColors.rlWarning;
-  Color get text        => isDark ? RoboticColors.rdText     : RoboticColors.rlText;
-  Color get textMuted   => isDark ? RoboticColors.rdTextMuted: RoboticColors.rlTextMuted;
+  Color get bg          => isDark ? RoboticColors.rdBg          : RoboticColors.rlBg;
+  Color get surface     => isDark ? RoboticColors.rdSurface     : RoboticColors.rlSurface;
+  Color get surface2    => isDark ? RoboticColors.rdSurface2    : RoboticColors.rlSurface2;
+  Color get border      => isDark ? RoboticColors.rdBorder      : RoboticColors.rlBorder;
+  Color get accent      => isDark ? RoboticColors.rdAccent      : RoboticColors.rlAccent;
+  Color get accentGlow  => isDark ? RoboticColors.rdAccentGlow  : RoboticColors.rlAccentGlow;
+  Color get accent2     => isDark ? RoboticColors.rdAccent2     : RoboticColors.rlAccent2;
+  Color get accent2Glow => isDark ? RoboticColors.rdAccent2Glow : RoboticColors.rlAccent2Glow;
+  Color get danger      => isDark ? RoboticColors.rdDanger      : RoboticColors.rlDanger;
+  Color get warning     => isDark ? RoboticColors.rdWarning     : RoboticColors.rlWarning;
+  Color get text        => isDark ? RoboticColors.rdText        : RoboticColors.rlText;
+  Color get textMuted   => isDark ? RoboticColors.rdTextMuted   : RoboticColors.rlTextMuted;
 
+  /// Primary method — called as roboticTheme.toThemeData() in main.dart
   ThemeData toThemeData() {
     final brightness = isDark ? Brightness.dark : Brightness.light;
     final cs = ColorScheme.fromSeed(
-      seedColor: accent,
+      seedColor:  accent,
       brightness: brightness,
     ).copyWith(
       primary:   accent,
@@ -76,11 +79,11 @@ class RoboticTheme {
       colorScheme:             cs,
       scaffoldBackgroundColor: bg,
       fontFamily:              'RobotoMono',
-      cardTheme: CardThemeData(   // ← was CardTheme — fixed to CardThemeData
+      cardTheme: CardThemeData(
         color:     surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.zero, // robotic: sharp corners
+          borderRadius: BorderRadius.zero,
           side: BorderSide(color: border, width: 1),
         ),
       ),
@@ -90,9 +93,11 @@ class RoboticTheme {
         elevation:        0,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
-          color: text, fontSize: 16,
-          fontWeight: FontWeight.w700, letterSpacing: 1.5,
-          fontFamily: 'RobotoMono',
+          color:       text,
+          fontSize:    16,
+          fontWeight:  FontWeight.w700,
+          letterSpacing: 1.5,
+          fontFamily:  'RobotoMono',
         ),
       ),
       dividerTheme: DividerThemeData(color: border, space: 1, thickness: 1),
@@ -115,4 +120,7 @@ class RoboticTheme {
       ),
     );
   }
+
+  /// Alias — keeps backward compatibility if any file calls toFlutterTheme()
+  ThemeData toFlutterTheme() => toThemeData();
 }

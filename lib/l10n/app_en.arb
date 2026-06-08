@@ -70,5 +70,6 @@
   "riverLevelTrend": "24-hr River Level Trend",
   "capacity": "capacity",
   "buildingTrend": "Building trend\u2026",
-  "comingSoon": "Coming soon"
+  "comingSoon": "Coming soon",
+  "monitors": "Monitors"
 }

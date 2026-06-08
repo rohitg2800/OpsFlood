@@ -1,10 +1,13 @@
 // lib/models/weather_data.dart
-// WeatherData is a convenience alias for WeatherState so that
-// monitors_screen.dart can use `WeatherData` without changing provider types.
+// WeatherData is a convenience typedef for WeatherState.
+// WeatherState is the canonical class in weather_provider.dart.
 library;
 
 export '../providers/weather_provider.dart'
-    show WeatherState, WeatherCurrent, WeatherDay, WeatherStatus;
+    show WeatherState, WeatherNotifier, weatherProvider,
+         WeatherCurrent, WeatherDay, CityResult, WeatherStatus;
 
-// typedef so existing code using `WeatherData` compiles directly.
+// Typedef so any file importing weather_data.dart can use WeatherData
+// instead of WeatherState (e.g. monitors_screen.dart: final WeatherData wx)
+import '../providers/weather_provider.dart';
 typedef WeatherData = WeatherState;
