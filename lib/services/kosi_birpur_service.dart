@@ -19,6 +19,10 @@
 // DATUM: All levels stored and returned in CWC AMSL metres.
 //   Birpur WRD local danger = 74.70 m
 //   Birpur CWC AMSL danger  = 214.00 m  (offset +139.30)
+//
+// DISCHARGE THRESHOLDS (CWC Bihar sub-zone 1a rating curve):
+//   kBirpurWarningDischarge = 22 000 m³/s  → stage ≈ 213.00 m AMSL
+//   kBirpurDangerDischarge  = 27 014 m³/s  → stage ≈ 214.00 m AMSL (design flood)
 // ─────────────────────────────────────────────────────────────────────────────
 library;
 
@@ -29,10 +33,21 @@ import 'package:http/http.dart' as http;
 import 'befiqr_cwc_service.dart';
 
 // ── Official CWC AMSL thresholds for Kosi @ Birpur ─────────────────────────
+
 const double kBirpurDangerLevel  = 214.00; // metres AMSL
 const double kBirpurWarningLevel = 213.00; // metres AMSL
 const double kBirpurNormalLevel  = 210.00; // metres AMSL (typical pre-monsoon)
 const double kBirpurHFL          = 215.32; // metres AMSL (Highest Flood Level)
+
+/// Discharge at warning stage (213.00 m AMSL) — CWC Bihar sub-zone 1a
+/// rating curve: Q = 27014 × ((H - 205.0) / 9.0) ^ (1/0.62)
+const double kBirpurWarningDischarge = 22000.0; // m³/s
+
+/// Discharge at danger stage (214.00 m AMSL) — design flood discharge
+/// per CWC Bihar sub-zone 1a (Kosi @ Birpur barrage)
+const double kBirpurDangerDischarge  = 27014.0; // m³/s
+
+// ───────────────────────────────────────────────────────────────────────────
 
 class KosiBirpurReading {
   final double levelM;           // water level — metres AMSL
@@ -83,7 +98,7 @@ class KosiBirpurReading {
       );
 }
 
-// ── KosiBirpurService ────────────────────────────────────────────────────────
+// ── KosiBirpurService ───────────────────────────────────────────────────────
 
 class KosiBirpurService {
   static const _timeout = Duration(seconds: 12);
@@ -108,7 +123,7 @@ class KosiBirpurService {
     return _seed();
   }
 
-  // ── Source 1: BefiqrCwcService (BEAMS → befiqr → seed internally) ─────────
+  // ── Source 1: BefiqrCwcService (BEAMS → befiqr → seed internally) ────────
 
   Future<KosiBirpurReading?> _tryFromCwcService() async {
     try {
@@ -119,7 +134,7 @@ class KosiBirpurService {
 
       if (birpur.isNotEmpty) {
         final s = birpur.first;
-        // Reject seed values (source == 'SEED') so we don't report KOSI LIVE
+        // Reject seed values so we don't report KOSI LIVE
         // when we're actually showing hardcoded numbers.
         if (s.source == 'SEED') return null;
 
@@ -143,7 +158,7 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Source 2: CWC FFS (FIXED domain india-water.gov.in) ───────────────────
+  // ── Source 2: CWC FFS (FIXED domain india-water.gov.in) ──────────────────
 
   Future<KosiBirpurReading?> _tryFFS() async {
     final endpoints = [
@@ -266,7 +281,7 @@ class KosiBirpurService {
   /// Birpur stage-discharge rating curve (CWC Bihar sub-zone 1a):
   /// H(m AMSL) ≈ 205.0 + 9.0 × (Q / 27014)^0.62
   static double _dischargeToLevel(double q) {
-    const qDesign = 27014.0;
+    const qDesign = kBirpurDangerDischarge;
     final ratio   = (q / qDesign).clamp(0.0, 1.2);
     return 205.0 + 9.0 * (ratio < 1 ? ratio : 1.0);
   }

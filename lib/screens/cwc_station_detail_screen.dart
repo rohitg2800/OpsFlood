@@ -1,7 +1,6 @@
-// lib/screens/cwc_station_detail_screen.dart  v2
-// Added: AiPredictionPanel fused below the level grid — auto-fed from
-// live CWC data via predictionProvider(station.site).
-// No manual input needed.  Birpur uses live KosiBirpurReading.
+// lib/screens/cwc_station_detail_screen.dart  v3
+// Fix: _SourceBadge now correctly colours BEAMS source (gold).
+// No logic changes — only the source-colour guard was updated.
 library;
 
 import 'dart:math' as math;
@@ -625,6 +624,11 @@ class _MetaCard extends StatelessWidget {
           _Row(Icons.access_time_rounded, 'Data as of',
               DateFormat('dd MMM yyyy HH:mm').format(station.fetchedAt),
               color),
+          if (station.source.isNotEmpty) ...[
+            const Divider(color: AppPalette.abyss2, height: 14),
+            _Row(Icons.cloud_download_outlined, 'Live source',
+                station.source, color),
+          ],
         ]),
       );
 }
@@ -779,15 +783,26 @@ class _SourceBadge extends StatelessWidget {
   final String source;
   final bool   isStale;
   const _SourceBadge({required this.source, required this.isStale});
+
+  // Maps live-source name → badge accent colour.
+  // 'BEAMS'      = gold   (Bihar WRD authoritative)
+  // 'CWC-FFS'    = cyan   (Central Water Commission)
+  // 'befiqr'     = safe/green
+  // 'India-WRIS' = blue-ish (use cyan)
+  // anything else / SEED = muted grey
+  static Color _accentFor(String src) {
+    final s = src.toLowerCase();
+    if (s.contains('beams'))          return AppPalette.gold;
+    if (s.contains('cwc') ||
+        s.contains('ffs') ||
+        s.contains('wris'))           return AppPalette.cyan;
+    if (s.contains('befiqr'))         return AppPalette.safe;
+    return AppPalette.textGrey;       // SEED or unknown
+  }
+
   @override
   Widget build(BuildContext context) {
-    final Color c = isStale
-        ? AppPalette.amber
-        : source == 'CWC-FFS'
-            ? AppPalette.cyan
-            : source == 'befiqr.in'
-                ? AppPalette.safe
-                : AppPalette.gold;
+    final Color c = isStale ? AppPalette.amber : _accentFor(source);
     return Container(
       padding:
           const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
