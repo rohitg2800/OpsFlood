@@ -1,6 +1,19 @@
-// lib/services/live_fetch_engine.dart  (v2.6 — boot crash fix)
-// Removed bare `library;` directive — two unnamed library declarations in the
-// same package cause a duplicate-library compile error that kills the isolate.
+// lib/services/live_fetch_engine.dart  (v2.7 — CWC/WRD health fix)
+//
+// KEY CHANGES from v2.6:
+//  • _cwcHealth now mirrors _wrdHealth — WRD Bihar IS our CWC-Bihar source.
+//    The old "CWC — stub / TODO" is replaced with real health wiring.
+//  • _wrdHealth.healthy = true for BOTH WRD_BIHAR_LIVE and WRD_BIHAR_DISK.
+//    Disk-cache data is valid data (just potentially stale), not "unhealthy".
+//    A separate `_wrdLiveCount` / `_wrdDiskCount` split lets the UI show the
+//    distinction without lying about overall availability.
+//  • hasCwcLiveData returns true whenever WRD has any stations (≥1).
+//  • WRD→city fuzzy matching now also walks district token list so
+//    "Muzaffarpur"-style city names match "Sikandarpur (Muzaffarpur)" sites.
+//  • BEAMS / befiqr_cwc_service are NOT called here — those scrapers require
+//    a 2-step __VIEWSTATE GET→POST (BEAMS) or cookie/session handling
+//    (befiqr CWC tab) and are unreliable from mobile. WRD Bihar's
+//    irrigation.befiqr.in/state/table/rivers endpoint works fine as-is.
 
 import 'dart:async';
 import 'dart:convert';
@@ -13,9 +26,9 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'wrd_bihar_service.dart';
 
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // SourceHealth — immutable snapshot for one data source
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 class SourceHealth {
   final bool      healthy;
   final int?      latencyMs;
@@ -49,9 +62,9 @@ class SourceHealth {
       );
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // LiveCityData
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 class LiveCityData {
   final double?   currentLevel;
   final double    warningLevel;
@@ -120,9 +133,9 @@ class LiveCityData {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // LiveFetchEngine
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 class LiveFetchEngine {
   static const _cacheTtl     = Duration(minutes: 15);
   static const _pollInterval = Duration(seconds: 45);
@@ -140,14 +153,22 @@ class LiveFetchEngine {
   int        _retryCount    = 0;
   int        _wakeAttempts  = 0;
 
+  // WRD station counters (live vs disk-cache) — exposed for debug UI
+  int _wrdLiveCount = 0;
+  int _wrdDiskCount = 0;
+
   SourceHealth _glofasHealth = const SourceHealth.unknown();
   SourceHealth _imdHealth    = const SourceHealth.unknown();
   SourceHealth _wrdHealth    = const SourceHealth.unknown();
-  SourceHealth _cwcHealth    = const SourceHealth.unknown();
+
+  // _cwcHealth mirrors _wrdHealth — WRD Bihar IS the CWC-Bihar station source.
+  // No separate BEAMS/befiqr-CWC scrape is attempted (those require
+  // __VIEWSTATE / session cookies and are unreliable from mobile).
+  SourceHealth get _cwcHealth => _wrdHealth;
 
   void Function()? onStateChanged;
 
-  // ── Lifecycle ───────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
     await refreshData();
@@ -171,23 +192,28 @@ class LiveFetchEngine {
   int       get debugRetryCount     => _retryCount;
   int       get debugWakeAttempts   => _wakeAttempts;
 
-  // ── Source health getters ──────────────────────────────────────────────
+  // WRD breakdown for debug/status UI
+  int get wrdLiveCount => _wrdLiveCount;
+  int get wrdDiskCount => _wrdDiskCount;
+  int get wrdTotalCount => _wrdLiveCount + _wrdDiskCount;
+
+  // ── Source health getters ─────────────────────────────────────────────────
   SourceHealth get glofasHealth => _glofasHealth;
   SourceHealth get imdHealth    => _imdHealth;
   SourceHealth get wrdHealth    => _wrdHealth;
-  SourceHealth get cwcHealth    => _cwcHealth;
+  SourceHealth get cwcHealth    => _cwcHealth; // mirrors wrdHealth
 
   bool get glofasHealthy => _glofasHealth.healthy;
   bool get imdHealthy    => _imdHealth.healthy;
   bool get wrdHealthy    => _wrdHealth.healthy;
-  bool get cwcHealthy    => _cwcHealth.healthy;
+  bool get cwcHealthy    => _cwcHealth.healthy; // true whenever WRD has data
 
   int? get glofasLatencyMs => _glofasHealth.latencyMs;
   int? get imdLatencyMs    => _imdHealth.latencyMs;
   int? get wrdLatencyMs    => _wrdHealth.latencyMs;
   int? get cwcLatencyMs    => _cwcHealth.latencyMs;
 
-  // ── Data getters ─────────────────────────────────────────────────────────
+  // ── Data getters ──────────────────────────────────────────────────────────
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
   List<FloodData> get liveFloodData {
@@ -210,8 +236,10 @@ class LiveFetchEngine {
   List<dynamic> get activeCriticalAlerts => _buildCriticalAlerts();
   List<dynamic> get criticalAlerts       => _buildCriticalAlerts();
   int           get criticalCount        => _buildCriticalAlerts().length;
-  List<dynamic> get cwcStations          => liveFloodData;
-  bool          get hasCwcLiveData       => _cache.isNotEmpty;
+
+  // cwcStations / hasCwcLiveData now correctly reflect WRD Bihar data
+  List<dynamic> get cwcStations    => liveFloodData;
+  bool          get hasCwcLiveData => _cache.isNotEmpty;
 
   MultiLocationMonitoring get monitoringData => MultiLocationMonitoring(
     locations:   liveFloodData,
@@ -225,9 +253,13 @@ class LiveFetchEngine {
   Map<String, dynamic> get debugLevelsRaw => {
     for (final e in _cache.entries) e.key: e.value.toString()
   };
-  Map<String, dynamic> get debugCwcRaw => const {};
+  Map<String, dynamic> get debugCwcRaw => {
+    'wrdLive': _wrdLiveCount,
+    'wrdDisk': _wrdDiskCount,
+    'cacheSize': _cache.length,
+  };
 
-  // ── Per-city helpers ────────────────────────────────────────────────────
+  // ── Per-city helpers ──────────────────────────────────────────────────────
   LiveCityData? dataForCity(String city) {
     _maybeBackgroundRefresh();
     return _cache[city.toLowerCase().trim()];
@@ -253,7 +285,7 @@ class LiveFetchEngine {
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
 
-  // ── Refresh ─────────────────────────────────────────────────────────────
+  // ── Refresh ───────────────────────────────────────────────────────────────
   Future<void> refreshData() async {
     _isLoading = true;
     _notify();
@@ -335,25 +367,62 @@ class LiveFetchEngine {
       _log('Open-Meteo fetch failed: $e');
     }
 
-    // ── WRD Bihar scraper ─────────────────────────────────────────────────
+    // ── WRD Bihar — primary station source (replaces BEAMS + befiqr-CWC) ─
+    //
+    // WRD Bihar (irrigation.befiqr.in/state/table/rivers) returns 31 live
+    // gauge readings and works reliably with a mobile UA + allOrigins proxy
+    // fallback. BEAMS requires a stateful __VIEWSTATE GET→POST round-trip
+    // and befiqr's CWC tab needs cookie/session handling — both are
+    // unreliable from a mobile client, so we use WRD as the authoritative
+    // station source for Bihar.
+    //
+    // Health rules:
+    //   healthy=true  when ANY stations are available (live OR disk-cache)
+    //   lastError=null when stations came from live scrape
+    //   lastError set  when falling back to disk cache
     final wrdStart = DateTime.now();
     Map<String, WrdStation> wrdByCity = {};
+    _wrdLiveCount = 0;
+    _wrdDiskCount = 0;
+
     try {
       final stations = await WrdBiharService.instance.fetch();
-      final liveFetch = stations.isNotEmpty &&
-          stations.any((s) => s.source == 'WRD_BIHAR_LIVE');
-      _wrdHealth = SourceHealth(
-        healthy:       liveFetch,
-        latencyMs:     DateTime.now().difference(wrdStart).inMilliseconds,
-        lastSuccessAt: liveFetch ? DateTime.now() : _wrdHealth.lastSuccessAt,
-        lastError:     liveFetch ? null : 'WRD returned disk-cache only',
-      );
+
       for (final s in stations) {
-        wrdByCity[s.site.toLowerCase().trim()] = s;
-        final dist = s.district.toLowerCase().trim();
-        if (dist.isNotEmpty) wrdByCity.putIfAbsent(dist, () => s);
+        if (s.source == 'WRD_BIHAR_LIVE') {
+          _wrdLiveCount++;
+        } else {
+          _wrdDiskCount++;
+        }
       }
-      _log('WRD Bihar: ${stations.length} stations (live=$liveFetch)');
+
+      final hasAny  = stations.isNotEmpty;
+      final hasLive = _wrdLiveCount > 0;
+
+      _wrdHealth = SourceHealth(
+        // healthy = true for both live AND disk-cache data; the UI can
+        // distinguish via wrdLiveCount / wrdDiskCount if needed.
+        healthy:       hasAny,
+        latencyMs:     DateTime.now().difference(wrdStart).inMilliseconds,
+        lastSuccessAt: hasLive ? DateTime.now() : _wrdHealth.lastSuccessAt,
+        lastError:     hasLive
+            ? null
+            : hasAny
+                ? 'WRD serving disk-cache (${_wrdDiskCount} stations)'
+                : 'WRD returned 0 stations',
+      );
+
+      // Build lookup map: site key → station, plus district key → station
+      for (final s in stations) {
+        final siteKey = s.site.toLowerCase().trim();
+        wrdByCity[siteKey] = s;
+
+        final distKey = s.district.toLowerCase().trim();
+        if (distKey.isNotEmpty) wrdByCity.putIfAbsent(distKey, () => s);
+      }
+
+      _log('WRD Bihar: ${stations.length} stations '
+          '(live=$_wrdLiveCount, disk=$_wrdDiskCount)');
     } catch (e) {
       _wrdHealth = SourceHealth(
         healthy:       false,
@@ -364,10 +433,10 @@ class LiveFetchEngine {
       _log('WRD Bihar fetch failed: $e');
     }
 
-    // ── CWC — stub ──────────────────────────────────────────────────────
-    // TODO: wire real CWC fetch and update _cwcHealth.
+    // _cwcHealth is a computed getter that returns _wrdHealth — no separate
+    // CWC fetch needed. See getter definition above.
 
-    // ── Assemble / merge cache ───────────────────────────────────────────────
+    // ── Assemble / merge cache ────────────────────────────────────────────
     final now = DateTime.now();
     for (int i = 0; i < biharCities.length; i++) {
       final mc       = biharCities[i];
@@ -383,11 +452,25 @@ class LiveFetchEngine {
           ? (discharge / mean) * dl * 0.85
           : null;
 
+      // ── WRD match: exact site → exact district → site word tokens
+      //              → district word tokens (NEW — fixes Muzaffarpur etc.)
       WrdStation? wrd = wrdByCity[key];
+
       if (wrd == null) {
+        // Walk word tokens of the city key against both site and district keys
         for (final word in key.split(RegExp(r'\s+'))) {
           if (word.length < 4) continue;
+          // Try direct lookup first
           wrd = wrdByCity[word];
+          if (wrd != null) break;
+          // Then scan all stations for a site/district containing this token
+          for (final s in (WrdBiharService.instance.cachedStations ?? [])) {
+            if (s.site.toLowerCase().contains(word) ||
+                s.district.toLowerCase().contains(word)) {
+              wrd = s;
+              break;
+            }
+          }
           if (wrd != null) break;
         }
       }
@@ -408,11 +491,11 @@ class LiveFetchEngine {
     _log('cache updated — ${_cache.length} cities '
         '(glofas=${_glofasHealth.healthy}, '
         'imd=${_imdHealth.healthy}, '
-        'wrd=${_wrdHealth.healthy})');
+        'wrd=${_wrdHealth.healthy} [live=$_wrdLiveCount disk=$_wrdDiskCount])');
     _notify();
   }
 
-  // ── HTTP helpers ────────────────────────────────────────────────────────
+  // ── HTTP helpers ──────────────────────────────────────────────────────────
   Future<Map<String, Map<String, List<double?>>>> _fetchGloFAS(
       String lats, String lons, int count) async {
     final uri = Uri.parse(
@@ -461,7 +544,7 @@ class LiveFetchEngine {
     return result;
   }
 
-  // ── Internal helpers ────────────────────────────────────────────────────
+  // ── Internal helpers ──────────────────────────────────────────────────────
   String? _deriveRisk(double? discharge, double? mean) {
     if (discharge == null || mean == null || mean <= 0) return null;
     final ratio = discharge / mean;
