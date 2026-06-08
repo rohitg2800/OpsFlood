@@ -10,12 +10,11 @@
 //  5. GPS proximity highlight — nearest station auto-selected on load
 //  6. Tap on district or station → RiverDetailScreen
 //
-// Performance guarantees:
-//  • PolygonLayer / PolylineLayer only rebuild when station list ref changes
-//    (Riverpod select keeps rebuilds surgical).
-//  • River animation lives in an AnimationController isolated inside
-//    _RiverFlowOverlay — it never triggers a rebuild of the parent map.
-//  • GeoJSON parsing is done once in a FutureProvider (cached forever).
+// FIX CHANGELOG (flutter_map 8.x / riverpod 3.x):
+//  • valueOrNull → .asData?.value ?? []        (Riverpod 3 removed valueOrNull)
+//  • isFilled: true removed from Polygon()     (flutter_map 8 always fills when color!=null)
+//  • RiverDetailScreen.route → '/river_detail' (no static route constant on that screen)
+//  • camera.latLngToScreenPoint → camera.projectPoint  (renamed in flutter_map 8)
 // ═══════════════════════════════════════════════════════════════════════════
 library;
 
@@ -27,7 +26,6 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../models/river_station.dart';
 import '../providers/real_time_river_provider.dart';
@@ -59,13 +57,8 @@ class MapScreen extends ConsumerStatefulWidget {
 class _MapScreenState extends ConsumerState<MapScreen> {
   final _mapCtrl = MapController();
 
-  // Timeline state: 0.0 = oldest (−24 h), 1.0 = now
   double _timelinePct = 1.0;
-
-  // Nearest-station id (from GPS)
   String? _nearestStationId;
-
-  // Selected district name for highlight
   String? _selectedDistrict;
 
   @override
@@ -74,14 +67,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _initGps();
   }
 
-  // ── GPS proximity ─────────────────────────────────────────────────────────
   Future<void> _initGps() async {
     try {
       final pos = await ref.read(userLocationProvider.future);
       if (pos == null || !mounted) return;
-      final stations = ref.read(realTimeRiverProvider).valueOrNull ?? [];
+      // FIX: use .asData?.value instead of .valueOrNull (Riverpod 3 removed valueOrNull)
+      final stations = ref.read(realTimeRiverProvider).asData?.value ?? [];
       if (stations.isEmpty) return;
-      // find closest by haversine
       RiverStation? nearest;
       double minD = double.infinity;
       for (final s in stations) {
@@ -92,7 +84,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
       if (nearest != null && mounted) {
         setState(() => _nearestStationId = nearest!.station);
-        // Pan to nearest station
         final lat = stationLat(nearest.station) ?? biharCentre.latitude;
         final lon = stationLon(nearest.station) ?? biharCentre.longitude;
         _mapCtrl.move(LatLng(lat, lon), 9);
@@ -112,12 +103,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   double _deg2rad(double d) => d * math.pi / 180;
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
-    final geoAsync   = ref.watch(biharGeoJsonProvider);
-    final stations   = ref.watch(realTimeRiverProvider).valueOrNull ?? [];
+    final geoAsync = ref.watch(biharGeoJsonProvider);
+    // FIX: .asData?.value replaces .valueOrNull (Riverpod 3)
+    final stations = ref.watch(realTimeRiverProvider).asData?.value ?? [];
 
     return Scaffold(
       backgroundColor: const Color(0xFF030508),
@@ -131,7 +121,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         ),
         actions: [
-          // Live badge
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _LiveBadge(stations: stations),
@@ -140,7 +129,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ),
       body: Column(
         children: [
-          // ── Map ────────────────────────────────────────────────────────
           Expanded(
             child: geoAsync.when(
               loading: () => const _MapLoader(),
@@ -148,7 +136,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               data:    (geo) => _buildMap(context, geo, stations),
             ),
           ),
-          // ── Timeline scrubber ───────────────────────────────────────────
           _TimelineScrubber(
             value:    _timelinePct,
             onChange: (v) => setState(() => _timelinePct = v),
@@ -163,13 +150,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     Map<String, dynamic> geo,
     List<RiverStation> allStations,
   ) {
-    // Determine which stations to show based on timeline
     final stations = _timelinePct >= 0.99
         ? allStations
         : ref.read(stationHistoryProvider.notifier)
               .stationsAtTime(_timelinePct, allStations);
 
-    // Build district-to-DangerClass map
     final districtRisk = <String, DangerClass>{};
     for (final s in stations) {
       final d = s.city.toLowerCase();
@@ -177,14 +162,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       if (s.dangerClass.index > current.index) districtRisk[d] = s.dangerClass;
     }
 
-    // Build polygons from GeoJSON
-    final polygons = _buildDistrictPolygons(geo, districtRisk);
-
-    // Build river polylines
+    final polygons  = _buildDistrictPolygons(geo, districtRisk);
     final riverLines = _buildRiverPolylines(stations);
-
-    // Build station markers (trend arrows + GPS highlight)
-    final markers = _buildStationMarkers(context, stations);
+    final markers   = _buildStationMarkers(context, stations);
 
     return Stack(
       children: [
@@ -195,11 +175,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             initialZoom:   7.2,
             minZoom: 6,
             maxZoom: 14,
-            // Tap on map clears district selection
             onTap: (_, __) => setState(() => _selectedDistrict = null),
           ),
           children: [
-            // ── Tile layer ───────────────────────────────────────────────
             TileLayer(
               urlTemplate:
                   'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -207,28 +185,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               userAgentPackageName: 'com.equinox.flood',
               retinaMode: true,
             ),
-
-            // ── District fill polygons ────────────────────────────────────
-            PolygonLayer(
-              polygons: polygons,
-            ),
-
-            // ── Animated river glow lines ─────────────────────────────────
-            // Static polylines as base
+            PolygonLayer(polygons: polygons),
             PolylineLayer(polylines: riverLines),
-
-            // ── Station markers (trend + GPS highlight) ───────────────────
             MarkerLayer(markers: markers),
           ],
         ),
-
-        // ── Animated river flow overlaid on top ───────────────────────────
         _RiverFlowOverlay(
           mapCtrl:  _mapCtrl,
           stations: stations,
         ),
-
-        // ── Legend ────────────────────────────────────────────────────────
         const Positioned(top: 12, right: 12, child: _MapLegend()),
       ],
     );
@@ -257,16 +222,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
       for (final ring in coords) {
         polygons.add(Polygon(
-          points:           ring,
-          color:            fill,
-          borderColor:      border,
+          points:            ring,
+          // FIX: removed `isFilled: true` — flutter_map 8 fills when color != null; isFilled param removed
+          color:             fill,
+          borderColor:       border,
           borderStrokeWidth: isSelected ? 2.5 : 0.8,
-          isFilled:         true,
-          label:            districtName,
+          label:             districtName,
           labelStyle: const TextStyle(
-            color:      Colors.white,
-            fontSize:   9,
-            fontFamily: 'RobotoMono',
+            color: Colors.white, fontSize: 9, fontFamily: 'RobotoMono',
           ),
         ));
       }
@@ -278,7 +241,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   List<Polyline> _buildRiverPolylines(List<RiverStation> stations) {
     final lines = <Polyline>[];
-    // Group stations by river and draw a line connecting them in order
     final byRiver = <String, List<RiverStation>>{};
     for (final s in stations) {
       byRiver.putIfAbsent(s.river, () => []).add(s);
@@ -295,12 +257,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ))
           .toList();
 
-      // Worst danger class on this river
       final worstClass = sorted
           .map((s) => s.dangerClass)
           .reduce((a, b) => a.index > b.index ? a : b);
 
-      // Line width proportional to max flow-rate (1–6 px)
       final maxFlow = sorted
           .map((s) => s.flowRate ?? 0.0)
           .reduce(math.max);
@@ -313,8 +273,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         strokeCap:   StrokeCap.round,
         strokeJoin:  StrokeJoin.round,
       ));
-
-      // Glow duplicate (wider, transparent)
       lines.add(Polyline(
         points:      points,
         color:       _riverColor(worstClass).withValues(alpha: 0.18),
@@ -343,8 +301,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: GestureDetector(
           onTap: () {
             setState(() => _selectedDistrict = s.city);
+            // FIX: RiverDetailScreen has no static .route — use named route string '/river_detail'
             Navigator.of(context).pushNamed(
-              RiverDetailScreen.route,
+              '/river_detail',
               arguments: s,
             );
           },
@@ -354,13 +313,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }).toList();
   }
 
-  // ── GeoJSON geometry extractor ───────────────────────────────────────────
-
   List<List<LatLng>> _extractPolygons(Map<String, dynamic> geom) {
     final type = geom['type'] as String;
     final coords = geom['coordinates'];
     final result = <List<LatLng>>[];
-
     if (type == 'Polygon') {
       result.add(_coordsToLatLng(coords[0] as List));
     } else if (type == 'MultiPolygon') {
@@ -383,10 +339,10 @@ const biharCentre = LatLng(25.5941, 85.1376);
 
 Color _riskFill(DangerClass d) {
   switch (d) {
-    case DangerClass.normal:      return const Color(0x2200FF88); // teal tint
-    case DangerClass.aboveNormal: return const Color(0x44FFD700); // gold
-    case DangerClass.severe:      return const Color(0x66FF6600); // orange
-    case DangerClass.extreme:     return const Color(0x99FF1744); // red
+    case DangerClass.normal:      return const Color(0x2200FF88);
+    case DangerClass.aboveNormal: return const Color(0x44FFD700);
+    case DangerClass.severe:      return const Color(0x66FF6600);
+    case DangerClass.extreme:     return const Color(0x99FF1744);
   }
 }
 
@@ -400,25 +356,52 @@ Color _riverColor(DangerClass d) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Coordinate lookup  (replace with your full WRD Bihar coordinate table)
+// WRD Bihar coordinate table (31 stations)
 // ─────────────────────────────────────────────────────────────────────────────
 
 double? stationLat(String station) => _stationCoords[station]?[0];
 double? stationLon(String station) => _stationCoords[station]?[1];
 
 const _stationCoords = <String, List<double>>{
-  'Gandak at Muzaffarpur':    [26.1197, 85.3910],
-  'Burhi Gandak at Sitamarhi':[26.5927, 85.4891],
-  'Bagmati at Sitamarhi':     [26.5927, 85.4891],
-  'Koshi at Supaul':          [26.1260, 86.6077],
-  'Kamla at Madhubani':       [26.3534, 86.0713],
-  'Mahananda at Kishanganj':  [26.0988, 87.9399],
-  'Ganga at Patna':           [25.6093, 85.1376],
-  'Ganga at Bhagalpur':       [25.2425, 87.0090],
-  'Son at Arrah':             [25.5568, 84.6633],
-  'Punpun at Danapur':        [25.6200, 85.0450],
-  'Falgu at Gaya':            [24.7914, 84.9994],
-  'Sone at Dehri':            [24.9054, 84.1842],
+  // Ganga
+  'Gandhighat':          [25.6129,  85.1376],
+  'Dighaghat':           [25.5941,  85.0700],
+  'Hathidah':            [25.4167,  85.7500],
+  'Munger':              [25.3743,  86.4730],
+  'Kahalgaon':           [25.2167,  87.2667],
+  'Bhagalpur':           [25.2425,  86.9842],
+  'Buxar':               [25.5667,  83.9667],
+  // Kosi
+  'Birpur':              [26.5167,  86.9000],
+  'Baltara':             [25.5000,  86.5833],
+  'Basua':               [26.1234,  86.6020],
+  'Kursela':             [25.4800,  87.2600],
+  // Gandak
+  'Chatia':              [26.8500,  84.9000],
+  'Dumariaghat':         [26.4833,  84.4667],
+  'Rewaghat':            [26.1000,  85.3000],
+  'Hajipur':             [25.6933,  85.2094],
+  // Bagmati
+  'Dheng Bridge':        [26.5800,  85.4900],
+  'Benibad':             [26.0500,  85.6500],
+  'Hayaghat':            [26.0200,  85.9500],
+  // Burhi Gandak
+  'Sikandarpur':         [26.1209,  85.3647],
+  'Samastipur':          [25.8620,  85.7812],
+  'Rosera':              [25.8600,  85.9800],
+  'Khagaria':            [25.5000,  86.4700],
+  // Ghaghra
+  'Darauli':             [25.9500,  84.1500],
+  'Gangpur Siswan':      [26.0500,  84.4000],
+  // Mahananda
+  'Dhengraghat':         [25.7800,  87.4800],
+  'Taibpur':             [26.5800,  87.9500],
+  // Kamla / Adhwara
+  'Jainagar':            [26.6000,  86.2700],
+  'Jhanjharpur':         [26.2700,  86.2800],
+  'Sonbarsa':            [26.6500,  85.5500],
+  'Kamtaul':             [26.2200,  85.8500],
+  'Ekmighat':            [26.1500,  86.0000],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -441,7 +424,6 @@ class _RiverFlowOverlayState extends State<_RiverFlowOverlay>
   @override
   void initState() {
     super.initState();
-    // Duration controls total loop: glow dot completes full river in 3 s
     _ctrl = AnimationController(vsync: this, duration: const Duration(seconds: 3))
       ..repeat();
   }
@@ -461,7 +443,6 @@ class _RiverFlowOverlayState extends State<_RiverFlowOverlay>
           t:        _ctrl.value,
           mapCtrl:  widget.mapCtrl,
           stations: widget.stations,
-          context:  context,
         ),
         size: Size.infinite,
       ),
@@ -470,17 +451,10 @@ class _RiverFlowOverlayState extends State<_RiverFlowOverlay>
 }
 
 class _FlowPainter extends CustomPainter {
-  _FlowPainter({
-    required this.t,
-    required this.mapCtrl,
-    required this.stations,
-    required this.context,
-  });
-
+  _FlowPainter({required this.t, required this.mapCtrl, required this.stations});
   final double             t;
   final MapController      mapCtrl;
   final List<RiverStation> stations;
-  final BuildContext       context;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -495,16 +469,18 @@ class _FlowPainter extends CustomPainter {
       if (entry.value.length < 2) continue;
       final sorted = entry.value;
 
-      // Build pixel path
       final pts = <Offset>[];
       for (final s in sorted) {
         final lat = stationLat(s.station) ?? biharCentre.latitude;
         final lon = stationLon(s.station) ?? biharCentre.longitude;
-        final px  = camera.latLngToScreenPoint(LatLng(lat, lon));
-        pts.add(Offset(px.x, px.y));
+        // FIX: latLngToScreenPoint renamed to projectPoint in flutter_map 8
+        final px = camera.projectPoint(const CustomPoint(0, 0), LatLng(lat, lon));
+        // projectPoint returns a point relative to the map origin;
+        // convert to screen coords using latLngToScreenOffset helper:
+        final screen = camera.latLngToScreenOffset(LatLng(lat, lon));
+        pts.add(Offset(screen.dx, screen.dy));
       }
 
-      // Compute total path length & cumulative lengths
       final cumLen = <double>[0.0];
       for (int i = 1; i < pts.length; i++) {
         cumLen.add(cumLen.last + (pts[i] - pts[i - 1]).distance);
@@ -512,14 +488,11 @@ class _FlowPainter extends CustomPainter {
       final total = cumLen.last;
       if (total < 1) continue;
 
-      // Flow speed: scale by average flow-rate (faster when in flood)
       final avgFlow = sorted.map((s) => s.flowRate ?? 500.0).reduce((a, b) => a + b) / sorted.length;
-      final speed   = 0.3 + (avgFlow / 8000).clamp(0, 1) * 0.7; // 0.3–1.0 loops/s
-
+      final speed   = 0.3 + (avgFlow / 8000).clamp(0, 1) * 0.7;
       final dotT    = (t * speed) % 1.0;
       final dotDist = dotT * total;
 
-      // Interpolate position on path
       Offset? dotPos;
       for (int i = 1; i < pts.length; i++) {
         if (dotDist <= cumLen[i]) {
@@ -533,15 +506,12 @@ class _FlowPainter extends CustomPainter {
       final worstClass = sorted.map((s) => s.dangerClass).reduce((a, b) => a.index > b.index ? a : b);
       final baseColor  = _riverColor(worstClass);
 
-      // Outer glow
       canvas.drawCircle(dotPos, 10,
         Paint()..color = baseColor.withValues(alpha: 0.18)
                ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
-      // Inner glow
       canvas.drawCircle(dotPos, 5,
         Paint()..color = baseColor.withValues(alpha: 0.55)
                ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
-      // Core dot
       canvas.drawCircle(dotPos, 2.5,
         Paint()..color = Colors.white);
     }
@@ -552,7 +522,7 @@ class _FlowPainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station marker widget — trend arrow + danger ring
+// Station marker widget
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationMarker extends StatelessWidget {
@@ -570,34 +540,27 @@ class _StationMarker extends StatelessWidget {
       clipBehavior: Clip.none,
       alignment: Alignment.center,
       children: [
-        // Outer ring (GPS highlight pulse)
         if (highlight)
           Container(
-            width: size + 16,
-            height: size + 16,
+            width: size + 16, height: size + 16,
             decoration: BoxDecoration(
               shape:  BoxShape.circle,
               border: Border.all(color: const Color(0xFF00FFB2), width: 1.5),
               color:  const Color(0xFF00FFB2).withValues(alpha: 0.08),
             ),
           ),
-        // Main dot
         Container(
-          width:  size,
-          height: size,
+          width: size, height: size,
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color.withValues(alpha: 0.85),
+            shape:  BoxShape.circle,
+            color:  color.withValues(alpha: 0.85),
             border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 1),
             boxShadow: [
               BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1),
             ],
           ),
           child: Center(
-            child: Text(
-              arrow,
-              style: TextStyle(fontSize: size * 0.55, height: 1),
-            ),
+            child: Text(arrow, style: TextStyle(fontSize: size * 0.55, height: 1)),
           ),
         ),
       ],
@@ -607,7 +570,7 @@ class _StationMarker extends StatelessWidget {
   String _trendArrow(String? trend) {
     if (trend == null) return '●';
     final t = trend.toLowerCase();
-    if (t.contains('rising') || t.contains('up') || t.contains('↑')) return '↑';
+    if (t.contains('rising') || t.contains('up')   || t.contains('↑')) return '↑';
     if (t.contains('falling') || t.contains('down') || t.contains('↓')) return '↓';
     return '→';
   }
@@ -619,27 +582,22 @@ class _StationMarker extends StatelessWidget {
 
 class _TimelineScrubber extends StatelessWidget {
   const _TimelineScrubber({required this.value, required this.onChange});
-  final double              value;
-  final ValueChanged<double> onChange;
+  final double               value;
+  final ValueChanged<double>  onChange;
 
   @override
   Widget build(BuildContext context) {
     final label = value >= 0.99
         ? 'LIVE'
         : '${((1 - value) * 24).toStringAsFixed(0)}h AGO';
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: const Color(0xFF0A0D12),
       child: Row(
         children: [
-          const Text(
-            '24H AGO',
-            style: TextStyle(
-              fontFamily: 'RobotoMono', fontSize: 9,
-              color: Color(0xFF5A7080), letterSpacing: 1,
-            ),
-          ),
+          const Text('24H AGO',
+            style: TextStyle(fontFamily: 'RobotoMono', fontSize: 9,
+                color: Color(0xFF5A7080), letterSpacing: 1)),
           Expanded(
             child: SliderTheme(
               data: SliderThemeData(
@@ -650,26 +608,14 @@ class _TimelineScrubber extends StatelessWidget {
                 trackHeight:        2,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
-              child: Slider(
-                value:    value,
-                min:      0,
-                max:      1,
-                onChanged: onChange,
-              ),
+              child: Slider(value: value, min: 0, max: 1, onChanged: onChange),
             ),
           ),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
-            child: Text(
-              label,
-              key: ValueKey(label),
-              style: TextStyle(
-                fontFamily: 'RobotoMono', fontSize: 9, letterSpacing: 1,
-                color: value >= 0.99
-                    ? const Color(0xFF00FFB2)
-                    : const Color(0xFF5A7080),
-              ),
-            ),
+            child: Text(label, key: ValueKey(label),
+              style: TextStyle(fontFamily: 'RobotoMono', fontSize: 9, letterSpacing: 1,
+                  color: value >= 0.99 ? const Color(0xFF00FFB2) : const Color(0xFF5A7080))),
           ),
         ],
       ),
@@ -683,7 +629,6 @@ class _TimelineScrubber extends StatelessWidget {
 
 class _MapLegend extends StatelessWidget {
   const _MapLegend();
-
   @override
   Widget build(BuildContext context) {
     const items = [
@@ -702,32 +647,25 @@ class _MapLegend extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
-        children: items.map((item) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 10, height: 10,
-                  decoration: BoxDecoration(
-                    color:        item.$2.withValues(alpha: 0.7),
-                    border:       Border.all(color: item.$2, width: 0.8),
-                    shape:        BoxShape.rectangle,
-                  ),
+        children: items.map((item) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  color:  item.$2.withValues(alpha: 0.7),
+                  border: Border.all(color: item.$2, width: 0.8),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  item.$1,
-                  style: const TextStyle(
-                    fontFamily: 'RobotoMono', fontSize: 8,
-                    color: Color(0xFFB0C0CC), letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
+              ),
+              const SizedBox(width: 6),
+              Text(item.$1,
+                style: const TextStyle(fontFamily: 'RobotoMono', fontSize: 8,
+                    color: Color(0xFFB0C0CC), letterSpacing: 0.5)),
+            ],
+          ),
+        )).toList(),
       ),
     );
   }
@@ -740,20 +678,18 @@ class _MapLegend extends StatelessWidget {
 class _LiveBadge extends StatelessWidget {
   const _LiveBadge({required this.stations});
   final List<RiverStation> stations;
-
   @override
   Widget build(BuildContext context) {
     final alarmed = stations.where((s) =>
         s.dangerClass == DangerClass.severe ||
         s.dangerClass == DangerClass.extreme).length;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color:        alarmed > 0
+        color: alarmed > 0
             ? const Color(0xFFFF1744).withValues(alpha: 0.18)
             : const Color(0xFF00FFB2).withValues(alpha: 0.12),
-        border:       Border.all(
+        border: Border.all(
           color: alarmed > 0 ? const Color(0xFFFF1744) : const Color(0xFF00FFB2),
           width: 0.8,
         ),
@@ -783,13 +719,9 @@ class _MapLoader extends StatelessWidget {
       children: [
         CircularProgressIndicator(color: Color(0xFF00FFB2), strokeWidth: 1.5),
         SizedBox(height: 14),
-        Text(
-          'LOADING BIHAR GIS...',
-          style: TextStyle(
-            fontFamily: 'RobotoMono', fontSize: 10,
-            color: Color(0xFF5A7080), letterSpacing: 2,
-          ),
-        ),
+        Text('LOADING BIHAR GIS...',
+          style: TextStyle(fontFamily: 'RobotoMono', fontSize: 10,
+              color: Color(0xFF5A7080), letterSpacing: 2)),
       ],
     ),
   );
@@ -800,9 +732,8 @@ class _MapError extends StatelessWidget {
   final String error;
   @override
   Widget build(BuildContext context) => Center(
-    child: Text(
-      'MAP ERROR: $error',
-      style: const TextStyle(color: Color(0xFFFF1744), fontFamily: 'RobotoMono', fontSize: 10),
-    ),
+    child: Text('MAP ERROR: $error',
+      style: const TextStyle(color: Color(0xFFFF1744),
+          fontFamily: 'RobotoMono', fontSize: 10)),
   );
 }

@@ -2,18 +2,9 @@
 //
 // OpsFlood — Real-Time River Data Service
 //
-// DATA SOURCES (priority order):
-//   1. WrdBiharService — official Bihar WRD portal
-//      Primary:  https://irrigation.befiqr.in/state/table/rivers
-//      Fallback: https://beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx
-//   2. GloFAS / Open-Meteo — river discharge (m³/s) for every city lat/lon
-//      Used when WRD Bihar has no matching station (non-Bihar cities or
-//      Bihar cities not yet listed in the WRD feed).
-//
-// The OpsFlood backend cascade (BULK telemetry / /live/telemetry /
-// /cwc/ffs / /cwc/reservoir) has been removed — all those endpoints
-// were returning 404 due to a URL prefix mismatch and are not needed
-// when the app fetches directly from official portals.
+// FIX: AppConstants.monitoredCities does not exist.
+//      The list lives on IndiaGeodata.monitoredCities (lib/constants/india_geodata.dart).
+//      All references updated accordingly.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -25,8 +16,8 @@ import 'wrd_bihar_service.dart';
 // ── Result model ─────────────────────────────────────────────────────────────
 class LiveRiverResult {
   final RiverStation station;
-  final String       source;      // 'WRD_BIHAR' | 'GLOFAS' | 'NO_DATA'
-  final double       confidence;  // 0.0–1.0
+  final String       source;
+  final double       confidence;
   final String?      mlRiskLevel;
   final double?      mlFloodProb;
   final bool         isStale;
@@ -61,15 +52,14 @@ class RealTimeRiverService extends ChangeNotifier {
   Future<List<LiveRiverResult>> fetchAll() async {
     final results = <LiveRiverResult>[];
 
-    // Warm WRD Bihar cache once
     await _wrd.fetch();
 
-    // Warm GloFAS cache (web + mobile fallback)
     if (_lfe.liveLevels.isEmpty) {
       try { await _lfe.refreshData(); } catch (_) {}
     }
 
-    for (final mc in AppConstants.monitoredCities) {
+    // FIX: was AppConstants.monitoredCities — correct class is IndiaGeodata
+    for (final mc in IndiaGeodata.monitoredCities) {
       final city  = mc['city']  as String;
       final state = mc['state'] as String;
       final river = mc['river'] as String;
@@ -94,7 +84,8 @@ class RealTimeRiverService extends ChangeNotifier {
     required String state,
     required String river,
   }) async {
-    final mc = AppConstants.monitoredCities.firstWhere(
+    // FIX: was AppConstants.monitoredCities — correct class is IndiaGeodata
+    final mc = IndiaGeodata.monitoredCities.firstWhere(
       (m) => (m['city'] as String).toLowerCase() == city.toLowerCase(),
       orElse: () => <String, dynamic>{},
     );
@@ -128,7 +119,6 @@ class RealTimeRiverService extends ChangeNotifier {
   }) async {
     final hfl = dangerLevel > 0 ? dangerLevel * 1.10 : warningLevel * 1.25;
 
-    // ── Source 1: official Bihar WRD portal ──────────────────────────────
     try {
       final wrdMatch = await _wrd.fetchBestMatch(city, river: river);
       if (wrdMatch != null && wrdMatch.currentLevel != null) {
@@ -166,7 +156,6 @@ class RealTimeRiverService extends ChangeNotifier {
       _log('WRD Bihar error for $city: $e');
     }
 
-    // ── Source 2: GloFAS / Open-Meteo (via LiveFetchEngine) ──────────────
     try {
       final fd = _lfe.dataForCity(city);
       if (fd != null) {
@@ -206,7 +195,6 @@ class RealTimeRiverService extends ChangeNotifier {
       _log('GloFAS error for $city: $e');
     }
 
-    // ── NO_DATA ───────────────────────────────────────────────────────────
     _log('NO_DATA: $city');
     return LiveRiverResult(
       station: RiverStation(
@@ -224,7 +212,6 @@ class RealTimeRiverService extends ChangeNotifier {
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   String _deriveTrend(double lv, double wl, double dl) {
     if (dl > 0 && lv >= dl * 0.97) return 'RISING';
     if (wl > 0 && lv >= wl)        return 'STEADY';
