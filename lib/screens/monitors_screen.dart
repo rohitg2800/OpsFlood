@@ -1,1 +1,1 @@
-__CONTENT__
+__PLACEHOLDER__
