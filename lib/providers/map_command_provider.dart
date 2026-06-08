@@ -1,32 +1,24 @@
 // lib/providers/map_command_provider.dart
-// ═══════════════════════════════════════════════════════════════════════════
-// Riverpod state layer for the Command-Center map screen.
-//
-// Providers:
-//   mapViewModeProvider     — Bihar | National toggle
-//   mapSelectedStationProvider — currently tapped station (for popup)
-//   mapSyncMetaProvider     — per-source last-updated timestamps
-//   mapStationsProvider     — derived: filtered + sorted station list
-//   biharDistrictRiskProvider — derived: district-name → DangerClass map
-// ═══════════════════════════════════════════════════════════════════════════
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/river_station.dart';
-import 'real_time_river_provider.dart';
-import 'cwc_provider.dart';
 
-// ─── View-mode toggle ─────────────────────────────────────────────────────
+import '../models/river_station.dart';
+import '../providers/real_time_river_provider.dart';
+import '../providers/cwc_provider.dart';   // cwcStationsProvider, biharGeoJsonProvider
+import '../services/befiqr_cwc_service.dart'; // CwcStation
+
+// ─── View-mode toggle ────────────────────────────────────────────────────────
 enum MapViewMode { bihar, national }
 
 final mapViewModeProvider =
     StateProvider<MapViewMode>((_) => MapViewMode.bihar);
 
-// ─── Selected station (popup) ─────────────────────────────────────────────
+// ─── Selected station (popup) ────────────────────────────────────────────────
 final mapSelectedStationProvider =
     StateProvider<RiverStation?>((_) => null);
 
-// ─── Sync-meta: last-updated per source ───────────────────────────────────
+// ─── Sync metadata ───────────────────────────────────────────────────────────
 class SyncMeta {
   final DateTime? cwcUpdated;
   final DateTime? wrdUpdated;
@@ -38,99 +30,103 @@ class SyncMeta {
     this.gloFasUpdated,
   });
 
-  /// Human-readable "freshest" label for the banner.
   String get freshnessLabel {
     final times = <DateTime>[
-      if (cwcUpdated   != null) cwcUpdated!,
-      if (wrdUpdated   != null) wrdUpdated!,
+      if (cwcUpdated    != null) cwcUpdated!,
+      if (wrdUpdated    != null) wrdUpdated!,
       if (gloFasUpdated != null) gloFasUpdated!,
     ];
     if (times.isEmpty) return 'No data yet';
     times.sort();
-    final latest = times.last;
-    final diff = DateTime.now().difference(latest);
+    final diff = DateTime.now().difference(times.last);
     if (diff.inSeconds < 60)  return 'Just now';
     if (diff.inMinutes < 60)  return '${diff.inMinutes} min ago';
     if (diff.inHours   < 24)  return '${diff.inHours} hr ago';
     return '${diff.inDays} day(s) ago';
   }
 
-  /// Per-source labels for the legend drawer.
   String labelFor(String source) {
     switch (source) {
-      case 'CWC_FFEM': return cwcUpdated == null   ? '—' : _fmt(cwcUpdated!);
-      case 'WRD_BIHAR': return wrdUpdated == null  ? '—' : _fmt(wrdUpdated!);
-      case 'GLOFAS':   return gloFasUpdated == null ? '—' : _fmt(gloFasUpdated!);
+      case 'CWC_FFEM':  return cwcUpdated    == null ? '—' : _fmt(cwcUpdated!);
+      case 'WRD_BIHAR': return wrdUpdated    == null ? '—' : _fmt(wrdUpdated!);
+      case 'GLOFAS':    return gloFasUpdated == null ? '—' : _fmt(gloFasUpdated!);
       default: return '—';
     }
   }
 
   String _fmt(DateTime t) =>
-      '${t.hour.toString().padLeft(2,'0')}:${t.minute.toString().padLeft(2,'0')}  '
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}  '
       '${t.day}/${t.month}';
 }
 
 final mapSyncMetaProvider =
     StateProvider<SyncMeta>((_) => const SyncMeta());
 
-// ─── Merged station list ───────────────────────────────────────────────────
-// Combines realTimeRiverProvider (CWC/national) with cwcProvider (Bihar CWC).
-// Falls back to empty list if providers are still loading / errored.
+// ─── CwcStation → RiverStation adapter ──────────────────────────────────────
+// CwcStation has no lat/lng or state field; we derive state='Bihar' and
+// city from site name.  Warning level is approximated as danger - 1.5 m.
+extension CwcStationAdapter on CwcStation {
+  RiverStation toRiverStation() => RiverStation(
+    city:    site,            // best proxy for city
+    state:   'Bihar',
+    river:   river,
+    station: site,
+    current: currentLevel,
+    warning: (dangerLevel - 1.5).clamp(0, double.infinity),
+    danger:  dangerLevel,
+    hfl:     dangerLevel + 1.5,
+    dataSource:  'CWC_FFEM',
+    lastUpdated: '${fetchedAt.hour.toString().padLeft(2,'0')}:'
+                 '${fetchedAt.minute.toString().padLeft(2,'0')}',
+    isLive:  true,
+  );
+}
+
+// ─── Merged + filtered station list ─────────────────────────────────────────
+// Watches both realTimeRiverProvider (national CWC/WRD) and
+// cwcStationsProvider (Bihar CWC).  Recomputes automatically on any change.
 final mapStationsProvider = Provider<List<RiverStation>>((ref) {
   final rtAsync  = ref.watch(realTimeRiverProvider);
-  final cwcAsync = ref.watch(cwcStationsProvider);
+  final cwcAsync = ref.watch(cwcStationsProvider);   // List<CwcStation>
   final mode     = ref.watch(mapViewModeProvider);
 
   final List<RiverStation> all = [
-    ...rtAsync.asData?.value  ?? const [],
-    ...cwcAsync.asData?.value ?? const [],
+    ...rtAsync.asData?.value ?? const [],
+    // Convert CwcStation → RiverStation via extension
+    ...(cwcAsync.asData?.value ?? const [])
+        .map((s) => s.toRiverStation()),
   ];
 
   // Deduplicate by station name
-  final seen = <String>{};
+  final seen   = <String>{};
   final unique = all.where((s) => seen.add(s.station)).toList();
 
-  // Filter by view-mode
+  // Filter
   final filtered = mode == MapViewMode.bihar
       ? unique.where((s) => s.state.toLowerCase().contains('bihar')).toList()
       : unique;
 
-  // Sort critical → extreme first
+  // Sort highest risk first
   filtered.sort((a, b) => b.riskScore.compareTo(a.riskScore));
   return filtered;
 });
 
-// ─── District risk map (for GeoJSON heatmap layer) ─────────────────────────
-// Maps district name (lowercase) → highest DangerClass found in that district.
+// ─── District risk map (for heatmap layer) ───────────────────────────────────
+// Maps district/city name (lowercase) → worst DangerClass from all stations.
 final biharDistrictRiskProvider = Provider<Map<String, DangerClass>>((ref) {
   final stations = ref.watch(mapStationsProvider);
-  final Map<String, DangerClass> riskMap = {};
+  final map = <String, DangerClass>{};
   for (final s in stations) {
     if (!s.state.toLowerCase().contains('bihar')) continue;
-    final key = s.city.toLowerCase();
-    final existing = riskMap[key];
+    final key      = s.city.toLowerCase();
+    final existing = map[key];
     if (existing == null || s.dangerClass.index > existing.index) {
-      riskMap[key] = s.dangerClass;
+      map[key] = s.dangerClass;
     }
   }
-  return riskMap;
+  return map;
 });
 
-// ─── CWC stations as RiverStation ─────────────────────────────────────────
-// Thin adapter so cwcProvider data flows into the unified station list.
-// cwcStationsProvider must be defined in cwc_provider.dart.
-// If it doesn't exist yet, we provide a safe empty fallback here.
-final cwcStationsProvider =
-    FutureProvider.autoDispose<List<RiverStation>>((ref) async {
-  try {
-    // Attempt to read from existing cwc provider — adjust import if needed.
-    // ignore: avoid_dynamic_calls
-    final cwcRef = ref.watch(cwcLiveStationsProvider);
-    return cwcRef.asData?.value
-            ?.map((e) => e.toRiverStation())
-            .toList() ??
-        const [];
-  } catch (_) {
-    return const [];
-  }
-});
+// ─── Re-export biharGeoJsonProvider from cwc_provider ───────────────────────
+// So map_screen.dart only needs to import map_command_provider.dart.
+export 'cwc_provider.dart' show biharGeoJsonProvider;
