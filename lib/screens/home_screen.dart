@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/theme_provider.dart';
+import '../theme/river_theme.dart'; // AppPalette.critical used by SOS badge
 import '../theme/rx.dart';
 import '../widgets/premium_theme_sheet.dart';
 import 'alerts_screen.dart';
