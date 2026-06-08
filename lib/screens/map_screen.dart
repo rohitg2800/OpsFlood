@@ -2,19 +2,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Bihar Flood Command Map  — Pro-Level Implementation
 //
-// Features:
-//  1. GeoJSON district polygons coloured by worst DangerClass in district
-//  2. Animated river polylines — glow dot flows at speed ∝ flow-rate
-//  3. Trend arrows (↑ ↓ →) rendered near each station via Marker
-//  4. Timeline scrubber (last 24 h) driven by StationHistoryStore
-//  5. GPS proximity highlight — nearest station auto-selected on load
-//  6. Tap on district or station → RiverDetailScreen
-//
 // FIX CHANGELOG (flutter_map 8.x / riverpod 3.x):
-//  • valueOrNull → .asData?.value ?? []        (Riverpod 3 removed valueOrNull)
-//  • isFilled: true removed from Polygon()     (flutter_map 8 always fills when color!=null)
-//  • RiverDetailScreen.route → '/river_detail' (no static route constant on that screen)
-//  • camera.latLngToScreenPoint → camera.projectPoint  (renamed in flutter_map 8)
+//  • valueOrNull → .asData?.value ?? []
+//  • isFilled: true removed from Polygon()
+//  • RiverDetailScreen.route → '/river_detail'
+//  • camera.latLngToScreenPoint → camera.latLngToScreenOffset (flutter_map 8)
+//    (projectPoint is an internal tile-math method — not for screen coords)
 // ═══════════════════════════════════════════════════════════════════════════
 library;
 
@@ -71,7 +64,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     try {
       final pos = await ref.read(userLocationProvider.future);
       if (pos == null || !mounted) return;
-      // FIX: use .asData?.value instead of .valueOrNull (Riverpod 3 removed valueOrNull)
       final stations = ref.read(realTimeRiverProvider).asData?.value ?? [];
       if (stations.isEmpty) return;
       RiverStation? nearest;
@@ -106,7 +98,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final geoAsync = ref.watch(biharGeoJsonProvider);
-    // FIX: .asData?.value replaces .valueOrNull (Riverpod 3)
     final stations = ref.watch(realTimeRiverProvider).asData?.value ?? [];
 
     return Scaffold(
@@ -162,9 +153,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       if (s.dangerClass.index > current.index) districtRisk[d] = s.dangerClass;
     }
 
-    final polygons  = _buildDistrictPolygons(geo, districtRisk);
+    final polygons   = _buildDistrictPolygons(geo, districtRisk);
     final riverLines = _buildRiverPolylines(stations);
-    final markers   = _buildStationMarkers(context, stations);
+    final markers    = _buildStationMarkers(context, stations);
 
     return Stack(
       children: [
@@ -209,10 +200,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final features = (geo['features'] as List?) ?? [];
 
     for (final feat in features) {
-      final props      = feat['properties'] as Map<String, dynamic>? ?? {};
+      final props        = feat['properties'] as Map<String, dynamic>? ?? {};
       final districtName = (props['district'] ?? props['NAME_2'] ?? '').toString();
-      final risk       = districtRisk[districtName.toLowerCase()] ?? DangerClass.normal;
-      final isSelected = districtName == _selectedDistrict;
+      final risk         = districtRisk[districtName.toLowerCase()] ?? DangerClass.normal;
+      final isSelected   = districtName == _selectedDistrict;
 
       final fill   = _riskFill(risk);
       final border = isSelected ? const Color(0xFF00FFB2) : fill.withValues(alpha: 0.9);
@@ -223,7 +214,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       for (final ring in coords) {
         polygons.add(Polygon(
           points:            ring,
-          // FIX: removed `isFilled: true` — flutter_map 8 fills when color != null; isFilled param removed
           color:             fill,
           borderColor:       border,
           borderStrokeWidth: isSelected ? 2.5 : 0.8,
@@ -240,7 +230,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   // ── River polylines ──────────────────────────────────────────────────────
 
   List<Polyline> _buildRiverPolylines(List<RiverStation> stations) {
-    final lines = <Polyline>[];
+    final lines   = <Polyline>[];
     final byRiver = <String, List<RiverStation>>{};
     for (final s in stations) {
       byRiver.putIfAbsent(s.river, () => []).add(s);
@@ -290,8 +280,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     List<RiverStation> stations,
   ) {
     return stations.map((s) {
-      final lat = stationLat(s.station) ?? biharCentre.latitude;
-      final lon = stationLon(s.station) ?? biharCentre.longitude;
+      final lat       = stationLat(s.station) ?? biharCentre.latitude;
+      final lon       = stationLon(s.station) ?? biharCentre.longitude;
       final isNearest = s.station == _nearestStationId;
 
       return Marker(
@@ -301,11 +291,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         child: GestureDetector(
           onTap: () {
             setState(() => _selectedDistrict = s.city);
-            // FIX: RiverDetailScreen has no static .route — use named route string '/river_detail'
-            Navigator.of(context).pushNamed(
-              '/river_detail',
-              arguments: s,
-            );
+            Navigator.of(context).pushNamed('/river_detail', arguments: s);
           },
           child: _StationMarker(station: s, highlight: isNearest),
         ),
@@ -314,7 +300,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   List<List<LatLng>> _extractPolygons(Map<String, dynamic> geom) {
-    final type = geom['type'] as String;
+    final type   = geom['type'] as String;
     final coords = geom['coordinates'];
     final result = <List<LatLng>>[];
     if (type == 'Polygon') {
@@ -473,10 +459,10 @@ class _FlowPainter extends CustomPainter {
       for (final s in sorted) {
         final lat = stationLat(s.station) ?? biharCentre.latitude;
         final lon = stationLon(s.station) ?? biharCentre.longitude;
-        // FIX: latLngToScreenPoint renamed to projectPoint in flutter_map 8
-        final px = camera.projectPoint(const CustomPoint(0, 0), LatLng(lat, lon));
-        // projectPoint returns a point relative to the map origin;
-        // convert to screen coords using latLngToScreenOffset helper:
+        // FIX: latLngToScreenOffset is the correct flutter_map 8 API for
+        // converting a LatLng to a screen-space Offset inside a CustomPainter.
+        // camera.projectPoint() is an internal tile-projection method and is
+        // not the right tool here — removed entirely.
         final screen = camera.latLngToScreenOffset(LatLng(lat, lon));
         pts.add(Offset(screen.dx, screen.dy));
       }
@@ -570,7 +556,7 @@ class _StationMarker extends StatelessWidget {
   String _trendArrow(String? trend) {
     if (trend == null) return '●';
     final t = trend.toLowerCase();
-    if (t.contains('rising') || t.contains('up')   || t.contains('↑')) return '↑';
+    if (t.contains('rising')  || t.contains('up')   || t.contains('↑')) return '↑';
     if (t.contains('falling') || t.contains('down') || t.contains('↓')) return '↓';
     return '→';
   }
@@ -582,8 +568,8 @@ class _StationMarker extends StatelessWidget {
 
 class _TimelineScrubber extends StatelessWidget {
   const _TimelineScrubber({required this.value, required this.onChange});
-  final double               value;
-  final ValueChanged<double>  onChange;
+  final double              value;
+  final ValueChanged<double> onChange;
 
   @override
   Widget build(BuildContext context) {
