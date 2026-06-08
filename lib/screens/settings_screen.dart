@@ -426,20 +426,25 @@ class _DeveloperTile extends StatelessWidget {
 bool _isPremium(AppThemeMode m) =>
     m == AppThemeMode.sunset || m == AppThemeMode.ocean;
 
+// Fixed: exhaustive switch — all 7 AppThemeMode values covered
 String _modeLabel(AppThemeMode m) => switch (m) {
-  AppThemeMode.system => 'Auto',
-  AppThemeMode.light  => 'Day River',
-  AppThemeMode.dark   => 'Night River',
-  AppThemeMode.sunset => 'Sunset Warm',
-  AppThemeMode.ocean  => 'Deep Ocean',
+  AppThemeMode.system       => 'Auto',
+  AppThemeMode.light        => 'Day River',
+  AppThemeMode.dark         => 'Night River',
+  AppThemeMode.sunset       => 'Sunset Warm',
+  AppThemeMode.ocean        => 'Deep Ocean',
+  AppThemeMode.roboticDark  => 'Tactical Dark',
+  AppThemeMode.roboticLight => 'System Light',
 };
 
 IconData _modeIcon(AppThemeMode m) => switch (m) {
-  AppThemeMode.system => Icons.brightness_auto,
-  AppThemeMode.light  => Icons.wb_sunny,
-  AppThemeMode.dark   => Icons.nights_stay,
-  AppThemeMode.sunset => Icons.wb_twilight,
-  AppThemeMode.ocean  => Icons.water,
+  AppThemeMode.system       => Icons.brightness_auto,
+  AppThemeMode.light        => Icons.wb_sunny,
+  AppThemeMode.dark         => Icons.nights_stay,
+  AppThemeMode.sunset       => Icons.wb_twilight,
+  AppThemeMode.ocean        => Icons.water,
+  AppThemeMode.roboticDark  => Icons.memory_rounded,
+  AppThemeMode.roboticLight => Icons.developer_board_rounded,
 };
 
 class _SectionCard extends StatelessWidget {

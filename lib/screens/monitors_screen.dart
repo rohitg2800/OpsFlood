@@ -12,11 +12,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../extensions/build_context_extensions.dart';
 import '../models/flood_data.dart';
-import '../models/weather_data.dart';
+import '../models/weather_data.dart'; // WeatherData = WeatherState
 import '../providers/flood_providers.dart';
 import '../providers/weather_provider.dart';
-import '../theme/app_palette.dart';
-import '../theme/river_theme.dart';
+import '../theme/river_theme.dart'; // AppPalette lives here
 import 'river_detail_screen.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -39,6 +38,12 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
   String _sortKey = 'level'; // level | capacity | name
   bool _showCriticalOnly = false;
 
+  // Compute level% from currentLevel / dangerLevel (dangerLevel as 100%).
+  double _levelPercent(FloodData d) {
+    if (d.dangerLevel <= 0) return d.capacityPercent;
+    return (d.currentLevel / d.dangerLevel * 100).clamp(0.0, 100.0);
+  }
+
   List<FloodData> _sorted(List<FloodData> raw) {
     var list = raw.where((d) {
       if (_showCriticalOnly &&
@@ -46,20 +51,21 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
           d.imdSeverity != 'high') return false;
       if (_search.isEmpty) return true;
       final q = _search.toLowerCase();
-      return d.stationName.toLowerCase().contains(q) ||
-          d.riverName.toString().toLowerCase().contains(q) ||
+      // stationName does not exist on FloodData — use city instead
+      return d.city.toLowerCase().contains(q) ||
+          (d.riverName ?? '').toLowerCase().contains(q) ||
           d.district.toLowerCase().contains(q) ||
           d.state.toLowerCase().contains(q);
     }).toList();
 
     list.sort((a, b) {
-      if (_sortKey == 'name') return a.stationName.compareTo(b.stationName);
+      if (_sortKey == 'name') return a.city.compareTo(b.city);
       if (_sortKey == 'capacity') {
         final c = b.capacityPercent.compareTo(a.capacityPercent);
         return c != 0 ? c : b.capacityPercent.compareTo(a.capacityPercent);
       }
       // default: level percent
-      final c = b.levelPercent.compareTo(a.levelPercent);
+      final c = _levelPercent(b).compareTo(_levelPercent(a));
       return c != 0 ? c : b.capacityPercent.compareTo(a.capacityPercent);
     });
     return list;
@@ -68,44 +74,45 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final floodAsync = ref.watch(floodDataProvider);
-    final theme      = ref.watch(riverThemeProvider);
+    // Use liveLevelsProvider (the correct provider from flood_providers.dart)
+    final allData = ref.watch(liveLevelsProvider);
+    final rc      = RiverColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.bg,
-      body: floodAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error:   (e, _) => Center(child: Text('Error: $e')),
-        data: (allData) {
-          final data = _sorted(
-            allData.where((d) => d != null).cast<FloodData>().toList(),
-          );
-          return CustomScrollView(
-            slivers: [
-              _AppBar(
-                search:           _search,
-                sortKey:          _sortKey,
-                showCriticalOnly: _showCriticalOnly,
-                onSearch: (v) => setState(() => _search = v),
-                onSort:   (v) => setState(() => _sortKey = v),
-                onToggleCritical: () =>
-                    setState(() => _showCriticalOnly = !_showCriticalOnly),
-              ),
-              if (data.isEmpty)
-                const SliverFillRemaining(
-                  child: Center(child: Text('No stations match.')),
-                )
-              else
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) => _StationCard(data: data[i]),
-                    childCount: data.length,
-                  ),
+      backgroundColor: rc.scaffoldBg,
+      body: allData.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : CustomScrollView(
+              slivers: [
+                _AppBar(
+                  search:           _search,
+                  sortKey:          _sortKey,
+                  showCriticalOnly: _showCriticalOnly,
+                  onSearch: (v) => setState(() => _search = v),
+                  onSort:   (v) => setState(() => _sortKey = v),
+                  onToggleCritical: () =>
+                      setState(() => _showCriticalOnly = !_showCriticalOnly),
+                  levelPercent: _levelPercent,
                 ),
-            ],
-          );
-        },
-      ),
+                Builder(builder: (context) {
+                  final data = _sorted(allData);
+                  if (data.isEmpty) {
+                    return const SliverFillRemaining(
+                      child: Center(child: Text('No stations match.')),
+                    );
+                  }
+                  return SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) => _StationCard(
+                        data:         data[i],
+                        levelPercent: _levelPercent,
+                      ),
+                      childCount: data.length,
+                    ),
+                  );
+                }),
+              ],
+            ),
     );
   }
 }
@@ -121,6 +128,7 @@ class _AppBar extends ConsumerWidget {
   final ValueChanged<String>  onSearch;
   final ValueChanged<String>  onSort;
   final VoidCallback          onToggleCritical;
+  final double Function(FloodData) levelPercent;
 
   const _AppBar({
     required this.search,
@@ -129,18 +137,17 @@ class _AppBar extends ConsumerWidget {
     required this.onSearch,
     required this.onSort,
     required this.onToggleCritical,
+    required this.levelPercent,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme    = ref.watch(riverThemeProvider);
-    final fetchAsync = ref.watch(floodDataProvider);
-    final lastFetch  = fetchAsync.valueOrNull != null
-        ? DateTime.now()
-        : null;
+    final rc        = RiverColors.of(context);
+    final allData   = ref.watch(liveLevelsProvider);
+    final lastFetch = allData.isNotEmpty ? DateTime.now() : null;
 
     return SliverAppBar(
-      backgroundColor: theme.bg,
+      backgroundColor: rc.scaffoldBg,
       pinned:          true,
       expandedHeight:  140,
       flexibleSpace: FlexibleSpaceBar(
@@ -152,7 +159,7 @@ class _AppBar extends ConsumerWidget {
               Text(
                 context.l10n.monitors,
                 style: TextStyle(
-                  color:      theme.textPrimary,
+                  color:      rc.textPrimary,
                   fontSize:   26,
                   fontWeight: FontWeight.w700,
                 ),
@@ -162,7 +169,7 @@ class _AppBar extends ConsumerWidget {
                 lastFetch != null
                     ? '${context.l10n.lastUpdated} ${_fmt(lastFetch)}'
                     : context.l10n.loading,
-                style: TextStyle(color: theme.textSecondary, fontSize: 12),
+                style: TextStyle(color: rc.textSecondary, fontSize: 12),
               ),
             ],
           ),
@@ -226,7 +233,8 @@ class _SearchSortBar extends StatelessWidget {
                   borderSide:   BorderSide.none,
                 ),
                 filled:      true,
-                fillColor:   AppPalette.surface2,
+                // surface2 ≈ abyss3
+                fillColor:   AppPalette.abyss3,
               ),
             ),
           ),
@@ -273,7 +281,8 @@ class _SortButton extends StatelessWidget {
 
 class _StationCard extends ConsumerStatefulWidget {
   final FloodData data;
-  const _StationCard({required this.data});
+  final double Function(FloodData) levelPercent;
+  const _StationCard({required this.data, required this.levelPercent});
 
   @override
   ConsumerState<_StationCard> createState() => _StationCardState();
@@ -302,7 +311,7 @@ class _StationCardState extends ConsumerState<_StationCard> {
     }
   }
 
-  double get _levelPct  => data.levelPercent.clamp(0, 100);
+  double get _levelPct  => widget.levelPercent(data).clamp(0, 100);
   double get _capPct    => data.capacityPercent.clamp(0, 100);
 
   String get _subLine {
@@ -321,17 +330,21 @@ class _StationCardState extends ConsumerState<_StationCard> {
 
   @override
   Widget build(BuildContext context) {
-    final wxAsync  = ref.watch(weatherProvider(data.stationName));
-    final hasWx    = wxAsync.valueOrNull != null;
+    // weatherProvider is a single (non-family) NotifierProvider.
+    // WeatherData is a typedef for WeatherState.
+    final WeatherData wxState = ref.watch(weatherProvider);
+    final hasWx    = wxState.current != null;
     final isExpanded = _expanded;
 
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
-        Navigator.pushNamed(
+        // RiverDetailScreen has no static route — push using MaterialPageRoute
+        Navigator.push(
           context,
-          RiverDetailScreen.route,
-          arguments: data,
+          MaterialPageRoute(
+            builder: (_) => RiverDetailScreen(data: data),
+          ),
         );
       },
       child: AnimatedContainer(
@@ -339,7 +352,8 @@ class _StationCardState extends ConsumerState<_StationCard> {
         curve:    Curves.easeInOut,
         margin:   const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color:        AppPalette.surface,
+          // surface ≈ abyss2
+          color:        AppPalette.abyss2,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _severityColor.withValues(alpha: 0.25),
@@ -374,15 +388,15 @@ class _StationCardState extends ConsumerState<_StationCard> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // station name + sub-line
+                  // city name + sub-line
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          data.stationName,
+                          data.city, // was data.stationName
                           style: const TextStyle(
-                            color:      AppPalette.textPrimary,
+                            color:      AppPalette.textWhite, // textPrimary
                             fontSize:   13,
                             fontWeight: FontWeight.w700,
                           ),
@@ -453,12 +467,12 @@ class _StationCardState extends ConsumerState<_StationCard> {
 
             // ── Pill row (collapsed) ────────────────────────────────
             if (hasWx && !isExpanded)
-              _WxSummaryPills(wx: wxAsync.valueOrNull!),
+              _WxSummaryPills(wx: wxState),
             if (!hasWx && !isExpanded)
               const SizedBox(height: 10),
 
             // ── Expanded weather detail ─────────────────────────────
-            if (isExpanded) _WxDetailPanel(wx: wxAsync.valueOrNull),
+            if (isExpanded) _WxDetailPanel(wx: hasWx ? wxState : null),
 
             const SizedBox(height: 4),
           ],
@@ -495,7 +509,6 @@ class _LevelBar extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // numeric info row
           _LevelInfoRow(
             warning: warning,
             danger:  danger,
@@ -503,10 +516,8 @@ class _LevelBar extends StatelessWidget {
             river:   river,
           ),
           const SizedBox(height: 6),
-          // level bar
           _ProgressBar(pct: levelPct / 100, color: color, label: 'Level'),
           const SizedBox(height: 4),
-          // capacity bar
           _ProgressBar(
             pct:   capPct / 100,
             color: AppPalette.cyan,
@@ -541,7 +552,7 @@ class _ProgressBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value:            pct.clamp(0, 1),
-              backgroundColor:  AppPalette.surface2,
+              backgroundColor:  AppPalette.abyss3, // surface2
               valueColor:       AlwaysStoppedAnimation(color),
               minHeight:        6,
             ),
@@ -592,7 +603,7 @@ class _LevelInfoRow extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _WxSummaryPills extends StatelessWidget {
-  final WeatherData wx;
+  final WeatherData wx; // WeatherData = WeatherState
   const _WxSummaryPills({required this.wx});
 
   @override
@@ -656,7 +667,7 @@ class _WxDetailPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (wx == null) {
+    if (wx == null || wx!.current == null) {
       return const Padding(
         padding: EdgeInsets.all(12),
         child: Center(
@@ -678,8 +689,8 @@ class _WxDetailPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(color: AppPalette.surface2, height: 16),
-          // ── Row 1: temp / feels-like / humidity ─────────────────
+          // surface2 ≈ abyss3
+          const Divider(color: AppPalette.abyss3, height: 16),
           Row(children: [
             Expanded(child: _WxDetailTile(
               icon: Icons.thermostat_rounded, label: 'Temperature',
@@ -700,7 +711,6 @@ class _WxDetailPanel extends StatelessWidget {
             )),
           ]),
           const SizedBox(height: 8),
-          // ── Row 2: 7-day rain / rain index / precip prob ─────────
           Row(children: [
             Expanded(child: _WxDetailTile(
               icon: Icons.grain_rounded, label: '7-Day Rain',
@@ -722,7 +732,6 @@ class _WxDetailPanel extends StatelessWidget {
             )),
           ]),
           const SizedBox(height: 8),
-          // ── Row 3: wind / UV / now-precip ───────────────────────
           Row(children: [
             Expanded(child: _WxDetailTile(
               icon: Icons.air_rounded, label: 'Wind',
@@ -743,7 +752,6 @@ class _WxDetailPanel extends StatelessWidget {
             )),
           ]),
           const SizedBox(height: 8),
-          // ── Row 4: flood metrics ─────────────────────────────────
           Row(children: [
             Expanded(child: _WxDetailTile(
               icon: Icons.speed_rounded, label: 'Flow Rate',
@@ -788,7 +796,7 @@ class _WxDetailTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: isHighlight
             ? color.withValues(alpha: 0.15)
-            : AppPalette.surface2.withValues(alpha: 0.5),
+            : AppPalette.abyss3.withValues(alpha: 0.5), // surface2
         borderRadius: BorderRadius.circular(10),
         border: isHighlight
             ? Border.all(color: color.withValues(alpha: 0.4))
