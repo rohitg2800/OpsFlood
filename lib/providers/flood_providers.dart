@@ -8,7 +8,7 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 export 'source_policy_provider.dart';
 
-// ── Notifier wrapper ───────────────────────────────────────────────────────────────────────
+// ── Notifier wrapper ──────────────────────────────────────────────────────────
 //
 // FIX: RealTimeService is a singleton (factory constructor returns _instance).
 // Riverpod uses identical() to decide whether to rebuild: if state is always
@@ -45,7 +45,18 @@ final realTimeProvider =
 /// Alias kept for backward compatibility.
 final realTimeServiceProvider = realTimeProvider;
 
-// ── Derived providers ─────────────────────────────────────────────────────────────────
+// ── Derived providers — status / metadata ────────────────────────────────────
+
+/// True while the service is performing its initial or refresh fetch.
+/// Replaces direct `service.isLoading` reads in screens so that only
+/// widgets that actually render a loading state rebuild on this flag.
+final isLoadingProvider = Provider<bool>((ref) =>
+    ref.watch(realTimeProvider).isLoading);
+
+/// The DateTime of the last successful data fetch, or null while loading.
+/// Replaces direct `service.lastFetchTime` reads in AppBars / footers.
+final lastFetchTimeProvider = Provider<DateTime?>((ref) =>
+    ref.watch(realTimeProvider).lastFetchTime);
 
 final isOfflineProvider = Provider<bool>((ref) =>
     !ref.watch(realTimeProvider).isOnline);
@@ -59,12 +70,25 @@ final errorMessageProvider = Provider<String?>((ref) =>
 final criticalCountProvider = Provider<int>((ref) =>
     ref.watch(realTimeProvider).criticalCount);
 
+// ── Alert providers ───────────────────────────────────────────────────────────
+
 final imdAlertsProvider = Provider<List<dynamic>>((ref) =>
     ref.watch(realTimeProvider).imdAlerts);
 
 /// NDMA advisories — sourced from the same real-time service.
 final ndmaAdvisoriesProvider = Provider<List<dynamic>>((ref) =>
     ref.watch(realTimeProvider).ndmaAdvisories);
+
+/// Combined IMD + NDMA alerts in a single list.
+/// AlertsScreen watches this one provider instead of two, eliminating the
+/// manual list-merge in the widget build method.
+final combinedAlertsProvider = Provider<List<dynamic>>((ref) {
+  final imd  = ref.watch(imdAlertsProvider);
+  final ndma = ref.watch(ndmaAdvisoriesProvider);
+  return [...imd, ...ndma];
+});
+
+// ── River / station data providers ───────────────────────────────────────────
 
 final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
     ref.watch(realTimeProvider).liveLevels);
@@ -78,19 +102,47 @@ final monitoringDataProvider = Provider<MultiLocationMonitoring>((ref) =>
 final monitoredCitiesProvider = Provider<List<String>>((ref) =>
     ref.watch(liveLevelsProvider).map((fd) => fd.city).toList());
 
+// ── Summary count providers — let RiverMonitor drop all in-widget aggregation ─
+
+/// Number of stations currently at CRITICAL risk level.
+final criticalStationCountProvider = Provider<int>((ref) =>
+    ref.watch(liveLevelsProvider)
+        .where((d) => d.riskLevel.toUpperCase() == 'CRITICAL')
+        .length);
+
+/// Number of stations currently at SEVERE risk level.
+final severeStationCountProvider = Provider<int>((ref) =>
+    ref.watch(liveLevelsProvider)
+        .where((d) => d.riskLevel.toUpperCase() == 'SEVERE')
+        .length);
+
+/// Number of stations NOT in a critical or severe risk level (normal/safe).
+final normalStationCountProvider = Provider<int>((ref) {
+  final levels = ref.watch(liveLevelsProvider);
+  final badCount = levels.where((d) {
+    final r = d.riskLevel.toUpperCase();
+    return r == 'CRITICAL' || r == 'SEVERE';
+  }).length;
+  return levels.length - badCount;
+});
+
 // ── City-scoped providers (used by CityDetailScreen) ─────────────────────────
 
 final cityDataProvider = Provider.family<FloodData?, String>((ref, cityName) =>
     ref.watch(realTimeProvider).dataForCity(cityName));
 
-final cityTrendProvider = Provider.family<List<RiverLevelSnapshot>, String>((ref, cityName) =>
-    ref.watch(realTimeProvider).trendForCity(cityName));
+final cityTrendProvider =
+    Provider.family<List<RiverLevelSnapshot>, String>((ref, cityName) =>
+        ref.watch(realTimeProvider).trendForCity(cityName));
 
-final stateImdAlertsProvider = Provider.family<List<dynamic>, String>((ref, state) =>
-    ref.watch(realTimeProvider).imdAlertsForState(state));
+final stateImdAlertsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) =>
+        ref.watch(realTimeProvider).imdAlertsForState(state));
 
-final stateNdmaAdvisoriesProvider = Provider.family<List<dynamic>, String>((ref, state) =>
-    ref.watch(realTimeProvider).ndmaAdvisoriesForState(state));
+final stateNdmaAdvisoriesProvider =
+    Provider.family<List<dynamic>, String>((ref, state) =>
+        ref.watch(realTimeProvider).ndmaAdvisoriesForState(state));
 
-final stateEmergencyContactsProvider = Provider.family<List<dynamic>, String>((ref, state) =>
-    ref.watch(realTimeProvider).emergencyContactsForState(state));
+final stateEmergencyContactsProvider =
+    Provider.family<List<dynamic>, String>((ref, state) =>
+        ref.watch(realTimeProvider).emergencyContactsForState(state));
