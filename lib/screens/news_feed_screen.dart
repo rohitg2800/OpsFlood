@@ -1,88 +1,225 @@
 // lib/screens/news_feed_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../theme/app_theme.dart';
+import '../providers/flood_providers.dart';
+import '../theme/river_theme.dart';
 
 class NewsFeedScreen extends ConsumerWidget {
+  static const String route = '/news-feed';
   const NewsFeedScreen({super.key});
-  static const route = '/news_feed';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final service = ref.watch(realTimeProvider);
+    final t = RiverColors.of(context);
+
+    final alerts    = service.imdAlerts;
+    final advisories = service.ndmaAdvisories;
+
     return Scaffold(
-      backgroundColor: AppTheme.bgDeep,
+      backgroundColor: AppPalette.abyss0,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgDeep,
-        title: const Text('Flood News & Advisories',
-            style: TextStyle(
-                color: AppTheme.cyan, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: AppTheme.cyan),
-        elevation: 0,
+        backgroundColor: AppPalette.abyss0,
+        title: Text(
+          'Flood News & Advisories',
+          style: TextStyle(
+            color: AppPalette.cyan,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: AppPalette.gold),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _buildInfoCard(
-            icon: Icons.info_outline,
-            title: 'Live news feed coming soon',
-            body:
-                'This section will aggregate NDMA, IMD and state disaster '
-                'management advisories in real-time.',
-            color: AppTheme.cyan,
+          // ── IMD Alerts ──────────────────────────────────────────────────
+          _SectionHeader(label: 'IMD ALERTS', color: AppPalette.cyan),
+          if (alerts.isEmpty)
+            _EmptyCard(message: 'No active IMD alerts', color: AppPalette.cyan)
+          else
+            ...alerts.map((a) => _AlertCard(item: a, color: AppPalette.warning, t: t)),
+
+          const SizedBox(height: 20),
+
+          // ── NDMA Advisories ─────────────────────────────────────────────
+          _SectionHeader(label: 'NDMA ADVISORIES', color: AppPalette.gold),
+          if (advisories.isEmpty)
+            _EmptyCard(message: 'No active NDMA advisories', color: AppPalette.gold)
+          else
+            ...advisories.map((a) => _AlertCard(item: a, color: AppPalette.gold, t: t)),
+
+          const SizedBox(height: 20),
+
+          // ── Quick Links ─────────────────────────────────────────────────
+          _SectionHeader(label: 'OFFICIAL SOURCES', color: AppPalette.textGrey),
+          _LinkCard(
+            title: 'IMD Flood Forecasting',
+            url: 'https://ffs.imd.gov.in',
+            color: AppPalette.cyan,
+            t: t,
           ),
-          const SizedBox(height: 16),
-          _buildInfoCard(
-            icon: Icons.link,
-            title: 'Official sources',
-            body:
-                '• NDMA — ndma.gov.in\n'
-                '• IMD — mausam.imd.gov.in\n'
-                '• CWC — cwc.gov.in\n'
-                '• Bihar SDMA — sdma.bih.nic.in',
-            color: AppTheme.warning,
+          _LinkCard(
+            title: 'NDMA Advisories',
+            url: 'https://ndma.gov.in',
+            color: AppPalette.gold,
+            t: t,
+          ),
+          _LinkCard(
+            title: 'CWC Flood Bulletin',
+            url: 'https://cwc.gov.in',
+            color: AppPalette.safe,
+            t: t,
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildInfoCard(
-      {required IconData icon,
-      required String title,
-      required String body,
-      required Color color}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _SectionHeader({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+        ),
       ),
-      child: Row(
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  final String message;
+  final Color color;
+  const _EmptyCard({required this.message, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppPalette.abyss2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(color: AppPalette.textGrey, fontSize: 13),
+      ),
+    );
+  }
+}
+
+class _AlertCard extends StatelessWidget {
+  final dynamic item;
+  final Color color;
+  final RiverColors t;
+  const _AlertCard({required this.item, required this.color, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final title   = item is Map ? item['title']   ?? item['heading'] ?? 'Alert' : item.toString();
+    final desc    = item is Map ? item['summary']  ?? item['description'] ?? '' : '';
+    final dateStr = item is Map ? item['date']     ?? item['issued_at'] ?? '' : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: TextStyle(
-                        color: color,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
-                const SizedBox(height: 6),
-                Text(body,
-                    style: const TextStyle(
-                        color: AppTheme.textMuted,
-                        fontSize: 13,
-                        height: 1.5)),
-              ],
+          Text(
+            title.toString(),
+            style: TextStyle(
+              color: AppPalette.textWhite,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
             ),
           ),
+          if (desc.toString().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              desc.toString(),
+              style: TextStyle(color: AppPalette.textGrey, fontSize: 12),
+            ),
+          ],
+          if (dateStr.toString().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              dateStr.toString(),
+              style: TextStyle(color: AppPalette.textGrey, fontSize: 11),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _LinkCard extends StatelessWidget {
+  final String title, url;
+  final Color color;
+  final RiverColors t;
+  const _LinkCard({
+    required this.title,
+    required this.url,
+    required this.color,
+    required this.t,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) launchUrl(uri);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: t.cardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.20)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.open_in_new_rounded, color: color, size: 16),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: AppPalette.textWhite,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            Text(
+              url,
+              style: TextStyle(color: AppPalette.textGrey, fontSize: 11),
+            ),
+          ],
+        ),
       ),
     );
   }

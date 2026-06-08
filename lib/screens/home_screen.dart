@@ -27,3 +27,84 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with SingleTickerProviderStateMixin {
   int _idx = 0;
+
+  static const _tabs = [
+    DashboardScreen(),
+    MonitorsScreen(),
+    AlertsScreen(),
+    WeatherScreen(),
+    RiverMonitorScreen(),
+    SettingsScreen(),
+  ];
+
+  static const _navItems = [
+    NavigationDestination(
+      icon: Icon(Icons.dashboard_outlined),
+      selectedIcon: Icon(Icons.dashboard_rounded),
+      label: 'Dashboard',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.sensors_outlined),
+      selectedIcon: Icon(Icons.sensors_rounded),
+      label: 'Monitors',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.notifications_outlined),
+      selectedIcon: Icon(Icons.notifications_rounded),
+      label: 'Alerts',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.wb_sunny_outlined),
+      selectedIcon: Icon(Icons.wb_sunny_rounded),
+      label: 'Weather',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.water_outlined),
+      selectedIcon: Icon(Icons.water_rounded),
+      label: 'Rivers',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.settings_outlined),
+      selectedIcon: Icon(Icons.settings_rounded),
+      label: 'Settings',
+    ),
+  ];
+
+  void _onThemeTap() {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => const PremiumThemeSheet(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    ref.watch(themeProvider); // rebuild on theme change
+
+    return Scaffold(
+      backgroundColor: t.scaffoldBg,
+      body: IndexedStack(
+        index: _idx,
+        children: _tabs,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _idx,
+        onDestinationSelected: (i) {
+          HapticFeedback.selectionClick();
+          setState(() => _idx = i);
+        },
+        destinations: _navItems,
+      ),
+      floatingActionButton: FloatingActionButton.small(
+        onPressed: _onThemeTap,
+        tooltip: 'Change theme',
+        backgroundColor: t.accent,
+        child: const Icon(Icons.palette_rounded, size: 18),
+      ),
+    );
+  }
+}

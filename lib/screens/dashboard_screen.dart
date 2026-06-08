@@ -6,7 +6,7 @@
 //   - Pulls live data from: realTimeProvider, liveLevelsProvider,
 //     criticalCountProvider, isOfflineProvider, isWakingUpProvider
 //   - Delegates chart/widget rendering to dashboard_screen_part2.dart
-//   - Pull-to-refresh via RefreshIndicator → service.refresh()
+//   - Pull-to-refresh via RefreshIndicator → service.refreshData()
 //   - Animated entry: gauge anim (0→1), wave ctrl (looping), entry ctrl
 //   - Respects prefers-reduced-motion via MediaQuery
 //
@@ -144,7 +144,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _entryCtrl.reset();
 
     try {
-      await ref.read(realTimeProvider).refresh();
+      await ref.read(realTimeProvider).refreshData();
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
@@ -168,7 +168,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final isWakingUp = ref.watch(isWakingUpProvider);
 
     return Scaffold(
-      backgroundColor: t.bg,
+      backgroundColor: t.scaffoldBg,
       body: RefreshIndicator(
         color: t.accent,
         backgroundColor: t.cardBg,
@@ -185,8 +185,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               isOffline: isOffline,
               isWakingUp: isWakingUp,
               pulseCtrl: _pulseCtrl,
-              lastUpdated: service.lastUpdated,
-              onRefresh: _onRefresh,     // ← fixed: callback wired up
+              lastUpdated: service.lastFetchTime,
+              onRefresh: _onRefresh,
             ),
 
             // ── Offline / waking-up banner ────────────────────────────────
@@ -313,7 +313,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       .map((d) => d.state)
                       .toSet()
                       .length,
-                  lastUpdated: service.lastUpdated,
+                  lastUpdated: service.lastFetchTime,
                 ),
               ),
 
@@ -337,7 +337,7 @@ class _DashboardAppBar extends StatelessWidget {
   final bool isOffline, isWakingUp;
   final AnimationController pulseCtrl;
   final DateTime? lastUpdated;
-  final VoidCallback onRefresh;    // ← fixed: wired to parent _onRefresh
+  final VoidCallback onRefresh;
 
   const _DashboardAppBar({
     required this.t,
@@ -364,14 +364,13 @@ class _DashboardAppBar extends StatelessWidget {
       floating: true,
       snap: true,
       expandedHeight: 100,
-      backgroundColor: t.bg,
+      backgroundColor: t.scaffoldBg,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0.5,
       shadowColor: t.stroke,
       title: Row(
         children: [
-          // Animated status dot
           AnimatedBuilder(
             animation: pulseCtrl,
             builder: (_, __) => Container(
@@ -431,7 +430,6 @@ class _DashboardAppBar extends StatelessWidget {
             padding: const EdgeInsets.only(right: 4),
             child: _CriticalBadge(count: criticalCount),
           ),
-        // Refresh button — wired to parent _onRefresh
         IconButton(
           icon: Icon(Icons.refresh_rounded, color: t.accent, size: 22),
           tooltip: 'Refresh now',
@@ -640,7 +638,6 @@ class _KpiStrip extends StatelessWidget {
                   children: [
                     Icon(kpi.icon, color: kpi.color, size: 18),
                     const SizedBox(height: 8),
-                    // Animated number count-up
                     AnimatedBuilder(
                       animation: gaugeAnim,
                       builder: (_, __) {
@@ -788,7 +785,6 @@ class _StationTile extends StatelessWidget {
           children: [
             Row(
               children: [
-                // Risk icon circle
                 Container(
                   width: 32,
                   height: 32,
@@ -822,7 +818,6 @@ class _StationTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Level + risk badge
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -856,7 +851,6 @@ class _StationTile extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            // Animated capacity bar
             AnimatedBuilder(
               animation: gaugeAnim,
               builder: (_, __) {
@@ -900,7 +894,6 @@ class _StationTile extends StatelessWidget {
                 );
               },
             ),
-            // Warning / danger level chips
             if (data.dangerLevel != null || data.warningLevel != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -1015,7 +1008,6 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // KPI row skeleton
               Row(
                 children: List.generate(
                   4,
@@ -1032,7 +1024,6 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
                 ),
               ),
               const SizedBox(height: 20),
-              // Section header skeleton
               Container(
                 width: 120,
                 height: 10,
@@ -1042,7 +1033,6 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
                 ),
               ),
               const SizedBox(height: 12),
-              // Station tile skeletons
               ...List.generate(
                 5,
                 (_) => Container(
