@@ -35,7 +35,6 @@ import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'screens/map_screen.dart';
-import 'theme/app_theme.dart';
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
@@ -78,16 +77,16 @@ Future<void> main() async {
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
-// ─── Root app ─────────────────────────────────────────────────────────────────
-// Each AppThemeMode gets its own fully-wired ThemeData that carries the correct
-// RiverColors ThemeExtension.  MaterialApp.themeMode selects light vs dark;
-// we ensure both slots are filled with the right palette so there is never a
-// fallback to the wrong palette regardless of system brightness.
+// ─── Root app ────────────────────────────────────────────────────────────────
+// Each AppThemeMode gets its own ThemeData with the correct RiverColors
+// ThemeExtension injected. MaterialApp receives both theme: and darkTheme:
+// filled with the right palette; themeMode: selects the slot.
 class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
 
-  // Build a ThemeData for the chosen mode, putting it in BOTH the light and
-  // dark slot so Flutter always picks it regardless of ThemeMode.light/dark.
+  /// Build the ThemeData for a given mode.
+  /// For system mode, only darkTheme uses this; lightTheme is handled
+  /// separately in build().
   static ThemeData _themeFor(AppThemeMode mode) {
     switch (mode) {
       case AppThemeMode.light:
@@ -103,9 +102,7 @@ class FloodWatchApp extends ConsumerWidget {
       case AppThemeMode.roboticLight:
         return const RoboticTheme(isDark: false).toThemeData();
       case AppThemeMode.system:
-        // For system mode provide both light and dark river themes;
-        // MaterialApp.themeMode = ThemeMode.system picks the right one.
-        return RiverColors.darkTheme(); // placeholder; overridden below
+        return RiverColors.darkTheme(); // replaced in build()
     }
   }
 
@@ -114,9 +111,9 @@ class FloodWatchApp extends ConsumerWidget {
     final mode          = ref.watch(themeModeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
 
-    // For system mode: provide separate light/dark; for every other mode
-    // stuff the same theme in both slots so ThemeMode.light/dark are both
-    // correctly served.
+    // For system: provide correct light + dark. For every other mode:
+    // fill BOTH slots with the same ThemeData so Flutter always picks it
+    // regardless of which ThemeMode slot it resolves to.
     final ThemeData lightSlot;
     final ThemeData darkSlot;
 
