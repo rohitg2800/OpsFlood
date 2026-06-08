@@ -1,35 +1,18 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard Screen v1
+// EQUINOX-BH — Dashboard Screen v2 (Redesign)
 //
-// Architecture:
-//   - ConsumerStatefulWidget (Riverpod 3)
-//   - Pulls live data from: realTimeProvider, liveLevelsProvider,
-//     criticalCountProvider, isOfflineProvider, isWakingUpProvider
-//   - Delegates chart/widget rendering to dashboard_screen_part2.dart
-//   - Pull-to-refresh via RefreshIndicator → service.refreshData()
-//   - Animated entry: gauge anim (0→1), wave ctrl (looping), entry ctrl
-//   - Respects prefers-reduced-motion via MediaQuery
-//
-// Widgets provided by dashboard_screen_part2.dart (same library):
-//   AnimatedAreaChart, AlertLog, SystemStats, DashboardFooter,
-//   DashboardEmptyState
-//
-// P1 fixes applied (2026-06-08):
-//   1. All fontSize values floored at 10px minimum.
-//      Affected: _KpiStrip label (8.5→10), _SectionHeader label (10 kept),
-//      _StationTile river/state sub-text (10 kept), capacity label (9→10),
-//      capacity % value (9→10), _LevelChip label (9→10),
-//      _DashboardAppBar subtitle (10 kept), _CriticalBadge text (11 kept).
-//
-// P2 fixes applied (2026-06-08):
-//   2. _SectionHeader visual weight upgrade:
-//        - fontSize 10 → 12, letterSpacing 0.8 → 1.5
-//        - icon size 14 → 15
-//        - top padding 20 → 24
-//        - Divider added above label row for clear section breaks
-//        - colour: textSecondary → textPrimary.withValues(alpha:0.55)
+// Design direction:
+//   Dark command-center / flood-ops aesthetic.
+//   Hero section: full-width avg-capacity arc gauge with live colour.
+//   KPI grid: 2×2 instead of 4-column cramped strip.
+//   Station tiles: status colour runs as left accent bar + ring icon.
+//   Section headers: full-width coloured underline pill.
+//   Capacity bars: gradient fill (safe → danger colour).
+//   Removed: light cream background → deep scaffoldBg from theme.
+//   Typography floor: 11px minimum on all visible text.
 library;
 
+import 'dart:math' as math;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,7 +26,7 @@ import '../theme/river_theme.dart';
 import 'dashboard_screen_part2.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Risk helpers (shared with part2)
+// Risk colour / icon helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 Color _riskColor(String level) {
@@ -79,7 +62,6 @@ class DashboardScreen extends ConsumerStatefulWidget {
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with TickerProviderStateMixin {
 
-  // ── Animation controllers ─────────────────────────────────────────────────
   late AnimationController _gaugeCtrl;
   late AnimationController _waveCtrl;
   late AnimationController _entryCtrl;
@@ -88,44 +70,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   late Animation<double> _gaugeAnim;
 
   bool _reduceMotion = false;
-
-  // ── Refresh state ──────────────────────────────────────────────────────────
   bool _isRefreshing = false;
 
   @override
   void initState() {
     super.initState();
-
     _gaugeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
+      vsync: this, duration: const Duration(milliseconds: 1400));
     _gaugeAnim = CurvedAnimation(
-      parent: _gaugeCtrl,
-      curve: Curves.easeOutCubic,
-    );
-
+      parent: _gaugeCtrl, curve: Curves.easeOutCubic);
     _waveCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2800),
-    )..repeat();
-
+      vsync: this, duration: const Duration(milliseconds: 2800))..repeat();
     _entryCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-
+      vsync: this, duration: const Duration(milliseconds: 900));
     _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
+      vsync: this, duration: const Duration(milliseconds: 1500))..repeat(reverse: true);
 
-    // Kick off entry animation after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _gaugeCtrl.forward();
-        _entryCtrl.forward();
-      }
+      if (mounted) { _gaugeCtrl.forward(); _entryCtrl.forward(); }
     });
   }
 
@@ -133,45 +95,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.of(context).disableAnimations;
-    if (_reduceMotion) {
-      _waveCtrl.stop();
-      _pulseCtrl.stop();
-    }
+    if (_reduceMotion) { _waveCtrl.stop(); _pulseCtrl.stop(); }
   }
 
   @override
   void dispose() {
-    _gaugeCtrl.dispose();
-    _waveCtrl.dispose();
-    _entryCtrl.dispose();
-    _pulseCtrl.dispose();
+    _gaugeCtrl.dispose(); _waveCtrl.dispose();
+    _entryCtrl.dispose(); _pulseCtrl.dispose();
     super.dispose();
   }
 
-  // ── Pull-to-refresh ────────────────────────────────────────────────────────
   Future<void> _onRefresh() async {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
     HapticFeedback.mediumImpact();
-
-    // Reset animations
-    _gaugeCtrl.reset();
-    _entryCtrl.reset();
-
+    _gaugeCtrl.reset(); _entryCtrl.reset();
     try {
       await ref.read(realTimeProvider).refreshData();
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
-        _gaugeCtrl.forward();
-        _entryCtrl.forward();
+        _gaugeCtrl.forward(); _entryCtrl.forward();
       }
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -190,10 +137,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         onRefresh: _onRefresh,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
-            parent: BouncingScrollPhysics(),
-          ),
+              parent: BouncingScrollPhysics()),
           slivers: [
-            // ── App bar ───────────────────────────────────────────────────
+            // ── App bar ────────────────────────────────────────────────────
             _DashboardAppBar(
               t: t,
               criticalCount: critCount,
@@ -204,25 +150,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               onRefresh: _onRefresh,
             ),
 
-            // ── Offline / waking-up banner ────────────────────────────────
+            // ── Status banner (offline / waking) ───────────────────────────
             if (isOffline || isWakingUp)
               SliverToBoxAdapter(
                 child: _StatusBanner(
-                  t: t,
-                  isOffline: isOffline,
-                  isWakingUp: isWakingUp,
-                ),
-              ),
+                    t: t, isOffline: isOffline, isWakingUp: isWakingUp)),
 
-            // ── Loading skeleton or content ───────────────────────────────
+            // ── Loading skeleton or content ─────────────────────────────────
             if (service.isLoading && liveLevels.isEmpty)
               SliverToBoxAdapter(child: _LoadingSkeleton(t: t))
             else if (liveLevels.isEmpty)
               const SliverToBoxAdapter(child: DashboardEmptyState())
             else ...[
-              // ── Summary KPI strip ─────────────────────────────────────
+
+              // ── Hero arc gauge ─────────────────────────────────────────
               SliverToBoxAdapter(
-                child: _KpiStrip(
+                child: _HeroGauge(
+                  t: t,
+                  levels: liveLevels,
+                  criticalCount: critCount,
+                  gaugeAnim: _gaugeAnim,
+                  pulseCtrl: _pulseCtrl,
+                  reduceMotion: _reduceMotion,
+                ),
+              ),
+
+              // ── 2×2 KPI grid ───────────────────────────────────────────
+              SliverToBoxAdapter(
+                child: _KpiGrid(
                   t: t,
                   levels: liveLevels,
                   criticalCount: critCount,
@@ -232,7 +187,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Critical / Severe alert cards ─────────────────────────
+              // ── Active alerts section ──────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'ACTIVE ALERTS',
@@ -252,10 +207,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── All stations list ─────────────────────────────────────
+              // ── All stations ───────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
-                  label: 'ALL MONITORED STATIONS',
+                  label: 'MONITORED STATIONS',
                   icon: Icons.sensors_rounded,
                   color: t.accent,
                   t: t,
@@ -273,7 +228,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Capacity distribution chart ───────────────────────────
+              // ── Capacity trend chart ───────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'CAPACITY TREND',
@@ -294,7 +249,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Data source health ────────────────────────────────────
+              // ── Data sources ───────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'DATA SOURCES',
@@ -312,7 +267,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Footer stats ──────────────────────────────────────────
+              // ── Footer ─────────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: DashboardFooter(
                   totalStations: liveLevels.length,
@@ -332,7 +287,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // Bottom padding for nav bar
               const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
           ],
@@ -343,7 +297,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _DashboardAppBar — SliverAppBar with live critical badge
+// _DashboardAppBar
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DashboardAppBar extends StatelessWidget {
@@ -378,19 +332,18 @@ class _DashboardAppBar extends StatelessWidget {
       pinned: true,
       floating: true,
       snap: true,
-      expandedHeight: 100,
+      expandedHeight: 56,
       backgroundColor: t.scaffoldBg,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      scrolledUnderElevation: 0.5,
+      scrolledUnderElevation: 1,
       shadowColor: t.stroke,
       title: Row(
         children: [
           AnimatedBuilder(
             animation: pulseCtrl,
             builder: (_, __) => Container(
-              width: 9,
-              height: 9,
+              width: 8, height: 8,
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -401,40 +354,34 @@ class _DashboardAppBar extends StatelessWidget {
                             alpha: 0.5 + pulseCtrl.value * 0.5)
                         : AppPalette.safe.withValues(
                             alpha: 0.5 + pulseCtrl.value * 0.5),
-                boxShadow: isOffline
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: (criticalCount > 0
-                                  ? AppPalette.critical
-                                  : AppPalette.safe)
-                              .withValues(alpha: pulseCtrl.value * 0.6),
-                          blurRadius: 8,
-                        ),
-                      ],
+                boxShadow: isOffline ? null : [
+                  BoxShadow(
+                    color: (criticalCount > 0
+                            ? AppPalette.critical
+                            : AppPalette.safe)
+                        .withValues(alpha: pulseCtrl.value * 0.7),
+                    blurRadius: 10,
+                  ),
+                ],
               ),
             ),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'OpsFlood',
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              Text('OpsFlood',
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                  )),
+              Text(subtitle,
+                  style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  )),
             ],
           ),
         ],
@@ -471,13 +418,12 @@ class _CriticalBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppPalette.critical.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppPalette.critical.withValues(alpha: 0.35)),
+        border: Border.all(color: AppPalette.critical.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.warning_rounded,
-              color: AppPalette.critical, size: 13),
+          const Icon(Icons.warning_rounded, color: AppPalette.critical, size: 13),
           const SizedBox(width: 4),
           Text(
             '$count critical',
@@ -494,17 +440,14 @@ class _CriticalBadge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _StatusBanner — offline / waking up ribbon
+// _StatusBanner
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatusBanner extends StatelessWidget {
   final RiverColors t;
   final bool isOffline, isWakingUp;
   const _StatusBanner({
-    required this.t,
-    required this.isOffline,
-    required this.isWakingUp,
-  });
+    required this.t, required this.isOffline, required this.isWakingUp});
 
   @override
   Widget build(BuildContext context) {
@@ -512,16 +455,14 @@ class _StatusBanner extends StatelessWidget {
     final msg   = isOffline
         ? 'No internet — showing last cached data'
         : 'Connecting to OpsFlood servers…';
-    final icon  = isOffline
-        ? Icons.wifi_off_rounded
-        : Icons.cloud_sync_rounded;
+    final icon  = isOffline ? Icons.wifi_off_rounded : Icons.cloud_sync_rounded;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Row(
@@ -529,24 +470,14 @@ class _StatusBanner extends StatelessWidget {
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              msg,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+            child: Text(msg,
+                style: TextStyle(
+                    color: color, fontSize: 12, fontWeight: FontWeight.w600))),
           if (isWakingUp)
             SizedBox(
-              width: 14,
-              height: 14,
+              width: 14, height: 14,
               child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: color,
-              ),
-            ),
+                  strokeWidth: 2, color: color)),
         ],
       ),
     );
@@ -554,10 +485,298 @@ class _StatusBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _KpiStrip — 4 animated summary KPI cards
+// _HeroGauge — full-width arc gauge showing avg capacity
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _KpiStrip extends StatelessWidget {
+class _HeroGauge extends StatelessWidget {
+  final RiverColors t;
+  final List<FloodData> levels;
+  final int criticalCount;
+  final Animation<double> gaugeAnim;
+  final AnimationController pulseCtrl;
+  final bool reduceMotion;
+
+  const _HeroGauge({
+    required this.t,
+    required this.levels,
+    required this.criticalCount,
+    required this.gaugeAnim,
+    required this.pulseCtrl,
+    required this.reduceMotion,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final avgCap = levels.isEmpty
+        ? 0.0
+        : levels.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
+            levels.length;
+
+    final gaugeColor = avgCap > 80
+        ? AppPalette.critical
+        : avgCap > 60
+            ? AppPalette.warning
+            : AppPalette.safe;
+
+    final statusLabel = criticalCount > 0
+        ? '$criticalCount CRITICAL'
+        : avgCap > 80
+            ? 'HIGH RISK'
+            : avgCap > 60
+                ? 'ELEVATED'
+                : 'ALL CLEAR';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: gaugeColor.withValues(alpha: 0.25)),
+        // Subtle top glow matching gauge colour
+        boxShadow: [
+          BoxShadow(
+            color: gaugeColor.withValues(alpha: 0.10),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Arc gauge
+          AnimatedBuilder(
+            animation: gaugeAnim,
+            builder: (_, __) {
+              return SizedBox(
+                height: 140,
+                child: CustomPaint(
+                  painter: _ArcGaugePainter(
+                    value: avgCap / 100 * gaugeAnim.value,
+                    color: gaugeColor,
+                    trackColor: t.stroke,
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 20), // optical centre in arc
+                        Text(
+                          '${(avgCap * gaugeAnim.value).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w900,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                            letterSpacing: -1,
+                          ),
+                        ),
+                        Text(
+                          'AVG CAPACITY',
+                          style: TextStyle(
+                            color: t.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+
+          const SizedBox(height: 16),
+
+          // Status pill
+          AnimatedBuilder(
+            animation: pulseCtrl,
+            builder: (_, __) => Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: gaugeColor.withValues(
+                    alpha: reduceMotion
+                        ? 0.12
+                        : 0.08 + pulseCtrl.value * 0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: gaugeColor.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_riskIcon(criticalCount > 0
+                          ? 'CRITICAL'
+                          : avgCap > 80
+                              ? 'SEVERE'
+                              : 'NORMAL'),
+                      color: gaugeColor,
+                      size: 13),
+                  const SizedBox(width: 6),
+                  Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: gaugeColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Quick stats row below gauge
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _GaugeSubStat(
+                  t: t,
+                  label: 'STATIONS',
+                  value: '${levels.length}',
+                  icon: Icons.sensors_rounded),
+              _GaugeDivider(t: t),
+              _GaugeSubStat(
+                  t: t,
+                  label: 'RIVERS',
+                  value: '${levels.map((d) => d.riverName).whereType<String>().toSet().length}',
+                  icon: Icons.water_rounded),
+              _GaugeDivider(t: t),
+              _GaugeSubStat(
+                  t: t,
+                  label: 'STATES',
+                  value: '${levels.map((d) => d.state).toSet().length}',
+                  icon: Icons.map_rounded),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GaugeSubStat extends StatelessWidget {
+  final RiverColors t;
+  final String label, value;
+  final IconData icon;
+  const _GaugeSubStat(
+      {required this.t,
+      required this.label,
+      required this.value,
+      required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icon, color: t.textSecondary, size: 14),
+        const SizedBox(height: 4),
+        Text(value,
+            style: TextStyle(
+                color: t.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                fontFeatures: const [FontFeature.tabularFigures()])),
+        Text(label,
+            style: TextStyle(
+                color: t.textSecondary,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8)),
+      ],
+    );
+  }
+}
+
+class _GaugeDivider extends StatelessWidget {
+  final RiverColors t;
+  const _GaugeDivider({required this.t});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+        width: 1, height: 32, color: t.stroke);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _ArcGaugePainter — semicircular arc gauge
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ArcGaugePainter extends CustomPainter {
+  final double value; // 0.0 – 1.0
+  final Color color;
+  final Color trackColor;
+
+  const _ArcGaugePainter({
+    required this.value,
+    required this.color,
+    required this.trackColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height * 0.85; // push centre down so arc sits at bottom
+    final radius = math.min(cx, cy) * 0.92;
+    const startAngle = math.pi;
+    const sweepAngle = math.pi;
+
+    final trackPaint = Paint()
+      ..color = trackColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+
+    final valuePaint = Paint()
+      ..shader = SweepGradient(
+        colors: [color.withValues(alpha: 0.5), color],
+        startAngle: startAngle,
+        endAngle: startAngle + sweepAngle,
+      ).createShader(
+          Rect.fromCircle(center: Offset(cx, cy), radius: radius))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+
+    final rect =
+        Rect.fromCircle(center: Offset(cx, cy), radius: radius);
+
+    // Track
+    canvas.drawArc(rect, startAngle, sweepAngle, false, trackPaint);
+    // Value
+    if (value > 0) {
+      canvas.drawArc(
+          rect, startAngle, sweepAngle * value, false, valuePaint);
+    }
+
+    // Tip dot
+    if (value > 0.02) {
+      final tipAngle = startAngle + sweepAngle * value;
+      final tipX = cx + radius * math.cos(tipAngle);
+      final tipY = cy + radius * math.sin(tipAngle);
+      canvas.drawCircle(
+          Offset(tipX, tipY),
+          8,
+          Paint()..color = color);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ArcGaugePainter old) =>
+      old.value != value || old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _KpiGrid — 2×2 grid replacing old 4-column cramped strip
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _KpiGrid extends StatelessWidget {
   final RiverColors t;
   final List<FloodData> levels;
   final int criticalCount;
@@ -565,7 +784,7 @@ class _KpiStrip extends StatelessWidget {
   final AnimationController entryCtrl;
   final bool reduceMotion;
 
-  const _KpiStrip({
+  const _KpiGrid({
     required this.t,
     required this.levels,
     required this.criticalCount,
@@ -576,116 +795,138 @@ class _KpiStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final severeCount  = levels.where((d) =>
-        d.riskLevel.toUpperCase() == 'SEVERE').length;
-    final avgCapacity  = levels.isEmpty
+    final severeCount = levels
+        .where((d) => d.riskLevel.toUpperCase() == 'SEVERE')
+        .length;
+    final avgCap = levels.isEmpty
         ? 0.0
         : levels.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
             levels.length;
-    final normalCount  = levels.where((d) =>
-        d.riskLevel.toUpperCase() == 'NORMAL' ||
-        d.riskLevel.toUpperCase() == 'SAFE').length;
+    final normalCount = levels
+        .where((d) =>
+            d.riskLevel.toUpperCase() == 'NORMAL' ||
+            d.riskLevel.toUpperCase() == 'SAFE')
+        .length;
 
     final kpis = [
       _KpiItem(
-        label: 'CRITICAL',
-        value: '$criticalCount',
-        color: AppPalette.critical,
-        icon: Icons.warning_rounded,
-      ),
+          label: 'CRITICAL',
+          value: '$criticalCount',
+          color: AppPalette.critical,
+          icon: Icons.warning_rounded),
       _KpiItem(
-        label: 'SEVERE',
-        value: '$severeCount',
-        color: AppPalette.danger,
-        icon: Icons.warning_amber_rounded,
-      ),
+          label: 'SEVERE',
+          value: '$severeCount',
+          color: AppPalette.danger,
+          icon: Icons.warning_amber_rounded),
       _KpiItem(
-        label: 'AVG CAP',
-        value: '${avgCapacity.toStringAsFixed(0)}%',
-        color: avgCapacity > 80
-            ? AppPalette.critical
-            : avgCapacity > 60
-                ? AppPalette.warning
-                : AppPalette.safe,
-        icon: Icons.water_rounded,
-      ),
+          label: 'AVG CAPACITY',
+          value: '${avgCap.toStringAsFixed(0)}%',
+          color: avgCap > 80
+              ? AppPalette.critical
+              : avgCap > 60
+                  ? AppPalette.warning
+                  : AppPalette.safe,
+          icon: Icons.water_rounded),
       _KpiItem(
-        label: 'NORMAL',
-        value: '$normalCount',
-        color: AppPalette.safe,
-        icon: Icons.check_circle_rounded,
-      ),
+          label: 'NORMAL',
+          value: '$normalCount',
+          color: AppPalette.safe,
+          icon: Icons.check_circle_rounded),
     ];
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: GridView.count(
+        crossAxisCount: 2,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: 1.8,
         children: kpis.asMap().entries.map((e) {
-          final i    = e.key;
-          final kpi  = e.value;
-          return Expanded(
-            child: AnimatedBuilder(
-              animation: entryCtrl,
-              builder: (_, child) {
-                final delay = i * 0.08;
-                final p = ((entryCtrl.value - delay) / (1.0 - delay))
-                    .clamp(0.0, 1.0);
-                return Opacity(
-                  opacity: reduceMotion ? 1.0 : p,
-                  child: Transform.translate(
-                    offset: Offset(0, reduceMotion ? 0 : 20 * (1 - p)),
-                    child: child,
-                  ),
-                );
-              },
-              child: Container(
-                margin: EdgeInsets.only(right: i < kpis.length - 1 ? 8 : 0),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 12),
-                decoration: BoxDecoration(
-                  color: t.cardBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
+          final i   = e.key;
+          final kpi = e.value;
+          return AnimatedBuilder(
+            animation: entryCtrl,
+            builder: (_, child) {
+              final delay = i * 0.07;
+              final p = ((entryCtrl.value - delay) / (1.0 - delay))
+                  .clamp(0.0, 1.0);
+              return Opacity(
+                opacity: reduceMotion ? 1.0 : p,
+                child: Transform.translate(
+                  offset: Offset(0, reduceMotion ? 0 : 16 * (1 - p)),
+                  child: child,
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: t.cardBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
                     color: kpi.color.withValues(alpha: 0.20)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(kpi.icon, color: kpi.color, size: 18),
-                    const SizedBox(height: 8),
-                    AnimatedBuilder(
-                      animation: gaugeAnim,
-                      builder: (_, __) {
-                        final num = int.tryParse(kpi.value) ??
-                            double.tryParse(
-                                kpi.value.replaceAll('%', ''))?.toInt();
-                        final displayVal = num != null
-                            ? '${(num * gaugeAnim.value).round()}${kpi.value.contains('%') ? '%' : ''}'
-                            : kpi.value;
-                        return Text(
-                          displayVal,
+              ),
+              child: Row(
+                children: [
+                  // Left colour ring icon
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: kpi.color.withValues(alpha: 0.12),
+                      border: Border.all(
+                          color: kpi.color.withValues(alpha: 0.30),
+                          width: 1.5),
+                    ),
+                    child: Icon(kpi.icon, color: kpi.color, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedBuilder(
+                          animation: gaugeAnim,
+                          builder: (_, __) {
+                            final num = int.tryParse(kpi.value) ??
+                                double.tryParse(
+                                    kpi.value.replaceAll('%', ''))?.toInt();
+                            final displayVal = num != null
+                                ? '${(num * gaugeAnim.value).round()}${kpi.value.contains('%') ? '%' : ''}'
+                                : kpi.value;
+                            return Text(
+                              displayVal,
+                              style: TextStyle(
+                                color: t.textPrimary,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w900,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                                letterSpacing: -0.5,
+                              ),
+                            );
+                          },
+                        ),
+                        Text(
+                          kpi.label,
                           style: TextStyle(
-                            color: t.textPrimary,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures()
-                            ],
+                            color: t.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
-                    Text(
-                      kpi.label,
-                      style: TextStyle(
-                        color: t.textSecondary,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           );
@@ -699,16 +940,15 @@ class _KpiItem {
   final String label, value;
   final Color color;
   final IconData icon;
-  const _KpiItem({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
+  const _KpiItem(
+      {required this.label,
+      required this.value,
+      required this.color,
+      required this.icon});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SectionHeader — P2 visual weight upgrade
+// _SectionHeader — coloured accent pill + label
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -726,56 +966,37 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Subtle full-width divider — visually breaks sections apart
-        Divider(
-          height: 1,
-          thickness: 1,
-          color: t.stroke,
-          indent: 16,
-          endIndent: 16,
-        ),
-        Padding(
-          // top: 24 (was 20), bottom: 10 (was 8)
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-          child: Row(
-            children: [
-              // Accent colour pip left of icon — visual anchor for each section
-              Container(
-                width: 3,
-                height: 14,
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Icon(icon, color: color, size: 15),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  // P2: textPrimary @ 55% opacity (was textSecondary)
-                  // Result: label is clearly readable but stays subdued
-                  // relative to the card content directly below it.
-                  color: t.textPrimary.withValues(alpha: 0.55),
-                  fontSize: 12,            // was 10
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.5,      // was 0.8
-                ),
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 4, height: 18,
+            margin: const EdgeInsets.only(right: 10),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
-        ),
-      ],
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: t.textPrimary.withValues(alpha: 0.75),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _StationTile — individual river station row with animated capacity bar
+// _StationTile — redesigned with left colour accent bar + ring icon
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationTile extends StatelessWidget {
@@ -804,160 +1025,214 @@ class _StationTile extends StatelessWidget {
       animation: entryCtrl,
       builder: (_, child) {
         final delay = (index * 0.04).clamp(0.0, 0.7);
-        final p = ((entryCtrl.value - delay) / (1.0 - delay))
-            .clamp(0.0, 1.0);
+        final p = ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
         return Opacity(
           opacity: reduceMotion ? 1.0 : p,
           child: Transform.translate(
-            offset: Offset(reduceMotion ? 0 : 20 * (1 - p), 0),
+            offset: Offset(reduceMotion ? 0 : 16 * (1 - p), 0),
             child: child,
           ),
         );
       },
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: t.cardBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: t.stroke),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: col.withValues(alpha: 0.12),
-                  ),
-                  child: Icon(_riskIcon(data.riskLevel),
-                      color: col, size: 16),
+            // Left colour accent bar
+            Container(
+              width: 4,
+              decoration: BoxDecoration(
+                color: col,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  bottomLeft: Radius.circular(16),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        data.city,
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        '${data.riverName ?? 'River'} · ${data.state}',
-                        style: TextStyle(
-                          color: t.textSecondary,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${data.currentLevel.toStringAsFixed(2)} m',
-                      style: TextStyle(
-                        color: t.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: col.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        data.riskLevel,
-                        style: TextStyle(
-                          color: col,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 10),
-            AnimatedBuilder(
-              animation: gaugeAnim,
-              builder: (_, __) {
-                final animatedCap = cap * gaugeAnim.value;
-                return Column(
+            // Main content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Capacity',
-                          style: TextStyle(
-                            color: t.textSecondary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
+                        // Ring icon
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: col.withValues(alpha: 0.10),
+                            border: Border.all(
+                                color: col.withValues(alpha: 0.35),
+                                width: 1.5),
+                          ),
+                          child: Icon(_riskIcon(data.riskLevel),
+                              color: col, size: 15),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data.city,
+                                style: TextStyle(
+                                  color: t.textPrimary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              Text(
+                                '${data.riverName ?? 'River'} · ${data.state}',
+                                style: TextStyle(
+                                  color: t.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        Text(
-                          '${(data.capacityPercent * gaugeAnim.value).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            color: col,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '${data.currentLevel.toStringAsFixed(2)} m',
+                              style: TextStyle(
+                                color: t.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w900,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: col.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                data.riskLevel.toUpperCase(),
+                                style: TextStyle(
+                                  color: col,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: animatedCap,
-                        minHeight: 5,
-                        backgroundColor: t.stroke,
-                        color: col,
-                      ),
+
+                    const SizedBox(height: 10),
+
+                    // Gradient capacity bar
+                    AnimatedBuilder(
+                      animation: gaugeAnim,
+                      builder: (_, __) {
+                        final animatedCap = cap * gaugeAnim.value;
+                        final displayPct = (data.capacityPercent *
+                                gaugeAnim.value)
+                            .toStringAsFixed(0);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Capacity',
+                                    style: TextStyle(
+                                      color: t.textSecondary,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    )),
+                                Text('$displayPct%',
+                                    style: TextStyle(
+                                      color: col,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ],
+                                    )),
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: t.stroke,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: FractionallySizedBox(
+                                  widthFactor: animatedCap,
+                                  alignment: Alignment.centerLeft,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius:
+                                          BorderRadius.circular(6),
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          AppPalette.safe,
+                                          col,
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                  ],
-                );
-              },
-            ),
-            if (data.dangerLevel != null || data.warningLevel != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
-                  children: [
-                    if (data.warningLevel != null)
-                      _LevelChip(
-                        label: 'Warning',
-                        value: '${data.warningLevel!.toStringAsFixed(1)} m',
-                        color: AppPalette.warning,
+
+                    // Warning / Danger chips
+                    if (data.dangerLevel != null ||
+                        data.warningLevel != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(
+                          children: [
+                            if (data.warningLevel != null)
+                              _LevelChip(
+                                label: 'Warning',
+                                value:
+                                    '${data.warningLevel!.toStringAsFixed(1)} m',
+                                color: AppPalette.warning,
+                              ),
+                            if (data.dangerLevel != null) ...[
+                              const SizedBox(width: 6),
+                              _LevelChip(
+                                label: 'Danger',
+                                value:
+                                    '${data.dangerLevel!.toStringAsFixed(1)} m',
+                                color: AppPalette.danger,
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                    if (data.dangerLevel != null) ...[
-                      const SizedBox(width: 6),
-                      _LevelChip(
-                        label: 'Danger',
-                        value: '${data.dangerLevel!.toStringAsFixed(1)} m',
-                        color: AppPalette.danger,
-                      ),
-                    ],
                   ],
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -968,19 +1243,17 @@ class _StationTile extends StatelessWidget {
 class _LevelChip extends StatelessWidget {
   final String label, value;
   final Color color;
-  const _LevelChip({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  const _LevelChip(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Text(
         '$label $value',
@@ -995,7 +1268,7 @@ class _LevelChip extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _LoadingSkeleton — shimmer placeholders while service.isLoading
+// _LoadingSkeleton
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LoadingSkeleton extends StatefulWidget {
@@ -1014,9 +1287,7 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
   void initState() {
     super.initState();
     _shimmerCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat();
+      vsync: this, duration: const Duration(milliseconds: 1500))..repeat();
   }
 
   @override
@@ -1033,53 +1304,50 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
         final gradient = LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
-          colors: [
-            widget.t.stroke,
-            widget.t.cardBg,
-            widget.t.stroke,
-          ],
+          colors: [widget.t.stroke, widget.t.cardBg, widget.t.stroke],
           stops: [
             (_shimmerCtrl.value - 0.3).clamp(0.0, 1.0),
             _shimmerCtrl.value.clamp(0.0, 1.0),
             (_shimmerCtrl.value + 0.3).clamp(0.0, 1.0),
           ],
         );
-
         return Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              // Hero gauge skeleton
+              Container(
+                height: 220,
+                decoration: BoxDecoration(
+                  gradient: gradient,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 2×2 KPI skeleton
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: 1.8,
                 children: List.generate(
                   4,
-                  (i) => Expanded(
-                    child: Container(
-                      margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
-                      height: 80,
-                      decoration: BoxDecoration(
-                        gradient: gradient,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                  (_) => Container(
+                    decoration: BoxDecoration(
+                      gradient: gradient,
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
               ),
               const SizedBox(height: 20),
-              Container(
-                width: 120,
-                height: 10,
-                decoration: BoxDecoration(
-                  gradient: gradient,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-              const SizedBox(height: 12),
               ...List.generate(
-                5,
+                4,
                 (_) => Container(
                   margin: const EdgeInsets.only(bottom: 10),
-                  height: 90,
+                  height: 100,
                   decoration: BoxDecoration(
                     gradient: gradient,
                     borderRadius: BorderRadius.circular(16),
