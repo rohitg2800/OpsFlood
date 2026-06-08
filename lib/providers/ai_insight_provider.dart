@@ -10,14 +10,10 @@
 //   6. alertsProvider          — CWC alert watcher
 //
 // FIX SUMMARY:
-//   1. Added import of befiqr_cwc_service.dart so CwcStation is in scope.
-//   2. Removed the dead `stationsFut` variable (was `ref.read(liveLevelsProvider.notifier).state`
-//      which is wrong — liveLevelsProvider is a Provider<List<FloodData>>, not a StateNotifier).
-//      `ref.read(liveLevelsProvider)` on the next line already gives us the List<FloodData>.
-//   3. KosiBirpurReading field is `.levelM` (metres AMSL), NOT `.currentLevel`.
-//      Also corrected: kosiDanger comes from `data.dangerLevel`.
-//   4. Removed the nonsense `extension on Object? { void get _ {} }` hack
-//      and the broken `_ = stationsFut` assignment.
+//   1. befiqr_cwc_service.dart  → CwcStation type
+//   2. kosi_birpur_service.dart → KosiBirpurReading + kBirpurDangerLevel constant
+//   3. Removed dead stationsFut / broken `_ = stationsFut` lines
+//   4. KosiBirpurReading.levelM (not .currentLevel)
 //
 // Exports a StreamProvider<AiInsight> that auto-refreshes every 5 minutes.
 library;
@@ -27,7 +23,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/flood_data.dart';
-import '../services/befiqr_cwc_service.dart'; // FIX #1: CwcStation is defined here
+import '../services/befiqr_cwc_service.dart';   // CwcStation
+import '../services/kosi_birpur_service.dart';   // KosiBirpurReading, kBirpurDangerLevel
 import 'alerts_provider.dart';
 import 'cwc_provider.dart';
 import 'flood_providers.dart';
@@ -144,7 +141,7 @@ class AiInsight {
         stations:          const [],
         riverTrends:       const [],
         kosiLevel:         -1,
-        kosiDanger:        50,
+        kosiDanger:        kBirpurDangerLevel, // 214.00
         modelVersion:      '–',
         mlConfidence:      0,
         mlBackendLive:     false,
@@ -219,7 +216,6 @@ double _confidence({
 }
 
 List<RiverTrend> _buildTrends(List<FloodData> stations) {
-  // Group by river, pick highest-risk station per river
   final Map<String, FloodData> byRiver = {};
   for (final s in stations) {
     final key = (s.riverName ?? s.district).trim();
@@ -267,13 +263,10 @@ final aiInsightProvider = StreamProvider<AiInsight>((ref) async* {
 });
 
 Future<AiInsight> _buildInsight(Ref ref) async {
-  // ── WRD Bihar stations — synchronous read (Provider<List<FloodData>>) ─────
-  // FIX #2: liveLevelsProvider is a plain Provider, not a StateNotifier.
-  //         Use ref.read() directly — no .notifier, no .state.
+  // ── WRD Bihar stations ────────────────────────────────────────────────────────
   final stations = ref.read(liveLevelsProvider);
 
   // ── CWC stations (async FutureProvider) ───────────────────────────────────
-  // FIX #1: CwcStation is imported from befiqr_cwc_service.dart
   List<CwcStation> cwcStations = [];
   bool cwcLive = false;
   try {
@@ -285,14 +278,13 @@ Future<AiInsight> _buildInsight(Ref ref) async {
 
   // ── Kosi Birpur (synchronous AsyncValue read) ─────────────────────────────
   double kosiLevel  = -1;
-  double kosiDanger = kBirpurDangerLevel; // 214.00 from kosi_birpur_service.dart
+  double kosiDanger = kBirpurDangerLevel; // 214.00 — now resolved via import
   bool   kosiLive   = false;
   try {
     final kosiState = ref.read(kosiBirpurProvider);
-    // FIX #3: KosiBirpurReading field is .levelM (metres AMSL), NOT .currentLevel
     kosiState.whenData((data) {
-      kosiLevel  = data.levelM;      // ✅ correct field
-      kosiDanger = data.dangerLevel; // ✅ already correct in model
+      kosiLevel  = data.levelM;      // KosiBirpurReading.levelM (metres AMSL)
+      kosiDanger = data.dangerLevel;
       kosiLive   = true;
     });
   } catch (_) {}
@@ -311,10 +303,10 @@ Future<AiInsight> _buildInsight(Ref ref) async {
   final weatherState  = ref.read(weatherProvider);
   final wx            = weatherState.current;
   final imdLive       = wx != null;
-  final rainfall      = wx?.precipMm    ?? 0.0;
-  final humidity      = wx?.humidity.toDouble() ?? 0.0;
-  final tempC         = wx?.tempC       ?? 0.0;
-  final forecast      = weatherState.forecast; // List<WeatherDay>
+  final rainfall      = wx?.precipMm             ?? 0.0;
+  final humidity      = wx?.humidity.toDouble()  ?? 0.0;
+  final tempC         = wx?.tempC                ?? 0.0;
+  final forecast      = weatherState.forecast;   // List<WeatherDay>
   final forecastTotal = forecast.fold<double>(0, (sum, d) => sum + d.rainMm);
 
   // ── Alerts (synchronous StateNotifierProvider) ────────────────────────────
