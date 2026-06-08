@@ -1,5 +1,5 @@
 // lib/providers/flood_providers.dart
-// v4 — bridged to mergedStationsProvider
+// v5 — added realTimeProvider, criticalCountProvider, isWakingUpProvider
 //
 // All KPI values that DashboardScreen, OverviewCard, and any widget
 // consuming FloodData now come from the same WRD+CWC merged pipeline.
@@ -10,7 +10,37 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/flood_data.dart';
 import '../models/river_station.dart';
+import '../services/real_time_service.dart';
 import 'real_time_river_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// realTimeProvider — ChangeNotifierProvider wrapping the singleton RealTimeService
+// Used by DashboardScreen for: service.isLoading, service.lastFetchTime,
+// service.isWakingUp, service.criticalCount, service.refreshData()
+// ─────────────────────────────────────────────────────────────────────────────
+
+final realTimeProvider = ChangeNotifierProvider<RealTimeService>(
+  (ref) => RealTimeService(),
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// criticalCountProvider — alias used by DashboardScreen
+// Maps to mergedCriticalCountProvider (stations at/above danger level)
+// ─────────────────────────────────────────────────────────────────────────────
+
+final criticalCountProvider = Provider<int>((ref) =>
+    ref.watch(mergedCriticalCountProvider));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isWakingUpProvider — true while the initial WRD fetch is in-flight
+// and the station list is still empty ("cold start" / server wake-up).
+// ─────────────────────────────────────────────────────────────────────────────
+
+final isWakingUpProvider = Provider<bool>((ref) {
+  final loading  = ref.watch(wrdIsLoadingProvider);
+  final hasData  = ref.watch(mergedStationsProvider).isNotEmpty;
+  return loading && !hasData;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FloodSummary — a simple value object for dashboard KPI cards.
@@ -172,10 +202,7 @@ final isOfflineProvider = Provider<bool>((ref) =>
 final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   final stations = ref.watch(mergedStationsProvider);
   if (stations.isEmpty) return null;
-  // All WRD stations share the same fetchedAt; take the first one as proxy.
-  // The lastUpdated string on RiverStation is a formatted HH:mm, so we
-  // reconstruct a today-DateTime from it (good enough for "last updated" UI).
-  final raw = stations.first.lastUpdated; // e.g. "14:35"
+  final raw = stations.first.lastUpdated;
   if (raw == null || raw.isEmpty) return DateTime.now();
   final parts = raw.split(':');
   if (parts.length < 2) return DateTime.now();
@@ -187,17 +214,7 @@ final lastFetchTimeProvider = Provider<DateTime?>((ref) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMD / NDMA alert providers — used by AlertsScreen
-//
-// These are static stub lists that keep AlertsScreen compiling while a real
-// IMD/NDMA HTTP integration is wired in a future sprint. The screen correctly
-// displays river-station counts via mergedCriticalCountProvider; these lists
-// only populate the text-alert tiles.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Raw IMD alert maps — replace with a real FutureProvider once the IMD
-/// RSS/API integration is available.
 final imdAlertsProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
-
-/// Raw NDMA advisory maps — replace with a real FutureProvider once the NDMA
-/// API integration is available.
 final ndmaAdvisoriesProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);

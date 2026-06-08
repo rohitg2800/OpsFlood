@@ -1,238 +1,329 @@
 // lib/providers/ai_insight_provider.dart
-// v3 — reads mergedStationsProvider for ALL flood context
+// OpsFlood — AiInsight provider v4
 //
-// Changes:
-//   • Removed dependency on FloodData / liveLevelsProvider (stale source)
-//   • FloodContext now built from RiverStation list (real levels)
-//   • riskScoreProvider now also from mergedStations (see risk_score_provider)
-//   • weatherProvider kept as additional signal
-//   • stationSummary prompt includes actual current/warning/danger values
+// This file owns:
+//   • DataSourceHealth   enum  (live / offline)
+//   • RiverTrend         model (per-river velocity + danger%)
+//   • AiInsight          model (ALL fields consumed by ai_prediction_screen)
+//   • AiInsightNotifier  (builds AiInsight from merged providers)
+//   • aiInsightProvider  (AsyncNotifierProvider<AiInsight>)
 library;
 
-import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 
+import '../models/flood_data.dart';
 import '../models/river_station.dart';
-import 'real_time_river_provider.dart';
-import 'risk_score_provider.dart';
-import 'weather_provider.dart';
+import '../providers/real_time_river_provider.dart';
+import '../providers/weather_provider.dart';
+import '../providers/kosi_birpur_provider.dart';
+import '../services/kosi_birpur_service.dart';
 
-// ─── Config ────────────────────────────────────────────────────────────────────
-const _openRouterUrl = 'https://openrouter.ai/api/v1/chat/completions';
-const _aiModel       = 'google/gemini-2.5-flash-preview';
+// ─────────────────────────────────────────────────────────────────────────────
+// DataSourceHealth
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── AiInsight model ──────────────────────────────────────────────────────────
+enum DataSourceHealth { live, offline }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RiverTrend — velocity + danger% per river/station pair
+// ─────────────────────────────────────────────────────────────────────────────
+
+class RiverTrend {
+  final String river;
+  final String station;
+  final double velocityMperHr; // positive = rising, negative = falling
+  final double dangerPct;      // currentLevel / dangerLevel * 100
+
+  const RiverTrend({
+    required this.river,
+    required this.station,
+    required this.velocityMperHr,
+    required this.dangerPct,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AiInsight — rich model matching every field used by AiPredictionScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
 class AiInsight {
-  final String summary;      // 2-3 sentence plain-English brief
-  final String riskLevel;    // 'LOW' | 'MODERATE' | 'HIGH' | 'EXTREME'
-  final String actionAdvice; // recommended action
-  final List<String> keyPoints;
-  final String rawResponse;
-  final DateTime generatedAt;
-  final bool isLoading;
-  final String? error;
+  // ── Identity / status ─────────────────────────────────────────────────────
+  final String   overallRisk;    // 'LOW' | 'MODERATE' | 'HIGH' | 'EXTREME' | 'LOADING'
+  final double   confidence;     // 0–100
+  final int      stationCount;
+  final int      criticalCount;  // stations at/above dangerLevel
+  final int      severeCount;    // stations above warningLevel but below dangerLevel
+  final int      alertCount;     // criticalCount + severeCount
+  final double   dangerPercent;  // criticalCount / stationCount * 100
+  final DateTime lastFetched;
+
+  // ── Source health ─────────────────────────────────────────────────────────
+  final Map<String, DataSourceHealth> sources;
+
+  // ── Kosi @ Birpur ─────────────────────────────────────────────────────────
+  final double kosiLevel;   // metres AMSL (0 = unavailable)
+  final double kosiDanger;  // 214.00 AMSL
+
+  // ── River trends ──────────────────────────────────────────────────────────
+  final List<RiverTrend> riverTrends;
+
+  // ── Station list (FloodData objects for StationRiskRow) ──────────────────
+  final List<FloodData> stations;
+
+  // ── Weather / rainfall drivers ────────────────────────────────────────────
+  final double tempC;
+  final double humidity;
+  final double rainfallNow;    // current-hour precipitation mm
+  final double rainfall7dMm;
+  final double rainfallIndex;
+
+  // ── Forecast ──────────────────────────────────────────────────────────────
+  final List<WeatherDay> forecast;
+  final double forecastRainTotal;
+
+  // ── ML model metadata ─────────────────────────────────────────────────────
+  final String modelVersion;
+  final double mlConfidence;
+  final bool   mlBackendLive;
+
+  // ── Legacy / compat ───────────────────────────────────────────────────────
+  /// Kept so any old call site that used the v3 fields still compiles.
+  String get summary      => overallRisk;
+  String get riskLevel    => overallRisk;
+  String get actionAdvice => _actionFor(overallRisk);
+  String get sourceSummary =>
+      sources.entries.map((e) => '${e.key} ${e.value == DataSourceHealth.live ? "✓" : "✗"}').join('  ');
 
   const AiInsight({
-    required this.summary,
-    required this.riskLevel,
-    required this.actionAdvice,
-    required this.keyPoints,
-    required this.rawResponse,
-    required this.generatedAt,
-    this.isLoading = false,
-    this.error,
+    required this.overallRisk,
+    required this.confidence,
+    required this.stationCount,
+    required this.criticalCount,
+    required this.severeCount,
+    required this.alertCount,
+    required this.dangerPercent,
+    required this.lastFetched,
+    required this.sources,
+    required this.kosiLevel,
+    required this.kosiDanger,
+    required this.riverTrends,
+    required this.stations,
+    required this.tempC,
+    required this.humidity,
+    required this.rainfallNow,
+    required this.rainfall7dMm,
+    required this.rainfallIndex,
+    required this.forecast,
+    required this.forecastRainTotal,
+    required this.modelVersion,
+    required this.mlConfidence,
+    required this.mlBackendLive,
   });
 
-  static AiInsight loading() => AiInsight(
-    summary: '', riskLevel: '', actionAdvice: '',
-    keyPoints: [], rawResponse: '', generatedAt: DateTime.now(), isLoading: true,
+  /// Loading / error placeholder — never null.
+  factory AiInsight.empty() => AiInsight(
+    overallRisk:      'LOADING',
+    confidence:       0,
+    stationCount:     0,
+    criticalCount:    0,
+    severeCount:      0,
+    alertCount:       0,
+    dangerPercent:    0,
+    lastFetched:      DateTime.now(),
+    sources: const {
+      'CWC':  DataSourceHealth.offline,
+      'WRD':  DataSourceHealth.offline,
+      'IMD':  DataSourceHealth.offline,
+      'KOSI': DataSourceHealth.offline,
+    },
+    kosiLevel:        0,
+    kosiDanger:       kBirpurDangerLevel,
+    riverTrends:      const [],
+    stations:         const [],
+    tempC:            0,
+    humidity:         0,
+    rainfallNow:      0,
+    rainfall7dMm:     0,
+    rainfallIndex:    0,
+    forecast:         const [],
+    forecastRainTotal: 0,
+    modelVersion:     '–',
+    mlConfidence:     0,
+    mlBackendLive:    false,
   );
 
-  static AiInsight errorState(String msg) => AiInsight(
-    summary: 'Unable to generate insight.',
-    riskLevel: 'UNKNOWN',
-    actionAdvice: 'Check network and retry.',
-    keyPoints: [msg],
-    rawResponse: '', generatedAt: DateTime.now(), error: msg,
-  );
-}
-
-// ─── State notifier ────────────────────────────────────────────────────────────
-class AiInsightNotifier extends Notifier<AiInsight> {
-  Timer? _debounce;
-
-  @override
-  AiInsight build() {
-    // Trigger re-generation whenever merged stations or weather changes
-    final stations = ref.watch(mergedStationsProvider);
-    final wx       = ref.watch(weatherProvider);
-    final risk     = ref.watch(riskScoreProvider);
-
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(seconds: 3), () {
-      if (stations.isNotEmpty) _generate(stations, wx, risk);
-    });
-
-    return AiInsight.loading();
-  }
-
-  // ── Build the system prompt from live station data ───────────────────────────
-  String _buildPrompt(
-    List<RiverStation> stations,
-    WeatherData wx,
-    RiskScore risk,
-  ) {
-    final total    = stations.length;
-    final critical = stations.where((s) => s.dangerClass == DangerClass.extreme).toList();
-    final severe   = stations.where((s) => s.dangerClass == DangerClass.severe).toList();
-    final elevated = stations.where((s) => s.dangerClass == DangerClass.aboveNormal).toList();
-
-    // Top 5 worst stations
-    final top5 = stations.take(5).map((s) =>
-      '  • ${s.station} (${s.river}): ${s.current.toStringAsFixed(2)} m '
-      '/ danger ${s.danger.toStringAsFixed(2)} m '
-      '[${s.dangerClass.name.toUpperCase()}]'
-    ).join('\n');
-
-    return '''
-You are a flood early-warning AI for Bihar, India. Respond with a JSON object only — no markdown, no prose outside JSON.
-
-LIVE RIVER DATA (${DateTime.now().toIso8601String()}):
-- Total monitored stations: $total
-- EXTREME (above HFL): ${critical.length}
-- SEVERE (at danger level): ${severe.length}
-- ELEVATED (above warning): ${elevated.length}
-- Normal: ${stations.length - critical.length - severe.length - elevated.length}
-- Overall risk score: ${risk.overall.toStringAsFixed(1)}/100 [${risk.label}]
-
-Top 5 critical stations:
-$top5
-
-WEATHER:
-- Temperature: ${wx.tempC.toStringAsFixed(1)}°C
-- Humidity: ${wx.humidity}%
-- 7-day rainfall: ${wx.rainfall7dMm.toStringAsFixed(1)} mm
-- Rainfall index: ${wx.rainfallIndex.toStringAsFixed(0)}/100
-- Wind: ${wx.windKph.toStringAsFixed(0)} km/h
-
-Respond ONLY with this JSON schema:
-{
-  "summary": "<2-3 sentence situation brief>",
-  "riskLevel": "LOW|MODERATE|HIGH|EXTREME",
-  "actionAdvice": "<recommended immediate action>",
-  "keyPoints": ["<point 1>", "<point 2>", "<point 3>"]
-}
-''';
-  }
-
-  Future<void> _generate(
-    List<RiverStation> stations,
-    WeatherData wx,
-    RiskScore risk,
-  ) async {
-    state = AiInsight.loading();
-    try {
-      final apiKey = const String.fromEnvironment('OPENROUTER_KEY', defaultValue: '');
-      if (apiKey.isEmpty) {
-        // No API key — produce a rule-based insight from live data
-        state = _ruleBasedInsight(stations, risk);
-        return;
-      }
-
-      final res = await http.post(
-        Uri.parse(_openRouterUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://floodwatch.bihar.app',
-        },
-        body: jsonEncode({
-          'model': _aiModel,
-          'messages': [
-            {'role': 'user', 'content': _buildPrompt(stations, wx, risk)}
-          ],
-          'temperature': 0.2,
-          'max_tokens': 512,
-        }),
-      ).timeout(const Duration(seconds: 20));
-
-      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
-
-      final body    = jsonDecode(res.body) as Map;
-      final content = (body['choices'] as List).first['message']['content'] as String;
-
-      // Strip possible markdown code fences
-      final clean = content
-          .replaceAll(RegExp(r'```json\s*'), '')
-          .replaceAll(RegExp(r'```\s*'), '')
-          .trim();
-
-      final parsed = jsonDecode(clean) as Map;
-      state = AiInsight(
-        summary:      parsed['summary']      as String? ?? '',
-        riskLevel:    parsed['riskLevel']     as String? ?? risk.label,
-        actionAdvice: parsed['actionAdvice']  as String? ?? '',
-        keyPoints:    (parsed['keyPoints'] as List?)?.cast<String>() ?? [],
-        rawResponse:  content,
-        generatedAt:  DateTime.now(),
-      );
-    } catch (e) {
-      if (kDebugMode) debugPrint('[AiInsight] error: $e');
-      // Fall back to rule-based on any error
-      state = _ruleBasedInsight(stations, risk);
+  static String _actionFor(String risk) {
+    switch (risk.toUpperCase()) {
+      case 'EXTREME': return 'Evacuate low-lying areas immediately.';
+      case 'HIGH':    return 'Prepare evacuation kits. Monitor CWC alerts.';
+      case 'MODERATE':return 'Stay alert. Avoid riverbanks.';
+      default:        return 'Conditions normal. Routine monitoring.';
     }
   }
+}
 
-  // ── Offline / no-key rule-based fallback ─────────────────────────────────────
-  AiInsight _ruleBasedInsight(List<RiverStation> stations, RiskScore risk) {
-    final critical = stations.where((s) => s.dangerClass == DangerClass.extreme).toList();
-    final severe   = stations.where((s) => s.dangerClass == DangerClass.severe).toList();
-    final elevated = stations.where((s) => s.dangerClass == DangerClass.aboveNormal).toList();
+// ─────────────────────────────────────────────────────────────────────────────
+// AiInsightNotifier
+// ─────────────────────────────────────────────────────────────────────────────
 
-    final worstStation = stations.isNotEmpty ? stations.first : null;
+class AiInsightNotifier extends AsyncNotifier<AiInsight> {
+  @override
+  Future<AiInsight> build() async {
+    final stations  = ref.watch(mergedStationsProvider);
+    final weather   = ref.watch(weatherProvider);
+    final kosiAsync = ref.watch(kosiBirpurProvider);
 
-    final summary = worstStation == null
-        ? 'No live station data available.'
-        : '${stations.length} stations monitored across Bihar rivers. '
-          '${critical.length + severe.length} stations at or above danger level. '
-          'Worst: ${worstStation.station} (${worstStation.river}) '
-          'at ${worstStation.current.toStringAsFixed(2)} m '
-          '(danger: ${worstStation.danger.toStringAsFixed(2)} m).';
+    if (stations.isEmpty) return AiInsight.empty();
 
-    final advice = critical.isNotEmpty
-        ? 'Evacuate low-lying areas near ${critical.first.station} '
-          'on ${critical.first.river} river immediately.'
-        : severe.isNotEmpty
-            ? 'Issue flood warnings for areas around ${severe.first.station}.'
-            : elevated.isNotEmpty
-                ? 'Monitor ${elevated.first.station} — approaching warning level.'
-                : 'Continue routine monitoring. No immediate danger.';
+    // ── Station KPIs ────────────────────────────────────────────────────────
+    int critical = 0, severe = 0;
+    for (final s in stations) {
+      if (s.dangerClass == DangerClass.extreme ||
+          s.dangerClass == DangerClass.severe) {
+        critical++;
+      } else if (s.dangerClass == DangerClass.aboveNormal) {
+        severe++;
+      }
+    }
+    final total  = stations.length;
+    final alerts = critical + severe;
+
+    // ── Overall risk ─────────────────────────────────────────────────────────
+    final String overallRisk;
+    if (critical >= 5 || (critical > 0 && critical / total > 0.15)) {
+      overallRisk = 'EXTREME';
+    } else if (critical > 0 || severe >= 5) {
+      overallRisk = 'HIGH';
+    } else if (severe > 0 || alerts > 0) {
+      overallRisk = 'MODERATE';
+    } else {
+      overallRisk = 'LOW';
+    }
+
+    // ── Confidence (heuristic based on data completeness) ────────────────────
+    final hasCwc = stations.any((s) => s.dataSource?.contains('CWC') ?? false);
+    final hasWrd = stations.any((s) => s.dataSource?.contains('WRD') ?? false);
+    final hasWeather = weather.status == WeatherStatus.loaded;
+    final kosiOk = kosiAsync.asData?.value?.source != 'SEED';
+    double conf = 55;
+    if (hasCwc)    conf += 15;
+    if (hasWrd)    conf += 10;
+    if (hasWeather)conf += 15;
+    if (kosiOk)    conf += 5;
+    conf = conf.clamp(0, 99);
+
+    // ── FloodData list for station rows ──────────────────────────────────────
+    final floodList = stations.map(_toFloodData).toList();
+
+    // ── River trends ─────────────────────────────────────────────────────────
+    // Build per-river trends grouped by river name. Velocity is approximated
+    // from the capacity% as a synthetic rising/falling signal since we don't
+    // have a historical time-series in this sync path.
+    final riverMap = <String, List<RiverStation>>{};
+    for (final s in stations) {
+      riverMap.putIfAbsent(s.river, () => []).add(s);
+    }
+    final trends = <RiverTrend>[];
+    for (final entry in riverMap.entries) {
+      if (trends.length >= 6) break;
+      final list    = entry.value;
+      final maxStn  = list.reduce((a, b) => a.progressPct > b.progressPct ? a : b);
+      final dangerPct = maxStn.danger > 0
+          ? (maxStn.current / maxStn.danger * 100).clamp(0.0, 120.0)
+          : maxStn.progressPct;
+      // Synthetic velocity: capacity% above 70 => rising, below 50 => falling
+      final vel = dangerPct > 70 ? 0.08 : dangerPct > 50 ? 0.02 : -0.01;
+      trends.add(RiverTrend(
+        river:          entry.key,
+        station:        maxStn.station,
+        velocityMperHr: vel,
+        dangerPct:      dangerPct,
+      ));
+    }
+    trends.sort((a, b) => b.dangerPct.compareTo(a.dangerPct));
+
+    // ── Kosi ─────────────────────────────────────────────────────────────────
+    final kosiReading = kosiAsync.asData?.value;
+    final kosiLevel  = kosiReading?.levelM  ?? 0.0;
+    final kosiDanger = kosiReading?.dangerLevel ?? kBirpurDangerLevel;
+
+    // ── Source health map ─────────────────────────────────────────────────────
+    final sourceMap = <String, DataSourceHealth>{
+      'CWC':  hasCwc  ? DataSourceHealth.live : DataSourceHealth.offline,
+      'WRD':  hasWrd  ? DataSourceHealth.live : DataSourceHealth.offline,
+      'IMD':  hasWeather ? DataSourceHealth.live : DataSourceHealth.offline,
+      'KOSI': kosiOk  ? DataSourceHealth.live : DataSourceHealth.offline,
+    };
+
+    // ── Weather ───────────────────────────────────────────────────────────────
+    final tempC       = weather.tempC;
+    final humidity    = weather.humidity.toDouble();
+    final rainfallNow = weather.precipMm;
+    final rain7d      = weather.rainfall7dMm;
+    final forecast    = weather.forecast;
+    final rainTotal   = forecast.fold(0.0, (s, d) => s + d.rainMm);
 
     return AiInsight(
-      summary:      summary,
-      riskLevel:    risk.label,
-      actionAdvice: advice,
-      keyPoints: [
-        '${critical.length} stations at extreme (above HFL) level',
-        '${severe.length} stations at danger level',
-        '${elevated.length} stations above warning level',
-        'Overall risk: ${risk.overall.toStringAsFixed(1)}/100',
-      ],
-      rawResponse:  '',
-      generatedAt:  DateTime.now(),
+      overallRisk:      overallRisk,
+      confidence:       conf,
+      stationCount:     total,
+      criticalCount:    critical,
+      severeCount:      severe,
+      alertCount:       alerts,
+      dangerPercent:    total > 0 ? critical / total * 100 : 0,
+      lastFetched:      DateTime.now(),
+      sources:          sourceMap,
+      kosiLevel:        kosiLevel,
+      kosiDanger:       kosiDanger,
+      riverTrends:      trends,
+      stations:         floodList,
+      tempC:            tempC,
+      humidity:         humidity,
+      rainfallNow:      rainfallNow,
+      rainfall7dMm:     rain7d,
+      rainfallIndex:    weather.rainfallIndex,
+      forecast:         forecast,
+      forecastRainTotal: rainTotal,
+      modelVersion:     '3.2',
+      mlConfidence:     conf,
+      mlBackendLive:    false, // backend not yet wired
     );
-  }
-
-  void refresh() {
-    final stations = ref.read(mergedStationsProvider);
-    final wx       = ref.read(weatherProvider);
-    final risk     = ref.read(riskScoreProvider);
-    _generate(stations, wx, risk);
   }
 }
 
-final aiInsightProvider = NotifierProvider<AiInsightNotifier, AiInsight>(
-    AiInsightNotifier.new);
+final aiInsightProvider =
+    AsyncNotifierProvider<AiInsightNotifier, AiInsight>(
+  AiInsightNotifier.new,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: RiverStation → FloodData
+// ─────────────────────────────────────────────────────────────────────────────
+
+FloodData _toFloodData(RiverStation s) {
+  String risk;
+  switch (s.dangerClass) {
+    case DangerClass.extreme:     risk = 'CRITICAL'; break;
+    case DangerClass.severe:      risk = 'SEVERE';   break;
+    case DangerClass.aboveNormal: risk = 'MODERATE'; break;
+    default:                      risk = 'LOW';      break;
+  }
+  final cap = s.danger > 0
+      ? (s.current / s.danger * 100).clamp(0.0, 100.0)
+      : 0.0;
+  return FloodData(
+    city:                s.station,
+    district:            '',
+    state:               s.state,
+    riverName:           s.river,
+    currentLevel:        s.current,
+    warningLevel:        s.warning,
+    dangerLevel:         s.danger,
+    safeLevel:           s.warning * 0.75,
+    capacityPercent:     cap,
+    riskLevel:           risk,
+    status:              s.isLive ? 'LIVE' : 'ESTIMATED',
+    effectiveRainfallMm: 0.0,
+    lastUpdated:         DateTime.now(),
+  );
+}
