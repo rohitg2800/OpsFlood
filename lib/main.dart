@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'l10n/app_localizations.dart';           // ← ADD: needed for delegate
 import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
@@ -33,6 +34,7 @@ import 'screens/cwc_station_detail_screen.dart';
 import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
+import 'screens/map_screen.dart';               // ← ADD: flood command map
 import 'theme/app_theme.dart';
 import 'providers/theme_provider.dart';
 
@@ -83,7 +85,6 @@ class FloodWatchApp extends ConsumerWidget {
     final roboticTheme  = ref.watch(roboticThemeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
 
-    // Robotic mode swaps ThemeData live; all other modes use existing river themes.
     final lightTheme = (roboticTheme != null && !roboticTheme.isDark)
         ? roboticTheme.toFlutterTheme()
         : AppTheme.light;
@@ -98,7 +99,9 @@ class FloodWatchApp extends ConsumerWidget {
       theme:                  lightTheme,
       darkTheme:              darkTheme,
       themeMode:              themeNotifier.flutterMode,
+      // ── FIX: AppLocalizations.delegate MUST be first so context.l10n works ──
       localizationsDelegates: const [
+        AppLocalizations.delegate,                      // ← ADDED
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
@@ -146,6 +149,8 @@ class FloodWatchApp extends ConsumerWidget {
             return _fade(const LiveStationsScreen());
           case NewsFeedScreen.route:
             return _fade(const NewsFeedScreen());
+          case MapScreen.route:                          // ← ADDED
+            return _fade(const MapScreen());
           case '/city_detail':
             final cityName = settings.arguments as String? ?? '';
             return _fade(CityDetailScreen(cityName: cityName));
