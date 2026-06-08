@@ -1,11 +1,8 @@
-/// lib/widgets/dashboard/dashboard_widgets.dart
-/// Barrel export for all dashboard sub-widgets.
-/// Import this single file in dashboard_screen.dart:
-///   import '../widgets/dashboard/dashboard_widgets.dart';
-library;
-export 'command_header.dart';
-export 'hero_section.dart';
-export 'quick_access_grid.dart';
-export 'river_pulse_card.dart';
-export 'alert_activity_log.dart';
-export 'section_header.dart';
+// lib/widgets/dashboard/dashboard_widgets.dart
+// Barrel export — import this single file to access all dashboard widgets.
+export 'risk_color_helper.dart';
+export 'animated_area_chart.dart';
+export 'alert_log.dart';
+export 'system_stats.dart';
+export 'dashboard_footer.dart';
+export 'dashboard_empty_state.dart';
