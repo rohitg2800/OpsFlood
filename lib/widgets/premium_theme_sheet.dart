@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/theme_provider.dart';
 import '../theme/river_theme.dart';
 
-// ─── Premium filter colour swatches ──────────────────────────────────────────
+// ─── Premium filter colour swatches ────────────────────────────────────────────
 const _kFilters = [
   _FilterMeta(
     mode:     AppThemeMode.system,
@@ -30,24 +30,168 @@ const _kFilters = [
     isPremium: false,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.sunset,
-    label:    'Sunset Warm',
-    subtitle: 'Golden hour glow',
-    icon:     Icons.wb_twilight,
-    gradient: [Color(0xFF7B2D00), Color(0xFFE06000)],
+    mode:     AppThemeMode.amoled,
+    label:    'AMOLED',
+    subtitle: 'Pure black',
+    icon:     Icons.circle,
+    gradient: [Color(0xFF000000), Color(0xFF0A0A0A)],
+    isPremium: false,
+  ),
+  _FilterMeta(
+    mode:     AppThemeMode.saffron,
+    label:    'Saffron Tide',
+    subtitle: 'Warm & bold',
+    icon:     Icons.local_fire_department,
+    gradient: [Color(0xFF3D1A00), Color(0xFF7A3800)],
     isPremium: true,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.ocean,
-    label:    'Deep Ocean',
-    subtitle: 'Midnight depths',
-    icon:     Icons.water,
-    gradient: [Color(0xFF001428), Color(0xFF003366)],
+    mode:     AppThemeMode.emerald,
+    label:    'Emerald Delta',
+    subtitle: 'Rich greens',
+    icon:     Icons.eco,
+    gradient: [Color(0xFF00280F), Color(0xFF00501E)],
     isPremium: true,
   ),
 ];
 
-@immutable
+// ─── Sheet widget ──────────────────────────────────────────────────────────────────
+class PremiumThemeSheet extends ConsumerWidget {
+  const PremiumThemeSheet({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(themeModeProvider);
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0D1B2A),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // drag handle
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFF3A4A58),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'APPEARANCE',
+            style: TextStyle(
+              color: Color(0xFF00B4D8),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...List.generate(
+            _kFilters.length,
+            (i) => _FilterTile(
+              meta:      _kFilters[i],
+              isActive:  _kFilters[i].mode == current,
+              onTap: () {
+                ref.read(themeModeProvider.notifier).set(_kFilters[i].mode);
+                Navigator.of(context).pop();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Tile ──────────────────────────────────────────────────────────────────────────
+class _FilterTile extends StatelessWidget {
+  final _FilterMeta meta;
+  final bool        isActive;
+  final VoidCallback onTap;
+
+  const _FilterTile({
+    required this.meta,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: meta.gradient,
+            begin: Alignment.centerLeft,
+            end:   Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isActive
+                ? const Color(0xFF00B4D8)
+                : Colors.white.withValues(alpha: 0.06),
+            width: isActive ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(meta.icon, size: 18,
+                color: isActive ? const Color(0xFF00B4D8) : Colors.white54),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        meta.label,
+                        style: TextStyle(
+                          color: isActive ? Colors.white : Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (meta.isPremium) ...[const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF9A825).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFFF9A825).withValues(alpha: 0.4)),
+                          ),
+                          child: const Text('PRO', style: TextStyle(color: Color(0xFFF9A825), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(meta.subtitle, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                ],
+              ),
+            ),
+            if (isActive)
+              const Icon(Icons.check_circle_rounded, color: Color(0xFF00B4D8), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Meta ──────────────────────────────────────────────────────────────────────────
 class _FilterMeta {
   final AppThemeMode mode;
   final String       label;
@@ -55,202 +199,13 @@ class _FilterMeta {
   final IconData     icon;
   final List<Color>  gradient;
   final bool         isPremium;
+
   const _FilterMeta({
-    required this.mode, required this.label, required this.subtitle,
-    required this.icon, required this.gradient, required this.isPremium,
+    required this.mode,
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.gradient,
+    required this.isPremium,
   });
-}
-
-// ─── Public helper ────────────────────────────────────────────────────────────
-// FIX: use builder: (ctx) not builder: (_) so the sheet receives the correct
-// BuildContext that is still inside the root ProviderScope widget tree.
-void showPremiumThemeSheet(BuildContext context) {
-  showModalBottomSheet(
-    context:          context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (ctx) => const _PremiumThemeSheet(),
-  );
-}
-
-// ─── Sheet widget ─────────────────────────────────────────────────────────────
-class _PremiumThemeSheet extends ConsumerWidget {
-  const _PremiumThemeSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final current  = ref.watch(themeModeProvider);
-    final notifier = ref.read(themeModeProvider.notifier);
-    final rc       = RiverColors.of(context);
-
-    return Container(
-      decoration: BoxDecoration(
-        color:        rc.cardBgElevated,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(
-          top: BorderSide(color: rc.stroke, width: 1),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // drag handle
-              Container(
-                width: 40, height: 4,
-                decoration: BoxDecoration(
-                  color:        rc.stroke,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Icon(Icons.palette_outlined, color: rc.accent, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Select Theme',
-                    style: TextStyle(
-                      color:      rc.textPrimary,
-                      fontSize:   16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              ..._kFilters.map((f) => _FilterTile(
-                meta:      f,
-                isActive:  current == f.mode,
-                onTap:     () {
-                  notifier.setMode(f.mode);
-                  Navigator.pop(context);
-                },
-              )),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterTile extends StatelessWidget {
-  const _FilterTile({
-    required this.meta,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  final _FilterMeta meta;
-  final bool        isActive;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final rc = RiverColors.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color:        Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap:        onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve:    Curves.easeOutCubic,
-            padding:  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              gradient: isActive
-                  ? LinearGradient(colors: meta.gradient)
-                  : null,
-              color: isActive ? null : rc.cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isActive ? meta.gradient.last : rc.stroke,
-                width: isActive ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                // swatch circle
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: meta.gradient),
-                    shape:    BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.20), width: 1.5,
-                    ),
-                  ),
-                  child: Icon(meta.icon, color: Colors.white, size: 18),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            meta.label,
-                            style: TextStyle(
-                              color:      isActive ? Colors.white : rc.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize:   14,
-                            ),
-                          ),
-                          if (meta.isPremium) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color:        AppPalette.amber.withValues(alpha: 0.20),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                    color: AppPalette.amber.withValues(alpha: 0.50)),
-                              ),
-                              child: const Text(
-                                'PREMIUM',
-                                style: TextStyle(
-                                  color:      AppPalette.amber,
-                                  fontSize:   9,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        meta.subtitle,
-                        style: TextStyle(
-                          color:    isActive
-                              ? Colors.white.withValues(alpha: 0.75)
-                              : rc.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isActive)
-                  const Icon(Icons.check_circle, color: Colors.white, size: 22)
-                else
-                  Icon(Icons.circle_outlined, color: rc.stroke, size: 22),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
