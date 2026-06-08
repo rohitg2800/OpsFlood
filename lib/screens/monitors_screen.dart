@@ -1,16 +1,13 @@
 // lib/screens/monitors_screen.dart
-// OpsFlood — Monitors Screen  ·  PREMIUM REDESIGN  v2
+// OpsFlood — Monitors Screen  ·  PREMIUM REDESIGN  v3
 //
-// v2 changes (data-sync fix):
-//   • Data source switched from liveLevelsProvider (FloodData / old service)
-//     to mergedStationsProvider (RiverStation — WRD + CWC merged).
-//   • _bucket / _counts / _process all operate on RiverStation.
-//   • KPI counters use mergedCritical/Elevated/Normal count providers
-//     so Monitors shows exactly the same numbers as the Map and Alerts.
-//   • Station card shows real currentLevel, warning, danger, hfl from
-//     RiverStation — Birpur will now show 212.05 m not 0.00 m.
-//   • capacityPercent derived from RiverStation.progressPct (0–100).
-//   • dataSource badge shows CWC_FFEM / WRD_BIHAR_LIVE etc.
+// v3 crash-fix (IntrinsicHeight + GridView.count):
+//   • _StationCard: replaced IntrinsicHeight ← Row with Stack so the
+//     left accent bar can stretch without asking a viewport for intrinsics.
+//   • _ExpandedDetail: replaced GridView.count(shrinkWrap: true) with
+//     _DataGrid — a plain Column of Row<Expanded> tiles. No viewport.
+//   • _WxGrid: same treatment — Column of 3-column Rows, no GridView.
+//   • _DataTile: fixed height (72 px) via SizedBox instead of aspect ratio.
 // ignore_for_file: avoid_function_literals_in_foreach_calls
 library;
 
@@ -37,10 +34,10 @@ enum _RiskBucket { critical, severe, elevated, normal }
 
 _RiskBucket _bucket(RiverStation s) {
   switch (s.dangerClass) {
-    case DangerClass.extreme: return _RiskBucket.critical;
-    case DangerClass.severe:  return _RiskBucket.severe;
+    case DangerClass.extreme:     return _RiskBucket.critical;
+    case DangerClass.severe:      return _RiskBucket.severe;
     case DangerClass.aboveNormal: return _RiskBucket.elevated;
-    default: return _RiskBucket.normal;
+    default:                      return _RiskBucket.normal;
   }
 }
 
@@ -145,7 +142,6 @@ class _MonitorsScreenState extends ConsumerState<MonitorsScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    // ✅ Single merged source — same data as Map screen
     final allData = ref.watch(mergedStationsProvider);
     final rc      = RiverColors.of(context);
     final counts  = _counts(allData);
@@ -285,17 +281,14 @@ class _HeroSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total   = allData.length;
-    // avgCap derived from progressPct (0–100) on RiverStation
-    final avgCap  = total == 0
+    final total  = allData.length;
+    final avgCap = total == 0
         ? 0.0
         : allData.map((s) => s.progressPct).reduce((a, b) => a + b) / total;
     final critCount = counts[_RiskBucket.critical] ?? 0;
     final sevCount  = counts[_RiskBucket.severe]   ?? 0;
     final elvCount  = counts[_RiskBucket.elevated] ?? 0;
     final norCount  = counts[_RiskBucket.normal]   ?? 0;
-
-    // data-source label: prefer CWC if any station is from CWC
     final hasCwc = allData.any((s) => s.dataSource?.contains('CWC') ?? false);
     final sourceLabel = hasCwc ? 'Live CWC+WRD data' : 'Live WRD data';
 
@@ -658,7 +651,9 @@ class _RiskFilterChips extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Station Card  — now uses RiverStation
+// Station Card
+// FIX: replaced IntrinsicHeight+Row with Stack so the accent bar can
+//      stretch to full card height without requiring intrinsic layout pass.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationCard extends ConsumerStatefulWidget {
@@ -684,11 +679,9 @@ class _StationCardState extends ConsumerState<_StationCard>
   _RiskBucket  get _bk  => _bucket(s);
   Color        get _col => _bucketColor(_bk);
 
-  // progressPct is 0–100 (current as % of HFL)
   double get _lvlPct => s.progressPct.clamp(0.0, 100.0);
   double get _capPct => s.progressPct.clamp(0.0, 100.0);
 
-  // Fake 7-point sparkline
   List<double> get _sparkline {
     final seed = s.station.hashCode;
     final base = _capPct;
@@ -740,156 +733,160 @@ class _StationCardState extends ConsumerState<_StationCard>
             border: Border.all(color: _col.withValues(alpha: _expanded ? 0.40 : 0.20), width: _expanded ? 1.5 : 1.0),
             boxShadow: [BoxShadow(color: _col.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 4))],
           ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(width: 4,
-                    decoration: BoxDecoration(
-                      color: _col,
-                      borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(20), bottomLeft: Radius.circular(20)))),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Header row
-                        Row(children: [
-                          AnimatedBuilder(
-                            animation: _arcCtrl,
-                            builder: (_, __) => SizedBox(
-                              width: 48, height: 48,
-                              child: CustomPaint(
-                                painter: _MiniArcPainter(
-                                  value: (_lvlPct / 100 * _arcCtrl.value).clamp(0, 1),
-                                  color: _col, track: rc.stroke, strokeWidth: 5,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '${(_lvlPct * _arcCtrl.value).toStringAsFixed(0)}%',
-                                    style: TextStyle(color: _col, fontSize: 11, fontWeight: FontWeight.w900),
-                                  ),
-                                ),
+          // ✅ Stack replaces IntrinsicHeight+Row — accent bar uses
+          //    Positioned.fill so it never triggers intrinsic layout.
+          child: Stack(
+            children: [
+              // Left accent bar — stretches to whatever height the Column needs
+              Positioned(
+                left: 0, top: 0, bottom: 0,
+                child: Container(
+                  width: 4,
+                  decoration: BoxDecoration(
+                    color: _col,
+                    borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(20), bottomLeft: Radius.circular(20))),
+                ),
+              ),
+              // Card content shifted right by accent bar width
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header row
+                    Row(children: [
+                      AnimatedBuilder(
+                        animation: _arcCtrl,
+                        builder: (_, __) => SizedBox(
+                          width: 48, height: 48,
+                          child: CustomPaint(
+                            painter: _MiniArcPainter(
+                              value: (_lvlPct / 100 * _arcCtrl.value).clamp(0, 1),
+                              color: _col, track: rc.stroke, strokeWidth: 5,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${(_lvlPct * _arcCtrl.value).toStringAsFixed(0)}%',
+                                style: TextStyle(color: _col, fontSize: 11, fontWeight: FontWeight.w900),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(s.station,
-                                    style: TextStyle(color: rc.textPrimary, fontSize: 14, fontWeight: FontWeight.w800),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 2),
-                                Text(
-                                  [s.river, s.city, s.state].where((v) => v.isNotEmpty).join('  ·  '),
-                                  style: TextStyle(color: rc.textSecondary, fontSize: 11),
-                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(s.station,
+                                style: TextStyle(color: rc.textPrimary, fontSize: 14, fontWeight: FontWeight.w800),
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 2),
+                            Text(
+                              [s.river, s.city, s.state].where((v) => v.isNotEmpty).join('  ·  '),
+                              style: TextStyle(color: rc.textSecondary, fontSize: 11),
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
                             ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${s.current.toStringAsFixed(2)} m',
+                            style: TextStyle(color: rc.textPrimary, fontSize: 14, fontWeight: FontWeight.w900,
+                                fontFeatures: const [FontFeature.tabularFigures()]),
                           ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '${s.current.toStringAsFixed(2)} m',
-                                style: TextStyle(color: rc.textPrimary, fontSize: 14, fontWeight: FontWeight.w900,
-                                    fontFeatures: const [FontFeature.tabularFigures()]),
-                              ),
-                              const SizedBox(height: 3),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: _col.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: _col.withValues(alpha: 0.30)),
-                                ),
-                                child: Text(_bucketLabel(_bk),
-                                    style: TextStyle(color: _col, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            icon: AnimatedRotation(
-                              turns: _expanded ? 0.5 : 0,
-                              duration: const Duration(milliseconds: 280),
-                              child: Icon(Icons.expand_more_rounded, size: 20, color: rc.textSecondary),
+                          const SizedBox(height: 3),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _col.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: _col.withValues(alpha: 0.30)),
                             ),
-                            onPressed: () { HapticFeedback.selectionClick(); setState(() => _expanded = !_expanded); },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            child: Text(_bucketLabel(_bk),
+                                style: TextStyle(color: _col, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
                           ),
-                        ]),
+                        ],
+                      ),
+                      IconButton(
+                        icon: AnimatedRotation(
+                          turns: _expanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 280),
+                          child: Icon(Icons.expand_more_rounded, size: 20, color: rc.textSecondary),
+                        ),
+                        onPressed: () { HapticFeedback.selectionClick(); setState(() => _expanded = !_expanded); },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                    ]),
 
-                        const SizedBox(height: 10),
+                    const SizedBox(height: 10),
 
-                        // Sparkline + capacity bar
-                        Row(children: [
-                          SizedBox(width: 72, height: 28,
-                              child: CustomPaint(painter: _SparklinePainter(points: _sparkline, color: _col))),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                                  Text('Capacity', style: TextStyle(color: rc.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
-                                  Text('${_capPct.toStringAsFixed(0)}%',
-                                      style: TextStyle(color: _col, fontSize: 11, fontWeight: FontWeight.w800,
-                                          fontFeatures: const [FontFeature.tabularFigures()])),
-                                ]),
-                                const SizedBox(height: 4),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Container(
-                                    height: 7, color: rc.stroke,
-                                    child: AnimatedBuilder(
-                                      animation: _arcCtrl,
-                                      builder: (_, __) => FractionallySizedBox(
-                                        widthFactor: (_capPct / 100 * _arcCtrl.value).clamp(0, 1),
-                                        alignment: Alignment.centerLeft,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(6),
-                                            gradient: LinearGradient(colors: [AppPalette.safe, _col]),
-                                          ),
-                                        ),
+                    // Sparkline + capacity bar
+                    Row(children: [
+                      SizedBox(width: 72, height: 28,
+                          child: CustomPaint(painter: _SparklinePainter(points: _sparkline, color: _col))),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                              Text('Capacity', style: TextStyle(color: rc.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
+                              Text('${_capPct.toStringAsFixed(0)}%',
+                                  style: TextStyle(color: _col, fontSize: 11, fontWeight: FontWeight.w800,
+                                      fontFeatures: const [FontFeature.tabularFigures()])),
+                            ]),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                height: 7, color: rc.stroke,
+                                child: AnimatedBuilder(
+                                  animation: _arcCtrl,
+                                  builder: (_, __) => FractionallySizedBox(
+                                    widthFactor: (_capPct / 100 * _arcCtrl.value).clamp(0, 1),
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(6),
+                                        gradient: LinearGradient(colors: [AppPalette.safe, _col]),
                                       ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 5),
-                                Row(children: [
-                                  _MiniChip(label: 'W ${s.warning.toStringAsFixed(1)}m', color: AppPalette.warning),
-                                  const SizedBox(width: 6),
-                                  _MiniChip(label: 'D ${s.danger.toStringAsFixed(1)}m',  color: AppPalette.danger),
-                                  const SizedBox(width: 6),
-                                  _MiniChip(label: s.dataSource ?? 'LIVE',               color: rc.accent, icon: Icons.sensors_rounded),
-                                ]),
-                              ],
+                              ),
                             ),
-                          ),
-                        ]),
+                            const SizedBox(height: 5),
+                            Row(children: [
+                              _MiniChip(label: 'W ${s.warning.toStringAsFixed(1)}m', color: AppPalette.warning),
+                              const SizedBox(width: 6),
+                              _MiniChip(label: 'D ${s.danger.toStringAsFixed(1)}m',  color: AppPalette.danger),
+                              const SizedBox(width: 6),
+                              _MiniChip(label: s.dataSource ?? 'LIVE',               color: rc.accent, icon: Icons.sensors_rounded),
+                            ]),
+                          ],
+                        ),
+                      ),
+                    ]),
 
-                        if (!_expanded && hasWx) ...[
-                          const SizedBox(height: 8),
-                          _WxPillRow(wx: weatherState),
-                        ],
+                    if (!_expanded && hasWx) ...[
+                      const SizedBox(height: 8),
+                      _WxPillRow(wx: weatherState),
+                    ],
 
-                        if (_expanded) ...[
-                          const SizedBox(height: 10),
-                          _ExpandedDetail(rc: rc, station: s, wx: hasWx ? weatherState : null),
-                        ],
-                      ],
-                    ),
-                  ),
+                    if (_expanded) ...[
+                      const SizedBox(height: 10),
+                      _ExpandedDetail(rc: rc, station: s, wx: hasWx ? weatherState : null),
+                    ],
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -963,6 +960,8 @@ class _WxPill extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Expanded detail panel
+// FIX: GridView.count(shrinkWrap: true) replaced with _DataGrid — a plain
+//      Column of 3-column Rows. No viewport = no intrinsic-height crash.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ExpandedDetail extends StatelessWidget {
@@ -973,9 +972,19 @@ class _ExpandedDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = station;
-    final bk = _bucket(s);
+    final s   = station;
+    final bk  = _bucket(s);
     final col = _bucketColor(bk);
+
+    final stationTiles = [
+      _DataTile(rc: rc, icon: Icons.waves_rounded,         label: 'Current',  value: '${s.current.toStringAsFixed(2)} m',     color: col,                   highlight: true),
+      _DataTile(rc: rc, icon: Icons.warning_amber_rounded, label: 'Warning',  value: '${s.warning.toStringAsFixed(2)} m',     color: AppPalette.warning),
+      _DataTile(rc: rc, icon: Icons.dangerous_rounded,     label: 'Danger',   value: '${s.danger.toStringAsFixed(2)} m',      color: AppPalette.danger),
+      _DataTile(rc: rc, icon: Icons.height_rounded,        label: 'HFL',      value: '${s.hfl.toStringAsFixed(2)} m',         color: AppPalette.critical),
+      _DataTile(rc: rc, icon: Icons.percent_rounded,       label: 'Progress', value: '${s.progressPct.toStringAsFixed(1)}%',  color: rc.accent),
+      _DataTile(rc: rc, icon: Icons.sensors_rounded,       label: 'Source',   value: s.dataSource ?? '—',                    color: rc.textSecondary),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -983,19 +992,8 @@ class _ExpandedDetail extends StatelessWidget {
         const SizedBox(height: 12),
         _SectionLabel(rc: rc, label: 'STATION STATS', icon: Icons.sensors_rounded),
         const SizedBox(height: 8),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.6,
-          children: [
-            _DataTile(rc: rc, icon: Icons.waves_rounded,       label: 'Current', value: '${s.current.toStringAsFixed(2)} m', color: col, highlight: true),
-            _DataTile(rc: rc, icon: Icons.warning_amber_rounded, label: 'Warning', value: '${s.warning.toStringAsFixed(2)} m', color: AppPalette.warning),
-            _DataTile(rc: rc, icon: Icons.dangerous_rounded,   label: 'Danger',  value: '${s.danger.toStringAsFixed(2)} m',  color: AppPalette.danger),
-            _DataTile(rc: rc, icon: Icons.height_rounded,      label: 'HFL',     value: '${s.hfl.toStringAsFixed(2)} m',     color: AppPalette.critical),
-            _DataTile(rc: rc, icon: Icons.percent_rounded,     label: 'Progress', value: '${s.progressPct.toStringAsFixed(1)}%', color: rc.accent),
-            _DataTile(rc: rc, icon: Icons.sensors_rounded,     label: 'Source',  value: s.dataSource ?? '—',                color: rc.textSecondary),
-          ],
-        ),
+        // ✅ No GridView — manual 3-column rows
+        _DataGrid(tiles: stationTiles, gap: 8),
         if (wx != null) ...[
           const SizedBox(height: 14),
           _SectionLabel(rc: rc, label: 'WEATHER DATA', icon: Icons.cloud_rounded),
@@ -1003,6 +1001,33 @@ class _ExpandedDetail extends StatelessWidget {
           _WxGrid(rc: rc, wx: wx!),
         ],
       ],
+    );
+  }
+}
+
+// ── Manual 3-column grid — no viewport ───────────────────────────────────────
+class _DataGrid extends StatelessWidget {
+  final List<Widget> tiles;
+  final double gap;
+  const _DataGrid({required this.tiles, this.gap = 8});
+
+  @override
+  Widget build(BuildContext context) {
+    // Chunk into rows of 3
+    final rows = <Widget>[];
+    for (var i = 0; i < tiles.length; i += 3) {
+      final rowItems = tiles.sublist(i, math.min(i + 3, tiles.length));
+      // Pad to 3 so the last row aligns
+      while (rowItems.length < 3) rowItems.add(const SizedBox.shrink());
+      rows.add(Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rowItems.map((w) => Expanded(child: w)).toList(),
+      ));
+      if (i + 3 < tiles.length) rows.add(SizedBox(height: gap));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows,
     );
   }
 }
@@ -1022,6 +1047,7 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
+// ── Data tile — fixed height, no aspect ratio ─────────────────────────────────
 class _DataTile extends StatelessWidget {
   final RiverColors rc;
   final IconData icon;
@@ -1032,6 +1058,8 @@ class _DataTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      height: 72,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
       padding: const EdgeInsets.all(9),
       decoration: BoxDecoration(
         color: highlight ? color.withValues(alpha: 0.12) : rc.scaffoldBg,
@@ -1055,6 +1083,7 @@ class _DataTile extends StatelessWidget {
   }
 }
 
+// ── Weather grid — also uses _DataGrid, no GridView ───────────────────────────
 class _WxGrid extends StatelessWidget {
   final RiverColors rc;
   final WeatherData wx;
@@ -1064,21 +1093,17 @@ class _WxGrid extends StatelessWidget {
     final indexColor = wx.rainfallIndex > 70 ? AppPalette.danger
         : wx.rainfallIndex > 45 ? AppPalette.warning : AppPalette.cyan;
     final tiles = [
-      _DataTile(rc: rc, icon: Icons.thermostat_rounded,       label: 'Temperature', value: '${wx.tempC.toStringAsFixed(1)}°C', color: AppPalette.amber, highlight: wx.tempC > 38),
-      _DataTile(rc: rc, icon: Icons.device_thermostat_rounded, label: 'Feels Like', value: '${(wx.current?.feelsLikeC ?? wx.tempC).toStringAsFixed(1)}°C', color: AppPalette.amber),
-      _DataTile(rc: rc, icon: Icons.water_drop_rounded,        label: 'Humidity',   value: '${wx.humidity}%', color: const Color(0xFF64B5F6), highlight: wx.humidity > 85),
-      _DataTile(rc: rc, icon: Icons.grain_rounded,             label: '7-Day Rain', value: '${wx.rainfall7dMm.toStringAsFixed(1)} mm', color: AppPalette.cyan, highlight: wx.rainfall7dMm > 100),
-      _DataTile(rc: rc, icon: Icons.analytics_rounded,         label: 'Rain Index', value: '${wx.rainfallIndex.toStringAsFixed(0)}/100', color: indexColor, highlight: wx.rainfallIndex > 45),
-      _DataTile(rc: rc, icon: Icons.umbrella_rounded,          label: 'Precip Prob',value: '${wx.maxPrecipProb.toStringAsFixed(0)}%', color: AppPalette.amber, highlight: wx.maxPrecipProb > 70),
-      _DataTile(rc: rc, icon: Icons.air_rounded,               label: 'Wind Speed', value: '${wx.windKph.toStringAsFixed(0)} km/h', color: const Color(0xFF64B5F6)),
-      _DataTile(rc: rc, icon: Icons.wb_sunny_rounded,          label: 'UV Index',   value: (wx.current?.uvIndex ?? 0).toStringAsFixed(1), color: AppPalette.amber),
-      _DataTile(rc: rc, icon: Icons.water_rounded,             label: 'Precip Now', value: '${wx.precipMm.toStringAsFixed(1)} mm', color: AppPalette.cyan),
+      _DataTile(rc: rc, icon: Icons.thermostat_rounded,        label: 'Temperature', value: '${wx.tempC.toStringAsFixed(1)}°C',                               color: AppPalette.amber,           highlight: wx.tempC > 38),
+      _DataTile(rc: rc, icon: Icons.device_thermostat_rounded,  label: 'Feels Like',  value: '${(wx.current?.feelsLikeC ?? wx.tempC).toStringAsFixed(1)}°C',   color: AppPalette.amber),
+      _DataTile(rc: rc, icon: Icons.water_drop_rounded,         label: 'Humidity',    value: '${wx.humidity}%',                                                color: const Color(0xFF64B5F6),    highlight: wx.humidity > 85),
+      _DataTile(rc: rc, icon: Icons.grain_rounded,              label: '7-Day Rain',  value: '${wx.rainfall7dMm.toStringAsFixed(1)} mm',                       color: AppPalette.cyan,            highlight: wx.rainfall7dMm > 100),
+      _DataTile(rc: rc, icon: Icons.analytics_rounded,          label: 'Rain Index',  value: '${wx.rainfallIndex.toStringAsFixed(0)}/100',                     color: indexColor,                 highlight: wx.rainfallIndex > 45),
+      _DataTile(rc: rc, icon: Icons.umbrella_rounded,           label: 'Precip Prob', value: '${wx.maxPrecipProb.toStringAsFixed(0)}%',                        color: AppPalette.amber,           highlight: wx.maxPrecipProb > 70),
+      _DataTile(rc: rc, icon: Icons.air_rounded,                label: 'Wind Speed',  value: '${wx.windKph.toStringAsFixed(0)} km/h',                          color: const Color(0xFF64B5F6)),
+      _DataTile(rc: rc, icon: Icons.wb_sunny_rounded,           label: 'UV Index',    value: (wx.current?.uvIndex ?? 0).toStringAsFixed(1),                    color: AppPalette.amber),
+      _DataTile(rc: rc, icon: Icons.water_rounded,              label: 'Precip Now',  value: '${wx.precipMm.toStringAsFixed(1)} mm',                           color: AppPalette.cyan),
     ];
-    return GridView.count(
-      shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.6,
-      children: tiles,
-    );
+    return _DataGrid(tiles: tiles, gap: 8);
   }
 }
 
