@@ -6,6 +6,17 @@
 //   1. All fontSize values floored at 10px minimum (was: 7, 8, 9, 9.5, 11)
 //   2. _clock Timer isolated into _SosClockWidget — only the time Text
 //      rebuilds every second instead of the entire screen Column tree.
+//
+// P2 fixes applied (2026-06-08):
+//   3. All surface/text colours routed through RiverColors.of(context):
+//        AppPalette.abyss0       → t.scaffoldBg
+//        AppPalette.abyss2       → t.cardBg
+//        AppPalette.abyssStroke  → t.stroke (unused here but consistent)
+//        AppPalette.textWhite    → t.textPrimary
+//        AppPalette.textGrey     → t.textSecondary
+//        AppPalette.textDim      → t.textSecondary (dimmed via opacity)
+//      Status / alert colours (critical, cyan, amber, safe) remain as
+//      AppPalette.* constants — they are theme-invariant.
 library;
 
 import 'dart:async';
@@ -103,10 +114,7 @@ const _biharEmergency = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P1 FIX: Isolated SOS clock widget — only this rebuilds every second.
-// Previously the Timer called setState on _SosScreenState which caused
-// the entire screen Column (including SOS button + ListView) to rebuild
-// on every tick.
+// Isolated SOS clock widget — only this rebuilds every second.
 // ─────────────────────────────────────────────────────────────────────────────
 class _SosClockWidget extends StatefulWidget {
   const _SosClockWidget();
@@ -142,11 +150,13 @@ class _SosClockWidgetState extends State<_SosClockWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // P2: use theme token instead of hardcoded AppPalette.textDim
+    final t = RiverColors.of(context);
     return Text(
       'SYS $_timeStr · BSDMA / SDRF / NDRF',
-      style: const TextStyle(
-        color: AppPalette.textDim,
-        fontSize: 10, // P1 FIX: was 9
+      style: TextStyle(
+        color: t.textSecondary.withValues(alpha: 0.6),
+        fontSize: 10,
         letterSpacing: 1,
       ),
     );
@@ -163,7 +173,6 @@ class SosScreen extends StatefulWidget {
 class _SosScreenState extends State<SosScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
-  // P1 FIX: _clock Timer and _timeStr removed — now live in _SosClockWidget.
   bool _calling = false;
 
   @override
@@ -193,20 +202,24 @@ class _SosScreenState extends State<SosScreen>
 
   @override
   Widget build(BuildContext context) {
+    // P2: single context lookup, passed down to all sub-widgets
+    final t = RiverColors.of(context);
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      // P2: t.scaffoldBg (was AppPalette.abyss0)
+      backgroundColor: t.scaffoldBg,
       body: Column(
         children: [
-          _buildHeader(),
-          _buildSOSButton(),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+          _buildHeader(t),
+          _buildSOSButton(t),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Row(
               children: [
                 Text('BIHAR EMERGENCY CONTACTS',
                     style: TextStyle(
-                      color: AppPalette.textDim,
-                      fontSize: 10, // P1 FIX: was 9
+                      // P2: t.textSecondary (was AppPalette.textDim)
+                      color: t.textSecondary.withValues(alpha: 0.6),
+                      fontSize: 10,
                       fontWeight: FontWeight.w700, letterSpacing: 2,
                     )),
               ],
@@ -225,6 +238,7 @@ class _SosScreenState extends State<SosScreen>
                   desc: e.desc,
                   type: e.type,
                   color: col,
+                  t: t,
                   onCall: () => _call(e.number),
                 );
               },
@@ -235,10 +249,11 @@ class _SosScreenState extends State<SosScreen>
     );
   }
 
-  Widget _buildHeader() => Container(
+  Widget _buildHeader(RiverColors t) => Container(
     padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
     decoration: BoxDecoration(
-      color: AppPalette.abyss0,
+      // P2: t.scaffoldBg
+      color: t.scaffoldBg,
       border: Border(bottom:
           BorderSide(color: AppPalette.critical.withValues(alpha: 0.20))),
     ),
@@ -252,7 +267,8 @@ class _SosScreenState extends State<SosScreen>
               shape: BoxShape.circle,
               border:
                   Border.all(color: AppPalette.critical.withValues(alpha: 0.35)),
-              color: AppPalette.abyss2,
+              // P2: t.cardBg (was AppPalette.abyss2)
+              color: t.cardBg,
             ),
             child: const Icon(Icons.arrow_back_ios_new_rounded,
                 color: AppPalette.critical, size: 14),
@@ -268,7 +284,6 @@ class _SosScreenState extends State<SosScreen>
                     color: AppPalette.critical, fontSize: 13,
                     fontWeight: FontWeight.w800, letterSpacing: 2,
                   )),
-              // P1 FIX: Replaced inline Text + Timer.setState with isolated widget
               const _SosClockWidget(),
             ],
           ),
@@ -287,7 +302,7 @@ class _SosScreenState extends State<SosScreen>
             child: const Text('EMERGENCY',
                 style: TextStyle(
                   color: AppPalette.critical,
-                  fontSize: 10, // P1 FIX: was 8.5
+                  fontSize: 10,
                   fontWeight: FontWeight.w900, letterSpacing: 1.2,
                 )),
           ),
@@ -296,7 +311,7 @@ class _SosScreenState extends State<SosScreen>
     ),
   );
 
-  Widget _buildSOSButton() => Padding(
+  Widget _buildSOSButton(RiverColors t) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
     child: GestureDetector(
       onTap: () => _call('112'),
@@ -333,10 +348,11 @@ class _SosScreenState extends State<SosScreen>
                     letterSpacing: 3,
                   )),
               const SizedBox(height: 4),
-              const Text('NATIONAL EMERGENCY · BIHAR',
+              Text('NATIONAL EMERGENCY · BIHAR',
                   style: TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 10, // P1 FIX: was 9
+                    // P2: t.textSecondary (was AppPalette.textGrey)
+                    color: t.textSecondary,
+                    fontSize: 10,
                     letterSpacing: 2,
                   )),
             ],
@@ -350,12 +366,14 @@ class _SosScreenState extends State<SosScreen>
 class _ContactTile extends StatelessWidget {
   final String name, number, desc, type;
   final Color color;
+  final RiverColors t;
   final VoidCallback onCall;
 
   const _ContactTile({
     required this.name, required this.number,
     required this.desc, required this.type,
-    required this.color, required this.onCall,
+    required this.color, required this.t,
+    required this.onCall,
   });
 
   @override
@@ -364,7 +382,8 @@ class _ContactTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        // P2: t.cardBg (was AppPalette.abyss2)
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
@@ -385,15 +404,17 @@ class _ContactTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name,
-                    style: const TextStyle(
-                      color: AppPalette.textWhite,
+                    style: TextStyle(
+                      // P2: t.textPrimary (was AppPalette.textWhite)
+                      color: t.textPrimary,
                       fontSize: 11.5, fontWeight: FontWeight.w800,
                     )),
                 const SizedBox(height: 2),
                 Text(desc,
-                    style: const TextStyle(
-                      color: AppPalette.textGrey,
-                      fontSize: 10, // P1 FIX: was 9.5
+                    style: TextStyle(
+                      // P2: t.textSecondary (was AppPalette.textGrey)
+                      color: t.textSecondary,
+                      fontSize: 10,
                     )),
                 const SizedBox(height: 3),
                 Row(
@@ -409,7 +430,7 @@ class _ContactTile extends StatelessWidget {
                       child: Text(type,
                           style: TextStyle(
                             color: color,
-                            fontSize: 10, // P1 FIX: was 7
+                            fontSize: 10,
                             fontWeight: FontWeight.w800, letterSpacing: 0.8,
                           )),
                     ),

@@ -6,6 +6,18 @@
 //   1. All fontSize values floored at 10px minimum (was: 7, 7.5, 8, 8.5, 9)
 //   2. _clock Timer isolated into _HudClockWidget — only the time Text
 //      rebuilds every second instead of the entire screen tree.
+//
+// P2 fixes applied (2026-06-08):
+//   3. All surface/text colours routed through RiverColors.of(context):
+//        AppPalette.abyss0       → t.scaffoldBg
+//        AppPalette.abyss2       → t.cardBg
+//        AppPalette.abyss4       → t.cardBgElevated
+//        AppPalette.abyssStroke  → t.stroke
+//        AppPalette.textWhite    → t.textPrimary
+//        AppPalette.textGrey     → t.textSecondary
+//        AppPalette.textDim      → t.textSecondary (dimmed via opacity)
+//      Status colours (critical/danger/amber/safe/cyan) remain as
+//      AppPalette.* constants — they are theme-invariant.
 library;
 
 import 'dart:async';
@@ -29,9 +41,7 @@ const _biharDistricts = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// P1 FIX: Isolated clock widget — only this rebuilds every second.
-// Previously the Timer called setState on _AlertsScreenState which caused
-// the entire NestedScrollView + ListView tree to rebuild on every tick.
+// Isolated clock widget — only this rebuilds every second.
 // ─────────────────────────────────────────────────────────────────────────────
 class _HudClockWidget extends StatefulWidget {
   const _HudClockWidget();
@@ -65,11 +75,13 @@ class _HudClockWidgetState extends State<_HudClockWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // P2: use theme token instead of hardcoded AppPalette.textDim
+    final t = RiverColors.of(context);
     return Text(
       'SYS CLOCK $_timeStr · BSDMA FEED',
-      style: const TextStyle(
-        color: AppPalette.textDim,
-        fontSize: 10, // P1 FIX: was 9
+      style: TextStyle(
+        color: t.textSecondary.withValues(alpha: 0.6),
+        fontSize: 10,
         letterSpacing: 1,
       ),
     );
@@ -86,8 +98,6 @@ class AlertsScreen extends ConsumerStatefulWidget {
 class _AlertsScreenState extends ConsumerState<AlertsScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
-  // P1 FIX: _clock Timer and _timeStr removed from this class.
-  // The clock now lives entirely inside _HudClockWidget.
   String _filter = 'ALL';
   final _filters = ['ALL', 'CRITICAL', 'SEVERE', 'MODERATE', 'SAFE'];
 
@@ -107,6 +117,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final t          = RiverColors.of(context); // P2: single context lookup
     final imdAlerts  = ref.watch(imdAlertsProvider);
     final ndmaAlerts = ref.watch(ndmaAdvisoriesProvider);
     final allAlerts  = [...imdAlerts, ...ndmaAlerts];
@@ -119,35 +130,36 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
           }).toList();
 
     return Scaffold(
-      backgroundColor: AppPalette.abyss0,
+      // P2: t.scaffoldBg (was AppPalette.abyss0 — always deep black)
+      backgroundColor: t.scaffoldBg,
       body: NestedScrollView(
         headerSliverBuilder: (_, __) => [
-          SliverToBoxAdapter(child: _buildHUDHeader()),
-          SliverToBoxAdapter(child: _buildCommandStrip(allAlerts)),
-          SliverToBoxAdapter(child: _buildFilterBar()),
+          SliverToBoxAdapter(child: _buildHUDHeader(t)),
+          SliverToBoxAdapter(child: _buildCommandStrip(t, allAlerts)),
+          SliverToBoxAdapter(child: _buildFilterBar(t)),
         ],
         body: filtered.isEmpty
-            ? _NoSignal(label: 'NO ALERTS · BIHAR CLEAR')
+            ? _NoSignal(label: 'NO ALERTS · BIHAR CLEAR', t: t)
             : ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 itemCount: filtered.length,
-                itemBuilder: (_, i) => _AlertTile(raw: filtered[i]),
+                itemBuilder: (_, i) => _AlertTile(raw: filtered[i], t: t),
               ),
       ),
     );
   }
 
-  Widget _buildHUDHeader() {
+  Widget _buildHUDHeader(RiverColors t) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
       decoration: BoxDecoration(
-        color: AppPalette.abyss0,
+        // P2: t.scaffoldBg
+        color: t.scaffoldBg,
         border: Border(
             bottom: BorderSide(color: AppPalette.cyan.withValues(alpha: 0.15))),
       ),
       child: Row(
         children: [
-          // back
           GestureDetector(
             onTap: () => Navigator.pop(context),
             child: Container(
@@ -155,7 +167,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.30)),
-                color: AppPalette.abyss2,
+                // P2: t.cardBg (was AppPalette.abyss2)
+                color: t.cardBg,
               ),
               child: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: AppPalette.cyan, size: 14),
@@ -166,13 +179,12 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('ALERT COMMAND · BIHAR',
+                const Text('ALERT COMMAND · BIHAR',
                     style: TextStyle(
                       color: AppPalette.cyan,
                       fontSize: 13, fontWeight: FontWeight.w800,
                       letterSpacing: 2,
                     )),
-                // P1 FIX: Replaced inline Text + Timer.setState with isolated widget
                 const _HudClockWidget(),
               ],
             ),
@@ -203,7 +215,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                   const Text('LIVE',
                       style: TextStyle(
                         color: AppPalette.critical,
-                        fontSize: 10, // P1 FIX: was 9
+                        fontSize: 10,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.5,
                       )),
@@ -216,7 +228,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     );
   }
 
-  Widget _buildCommandStrip(List allAlerts) {
+  Widget _buildCommandStrip(RiverColors t, List allAlerts) {
     final counts = <String, int>{
       'CRITICAL': 0, 'SEVERE': 0, 'MODERATE': 0, 'SAFE': 0,
     };
@@ -242,28 +254,29 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Row(
-        children: tiles.map((t) => Expanded(
+        children: tiles.map((tile) => Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 3),
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: t.$3.withValues(alpha: 0.08),
+              color: tile.$3.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: t.$3.withValues(alpha: 0.25)),
+              border: Border.all(color: tile.$3.withValues(alpha: 0.25)),
             ),
             child: Column(
               children: [
-                Text('${t.$2}',
+                Text('${tile.$2}',
                     style: TextStyle(
-                      color: t.$3, fontSize: 18,
+                      color: tile.$3, fontSize: 18,
                       fontWeight: FontWeight.w900,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     )),
                 const SizedBox(height: 2),
-                Text(t.$1,
-                    style: const TextStyle(
-                      color: AppPalette.textDim,
-                      fontSize: 10, // P1 FIX: was 7
+                Text(tile.$1,
+                    style: TextStyle(
+                      // P2: t.textSecondary (was AppPalette.textDim)
+                      color: t.textSecondary.withValues(alpha: 0.6),
+                      fontSize: 10,
                       fontWeight: FontWeight.w700, letterSpacing: 0.8,
                     )),
               ],
@@ -274,7 +287,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildFilterBar(RiverColors t) {
     return SizedBox(
       height: 44,
       child: ListView(
@@ -290,16 +303,17 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
               margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: active ? col.withValues(alpha: 0.15) : AppPalette.abyss2,
+                color: active ? col.withValues(alpha: 0.15) : t.cardBg,
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                    color: active ? col : AppPalette.abyssStroke),
+                // P2: t.stroke (was AppPalette.abyssStroke)
+                border: Border.all(color: active ? col : t.stroke),
               ),
               child: Center(
                 child: Text(f,
                     style: TextStyle(
-                      color: active ? col : AppPalette.textDim,
-                      fontSize: 10, // P1 FIX: was 9
+                      // P2: t.textSecondary (was AppPalette.textDim)
+                      color: active ? col : t.textSecondary,
+                      fontSize: 10,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
                     )),
@@ -332,7 +346,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 // ─── Alert Tile ──────────────────────────────────────────────────────────────
 class _AlertTile extends StatelessWidget {
   final dynamic raw;
-  const _AlertTile({required this.raw});
+  final RiverColors t;
+  const _AlertTile({required this.raw, required this.t});
 
   String _f(String key, [String fb = '—']) {
     try {
@@ -368,14 +383,14 @@ class _AlertTile extends StatelessWidget {
           : rawDate;
     }
 
-    // District badge — highlight if it's a Bihar district
     final isBihar = _biharDistricts.any(
         (d) => area.toLowerCase().contains(d.toLowerCase()));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppPalette.abyss2,
+        // P2: t.cardBg (was AppPalette.abyss2)
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: col.withValues(alpha: 0.22)),
         boxShadow: [
@@ -386,7 +401,6 @@ class _AlertTile extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // top accent bar
           Container(
             height: 2,
             decoration: BoxDecoration(
@@ -419,8 +433,9 @@ class _AlertTile extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(title,
-                              style: const TextStyle(
-                                color: AppPalette.textWhite,
+                              style: TextStyle(
+                                // P2: t.textPrimary (was AppPalette.textWhite)
+                                color: t.textPrimary,
                                 fontSize: 12, fontWeight: FontWeight.w800,
                                 height: 1.3,
                               )),
@@ -428,14 +443,16 @@ class _AlertTile extends StatelessWidget {
                             const SizedBox(height: 3),
                             Row(
                               children: [
-                                const Icon(Icons.location_on_rounded,
-                                    color: AppPalette.textDim, size: 10),
+                                Icon(Icons.location_on_rounded,
+                                    // P2: t.textSecondary
+                                    color: t.textSecondary, size: 10),
                                 const SizedBox(width: 3),
                                 Text(area,
                                     style: TextStyle(
                                       color: isBihar
                                           ? AppPalette.cyan
-                                          : AppPalette.textGrey,
+                                          // P2: t.textSecondary
+                                          : t.textSecondary,
                                       fontSize: 10,
                                       fontWeight: isBihar
                                           ? FontWeight.w700
@@ -455,7 +472,7 @@ class _AlertTile extends StatelessWidget {
                                     child: const Text('BIHAR',
                                         style: TextStyle(
                                           color: AppPalette.cyan,
-                                          fontSize: 10, // P1 FIX: was 7
+                                          fontSize: 10,
                                           fontWeight: FontWeight.w800,
                                           letterSpacing: 0.8,
                                         )),
@@ -483,7 +500,7 @@ class _AlertTile extends StatelessWidget {
                                 .replaceAll('_', ' '),
                             style: TextStyle(
                               color: col,
-                              fontSize: 10, // P1 FIX: was 7.5
+                              fontSize: 10,
                               fontWeight: FontWeight.w900, letterSpacing: 0.8,
                             ),
                           ),
@@ -491,9 +508,10 @@ class _AlertTile extends StatelessWidget {
                         if (dateStr.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(dateStr,
-                              style: const TextStyle(
-                                color: AppPalette.textDim,
-                                fontSize: 10, // P1 FIX: was 8.5
+                              style: TextStyle(
+                                // P2: t.textSecondary
+                                color: t.textSecondary.withValues(alpha: 0.6),
+                                fontSize: 10,
                               )),
                         ],
                       ],
@@ -506,26 +524,31 @@ class _AlertTile extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(9),
                     decoration: BoxDecoration(
-                      color: AppPalette.abyss4,
+                      // P2: t.cardBgElevated (was AppPalette.abyss4)
+                      color: t.cardBgElevated,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppPalette.abyssStroke),
+                      // P2: t.stroke (was AppPalette.abyssStroke)
+                      border: Border.all(color: t.stroke),
                     ),
                     child: Text(desc,
-                        style: const TextStyle(
-                          color: AppPalette.textGrey,
+                        style: TextStyle(
+                          // P2: t.textSecondary
+                          color: t.textSecondary,
                           fontSize: 10.5, height: 1.55)),
                   ),
                 ],
                 if (source.isNotEmpty && source != '—') ...[
                   const SizedBox(height: 6),
                   Row(children: [
-                    const Icon(Icons.sensors_rounded,
-                        color: AppPalette.textDim, size: 10),
+                    Icon(Icons.sensors_rounded,
+                        // P2: t.textSecondary
+                        color: t.textSecondary.withValues(alpha: 0.6), size: 10),
                     const SizedBox(width: 4),
                     Text(source,
-                        style: const TextStyle(
-                          color: AppPalette.textDim,
-                          fontSize: 10, // P1 FIX: was 9
+                        style: TextStyle(
+                          // P2: t.textSecondary
+                          color: t.textSecondary.withValues(alpha: 0.6),
+                          fontSize: 10,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
                         )),
@@ -550,7 +573,8 @@ class _AlertTile extends StatelessWidget {
 // ─── No Signal ────────────────────────────────────────────────────────────────
 class _NoSignal extends StatelessWidget {
   final String label;
-  const _NoSignal({required this.label});
+  final RiverColors t;
+  const _NoSignal({required this.label, required this.t});
   @override
   Widget build(BuildContext context) => Center(
         child: Column(
@@ -562,7 +586,8 @@ class _NoSignal extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(colors: [
                   AppPalette.safe.withValues(alpha: 0.12),
-                  AppPalette.abyss2,
+                  // P2: t.cardBg
+                  t.cardBg,
                 ]),
                 border: Border.all(
                     color: AppPalette.safe.withValues(alpha: 0.25)),
@@ -572,15 +597,17 @@ class _NoSignal extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(label,
-                style: const TextStyle(
-                  color: AppPalette.textGrey, fontSize: 11,
+                style: TextStyle(
+                  // P2: t.textSecondary
+                  color: t.textSecondary, fontSize: 11,
                   fontWeight: FontWeight.w700, letterSpacing: 1.5,
                 )),
             const SizedBox(height: 6),
-            const Text('38 BIHAR DISTRICTS MONITORED',
+            Text('38 BIHAR DISTRICTS MONITORED',
                 style: TextStyle(
-                  color: AppPalette.textDim,
-                  fontSize: 10, // P1 FIX: was 9
+                  // P2: t.textSecondary (dimmed)
+                  color: t.textSecondary.withValues(alpha: 0.6),
+                  fontSize: 10,
                   letterSpacing: 1,
                 )),
           ],
