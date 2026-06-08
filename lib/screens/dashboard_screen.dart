@@ -997,6 +997,8 @@ class _SectionHeader extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _StationTile — redesigned with left colour accent bar + ring icon
+// Fix: IntrinsicHeight wraps the Row so CrossAxisAlignment.stretch gets a
+// finite height from the content Column instead of the unbounded list item.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationTile extends StatelessWidget {
@@ -1041,199 +1043,205 @@ class _StationTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: t.stroke),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Left colour accent bar
-            Container(
-              width: 4,
-              decoration: BoxDecoration(
-                color: col,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  bottomLeft: Radius.circular(16),
+        // FIX: IntrinsicHeight gives the Row a finite height derived from
+        // the content Column, resolving the "BoxConstraints forces an
+        // infinite height" crash when CrossAxisAlignment.stretch is used
+        // inside a SliverList item (which has unbounded height).
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left colour accent bar
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: col,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    bottomLeft: Radius.circular(16),
+                  ),
                 ),
               ),
-            ),
-            // Main content
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        // Ring icon
-                        Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: col.withValues(alpha: 0.10),
-                            border: Border.all(
-                                color: col.withValues(alpha: 0.35),
-                                width: 1.5),
+              // Main content
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          // Ring icon
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: col.withValues(alpha: 0.10),
+                              border: Border.all(
+                                  color: col.withValues(alpha: 0.35),
+                                  width: 1.5),
+                            ),
+                            child: Icon(_riskIcon(data.riskLevel),
+                                color: col, size: 15),
                           ),
-                          child: Icon(_riskIcon(data.riskLevel),
-                              color: col, size: 15),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data.city,
+                                  style: TextStyle(
+                                    color: t.textPrimary,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  '${data.riverName ?? 'River'} · ${data.state}',
+                                  style: TextStyle(
+                                    color: t.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                data.city,
+                                '${data.currentLevel.toStringAsFixed(2)} m',
                                 style: TextStyle(
                                   color: t.textPrimary,
                                   fontSize: 14,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w900,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures()
+                                  ],
                                 ),
                               ),
-                              Text(
-                                '${data.riverName ?? 'River'} · ${data.state}',
-                                style: TextStyle(
-                                  color: t.textSecondary,
-                                  fontSize: 11,
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: col.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  data.riskLevel.toUpperCase(),
+                                  style: TextStyle(
+                                    color: col,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.3,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              '${data.currentLevel.toStringAsFixed(2)} m',
-                              style: TextStyle(
-                                color: t.textPrimary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w900,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures()
+                        ],
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      // Gradient capacity bar
+                      AnimatedBuilder(
+                        animation: gaugeAnim,
+                        builder: (_, __) {
+                          final animatedCap = cap * gaugeAnim.value;
+                          final displayPct = (data.capacityPercent *
+                                  gaugeAnim.value)
+                              .toStringAsFixed(0);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Capacity',
+                                      style: TextStyle(
+                                        color: t.textSecondary,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      )),
+                                  Text('$displayPct%',
+                                      style: TextStyle(
+                                        color: col,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures()
+                                        ],
+                                      )),
                                 ],
                               ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: col.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                data.riskLevel.toUpperCase(),
-                                style: TextStyle(
-                                  color: col,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    // Gradient capacity bar
-                    AnimatedBuilder(
-                      animation: gaugeAnim,
-                      builder: (_, __) {
-                        final animatedCap = cap * gaugeAnim.value;
-                        final displayPct = (data.capacityPercent *
-                                gaugeAnim.value)
-                            .toStringAsFixed(0);
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Capacity',
-                                    style: TextStyle(
-                                      color: t.textSecondary,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    )),
-                                Text('$displayPct%',
-                                    style: TextStyle(
-                                      color: col,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures()
-                                      ],
-                                    )),
-                              ],
-                            ),
-                            const SizedBox(height: 5),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                height: 6,
-                                decoration: BoxDecoration(
-                                  color: t.stroke,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: FractionallySizedBox(
-                                  widthFactor: animatedCap,
-                                  alignment: Alignment.centerLeft,
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius:
-                                          BorderRadius.circular(6),
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          AppPalette.safe,
-                                          col,
-                                        ],
+                              const SizedBox(height: 5),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: t.stroke,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: FractionallySizedBox(
+                                    widthFactor: animatedCap,
+                                    alignment: Alignment.centerLeft,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        borderRadius:
+                                            BorderRadius.circular(6),
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            AppPalette.safe,
+                                            col,
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-
-                    // Warning / Danger chips
-                    if (data.dangerLevel != null ||
-                        data.warningLevel != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Row(
-                          children: [
-                            if (data.warningLevel != null)
-                              _LevelChip(
-                                label: 'Warning',
-                                value:
-                                    '${data.warningLevel!.toStringAsFixed(1)} m',
-                                color: AppPalette.warning,
-                              ),
-                            if (data.dangerLevel != null) ...[
-                              const SizedBox(width: 6),
-                              _LevelChip(
-                                label: 'Danger',
-                                value:
-                                    '${data.dangerLevel!.toStringAsFixed(1)} m',
-                                color: AppPalette.danger,
-                              ),
                             ],
-                          ],
-                        ),
+                          );
+                        },
                       ),
-                  ],
+
+                      // Warning / Danger chips
+                      if (data.dangerLevel != null ||
+                          data.warningLevel != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(
+                            children: [
+                              if (data.warningLevel != null)
+                                _LevelChip(
+                                  label: 'Warning',
+                                  value:
+                                      '${data.warningLevel!.toStringAsFixed(1)} m',
+                                  color: AppPalette.warning,
+                                ),
+                              if (data.dangerLevel != null) ...[
+                                const SizedBox(width: 6),
+                                _LevelChip(
+                                  label: 'Danger',
+                                  value:
+                                      '${data.dangerLevel!.toStringAsFixed(1)} m',
+                                  color: AppPalette.danger,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
