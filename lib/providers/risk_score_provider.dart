@@ -1,124 +1,98 @@
-import 'package:flutter/foundation.dart';
-import '../services/offline_cache_service.dart';
+// lib/providers/risk_score_provider.dart
+// v2 — uses mergedStationsProvider (was using stale FloodData / prediction)
+library;
 
-/// Resolves issue #19: AI-Based Flood Risk Indicator
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/river_station.dart';
+import 'real_time_river_provider.dart';
+
+// ─── RiskScore value object ───────────────────────────────────────────────────
 class RiskScore {
-  final String stationId;
-  final double score; // 0-100
-  final RiskZone zone;
-  final List<String> contributingFactors;
-  final double confidencePercent;
-  final DateTime updatedAt;
+  final double overall;       // 0-100
+  final double floodRisk;     // 0-100 (based on dangerClass distribution)
+  final double infrastructureRisk; // 0-100 (stations above danger)
+  final double populationRisk;     // 0-100 (critical stations weighted)
+  final String label;         // 'LOW' | 'MODERATE' | 'HIGH' | 'EXTREME'
+  final String summary;       // one-liner for dashboard
+  final int    criticalCount;
+  final int    severeCount;
+  final int    totalStations;
 
   const RiskScore({
-    required this.stationId,
-    required this.score,
-    required this.zone,
-    required this.contributingFactors,
-    required this.confidencePercent,
-    required this.updatedAt,
+    required this.overall,
+    required this.floodRisk,
+    required this.infrastructureRisk,
+    required this.populationRisk,
+    required this.label,
+    required this.summary,
+    required this.criticalCount,
+    required this.severeCount,
+    required this.totalStations,
   });
-
-  factory RiskScore.fromMap(Map<String, dynamic> map) => RiskScore(
-        stationId: map['station_id'] ?? '',
-        score: (map['score'] ?? 0.0).toDouble(),
-        zone: RiskZone.fromScore((map['score'] ?? 0.0).toDouble()),
-        contributingFactors:
-            List<String>.from(map['contributing_factors'] ?? []),
-        confidencePercent:
-            (map['confidence_percent'] ?? 0.0).toDouble(),
-        updatedAt: map['updated_at'] != null
-            ? DateTime.parse(map['updated_at'])
-            : DateTime.now(),
-      );
 }
 
-enum RiskZone {
-  low,    // 0-20
-  moderate, // 21-40
-  high,   // 41-60
-  veryHigh, // 61-80
-  critical; // 81-100
+// ─── Compute risk from live merged stations ───────────────────────────────────
+final riskScoreProvider = Provider<RiskScore>((ref) {
+  final stations = ref.watch(mergedStationsProvider);
 
-  static RiskZone fromScore(double score) {
-    if (score <= 20) return RiskZone.low;
-    if (score <= 40) return RiskZone.moderate;
-    if (score <= 60) return RiskZone.high;
-    if (score <= 80) return RiskZone.veryHigh;
-    return RiskZone.critical;
+  if (stations.isEmpty) {
+    return const RiskScore(
+      overall: 0, floodRisk: 0, infrastructureRisk: 0, populationRisk: 0,
+      label: 'LOADING', summary: 'Connecting to live data…',
+      criticalCount: 0, severeCount: 0, totalStations: 0,
+    );
   }
 
-  String get label {
-    switch (this) {
-      case RiskZone.low: return 'Low';
-      case RiskZone.moderate: return 'Moderate';
-      case RiskZone.high: return 'High';
-      case RiskZone.veryHigh: return 'Very High';
-      case RiskZone.critical: return 'Critical';
-    }
-  }
-}
+  final total    = stations.length;
+  final critical = stations.where((s) => s.dangerClass == DangerClass.extreme).length;
+  final severe   = stations.where((s) => s.dangerClass == DangerClass.severe).length;
+  final elevated = stations.where((s) => s.dangerClass == DangerClass.aboveNormal).length;
 
-class RiskScoreProvider extends ChangeNotifier {
-  final Map<String, RiskScore> _scores = {};
-  bool _isLoading = false;
-  String? _error;
+  // Flood risk: weighted by severity
+  final floodRisk = ((critical * 100 + severe * 70 + elevated * 40) /
+      (total * 100) * 100).clamp(0.0, 100.0);
 
-  Map<String, RiskScore> get scores => Map.unmodifiable(_scores);
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+  // Infrastructure: % of stations at or above danger level
+  final infraRisk = ((critical + severe) / total * 100).clamp(0.0, 100.0);
 
-  RiskScore? getScore(String stationId) => _scores[stationId];
+  // Population: heavily weighted by extreme stations
+  final popRisk   = ((critical * 2 + severe) / (total * 2 + 1) * 100).clamp(0.0, 100.0);
 
-  Future<void> fetchRiskScore(String stationId, String baseUrl) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  // Overall: weighted average
+  final overall   = (floodRisk * 0.5 + infraRisk * 0.3 + popRisk * 0.2).clamp(0.0, 100.0);
 
-    try {
-      // Try cache first
-      final cache = OfflineCacheService();
-      final cached = await cache.getCachedData('risk_$stationId');
-      if (cached != null) {
-        _scores[stationId] = RiskScore.fromMap(cached);
-        notifyListeners();
-      }
-
-      // TODO: Replace with actual HTTP call when online:
-      // final response = await http.get(Uri.parse('$baseUrl/api/v1/risk-score?station_id=$stationId'));
-      // if (response.statusCode == 200) {
-      //   final data = jsonDecode(response.body);
-      //   _scores[stationId] = RiskScore.fromMap(data);
-      //   await cache.cacheData('risk_$stationId', data);
-      // }
-
-      // Demo fallback score
-      if (!_scores.containsKey(stationId)) {
-        _scores[stationId] = RiskScore(
-          stationId: stationId,
-          score: 45.0,
-          zone: RiskZone.high,
-          contributingFactors: [
-            'Water level at 85% of danger threshold',
-            'IMD forecasts heavy rainfall in next 24h',
-            'Upstream stations showing rising trend',
-          ],
-          confidencePercent: 78.0,
-          updatedAt: DateTime.now(),
-        );
-      }
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('RiskScoreProvider error: $e');
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
+  String label;
+  String summary;
+  if (overall >= 70) {
+    label   = 'EXTREME';
+    summary = '$critical stations at extreme flood level. Immediate action required.';
+  } else if (overall >= 45) {
+    label   = 'HIGH';
+    summary = '${critical + severe} stations at danger level across Bihar rivers.';
+  } else if (overall >= 20) {
+    label   = 'MODERATE';
+    summary = '$elevated stations above warning level. Monitor closely.';
+  } else {
+    label   = 'LOW';
+    summary = 'Most stations (${stations.where((s) => s.dangerClass == DangerClass.normal).length}) within safe range.';
   }
 
-  Future<void> fetchAllDistrictScores(String baseUrl) async {
-    // TODO: Batch fetch district-level risk aggregation
-    // GET $baseUrl/api/v1/risk-score?scope=district
-    debugPrint('Fetching all district risk scores...');
-  }
-}
+  return RiskScore(
+    overall:            overall,
+    floodRisk:          floodRisk,
+    infrastructureRisk: infraRisk,
+    populationRisk:     popRisk,
+    label:              label,
+    summary:            summary,
+    criticalCount:      critical,
+    severeCount:        severe,
+    totalStations:      total,
+  );
+});
+
+// Convenience scalar
+final overallRiskScoreProvider = Provider<double>((ref) =>
+    ref.watch(riskScoreProvider).overall);
+
+final riskLabelProvider = Provider<String>((ref) =>
+    ref.watch(riskScoreProvider).label);

@@ -1,147 +1,210 @@
 // lib/providers/alerts_provider.dart
+// v3 — fully rewired to mergedStationsProvider
 //
-// OpsFlood — AlertsProvider (Riverpod v3)
-//
-// Riverpod v3 removed ChangeNotifierProvider.
-// Migrated to a plain ChangeNotifier exposed via ChangeNotifierProvider
-// shim — but since that's also gone, we use a Notifier<AlertsState>
-// pattern with a thin facade for backward-compat getters.
+// ALL counts, station-alert objects, and summary cards now derive from the
+// same WRD+CWC merged pipeline that powers the Map screen. No more
+// liveLevelsProvider / FloodData divergence.
 library;
 
-import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/threshold_alert.dart';
-import '../models/imd_alert.dart';
-import '../services/threshold_alert_service.dart';
-import 'flood_providers.dart';
+import '../models/river_station.dart';
+import 'real_time_river_provider.dart';
 
-// ── State model ──────────────────────────────────────────────────────────────
-class AlertsState {
-  final List<ThresholdAlert> cwcAlerts;
-  final List<ImdAlert>       imdAlerts;
-  final bool                 loading;
-  final String?              error;
+// ─── DangerClass → severity int (higher = worse) ──────────────────────────────
+int _severity(DangerClass dc) {
+  switch (dc) {
+    case DangerClass.extreme:     return 4;
+    case DangerClass.severe:      return 3;
+    case DangerClass.aboveNormal: return 2;
+    default:                      return 1;
+  }
+}
 
-  const AlertsState({
-    this.cwcAlerts = const [],
-    this.imdAlerts = const [],
-    this.loading   = false,
-    this.error,
+// ─── FloodAlert model ─────────────────────────────────────────────────────────
+class FloodAlert {
+  final String id;
+  final String title;
+  final String message;
+  final String severity;   // 'critical' | 'severe' | 'elevated' | 'normal'
+  final String source;     // 'CWC_FFEM' | 'WRD_BIHAR_LIVE' | 'IMD' | 'NDMA'
+  final String river;
+  final String station;
+  final String state;
+  final double currentLevel;
+  final double dangerLevel;
+  final double warningLevel;
+  final double progressPct;
+  final DateTime issuedAt;
+
+  const FloodAlert({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.severity,
+    required this.source,
+    required this.river,
+    required this.station,
+    required this.state,
+    required this.currentLevel,
+    required this.dangerLevel,
+    required this.warningLevel,
+    required this.progressPct,
+    required this.issuedAt,
   });
+}
 
-  AlertsState copyWith({
-    List<ThresholdAlert>? cwcAlerts,
-    List<ImdAlert>?       imdAlerts,
-    bool?                 loading,
-    String?               error,
-  }) => AlertsState(
-    cwcAlerts: cwcAlerts ?? this.cwcAlerts,
-    imdAlerts: imdAlerts ?? this.imdAlerts,
-    loading:   loading   ?? this.loading,
-    error:     error,
+// ─── Convert RiverStation → FloodAlert ────────────────────────────────────────
+FloodAlert _stationToAlert(RiverStation s) {
+  final dc = s.dangerClass;
+  String sev;
+  String title;
+  String msg;
+  switch (dc) {
+    case DangerClass.extreme:
+      sev   = 'critical';
+      title = '🔴 EXTREME FLOOD — ${s.station}';
+      msg   = '${s.station} (${s.river}) is at ${s.current.toStringAsFixed(2)} m, '
+              'above HFL ${s.hfl.toStringAsFixed(2)} m. Immediate evacuation advised.';
+      break;
+    case DangerClass.severe:
+      sev   = 'severe';
+      title = '🟠 DANGER LEVEL — ${s.station}';
+      msg   = '${s.station} (${s.river}) at ${s.current.toStringAsFixed(2)} m '
+              'exceeds danger mark ${s.danger.toStringAsFixed(2)} m.';
+      break;
+    case DangerClass.aboveNormal:
+      sev   = 'elevated';
+      title = '🟡 WARNING LEVEL — ${s.station}';
+      msg   = '${s.station} (${s.river}) at ${s.current.toStringAsFixed(2)} m '
+              'above warning level ${s.warning.toStringAsFixed(2)} m.';
+      break;
+    default:
+      sev   = 'normal';
+      title = '🟢 NORMAL — ${s.station}';
+      msg   = '${s.station} (${s.river}) at ${s.current.toStringAsFixed(2)} m, '
+              'within safe range.';
+  }
+  return FloodAlert(
+    id:           '${s.station}_${s.river}'.replaceAll(' ', '_'),
+    title:        title,
+    message:      msg,
+    severity:     sev,
+    source:       s.dataSource ?? 'LIVE',
+    river:        s.river,
+    station:      s.station,
+    state:        s.state,
+    currentLevel: s.current,
+    dangerLevel:  s.danger,
+    warningLevel: s.warning,
+    progressPct:  s.progressPct,
+    issuedAt:     DateTime.now(),
   );
-
-  List<ThresholdAlert> get active   => cwcAlerts.where((a) => a.level != AlertLevel.normal).toList();
-  List<ThresholdAlert> get critical => cwcAlerts.where((a) => a.level.requiresEmergency).toList();
-  int get badgeCount => ThresholdAlertService.instance.unreadCount;
 }
 
-// ── Notifier ───────────────────────────────────────────────────────────────────
-class AlertsNotifier extends Notifier<AlertsState> {
-  StreamSubscription<List<ThresholdAlert>>? _sub;
+// ─── 1. Full alert list sorted by severity ────────────────────────────────────
+/// All stations as FloodAlert objects, sorted worst-first.
+final stationAlertsProvider = Provider<List<FloodAlert>>((ref) {
+  final stations = ref.watch(mergedStationsProvider);
+  final alerts   = stations.map(_stationToAlert).toList();
+  alerts.sort((a, b) => _severity(_severityToDc(b.severity))
+      .compareTo(_severity(_severityToDc(a.severity))));
+  return alerts;
+});
 
-  @override
-  AlertsState build() {
-    Future.microtask(() => ThresholdAlertService.instance.start());
-
-    _sub = ThresholdAlertService.instance.stream.listen((alerts) {
-      state = state.copyWith(cwcAlerts: alerts, loading: false);
-    });
-
-    // Watch imdAlertsProvider and push into state
-    ref.listen<List<dynamic>>(imdAlertsProvider, (_, rawList) {
-      ingestImdAlerts(rawList);
-    });
-
-    ref.onDispose(() => _sub?.cancel());
-
-    return AlertsState(
-      cwcAlerts: List.of(ThresholdAlertService.instance.currentAlerts),
-    );
+DangerClass _severityToDc(String s) {
+  switch (s) {
+    case 'critical': return DangerClass.extreme;
+    case 'severe':   return DangerClass.severe;
+    case 'elevated': return DangerClass.aboveNormal;
+    default:         return DangerClass.normal;
   }
-
-  void ingestImdAlerts(List<dynamic> rawList) {
-    if (rawList.isEmpty) return;
-    final parsed = rawList.map(ImdAlert.fromRaw).toList()
-      ..sort((a, b) => b.severity.order.compareTo(a.severity.order));
-    final existing = {for (final a in state.imdAlerts) a.id: a};
-    final merged   = parsed.map((a) {
-      final old = existing[a.id];
-      return old != null ? a.copyWith(isNew: false) : a;
-    }).toList();
-    state = state.copyWith(imdAlerts: merged);
-  }
-
-  Future<void> refresh() async {
-    state = state.copyWith(loading: true);
-    try {
-      await ThresholdAlertService.instance.refresh();
-    } catch (e) {
-      state = state.copyWith(loading: false, error: e.toString());
-      if (kDebugMode) debugPrint('[AlertsNotifier] refresh error: $e');
-    }
-  }
-
-  Future<void> markAllSeen() async {
-    await ThresholdAlertService.instance.markAllSeen();
-    state = state.copyWith(
-      imdAlerts: state.imdAlerts.map((a) => a.copyWith(isNew: false)).toList(),
-    );
-  }
-
-  // ── Filter helpers (CWC tab) ───────────────────────────────────────────────
-  AlertLevel? _filterLevel;
-  String?     _filterState;
-  void setFilterLevel(AlertLevel? l) { _filterLevel = l; state = state.copyWith(); }
-  void setFilterState(String? s)     { _filterState = s; state = state.copyWith(); }
-  void clearFilters()                { _filterLevel = null; _filterState = null; state = state.copyWith(); }
-
-  List<ThresholdAlert> get filtered => state.cwcAlerts.where((a) {
-    if (_filterLevel != null && a.level != _filterLevel) return false;
-    if (_filterState != null && a.state != _filterState) return false;
-    return true;
-  }).toList();
 }
 
-// ── Providers ──────────────────────────────────────────────────────────────────
-final alertsProvider =
-    NotifierProvider<AlertsNotifier, AlertsState>(AlertsNotifier.new);
+// ─── 2. Filtered sub-lists ────────────────────────────────────────────────────
 
-final activeAlertsProvider = Provider<List<ThresholdAlert>>((ref) {
-  return ref.watch(alertsProvider).active;
-});
+/// Only critical (extreme) alerts.
+final criticalAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider)
+        .where((a) => a.severity == 'critical')
+        .toList());
 
-final criticalAlertsRiverProvider = Provider<List<ThresholdAlert>>((ref) {
-  return ref.watch(alertsProvider).critical;
-});
+/// Severe alerts (at danger but below HFL).
+final severeAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider)
+        .where((a) => a.severity == 'severe')
+        .toList());
 
-final alertBadgeCountProvider = Provider<int>((ref) {
-  return ref.watch(alertsProvider).badgeCount;
-});
+/// Elevated (above warning) alerts.
+final elevatedAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider)
+        .where((a) => a.severity == 'elevated')
+        .toList());
 
-final alertsLoadingProvider = Provider<bool>((ref) {
-  return ref.watch(alertsProvider).loading;
-});
+/// Normal (safe) station alerts.
+final normalAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider)
+        .where((a) => a.severity == 'normal')
+        .toList());
 
-final parsedImdAlertsProvider = Provider<List<ImdAlert>>((ref) {
-  return ref.watch(alertsProvider).imdAlerts;
-});
+// ─── 3. Count providers (match mergedStationsProvider counts exactly) ─────────
 
-// ── Backward-compat facade so callers using .active/.badgeCount still work ──
-// Any file that does: ref.watch(alertsProvider).active
-// still works because AlertsState exposes .active etc.
+/// Total station count.
+final alertTotalCountProvider = Provider<int>((ref) =>
+    ref.watch(mergedTotalCountProvider));
 
-/// Legacy type alias so screens that typed AlertsProvider still compile.
-typedef AlertsProvider = AlertsNotifier;
+/// Critical count (extreme DangerClass).
+final alertCriticalCountProvider = Provider<int>((ref) =>
+    ref.watch(criticalAlertsProvider).length);
+
+/// Severe count.
+final alertSevereCountProvider = Provider<int>((ref) =>
+    ref.watch(severeAlertsProvider).length);
+
+/// Elevated count (above warning).
+final alertElevatedCountProvider = Provider<int>((ref) =>
+    ref.watch(elevatedAlertsProvider).length);
+
+/// Normal / safe count.
+final alertNormalCountProvider = Provider<int>((ref) =>
+    ref.watch(normalAlertsProvider).length);
+
+/// Combined danger count = critical + severe (used by Alerts screen KPI bar).
+final alertDangerCountProvider = Provider<int>((ref) =>
+    ref.watch(alertCriticalCountProvider) +
+    ref.watch(alertSevereCountProvider));
+
+// ─── 4. Top-alert summary for dashboard / notification banners ───────────────
+
+/// Top 5 worst stations as alert objects.
+final topAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider).take(5).toList());
+
+/// Single worst alert (or null if no stations).
+final worstAlertProvider = Provider<FloodAlert?>((ref) =>
+    ref.watch(stationAlertsProvider).isNotEmpty
+        ? ref.watch(stationAlertsProvider).first
+        : null);
+
+/// Stations above ANY alert threshold (warning or higher).
+final activeAlertsProvider = Provider<List<FloodAlert>>((ref) =>
+    ref.watch(stationAlertsProvider)
+        .where((a) => a.severity != 'normal')
+        .toList());
+
+/// Count of stations above any alert threshold.
+final activeAlertCountProvider = Provider<int>((ref) =>
+    ref.watch(activeAlertsProvider).length);
+
+// ─── 5. Legacy aliases — kept so existing code compiles without changes ───────
+//       These all now delegate to the merged-data providers above.
+
+/// Legacy: total alert count.
+@Deprecated('Use alertTotalCountProvider')
+final mergedAlertCountProvider = alertTotalCountProvider;
+
+/// Legacy: critical-count alias used by old alerts_screen.
+final mergedCriticalAlertsCountProvider = alertCriticalCountProvider;
+
+/// Legacy: elevated-count alias used by old alerts_screen.
+final mergedElevatedAlertsCountProvider = alertElevatedCountProvider;
