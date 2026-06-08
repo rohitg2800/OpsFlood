@@ -3,54 +3,58 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/theme_provider.dart';
 import '../theme/river_theme.dart';
 
-// ─── Premium filter colour swatches ────────────────────────────────────────────
+// ─── Top-level helper called from settings_screen ─────────────────────────
+void showPremiumThemeSheet(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => Consumer(
+      builder: (ctx, ref, __) => const PremiumThemeSheet(),
+    ),
+  );
+}
+
+// ─── Filter metadata ───────────────────────────────────────────────────
 const _kFilters = [
   _FilterMeta(
-    mode:     AppThemeMode.system,
-    label:    'Auto',
-    subtitle: 'Follows device',
-    icon:     Icons.brightness_auto,
-    gradient: [Color(0xFF2A3A5C), Color(0xFF3A5080)],
+    mode:      AppThemeMode.system,
+    label:     'Auto',
+    subtitle:  'Follows device',
+    icon:      Icons.brightness_auto,
+    gradient:  [Color(0xFF2A3A5C), Color(0xFF3A5080)],
     isPremium: false,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.light,
-    label:    'Day River',
-    subtitle: 'Bright & clear',
-    icon:     Icons.wb_sunny,
-    gradient: [Color(0xFF0A1628), Color(0xFF1A3060)],
+    mode:      AppThemeMode.light,
+    label:     'Day River',
+    subtitle:  'Bright & clear',
+    icon:      Icons.wb_sunny,
+    gradient:  [Color(0xFF0A1628), Color(0xFF1A3060)],
     isPremium: false,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.dark,
-    label:    'Night River',
-    subtitle: 'Deep abyss',
-    icon:     Icons.nights_stay,
-    gradient: [Color(0xFF010810), Color(0xFF071525)],
+    mode:      AppThemeMode.dark,
+    label:     'Night River',
+    subtitle:  'Deep abyss',
+    icon:      Icons.nights_stay,
+    gradient:  [Color(0xFF010810), Color(0xFF071525)],
     isPremium: false,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.amoled,
-    label:    'AMOLED',
-    subtitle: 'Pure black',
-    icon:     Icons.circle,
-    gradient: [Color(0xFF000000), Color(0xFF0A0A0A)],
-    isPremium: false,
-  ),
-  _FilterMeta(
-    mode:     AppThemeMode.saffron,
-    label:    'Saffron Tide',
-    subtitle: 'Warm & bold',
-    icon:     Icons.local_fire_department,
-    gradient: [Color(0xFF3D1A00), Color(0xFF7A3800)],
+    mode:      AppThemeMode.sunset,
+    label:     'Sunset Warm',
+    subtitle:  'Warm & golden',
+    icon:      Icons.wb_twilight,
+    gradient:  [Color(0xFF3D1A00), Color(0xFF7A3800)],
     isPremium: true,
   ),
   _FilterMeta(
-    mode:     AppThemeMode.emerald,
-    label:    'Emerald Delta',
-    subtitle: 'Rich greens',
-    icon:     Icons.eco,
-    gradient: [Color(0xFF00280F), Color(0xFF00501E)],
+    mode:      AppThemeMode.ocean,
+    label:     'Deep Ocean',
+    subtitle:  'Cool blue depths',
+    icon:      Icons.water,
+    gradient:  [Color(0xFF00280F), Color(0xFF003A5C)],
     isPremium: true,
   ),
 ];
@@ -73,7 +77,6 @@ class PremiumThemeSheet extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // drag handle
           Center(
             child: Container(
               width: 36, height: 4,
@@ -97,10 +100,10 @@ class PremiumThemeSheet extends ConsumerWidget {
           ...List.generate(
             _kFilters.length,
             (i) => _FilterTile(
-              meta:      _kFilters[i],
-              isActive:  _kFilters[i].mode == current,
+              meta:     _kFilters[i],
+              isActive: _kFilters[i].mode == current,
               onTap: () {
-                ref.read(themeModeProvider.notifier).set(_kFilters[i].mode);
+                ref.read(themeModeProvider.notifier).setMode(_kFilters[i].mode);
                 Navigator.of(context).pop();
               },
             ),
@@ -113,15 +116,10 @@ class PremiumThemeSheet extends ConsumerWidget {
 
 // ─── Tile ──────────────────────────────────────────────────────────────────────────
 class _FilterTile extends StatelessWidget {
-  final _FilterMeta meta;
-  final bool        isActive;
+  final _FilterMeta  meta;
+  final bool         isActive;
   final VoidCallback onTap;
-
-  const _FilterTile({
-    required this.meta,
-    required this.isActive,
-    required this.onTap,
-  });
+  const _FilterTile({required this.meta, required this.isActive, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +189,7 @@ class _FilterTile extends StatelessWidget {
   }
 }
 
-// ─── Meta ──────────────────────────────────────────────────────────────────────────
+// ─── Meta model ──────────────────────────────────────────────────────────────────────
 class _FilterMeta {
   final AppThemeMode mode;
   final String       label;
@@ -199,7 +197,6 @@ class _FilterMeta {
   final IconData     icon;
   final List<Color>  gradient;
   final bool         isPremium;
-
   const _FilterMeta({
     required this.mode,
     required this.label,
