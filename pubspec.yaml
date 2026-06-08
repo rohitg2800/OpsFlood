@@ -54,11 +54,11 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.6
 
-  # ── Phase 2 ─────────────────────────────────────────────────────
-  # GPS — "Am I in danger?" proximity banner
+  # ── Phase 2 ─────────────────────────────────────────────────────────────────
+  # GPS — “Am I in danger?” proximity banner
   geolocator: ^13.0.4
 
-  # ── Phase 3 ─────────────────────────────────────────────────────
+  # ── Phase 3 ─────────────────────────────────────────────────────────────────
   # Real map tiles + GeoJSON overlays — Bihar River Map
   flutter_map: ^8.1.1
   latlong2:    ^0.9.1
@@ -83,6 +83,28 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   generate: true
+
   assets:
     - .env
     - assets/icon/
+    - assets/fonts/   # JetBrains Mono — required by ThemeRegistry terminal skins
+
+  fonts:
+    # ──────────────────────────────────────────────────────────────
+    # JetBrains Mono — used for all monospaced numbers in ThemeRegistry
+    # (monoLg / monoMd / monoSm tokens on both Deep-Space & Tactical-Ops skins)
+    #
+    # Download with the helper script:  scripts/download_fonts.sh
+    # Or manually from: https://www.jetbrains.com/lp/mono/
+    # Place .ttf files at: assets/fonts/
+    # ──────────────────────────────────────────────────────────────
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/JetBrainsMono-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700

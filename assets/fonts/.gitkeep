@@ -1,0 +1,3 @@
+# This directory holds JetBrains Mono .ttf files required by ThemeRegistry.
+# Run:  bash scripts/download_fonts.sh
+# to download all four weights automatically.
