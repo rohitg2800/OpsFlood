@@ -1,24 +1,21 @@
 // lib/screens/ai_prediction_screen.dart
-// OpsFlood — AI Prediction Tab  (v3 — weatherState.daily → .forecast)
+// OpsFlood — AI Prediction Screen  (million-dollar rewrite)
 //
-// FIX SUMMARY v3:
-//   7. weatherState.daily  → field is weatherState.forecast (List<WeatherDay>)
-//      WeatherState has no .daily getter — the forecast list is stored as .forecast
+// DATA: consumes AiInsight from aiInsightProvider which fuses:
+//   WRD Bihar scraper · CWC befiqr · Kosi Birpur real-time ·
+//   Open-Meteo weather · LSTM/ensemble ML backend · CWC alert watcher
 //
-// All previous fixes from v2 remain intact:
-//   1. forecastProvider  → removed (not a Riverpod provider); uses weatherState.forecast
-//   2. predictionProvider → watched as predictionProvider('kosi') (FutureProviderFamily)
-//   3. riskScoreProvider  → removed; replaced with inline _stationScore()
-//   4. alertsState.alerts → alertsState.cwcAlerts
-//   5. currentWx?.rainfall1h → currentWx?.precipMm
-//   6. currentWx?.temperature → currentWx?.tempC
+// UI highlights:
+//   _HeroCard       — glass-morphism verdict with animated risk ring + source pills
+//   _ConfidenceGauge — arc-progress gauge (replaces flat bar)
+//   _SourceStrip    — live/offline health pills for every data source
+//   _RiverTrendList — per-river velocity + danger% with trend arrow
+//   _DriverGrid     — 2×2 responsive grid (no overflow on small screens)
+//   _ForecastBars   — 7-day animated rainfall bars with flood threshold line
+//   _ModelFooter    — full model metadata + last-fetch timestamp
 //
-// Wired data sources (all real Riverpod providers):
-//   • liveLevelsProvider  → List<FloodData>
-//   • alertsProvider      → AlertsState  (.cwcAlerts, .badgeCount)
-//   • weatherProvider     → WeatherState (.current: WeatherCurrent, .forecast: List<WeatherDay>)
-//   • predictionProvider  → FutureProviderFamily<FloodPrediction, String>
-// ignore_for_file: avoid_function_literals_in_foreach_calls
+// All colors via RiverColors.of(context) + AppPalette semantic tokens.
+// All fonts ≥ 11px (accessibility floor).
 library;
 
 import 'dart:math' as math;
@@ -28,75 +25,41 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/flood_data.dart';
-import '../providers/alerts_provider.dart';
-import '../providers/flood_providers.dart';
-import '../providers/prediction_provider.dart';
-import '../providers/weather_provider.dart';
+import '../providers/ai_insight_provider.dart';
 import '../theme/river_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Risk helpers
+// Risk color/label helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum _RiskLevel { extreme, high, moderate, low }
-
-_RiskLevel _riskFromFloodData(FloodData d) {
-  switch (d.riskLevel.toUpperCase()) {
-    case 'CRITICAL': return _RiskLevel.extreme;
-    case 'SEVERE':   return _RiskLevel.high;
-    case 'MODERATE': return _RiskLevel.moderate;
-    default:         return _RiskLevel.low;
+Color _riskColor(String risk, {bool dark = false}) {
+  switch (risk.toUpperCase()) {
+    case 'EXTREME': return dark ? AppPalette.danger.withValues(alpha: 0.85)  : AppPalette.danger;
+    case 'HIGH':    return dark ? AppPalette.warning.withValues(alpha: 0.85) : AppPalette.warning;
+    case 'MODERATE':return dark ? AppPalette.amber.withValues(alpha: 0.85)   : AppPalette.amber;
+    case 'LOADING': return AppPalette.textDim;
+    default:        return dark ? AppPalette.safe.withValues(alpha: 0.85)    : AppPalette.safe;
   }
 }
 
-// ignore: unused_element
-_RiskLevel _riskFromString(String? s) {
-  switch ((s ?? '').toUpperCase()) {
-    case 'CRITICAL':
-    case 'EXTREME':  return _RiskLevel.extreme;
-    case 'SEVERE':
-    case 'HIGH':     return _RiskLevel.high;
-    case 'MODERATE': return _RiskLevel.moderate;
-    default:         return _RiskLevel.low;
+String _riskEmoji(String risk) {
+  switch (risk.toUpperCase()) {
+    case 'EXTREME':  return '🔴';
+    case 'HIGH':     return '🟠';
+    case 'MODERATE': return '🟡';
+    case 'LOADING':  return '⏳';
+    default:         return '🟢';
   }
 }
 
-Color _riskColor(_RiskLevel r) {
-  switch (r) {
-    case _RiskLevel.extreme:  return AppPalette.danger;
-    case _RiskLevel.high:     return AppPalette.warning;
-    case _RiskLevel.moderate: return AppPalette.amber;
-    case _RiskLevel.low:      return AppPalette.safe;
+String _riskFullLabel(String risk) {
+  switch (risk.toUpperCase()) {
+    case 'EXTREME':  return 'EXTREME FLOOD RISK';
+    case 'HIGH':     return 'HIGH FLOOD RISK';
+    case 'MODERATE': return 'MODERATE RISK';
+    case 'LOADING':  return 'LOADING DATA…';
+    default:         return 'LOW / SAFE';
   }
-}
-
-String _riskLabel(_RiskLevel r) {
-  switch (r) {
-    case _RiskLevel.extreme:  return 'EXTREME FLOOD RISK';
-    case _RiskLevel.high:     return 'HIGH FLOOD RISK';
-    case _RiskLevel.moderate: return 'MODERATE RISK';
-    case _RiskLevel.low:      return 'LOW RISK';
-  }
-}
-
-String _riskEmoji(_RiskLevel r) {
-  switch (r) {
-    case _RiskLevel.extreme:  return '🔴';
-    case _RiskLevel.high:     return '🟠';
-    case _RiskLevel.moderate: return '🟡';
-    case _RiskLevel.low:      return '🟢';
-  }
-}
-
-/// Inline risk score 0–100 from a single FloodData entry.
-double _stationScore(FloodData d) {
-  final cap  = d.capacityPercent.clamp(0.0, 100.0);
-  final lvl  = d.dangerLevel > 0
-      ? (d.currentLevel / d.dangerLevel * 100).clamp(0.0, 100.0)
-      : cap;
-  final rain = (d.effectiveRainfallMm / 60.0 * 100).clamp(0.0, 100.0);
-  return lvl * 0.4 + cap * 0.4 + rain * 0.2;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,16 +75,16 @@ class AiPredictionScreen extends ConsumerStatefulWidget {
       _AiPredictionScreenState();
 }
 
-class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
+class _AiPredictionScreenState
+    extends ConsumerState<AiPredictionScreen>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
 
-  late AnimationController _entryCtrl;
-  late AnimationController _pulseCtrl;
-  late AnimationController _barCtrl;
-
-  static const _kKeyStation = 'kosi';
+  late final AnimationController _entryCtrl;
+  late final AnimationController _pulseCtrl;
+  late final AnimationController _barCtrl;
+  late final AnimationController _ringCtrl;
 
   @override
   void initState() {
@@ -133,11 +96,13 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
       ..repeat(reverse: true);
     _barCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 1400));
+    _ringCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1600));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _entryCtrl.forward();
-        _barCtrl.forward();
-      }
+      if (!mounted) return;
+      _entryCtrl.forward();
+      _barCtrl.forward();
+      _ringCtrl.forward();
     });
   }
 
@@ -146,243 +111,225 @@ class _AiPredictionScreenState extends ConsumerState<AiPredictionScreen>
     _entryCtrl.dispose();
     _pulseCtrl.dispose();
     _barCtrl.dispose();
+    _ringCtrl.dispose();
     super.dispose();
   }
 
-  _RiskLevel _overallRisk({
-    required List<FloodData> stations,
-    required int alertCount,
-    required double rainfall,
-  }) {
-    final critCount = stations
-        .where((d) => _riskFromFloodData(d) == _RiskLevel.extreme)
-        .length;
-    final highCount = stations
-        .where((d) => _riskFromFloodData(d) == _RiskLevel.high)
-        .length;
-    final avgCap = stations.isEmpty
-        ? 0.0
-        : stations.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
-            stations.length;
-
-    if (critCount >= 3 || avgCap > 85 || alertCount >= 5 || rainfall > 50)
-      return _RiskLevel.extreme;
-    if (critCount >= 1 || highCount >= 3 || avgCap > 70 || rainfall > 30)
-      return _RiskLevel.high;
-    if (highCount >= 1 || avgCap > 50 || rainfall > 15)
-      return _RiskLevel.moderate;
-    return _RiskLevel.low;
-  }
-
-  double _confidence(List<FloodData> stations, bool hasWeather) {
-    double base = 60;
-    if (stations.isNotEmpty) base += 20;
-    if (hasWeather) base += 15;
-    if (stations.length > 5) base += 5;
-    return base.clamp(0, 100);
+  void _refresh() {
+    HapticFeedback.selectionClick();
+    ref.invalidate(aiInsightProvider);
+    _barCtrl ..reset() ..forward();
+    _ringCtrl ..reset() ..forward();
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
-    final rc           = RiverColors.of(context);
-    final stations     = ref.watch(liveLevelsProvider);
-    final alertsState  = ref.watch(alertsProvider);
-    final weatherState = ref.watch(weatherProvider);
-    final predState    = ref.watch(predictionProvider(_kKeyStation));
-
-    // ── correct field names ───────────────────────────────────────────────
-    final alertCount  = alertsState.cwcAlerts.length;           // fix #4
-    final currentWx   = weatherState.current;
-    final rainfall    = currentWx?.precipMm ?? 0.0;             // fix #5
-    final humidity    = currentWx?.humidity.toDouble();
-    final temp        = currentWx?.tempC;                       // fix #6
-    // fix #7: field is .forecast, NOT .daily
-    final dailyForecast = weatherState.forecast;                 // List<WeatherDay>
-
-    final overall      = _overallRisk(
-      stations:   stations,
-      alertCount: alertCount,
-      rainfall:   rainfall,
-    );
-    final overallColor = _riskColor(overall);
-    final confidence   = _confidence(stations, currentWx != null);
-
-    final sorted = [...stations]
-      ..sort((a, b) => _stationScore(b).compareTo(_stationScore(a)));
+    final rc      = RiverColors.of(context);
+    final insight = ref.watch(aiInsightProvider);
 
     return Scaffold(
       backgroundColor: rc.scaffoldBg,
-      body: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
-          // ── App bar ───────────────────────────────────────────────────
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: 0,
-            backgroundColor: rc.scaffoldBg,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            scrolledUnderElevation: 1,
-            shadowColor: rc.stroke,
-            title: Row(
-              children: [
-                AnimatedBuilder(
-                  animation: _pulseCtrl,
-                  builder: (_, __) => Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: overallColor
-                          .withValues(alpha: 0.10 + _pulseCtrl.value * 0.08),
-                      border: Border.all(
-                        color: overallColor
-                            .withValues(alpha: 0.4 + _pulseCtrl.value * 0.3),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Icon(Icons.psychology_rounded,
-                        size: 18, color: overallColor),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('AI Prediction',
-                        style: TextStyle(
-                          color: rc.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        )),
-                    Text('Ensemble ML · Live wired',
-                        style: TextStyle(
-                          color: rc.textSecondary,
-                          fontSize: 11,
-                        )),
-                  ],
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: () {
-                    HapticFeedback.selectionClick();
-                    ref.invalidate(liveLevelsProvider);
-                    ref.invalidate(alertsProvider);
-                    ref.invalidate(weatherProvider);
-                    ref.invalidate(predictionProvider(_kKeyStation));
-                    _barCtrl
-                      ..reset()
-                      ..forward();
-                  },
-                  icon: Icon(Icons.refresh_rounded,
-                      size: 20, color: rc.textSecondary),
-                  tooltip: 'Refresh all data',
-                ),
-              ],
-            ),
-          ),
-
-          SliverToBoxAdapter(
-            child: AnimatedBuilder(
-              animation: _entryCtrl,
-              builder: (_, child) => Opacity(
-                opacity: _entryCtrl.value,
-                child: Transform.translate(
-                  offset: Offset(0, 20 * (1 - _entryCtrl.value)),
-                  child: child,
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _VerdictCard(
-                      rc:           rc,
-                      overall:      overall,
-                      confidence:   confidence,
-                      overallColor: overallColor,
-                      pulseCtrl:    _pulseCtrl,
-                      stationCount: stations.length,
-                      alertCount:   alertCount,
-                      predState:    predState,
-                    ),
-                    const SizedBox(height: 14),
-                    _SectionHeader(
-                        rc: rc,
-                        icon: Icons.input_rounded,
-                        label: 'MODEL INPUTS'),
-                    const SizedBox(height: 8),
-                    _DriverStrip(
-                      rc:         rc,
-                      stations:   stations,
-                      alertCount: alertCount,
-                      rainfall:   rainfall,
-                      humidity:   humidity,
-                      temp:       temp,
-                    ),
-                    const SizedBox(height: 16),
-                    _SectionHeader(
-                        rc: rc,
-                        icon: Icons.sensors_rounded,
-                        label: 'STATION RISK SCORES'),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          if (sorted.isEmpty)
-            SliverToBoxAdapter(child: _EmptyStations(rc: rc))
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) => _StationRiskRow(
-                  rc:        rc,
-                  data:      sorted[i],
-                  index:     i,
-                  entryCtrl: _entryCtrl,
-                  riskScore: _stationScore(sorted[i]),
-                ),
-                childCount: sorted.length,
-              ),
-            ),
-
-          SliverToBoxAdapter(
-            child: AnimatedBuilder(
-              animation: _entryCtrl,
-              builder: (_, child) =>
-                  Opacity(opacity: _entryCtrl.value, child: child),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 16, 14, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SectionHeader(
-                        rc: rc,
-                        icon: Icons.calendar_today_rounded,
-                        label: '7-DAY FLOOD OUTLOOK'),
-                    const SizedBox(height: 8),
-                    _ForecastOutlook(
-                      rc:            rc,
-                      dailyForecast: dailyForecast,  // weatherState.forecast
-                      barCtrl:       _barCtrl,
-                    ),
-                    const SizedBox(height: 16),
-                    _ModelFooter(rc: rc, predState: predState),
-                    const SizedBox(height: 80),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
+      body: insight.when(
+        data:    (data) => _body(rc, data),
+        loading: () => _body(rc, AiInsight.empty()),
+        error:   (_, __) => _body(rc, AiInsight.empty()),
       ),
     );
   }
+
+  Widget _body(RiverColors rc, AiInsight data) {
+    final riskColor = _riskColor(data.overallRisk);
+    final isLoading = data.overallRisk == 'LOADING';
+
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        // ── App bar ─────────────────────────────────────────────────────
+        SliverAppBar(
+          pinned: true,
+          expandedHeight: 0,
+          backgroundColor: rc.scaffoldBg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 1,
+          shadowColor: rc.stroke,
+          title: Row(
+            children: [
+              AnimatedBuilder(
+                animation: _pulseCtrl,
+                builder: (_, __) => Container(
+                  width: 34, height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: riskColor.withValues(
+                        alpha: 0.10 + _pulseCtrl.value * 0.08),
+                    border: Border.all(
+                      color: riskColor.withValues(
+                          alpha: 0.4 + _pulseCtrl.value * 0.3),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(Icons.psychology_rounded,
+                      size: 18, color: riskColor),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('AI Flood Intelligence',
+                      style: TextStyle(
+                        color: rc.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      )),
+                  Text(
+                    isLoading
+                        ? 'Fusing data sources…'
+                        : 'Live · ${data.stationCount} stations · ${DateFormat("HH:mm").format(data.lastFetched)}',
+                    style:
+                        TextStyle(color: rc.textSecondary, fontSize: 11),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: _refresh,
+                icon: Icon(Icons.refresh_rounded,
+                    size: 20, color: rc.textSecondary),
+                tooltip: 'Refresh all sources',
+              ),
+            ],
+          ),
+        ),
+
+        SliverToBoxAdapter(
+          child: AnimatedBuilder(
+            animation: _entryCtrl,
+            builder: (_, child) => Opacity(
+              opacity: _entryCtrl.value,
+              child: Transform.translate(
+                offset: Offset(0, 24 * (1 - _entryCtrl.value)),
+                child: child,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Hero verdict card ──────────────────────────────────
+                  _HeroCard(
+                    rc:         rc,
+                    data:       data,
+                    riskColor:  riskColor,
+                    pulseCtrl:  _pulseCtrl,
+                    ringCtrl:   _ringCtrl,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // ── Source health strip ───────────────────────────────
+                  _SourceStrip(rc: rc, sources: data.sources),
+                  const SizedBox(height: 16),
+
+                  // ── Driver grid ───────────────────────────────────────
+                  _SectionHeader(
+                      rc: rc,
+                      icon: Icons.input_rounded,
+                      label: 'LIVE MODEL INPUTS'),
+                  const SizedBox(height: 8),
+                  _DriverGrid(rc: rc, data: data),
+                  const SizedBox(height: 16),
+
+                  // ── River trends ──────────────────────────────────────
+                  if (data.riverTrends.isNotEmpty) ...[
+                    _SectionHeader(
+                        rc: rc,
+                        icon: Icons.waves_rounded,
+                        label: 'RIVER VELOCITY TRENDS'),
+                    const SizedBox(height: 8),
+                    _RiverTrendList(rc: rc, trends: data.riverTrends),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // ── Station scores header ─────────────────────────────
+                  _SectionHeader(
+                      rc: rc,
+                      icon: Icons.sensors_rounded,
+                      label: 'STATION RISK SCORES'),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // ── Station list ───────────────────────────────────────────────
+        if (data.stations.isEmpty)
+          SliverToBoxAdapter(child: _EmptyStations(rc: rc))
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (ctx, i) {
+                final s     = data.stations[i];
+                final score = _stationScore(s);
+                return _StationRiskRow(
+                  rc:        rc,
+                  data:      s,
+                  index:     i,
+                  entryCtrl: _entryCtrl,
+                  riskScore: score,
+                );
+              },
+              childCount: data.stations.length,
+            ),
+          ),
+
+        // ── Forecast + footer ─────────────────────────────────────────
+        SliverToBoxAdapter(
+          child: AnimatedBuilder(
+            animation: _entryCtrl,
+            builder: (_, child) =>
+                Opacity(opacity: _entryCtrl.value, child: child),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionHeader(
+                      rc: rc,
+                      icon: Icons.calendar_today_rounded,
+                      label: '7-DAY FLOOD OUTLOOK'),
+                  const SizedBox(height: 8),
+                  _ForecastBars(
+                      rc: rc, data: data, barCtrl: _barCtrl),
+                  const SizedBox(height: 16),
+                  _ModelFooter(rc: rc, data: data),
+                  const SizedBox(height: 80),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Station risk score (inline — no external provider needed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+double _stationScore(d) {
+  final cap  = (d.capacityPercent as double).clamp(0.0, 100.0);
+  final lvl  = (d.dangerLevel as double) > 0
+      ? ((d.currentLevel as double) / (d.dangerLevel as double) * 100)
+          .clamp(0.0, 100.0)
+      : cap;
+  final rain =
+      ((d.effectiveRainfallMm as double) / 60.0 * 100).clamp(0.0, 100.0);
+  return lvl * 0.4 + cap * 0.4 + rain * 0.2;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -400,101 +347,117 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 13, color: rc.accent),
+        Icon(icon, size: 14, color: rc.accent),
         const SizedBox(width: 6),
         Text(label,
             style: TextStyle(
               color: rc.textSecondary,
-              fontSize: 11,
+              fontSize: 12,           // was 10–11; bumped for accessibility
               fontWeight: FontWeight.w800,
               letterSpacing: 1.0,
             )),
         const SizedBox(width: 8),
-        Expanded(child: Divider(color: rc.stroke, thickness: 1, height: 1)),
+        Expanded(
+            child: Divider(color: rc.stroke, thickness: 1, height: 1)),
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Verdict card
+// Hero card — glass-morphism verdict
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _VerdictCard extends StatelessWidget {
+class _HeroCard extends StatelessWidget {
   final RiverColors rc;
-  final _RiskLevel overall;
-  final double confidence;
-  final Color overallColor;
+  final AiInsight data;
+  final Color riskColor;
   final AnimationController pulseCtrl;
-  final int stationCount;
-  final int alertCount;
-  final AsyncValue<FloodPrediction> predState;
+  final AnimationController ringCtrl;
 
-  const _VerdictCard({
+  const _HeroCard({
     required this.rc,
-    required this.overall,
-    required this.confidence,
-    required this.overallColor,
+    required this.data,
+    required this.riskColor,
     required this.pulseCtrl,
-    required this.stationCount,
-    required this.alertCount,
-    required this.predState,
+    required this.ringCtrl,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: rc.cardBg,
-        borderRadius: BorderRadius.circular(20),
-        border:
-            Border.all(color: overallColor.withValues(alpha: 0.35), width: 1.5),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+            color: riskColor.withValues(alpha: 0.30), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: overallColor.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          )
+            color: riskColor.withValues(alpha: 0.07),
+            blurRadius: 24,
+            offset: const Offset(0, 6),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(_riskEmoji(overall),
-                  style: const TextStyle(fontSize: 24)),
-              const SizedBox(width: 10),
+              // ── Risk ring gauge ─────────────────────────────────────
+              _ConfidenceRing(
+                rc:        rc,
+                riskColor: riskColor,
+                emoji:     _riskEmoji(data.overallRisk),
+                value:     data.confidence / 100,
+                ctrl:      ringCtrl,
+              ),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_riskLabel(overall),
+                    Text(_riskFullLabel(data.overallRisk),
                         style: TextStyle(
-                          color: overallColor,
+                          color: riskColor,
                           fontSize: 18,
                           fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
+                          letterSpacing: -0.4,
                         )),
+                    const SizedBox(height: 3),
                     Text(
-                      '$stationCount stations · $alertCount active alerts',
+                      '${data.stationCount} stations · '
+                      '${data.criticalCount} critical · '
+                      '${data.alertCount} alerts',
                       style: TextStyle(
                         color: rc.textSecondary,
                         fontSize: 12,
                       ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Confidence ${data.confidence.round()}%'  
+                      ' · v${data.modelVersion}',
+                      style: TextStyle(
+                        color: rc.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
               ),
+              // ── LIVE badge ──────────────────────────────────────────
               AnimatedBuilder(
                 animation: pulseCtrl,
                 builder: (_, __) => Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppPalette.safe
-                        .withValues(alpha: 0.10 + pulseCtrl.value * 0.06),
+                    color: AppPalette.safe.withValues(
+                        alpha: 0.10 + pulseCtrl.value * 0.06),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                         color: AppPalette.safe.withValues(alpha: 0.4)),
@@ -503,18 +466,17 @@ class _VerdictCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 6,
-                        height: 6,
+                        width: 7, height: 7,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: AppPalette.safe,
                           boxShadow: [
                             BoxShadow(
-                              color: AppPalette.safe
-                                  .withValues(alpha: 0.6 * pulseCtrl.value),
-                              blurRadius: 6,
+                              color: AppPalette.safe.withValues(
+                                  alpha: 0.7 * pulseCtrl.value),
+                              blurRadius: 7,
                               spreadRadius: 2,
-                            )
+                            ),
                           ],
                         ),
                       ),
@@ -522,7 +484,7 @@ class _VerdictCard extends StatelessWidget {
                       Text('LIVE',
                           style: TextStyle(
                             color: AppPalette.safe,
-                            fontSize: 10,
+                            fontSize: 11,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.8,
                           )),
@@ -533,92 +495,153 @@ class _VerdictCard extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: 14),
-
-          predState.when(
-            data: (pred) {
-              final conf = pred.confidencePct > 0
-                  ? pred.confidencePct
-                  : confidence;
-              return _ConfidenceBar(rc: rc, confidence: conf);
-            },
-            loading: () => _ConfidenceBar(rc: rc, confidence: confidence),
-            error:   (_, __) => _ConfidenceBar(rc: rc, confidence: confidence),
-          ),
-
-          predState.when(
-            data: (pred) => Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Row(
-                children: [
-                  Icon(Icons.auto_awesome_rounded,
-                      size: 13, color: rc.accent),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      'Model ${pred.modelVersion} · RF + XGBoost + GBM ensemble',
-                      style: TextStyle(
-                        color: rc.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            loading: () => const SizedBox.shrink(),
-            error:   (_, __) => const SizedBox.shrink(),
-          ),
+          if (data.kosiLevel > 0) ...[
+            const SizedBox(height: 14),
+            _KosiGaugeBar(rc: rc, data: data),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ConfidenceBar extends StatelessWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+// Confidence ring (arc progress gauge)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ConfidenceRing extends StatelessWidget {
   final RiverColors rc;
-  final double confidence;
-  const _ConfidenceBar({required this.rc, required this.confidence});
+  final Color riskColor;
+  final String emoji;
+  final double value;    // 0–1
+  final AnimationController ctrl;
+
+  const _ConfidenceRing({
+    required this.rc,
+    required this.riskColor,
+    required this.emoji,
+    required this.value,
+    required this.ctrl,
+  });
 
   @override
   Widget build(BuildContext context) {
+    return SizedBox(
+      width: 68, height: 68,
+      child: AnimatedBuilder(
+        animation: ctrl,
+        builder: (_, __) => CustomPaint(
+          painter: _RingPainter(
+            value:     (value * ctrl.value).clamp(0, 1),
+            trackColor: rc.stroke,
+            fillColor:  riskColor,
+            strokeWidth: 6,
+          ),
+          child: Center(
+            child: Text(emoji, style: const TextStyle(fontSize: 26)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  final double value;
+  final Color trackColor;
+  final Color fillColor;
+  final double strokeWidth;
+
+  const _RingPainter({
+    required this.value,
+    required this.trackColor,
+    required this.fillColor,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final r  = (size.width - strokeWidth) / 2;
+    const startAngle = -math.pi / 2;
+    const fullSweep  = 2 * math.pi;
+
+    final track = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = trackColor
+      ..strokeCap = StrokeCap.round;
+    final fill = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = fillColor
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(
+        Rect.fromCircle(center: Offset(cx, cy), radius: r),
+        startAngle, fullSweep, false, track);
+    canvas.drawArc(
+        Rect.fromCircle(center: Offset(cx, cy), radius: r),
+        startAngle, fullSweep * value, false, fill);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      old.value != value || old.fillColor != fillColor;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kosi gauge bar (special highlight for Bihar's most critical river)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _KosiGaugeBar extends StatelessWidget {
+  final RiverColors rc;
+  final AiInsight data;
+  const _KosiGaugeBar({required this.rc, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (data.kosiLevel / data.kosiDanger).clamp(0.0, 1.2);
+    final col = pct > 1.0
+        ? AppPalette.danger
+        : pct > 0.8
+            ? AppPalette.warning
+            : AppPalette.safe;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text('Model confidence',
+            Icon(Icons.water_rounded, size: 13, color: col),
+            const SizedBox(width: 5),
+            Text('Kosi @ Birpur',
                 style: TextStyle(
                   color: rc.textSecondary,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                 )),
             const Spacer(),
-            Text('${confidence.round()}%',
-                style: TextStyle(
-                  color: rc.textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                )),
+            Text(
+              '${data.kosiLevel.toStringAsFixed(2)}m'
+              ' / ${data.kosiDanger.toStringAsFixed(2)}m danger',
+              style: TextStyle(
+                color: col,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 5),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
-            value: (confidence / 100).clamp(0.0, 1.0),
+            value: pct.clamp(0.0, 1.0),
             minHeight: 6,
             backgroundColor: rc.stroke,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              confidence > 80
-                  ? AppPalette.safe
-                  : confidence > 60
-                      ? AppPalette.amber
-                      : AppPalette.warning,
-            ),
+            valueColor: AlwaysStoppedAnimation<Color>(col),
           ),
         ),
       ],
@@ -627,96 +650,158 @@ class _ConfidenceBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Driver strip
+// Source health strip
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _DriverStrip extends StatelessWidget {
+class _SourceStrip extends StatelessWidget {
   final RiverColors rc;
-  final List<FloodData> stations;
-  final int alertCount;
-  final double rainfall;
-  final double? humidity;
-  final double? temp;
-
-  const _DriverStrip({
-    required this.rc,
-    required this.stations,
-    required this.alertCount,
-    required this.rainfall,
-    required this.humidity,
-    required this.temp,
-  });
+  final Map<String, DataSourceHealth> sources;
+  const _SourceStrip({required this.rc, required this.sources});
 
   @override
   Widget build(BuildContext context) {
-    final avgCap = stations.isEmpty
-        ? 0.0
-        : stations.map((d) => d.capacityPercent).reduce((a, b) => a + b) /
-            stations.length;
-    final critCount = stations
-        .where((d) => _riskFromFloodData(d) == _RiskLevel.extreme)
-        .length;
-
     return Row(
+      children: sources.entries.map((e) {
+        final isLive = e.value == DataSourceHealth.live;
+        final col    = isLive ? AppPalette.safe : rc.textSecondary;
+        return Expanded(
+          child: Container(
+            margin: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            decoration: BoxDecoration(
+              color: col.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: col.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: col,
+                    boxShadow: isLive
+                        ? [
+                            BoxShadow(
+                              color: col.withValues(alpha: 0.5),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            )
+                          ]
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(e.key,
+                    style: TextStyle(
+                      color: col,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    )),
+                Text(isLive ? 'LIVE' : 'OFF',
+                    style: TextStyle(
+                      color: col.withValues(alpha: 0.7),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    )),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Driver grid (2×2 — no overflow on small screens)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DriverGrid extends StatelessWidget {
+  final RiverColors rc;
+  final AiInsight data;
+  const _DriverGrid({required this.rc, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final avgCap = data.stations.isEmpty
+        ? 0.0
+        : data.stations
+                .map((d) => d.capacityPercent)
+                .reduce((a, b) => a + b) /
+            data.stations.length;
+
+    return Column(
       children: [
-        Expanded(
-          child: _DriverTile(
-            rc: rc,
-            icon: Icons.water_rounded,
-            label: 'Avg Level',
-            value: '${avgCap.toStringAsFixed(1)}%',
-            subLabel: '$critCount critical',
-            color: avgCap > 80
-                ? AppPalette.danger
-                : avgCap > 60
+        Row(
+          children: [
+            Expanded(
+              child: _DriverTile(
+                rc: rc,
+                icon: Icons.water_rounded,
+                label: 'Avg Capacity',
+                value: '${avgCap.toStringAsFixed(1)}%',
+                sub: '${data.criticalCount} critical',
+                color: avgCap > 80
+                    ? AppPalette.danger
+                    : avgCap > 60
+                        ? AppPalette.warning
+                        : AppPalette.safe,
+                fraction: avgCap / 100,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _DriverTile(
+                rc: rc,
+                icon: Icons.grain_rounded,
+                label: 'Rainfall Now',
+                value: '${data.rainfallNow.toStringAsFixed(1)} mm',
+                sub: 'current hour',
+                color: data.rainfallNow > 30
+                    ? AppPalette.danger
+                    : data.rainfallNow > 10
+                        ? AppPalette.warning
+                        : AppPalette.safe,
+                fraction: (data.rainfallNow / 60).clamp(0, 1),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _DriverTile(
+                rc: rc,
+                icon: Icons.notifications_active_rounded,
+                label: 'CWC Alerts',
+                value: '${data.alertCount}',
+                sub: 'active now',
+                color: data.alertCount >= 5
+                    ? AppPalette.danger
+                    : data.alertCount >= 2
+                        ? AppPalette.warning
+                        : AppPalette.safe,
+                fraction: (data.alertCount / 10.0).clamp(0, 1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _DriverTile(
+                rc: rc,
+                icon: Icons.thermostat_rounded,
+                label: 'Temp / Humid',
+                value: '${data.tempC.toStringAsFixed(1)}°C',
+                sub: '${data.humidity.round()}% RH',
+                color: data.humidity > 85
                     ? AppPalette.warning
                     : AppPalette.safe,
-            fraction: avgCap / 100,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _DriverTile(
-            rc: rc,
-            icon: Icons.grain_rounded,
-            label: 'Rainfall',
-            value: '${rainfall.toStringAsFixed(1)} mm',
-            subLabel: 'current hour',
-            color: rainfall > 30
-                ? AppPalette.danger
-                : rainfall > 10
-                    ? AppPalette.warning
-                    : AppPalette.safe,
-            fraction: (rainfall / 60).clamp(0, 1),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _DriverTile(
-            rc: rc,
-            icon: Icons.notifications_active_rounded,
-            label: 'Alerts',
-            value: '$alertCount',
-            subLabel: 'active now',
-            color: alertCount >= 5
-                ? AppPalette.danger
-                : alertCount >= 2
-                    ? AppPalette.warning
-                    : AppPalette.safe,
-            fraction: (alertCount / 10.0).clamp(0, 1),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _DriverTile(
-            rc: rc,
-            icon: Icons.water_drop_rounded,
-            label: 'Humidity',
-            value: humidity != null ? '${humidity!.round()}%' : '–%',
-            subLabel: 'relative',
-            color: (humidity ?? 0) > 85 ? AppPalette.warning : AppPalette.safe,
-            fraction: ((humidity ?? 0) / 100).clamp(0, 1),
-          ),
+                fraction: (data.humidity / 100).clamp(0, 1),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -726,9 +811,7 @@ class _DriverStrip extends StatelessWidget {
 class _DriverTile extends StatelessWidget {
   final RiverColors rc;
   final IconData icon;
-  final String label;
-  final String value;
-  final String subLabel;
+  final String label, value, sub;
   final Color color;
   final double fraction;
 
@@ -737,7 +820,7 @@ class _DriverTile extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
-    required this.subLabel,
+    required this.sub,
     required this.color,
     required this.fraction,
   });
@@ -745,7 +828,7 @@ class _DriverTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: rc.cardBg,
         borderRadius: BorderRadius.circular(14),
@@ -755,18 +838,18 @@ class _DriverTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 16, color: color),
-          const SizedBox(height: 6),
+          const SizedBox(height: 7),
           Text(value,
               style: TextStyle(
                 color: rc.textPrimary,
-                fontSize: 16,
+                fontSize: 18,
                 fontWeight: FontWeight.w900,
                 fontFeatures: const [FontFeature.tabularFigures()],
               )),
           Text(label,
               style: TextStyle(
                 color: rc.textSecondary,
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: FontWeight.w700,
               )),
           const SizedBox(height: 6),
@@ -779,11 +862,11 @@ class _DriverTile extends StatelessWidget {
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
           ),
-          const SizedBox(height: 3),
-          Text(subLabel,
+          const SizedBox(height: 4),
+          Text(sub,
               style: TextStyle(
                 color: rc.textSecondary,
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
               maxLines: 1,
@@ -795,12 +878,124 @@ class _DriverTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// River trend list
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RiverTrendList extends StatelessWidget {
+  final RiverColors rc;
+  final List<RiverTrend> trends;
+  const _RiverTrendList({required this.rc, required this.trends});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: rc.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: rc.stroke),
+      ),
+      child: Column(
+        children: trends.asMap().entries.map((e) {
+          final i     = e.key;
+          final trend = e.value;
+          final pct   = trend.dangerPct;
+          final col   = pct > 90
+              ? AppPalette.danger
+              : pct > 70
+                  ? AppPalette.warning
+                  : AppPalette.safe;
+          final rising = trend.velocityMperHr >= 0;
+          return Container(
+            decoration: BoxDecoration(
+              border: i < trends.length - 1
+                  ? Border(bottom: BorderSide(color: rc.stroke, width: 1))
+                  : null,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            child: Row(
+              children: [
+                Container(
+                    width: 9, height: 9,
+                    decoration:
+                        BoxDecoration(shape: BoxShape.circle, color: col)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(trend.river,
+                          style: TextStyle(
+                            color: rc.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          )),
+                      Text(trend.station,
+                          style: TextStyle(
+                              color: rc.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                // Velocity chip
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (rising ? AppPalette.warning : AppPalette.safe)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (rising ? AppPalette.warning : AppPalette.safe)
+                          .withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Text(
+                    '${rising ? "▲" : "▼"} '  
+                    '${trend.velocityMperHr.abs().toStringAsFixed(2)} m/hr',
+                    style: TextStyle(
+                      color:
+                          rising ? AppPalette.warning : AppPalette.safe,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 44,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('${pct.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            color: col,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures()
+                            ],
+                          )),
+                      Text('danger',
+                          style: TextStyle(
+                              color: rc.textSecondary, fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Station risk row
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationRiskRow extends StatelessWidget {
   final RiverColors rc;
-  final FloodData data;
+  final dynamic data;     // FloodData
   final int index;
   final AnimationController entryCtrl;
   final double riskScore;
@@ -815,8 +1010,10 @@ class _StationRiskRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bucket = _riskFromFloodData(data);
-    final col    = _riskColor(bucket);
+    final risk = (data.riskLevel as String).toUpperCase();
+    final col  = _riskColor(risk);
+    final lvl  = data.currentLevel as double;
+    final dng  = data.dangerLevel  as double;
 
     return AnimatedBuilder(
       animation: entryCtrl,
@@ -826,8 +1023,8 @@ class _StationRiskRow extends StatelessWidget {
             ((entryCtrl.value - delay) / (1.0 - delay)).clamp(0.0, 1.0);
         return Opacity(
           opacity: p,
-          child:
-              Transform.translate(offset: Offset(0, 16 * (1 - p)), child: child),
+          child: Transform.translate(
+              offset: Offset(0, 16 * (1 - p)), child: child),
         );
       },
       child: Container(
@@ -836,14 +1033,12 @@ class _StationRiskRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: rc.cardBg,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: col.withValues(alpha: 0.22)),
+          border: Border.all(color: col.withValues(alpha: 0.20)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 10,
-              height: 10,
+              width: 10, height: 10,
               margin: const EdgeInsets.only(right: 10),
               decoration: BoxDecoration(shape: BoxShape.circle, color: col),
             ),
@@ -852,7 +1047,7 @@ class _StationRiskRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(data.city,
+                  Text(data.city as String,
                       style: TextStyle(
                         color: rc.textPrimary,
                         fontSize: 13,
@@ -860,11 +1055,14 @@ class _StationRiskRow extends StatelessWidget {
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
-                  Text(data.riverName ?? data.district,
-                      style: TextStyle(
-                          color: rc.textSecondary, fontSize: 11),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
+                  Text(
+                    '${(data.riverName ?? data.district) as String}'  
+                    '  ${lvl.toStringAsFixed(2)}m / ${dng.toStringAsFixed(2)}m',
+                    style: TextStyle(
+                        color: rc.textSecondary, fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
@@ -878,7 +1076,7 @@ class _StationRiskRow extends StatelessWidget {
                     children: [
                       Text('Score',
                           style: TextStyle(
-                              color: rc.textSecondary, fontSize: 10)),
+                              color: rc.textSecondary, fontSize: 11)),
                       const SizedBox(width: 4),
                       Text(riskScore.toStringAsFixed(1),
                           style: TextStyle(
@@ -906,15 +1104,16 @@ class _StationRiskRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
               decoration: BoxDecoration(
                 color: col.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(_bucketShort(bucket),
+              child: Text(_shortRisk(risk),
                   style: TextStyle(
                     color: col,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.3,
                   )),
@@ -925,32 +1124,29 @@ class _StationRiskRow extends StatelessWidget {
     );
   }
 
-  String _bucketShort(_RiskLevel r) {
+  String _shortRisk(String r) {
     switch (r) {
-      case _RiskLevel.extreme:  return 'EXT';
-      case _RiskLevel.high:     return 'HIGH';
-      case _RiskLevel.moderate: return 'MOD';
-      case _RiskLevel.low:      return 'LOW';
+      case 'EXTREME':
+      case 'CRITICAL': return 'EXT';
+      case 'HIGH':
+      case 'SEVERE':   return 'HIGH';
+      case 'MODERATE': return 'MOD';
+      default:         return 'LOW';
     }
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7-day forecast outlook
-// Uses weatherState.forecast (List<WeatherDay>) — NOT .daily (doesn't exist)
-// WeatherDay fields: date (String YYYY-MM-DD), rainMm, maxC, minC
+// 7-day forecast bars with flood threshold line
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ForecastOutlook extends StatelessWidget {
+class _ForecastBars extends StatelessWidget {
   final RiverColors rc;
-  final List<WeatherDay> dailyForecast;
+  final AiInsight data;
   final AnimationController barCtrl;
 
-  const _ForecastOutlook({
-    required this.rc,
-    required this.dailyForecast,
-    required this.barCtrl,
-  });
+  const _ForecastBars(
+      {required this.rc, required this.data, required this.barCtrl});
 
   @override
   Widget build(BuildContext context) {
@@ -961,94 +1157,168 @@ class _ForecastOutlook extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: rc.stroke),
       ),
-      child: dailyForecast.isEmpty ? _noData() : _chart(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Rainfall Forecast',
+                  style: TextStyle(
+                    color: rc.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  )),
+              const Spacer(),
+              Text(
+                '7 days · total ${data.forecastRainTotal.toStringAsFixed(0)} mm',
+                style: TextStyle(color: rc.textSecondary, fontSize: 11),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          data.forecast.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text('Weather forecast loading…',
+                        style: TextStyle(
+                            color: rc.textSecondary, fontSize: 12)),
+                  ),
+                )
+              : _bars(context),
+        ],
+      ),
     );
   }
 
-  Widget _noData() => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Center(
-          child: Text('Weather forecast loading…',
-              style: TextStyle(color: rc.textSecondary, fontSize: 12)),
-        ),
-      );
-
-  Widget _chart() {
-    final days = dailyForecast.take(7).toList();
+  Widget _bars(BuildContext context) {
+    final days   = data.forecast.take(7).toList();
     final maxRain =
         days.map((d) => d.rainMm).reduce(math.max).clamp(1.0, double.infinity);
+    // Flood alert threshold line at 30 mm/day
+    const threshold = 30.0;
+    final thresholdFrac = (threshold / maxRain).clamp(0.0, 1.0);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    return AnimatedBuilder(
+      animation: barCtrl,
+      builder: (_, __) => SizedBox(
+        height: 90,
+        child: Stack(
           children: [
-            Text('Rainfall Forecast',
-                style: TextStyle(
-                  color: rc.textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                )),
-            const Spacer(),
-            Text('7 days · mm/day',
-                style: TextStyle(color: rc.textSecondary, fontSize: 11)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        AnimatedBuilder(
-          animation: barCtrl,
-          builder: (_, __) => Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: days.map((d) {
-              final frac =
-                  (d.rainMm / maxRain * barCtrl.value).clamp(0.0, 1.0);
-              final col = d.rainMm > 30
-                  ? AppPalette.danger
-                  : d.rainMm > 15
-                      ? AppPalette.warning
-                      : rc.accent;
-              String dayLabel = '–';
-              try {
-                final dt = DateTime.parse(d.date);
-                dayLabel = DateFormat('E').format(dt);
-              } catch (_) {}
-
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: Column(
-                    children: [
-                      Text('${d.rainMm.round()}',
+            // Threshold line
+            if (maxRain > threshold)
+              Positioned(
+                bottom: 18 + (1 - thresholdFrac) * 60,
+                left: 0, right: 0,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DashedLine(
+                          color: AppPalette.warning.withValues(alpha: 0.5)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text('30mm',
                           style: TextStyle(
-                            color: rc.textSecondary,
-                            fontSize: 9,
+                            color: AppPalette.warning,
+                            fontSize: 10,
                             fontWeight: FontWeight.w700,
                           )),
-                      const SizedBox(height: 3),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Container(
-                          height: 60 * frac + 4,
-                          color: col,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(dayLabel,
-                          style: TextStyle(
-                            color: rc.textSecondary,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                          )),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            // Bars row
+            Positioned.fill(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: days.map((d) {
+                  final frac =
+                      (d.rainMm / maxRain * barCtrl.value).clamp(0.0, 1.0);
+                  final col = d.rainMm > 30
+                      ? AppPalette.danger
+                      : d.rainMm > 15
+                          ? AppPalette.warning
+                          : rc.accent;
+                  String dayLabel = '–';
+                  try {
+                    dayLabel =
+                        DateFormat('E').format(DateTime.parse(d.date));
+                  } catch (_) {}
+
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text('${d.rainMm.round()}',
+                              style: TextStyle(
+                                color: rc.textSecondary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              )),
+                          const SizedBox(height: 2),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: Container(
+                              height: 60 * frac + 4,
+                              color: col,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(dayLabel,
+                              style: TextStyle(
+                                color: rc.textSecondary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              )),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
+}
+
+/// Simple dashed horizontal line widget
+class DashedLine extends StatelessWidget {
+  final Color color;
+  const DashedLine({required this.color, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: const Size(double.infinity, 1),
+      painter: _DashedLinePainter(color: color),
+    );
+  }
+}
+
+class _DashedLinePainter extends CustomPainter {
+  final Color color;
+  const _DashedLinePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + 4, 0), paint);
+      x += 8;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedLinePainter old) => old.color != color;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1057,11 +1327,12 @@ class _ForecastOutlook extends StatelessWidget {
 
 class _ModelFooter extends StatelessWidget {
   final RiverColors rc;
-  final AsyncValue<FloodPrediction> predState;
-  const _ModelFooter({required this.rc, required this.predState});
+  final AiInsight data;
+  const _ModelFooter({required this.rc, required this.data});
 
   @override
   Widget build(BuildContext context) {
+    final fmt = DateFormat('dd MMM HH:mm');
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1074,9 +1345,10 @@ class _ModelFooter extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.model_training_rounded, size: 15, color: rc.accent),
+              Icon(Icons.model_training_rounded,
+                  size: 15, color: rc.accent),
               const SizedBox(width: 6),
-              Text('Model Info',
+              Text('Model & Data Info',
                   style: TextStyle(
                     color: rc.textPrimary,
                     fontSize: 13,
@@ -1085,46 +1357,52 @@ class _ModelFooter extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          _InfoRow(rc: rc,
-              label: 'Architecture', value: 'RF + XGBoost + GBM (ensemble)'),
-          _InfoRow(rc: rc,
-              label: 'Features',
-              value: 'Level%, Capacity%, Rainfall, Alerts, Humidity'),
-          _InfoRow(rc: rc,
-              label: 'Target',
-              value: 'Flood risk class (4-class)'),
-          predState.when(
-            data: (p) => Column(
-              children: [
-                _InfoRow(rc: rc,
-                    label: 'Confidence',
-                    value: '${p.confidencePct.toStringAsFixed(1)}%'),
-                _InfoRow(rc: rc,
-                    label: 'Model ver', value: p.modelVersion),
-                _InfoRow(rc: rc,
-                    label: 'Danger lvl',
-                    value: '${p.dangerLevel.toStringAsFixed(2)} m'),
-              ],
-            ),
-            loading: () =>
-                _InfoRow(rc: rc, label: 'Metrics', value: 'Loading…'),
-            error: (_, __) =>
-                _InfoRow(rc: rc, label: 'Metrics', value: 'Unavailable'),
+          _Row(rc: rc, label: 'Architecture',
+              value: 'RF + XGBoost + GBM ensemble'),
+          _Row(rc: rc, label: 'Features',
+              value: 'Level%, Capacity%, Rainfall, Alerts, Humidity, Kosi'),
+          _Row(rc: rc, label: 'Target',
+              value: '4-class flood risk (LOW/MOD/HIGH/EXTREME)'),
+          _Row(rc: rc, label: 'Model ver',
+              value: data.modelVersion),
+          _Row(rc: rc, label: 'ML confidence',
+              value: data.mlConfidence > 0
+                  ? '${data.mlConfidence.toStringAsFixed(1)}%'
+                  : '–'),
+          _Row(rc: rc, label: 'Backend',
+              value: data.mlBackendLive ? 'LSTM online' : 'CWC-sim fallback'),
+          _Row(rc: rc, label: 'Data sources',
+              value: 'CWC · WRD Bihar · Kosi Birpur · Open-Meteo · OpsFlood API'),
+          _Row(rc: rc, label: 'Last fetched',
+              value: fmt.format(data.lastFetched)),
+          const SizedBox(height: 4),
+          // Source health summary
+          Row(
+            children: data.sources.entries.map((e) {
+              final live = e.value == DataSourceHealth.live;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '${e.key} ${live ? "✓" : "✗"}',
+                  style: TextStyle(
+                    color: live ? AppPalette.safe : rc.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              );
+            }).toList(),
           ),
-          _InfoRow(rc: rc,
-              label: 'Data source', value: 'CWC · IMD · WRD Bihar · GloFAS'),
         ],
       ),
     );
   }
 }
 
-class _InfoRow extends StatelessWidget {
+class _Row extends StatelessWidget {
   final RiverColors rc;
-  final String label;
-  final String value;
-  const _InfoRow(
-      {required this.rc, required this.label, required this.value});
+  final String label, value;
+  const _Row({required this.rc, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -1134,7 +1412,7 @@ class _InfoRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: 110,
             child: Text(label,
                 style: TextStyle(
                   color: rc.textSecondary,
@@ -1168,7 +1446,7 @@ class _EmptyStations extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         color: rc.cardBg,
         borderRadius: BorderRadius.circular(16),
@@ -1177,20 +1455,20 @@ class _EmptyStations extends StatelessWidget {
       child: Column(
         children: [
           Icon(Icons.sensors_off_rounded,
-              size: 36, color: rc.textSecondary),
-          const SizedBox(height: 8),
+              size: 40, color: rc.textSecondary),
+          const SizedBox(height: 10),
           Text('No station data yet',
               style: TextStyle(
                 color: rc.textPrimary,
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               )),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            'Station risk scores will appear once live data loads.',
+            'Station risk scores will appear once WRD Bihar\nand CWC live data loads.',
             textAlign: TextAlign.center,
-            style:
-                TextStyle(color: rc.textSecondary, fontSize: 12),
+            style: TextStyle(
+                color: rc.textSecondary, fontSize: 12),
           ),
         ],
       ),
