@@ -1315,7 +1315,10 @@ class _ExpandedDetail extends StatelessWidget {
           children: [
             _DataTile(
               rc: rc,
-              icon: Icons.water_level_rounded,
+              // FIX: Icons.water_level_rounded does not exist in Flutter's
+              // Material icon set. Replaced with Icons.waves_rounded which
+              // semantically represents a water / river level reading.
+              icon: Icons.waves_rounded,
               label: 'Current',
               value: '${data.currentLevel.toStringAsFixed(2)} m',
               color: _bucketColor(_bucket(data.imdSeverity ?? '')),
@@ -1463,15 +1466,15 @@ class _WxGrid extends StatelessWidget {
             : AppPalette.cyan;
 
     final tiles = [
-      _DataTile(rc: rc, icon: Icons.thermostat_rounded,       label: 'Temperature',  value: '${wx.tempC.toStringAsFixed(1)}°C',                    color: AppPalette.amber,        highlight: wx.tempC > 38),
-      _DataTile(rc: rc, icon: Icons.device_thermostat_rounded, label: 'Feels Like',   value: '${(wx.current?.feelsLikeC ?? wx.tempC).toStringAsFixed(1)}°C', color: AppPalette.amber),
-      _DataTile(rc: rc, icon: Icons.water_drop_rounded,        label: 'Humidity',     value: '${wx.humidity}%',                                     color: const Color(0xFF64B5F6), highlight: wx.humidity > 85),
-      _DataTile(rc: rc, icon: Icons.grain_rounded,             label: '7-Day Rain',   value: '${wx.rainfall7dMm.toStringAsFixed(1)} mm',              color: AppPalette.cyan,         highlight: wx.rainfall7dMm > 100),
-      _DataTile(rc: rc, icon: Icons.analytics_rounded,         label: 'Rain Index',   value: '${wx.rainfallIndex.toStringAsFixed(0)}/100',            color: indexColor,             highlight: wx.rainfallIndex > 45),
-      _DataTile(rc: rc, icon: Icons.umbrella_rounded,          label: 'Precip Prob',  value: '${wx.maxPrecipProb.toStringAsFixed(0)}%',               color: AppPalette.amber,        highlight: wx.maxPrecipProb > 70),
-      _DataTile(rc: rc, icon: Icons.air_rounded,               label: 'Wind Speed',   value: '${wx.windKph.toStringAsFixed(0)} km/h',                 color: const Color(0xFF64B5F6)),
-      _DataTile(rc: rc, icon: Icons.wb_sunny_rounded,          label: 'UV Index',     value: (wx.current?.uvIndex ?? 0).toStringAsFixed(1),           color: AppPalette.amber),
-      _DataTile(rc: rc, icon: Icons.water_rounded,             label: 'Precip Now',   value: '${wx.precipMm.toStringAsFixed(1)} mm',                  color: AppPalette.cyan),
+      _DataTile(rc: rc, icon: Icons.thermostat_rounded,        label: 'Temperature',  value: '${wx.tempC.toStringAsFixed(1)}°C',                    color: AppPalette.amber,        highlight: wx.tempC > 38),
+      _DataTile(rc: rc, icon: Icons.device_thermostat_rounded,  label: 'Feels Like',   value: '${(wx.current?.feelsLikeC ?? wx.tempC).toStringAsFixed(1)}°C', color: AppPalette.amber),
+      _DataTile(rc: rc, icon: Icons.water_drop_rounded,         label: 'Humidity',     value: '${wx.humidity}%',                                     color: const Color(0xFF64B5F6), highlight: wx.humidity > 85),
+      _DataTile(rc: rc, icon: Icons.grain_rounded,              label: '7-Day Rain',   value: '${wx.rainfall7dMm.toStringAsFixed(1)} mm',              color: AppPalette.cyan,         highlight: wx.rainfall7dMm > 100),
+      _DataTile(rc: rc, icon: Icons.analytics_rounded,          label: 'Rain Index',   value: '${wx.rainfallIndex.toStringAsFixed(0)}/100',            color: indexColor,             highlight: wx.rainfallIndex > 45),
+      _DataTile(rc: rc, icon: Icons.umbrella_rounded,           label: 'Precip Prob',  value: '${wx.maxPrecipProb.toStringAsFixed(0)}%',               color: AppPalette.amber,        highlight: wx.maxPrecipProb > 70),
+      _DataTile(rc: rc, icon: Icons.air_rounded,                label: 'Wind Speed',   value: '${wx.windKph.toStringAsFixed(0)} km/h',                 color: const Color(0xFF64B5F6)),
+      _DataTile(rc: rc, icon: Icons.wb_sunny_rounded,           label: 'UV Index',     value: (wx.current?.uvIndex ?? 0).toStringAsFixed(1),           color: AppPalette.amber),
+      _DataTile(rc: rc, icon: Icons.water_rounded,              label: 'Precip Now',   value: '${wx.precipMm.toStringAsFixed(1)} mm',                  color: AppPalette.cyan),
     ];
 
     return GridView.count(
