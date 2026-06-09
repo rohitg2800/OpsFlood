@@ -18,6 +18,13 @@ AUTO-REFRESH:
 
 DATA SOURCE: WRD Bihar BeFIQR only.
 Live URL: https://irrigation.befiqr.in/state/table/rivers
+
+NOTE on above_below_danger_m:
+  BeFIQR scrapes a signed distance column BUT the portal sometimes returns
+  unsigned magnitudes. To avoid ambiguity we ALWAYS recompute this field
+  as  (current_level_m - danger_level_m)  so the sign is unambiguous:
+    negative  → river is BELOW danger level (safe)
+    positive  → river is ABOVE danger level (flooding)
 """
 
 from __future__ import annotations
@@ -86,34 +93,34 @@ _STATION_REGISTRY: List[Dict[str, Any]] = [
     {"station": "Samastipur",     "river": "Burhi Gandak", "district": "Samastipur / Samastipur",  "hfl": 49.40, "danger_level_m": 46.00, "lat": 25.877, "lon": 85.782},
     {"station": "Sikandarpur",    "river": "Burhi Gandak", "district": "Muzaffarpur / Musahari",   "hfl": 54.29, "danger_level_m": 52.53, "lat": 26.098, "lon": 85.396},
     # Gandak
-    {"station": "Chatia",         "river": "Gandak",       "district": "East Champaran / Areraj", "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
-    {"station": "Dumariaghat",    "river": "Gandak",       "district": "Gopalganj / Sidhwalia",   "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
+    {"station": "Chatia",         "river": "Gandak",       "district": "East Champaran / Areraj",  "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
+    {"station": "Dumariaghat",    "river": "Gandak",       "district": "Gopalganj / Sidhwalia",    "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
     {"station": "Hajipur",        "river": "Gandak",       "district": "Vaishali / Hajipur",       "hfl": 50.93, "danger_level_m": 50.32, "lat": 25.686, "lon": 85.208},
     {"station": "Rewaghat",       "river": "Gandak",       "district": "Muzaffarpur / Saraiya",    "hfl": 55.46, "danger_level_m": 54.41, "lat": 25.940, "lon": 85.383},
     # Ganga
-    {"station": "Bhagalpur",      "river": "Ganga",        "district": "Bhagalpur / Nathnagar",   "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
-    {"station": "Buxar",          "river": "Ganga",        "district": "Buxar / Buxar",            "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
-    {"station": "Dighaghat",      "river": "Ganga",        "district": "Patna / Patna Rural",     "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
-    {"station": "Gandhighat",     "river": "Ganga",        "district": "Patna / Patna Rural",     "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
-    {"station": "Hathidah",       "river": "Ganga",        "district": "Patna / Mokameh",         "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
-    {"station": "Kahalgaon",      "river": "Ganga",        "district": "Bhagalpur / Gopalpur",    "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
-    {"station": "Munger",         "river": "Ganga",        "district": "Munger / Sadar Munger",   "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
+    {"station": "Bhagalpur",      "river": "Ganga",        "district": "Bhagalpur / Nathnagar",    "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
+    {"station": "Buxar",          "river": "Ganga",        "district": "Buxar / Buxar",             "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
+    {"station": "Dighaghat",      "river": "Ganga",        "district": "Patna / Patna Rural",      "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
+    {"station": "Gandhighat",     "river": "Ganga",        "district": "Patna / Patna Rural",      "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
+    {"station": "Hathidah",       "river": "Ganga",        "district": "Patna / Mokameh",          "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
+    {"station": "Kahalgaon",      "river": "Ganga",        "district": "Bhagalpur / Gopalpur",     "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
+    {"station": "Munger",         "river": "Ganga",        "district": "Munger / Sadar Munger",    "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
     # Ghaghra
-    {"station": "Darauli",        "river": "Ghaghra",      "district": "Siwan / Darauli",          "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
-    {"station": "Gangpur Siswan", "river": "Ghaghra",      "district": "Siwan / Siswan",           "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
+    {"station": "Darauli",        "river": "Ghaghra",      "district": "Siwan / Darauli",           "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
+    {"station": "Gangpur Siswan", "river": "Ghaghra",      "district": "Siwan / Siswan",            "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
     # Kamalabalan
-    {"station": "Jhanjharpur",    "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur", "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
+    {"station": "Jhanjharpur",    "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur",  "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
     # Kamla
-    {"station": "Jainagar",       "river": "Kamla",        "district": "Madhubani / Jainagar",     "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
+    {"station": "Jainagar",       "river": "Kamla",        "district": "Madhubani / Jainagar",      "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
     # Kosi
-    {"station": "Baltara",        "river": "Kosi",         "district": "Khagaria / Beldaur",      "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
-    {"station": "Basua",          "river": "Kosi",         "district": "Supaul / Supaul",         "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
-    {"station": "Kursela",        "river": "Kosi",         "district": "Katihar / Kursela",       "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
+    {"station": "Baltara",        "river": "Kosi",         "district": "Khagaria / Beldaur",       "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
+    {"station": "Basua",          "river": "Kosi",         "district": "Supaul / Supaul",          "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
+    {"station": "Kursela",        "river": "Kosi",         "district": "Katihar / Kursela",        "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
     # Mahananda
-    {"station": "Dhengraghat",    "river": "Mahananda",    "district": "Purnia / Baisi",           "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
-    {"station": "Taibpur",        "river": "Mahananda",    "district": "Kishanganj / Thakurganj", "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
+    {"station": "Dhengraghat",    "river": "Mahananda",    "district": "Purnia / Baisi",            "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
+    {"station": "Taibpur",        "river": "Mahananda",    "district": "Kishanganj / Thakurganj",  "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
     # Punpun
-    {"station": "Sripalpur",      "river": "Punpun",       "district": "Patna / Phulwari",        "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
+    {"station": "Sripalpur",      "river": "Punpun",       "district": "Patna / Phulwari",         "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
 ]
 
 _REGISTRY_MAP: Dict[str, Dict[str, Any]] = {
@@ -134,8 +141,7 @@ def _normalize(value: str) -> str:
 
 
 def _safe_float(value: Any) -> Optional[float]:
-    """Parse float from scraped cell. Returns None for missing/invalid.
-    0.0 is a valid value (e.g. zero 24h change)."""
+    """Parse float from scraped cell. Returns None for missing/invalid."""
     try:
         v = str(value).strip().replace(",", "")
         if v in ("", "--", "N/A", "NA", "-", ".", "nil", "NIL"):
@@ -156,19 +162,26 @@ def _enrich(station_name: str) -> Dict[str, Any]:
             "hfl": None, "danger_level_m": None, "lat": 25.8, "lon": 85.4}
 
 
-def _status_label(current: Optional[float], danger: Optional[float], hfl: Optional[float]) -> str:
+def _status_label(
+    current: Optional[float],
+    danger: Optional[float],
+    hfl: Optional[float],
+    above_dl: Optional[float],
+) -> str:
     """
-    CRITICAL — at/above HFL (or within 3% of HFL) AND above danger
-    DANGER   — at/above danger level
-    WARNING  — within 3 metres below danger level
-    NORMAL   — below warning threshold, level known
-    UNKNOWN  — no current reading
+    Status derived from signed above_dl (current - danger level):
+      CRITICAL  — above danger AND near/above HFL
+      DANGER    — at or above danger level
+      WARNING   — within 3 m below danger level
+      NORMAL    — more than 3 m below danger level
+      UNKNOWN   — no current reading
     """
-    if current is None:
+    if current is None or above_dl is None:
         return "UNKNOWN"
-    if danger is not None and current >= danger:
+    if above_dl >= 0:
+        # At or above danger level
         return "CRITICAL" if (hfl and current >= hfl * 0.97) else "DANGER"
-    if danger is not None and current >= (danger - 3.0):
+    if above_dl >= -3.0:
         return "WARNING"
     if current > 0:
         return "NORMAL"
@@ -209,17 +222,16 @@ def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
                         return i
             return default
 
-        i_river   = col_idx(["river", "nadi"],                        _BEFIQR_COL["river"])
-        i_site    = col_idx(["site", "station", "gauge"],             _BEFIQR_COL["site"])
-        i_hfl     = col_idx(["hfl"],                                  _BEFIQR_COL["hfl"])
-        i_dl      = col_idx(["dl", "danger level", "danger"],        _BEFIQR_COL["dl"])
-        i_yest    = col_idx(["yesterday", "previous", "yest"],        _BEFIQR_COL["yest"])
+        i_river   = col_idx(["river", "nadi"],                       _BEFIQR_COL["river"])
+        i_site    = col_idx(["site", "station", "gauge"],            _BEFIQR_COL["site"])
+        i_hfl     = col_idx(["hfl"],                                 _BEFIQR_COL["hfl"])
+        i_dl      = col_idx(["dl", "danger level", "danger"],       _BEFIQR_COL["dl"])
+        i_yest    = col_idx(["yesterday", "previous", "yest"],       _BEFIQR_COL["yest"])
         i_current = col_idx(["current observed", "current wl",
-                             "current level", "observed wl"],         _BEFIQR_COL["current"])
-        i_diff    = col_idx(["diff", "24", "change"],                 _BEFIQR_COL["diff"])
-        i_above   = col_idx(["above", "below danger"],                _BEFIQR_COL["above"])
-        i_trend   = col_idx(["trend", "today"],                       _BEFIQR_COL["trend"])
-        i_dist    = col_idx(["district", "block"],                    _BEFIQR_COL["dist"])
+                             "current level", "observed wl"],        _BEFIQR_COL["current"])
+        i_diff    = col_idx(["diff", "24", "change"],                _BEFIQR_COL["diff"])
+        i_trend   = col_idx(["trend", "today"],                      _BEFIQR_COL["trend"])
+        i_dist    = col_idx(["district", "block"],                   _BEFIQR_COL["dist"])
 
         for row in rows[1:]:
             cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
@@ -240,7 +252,6 @@ def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
             yest     = _safe_float(c(i_yest))
             current  = _safe_float(c(i_current))
             diff_24h = _safe_float(c(i_diff))
-            above_dl = _safe_float(c(i_above))
             trend    = c(i_trend) or "—"
             district = c(i_dist)
 
@@ -250,9 +261,17 @@ def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
             if hfl is None:  hfl      = meta.get("hfl")
             if dl is None:   dl       = meta.get("danger_level_m")
 
-            below_danger: Optional[float] = None
-            if dl and current is not None:
-                below_danger = round(dl - current, 3)
+            # ----------------------------------------------------------------
+            # above_below_danger_m: ALWAYS computed as (current - danger_level)
+            # Convention:  negative = river BELOW danger level (safe)
+            #              positive = river ABOVE danger level (flooding!)
+            # We deliberately IGNORE BeFIQR's own "above/below" column because
+            # it returns unsigned magnitudes and the sign must be inferred from
+            # context — which we can compute directly here.
+            # ----------------------------------------------------------------
+            above_dl: Optional[float] = None
+            if current is not None and dl is not None and dl > 0:
+                above_dl = round(current - dl, 3)
 
             stations.append({
                 "station":              site,
@@ -265,9 +284,9 @@ def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
                 "yesterday_level_m":    yest,
                 "current_level_m":      current,
                 "change_24h_m":         diff_24h,
-                "above_below_danger_m": above_dl if above_dl is not None else below_danger,
+                "above_below_danger_m": above_dl,
                 "trend":                trend,
-                "status":               _status_label(current, dl, hfl),
+                "status":               _status_label(current, dl, hfl, above_dl),
                 "source":               "WRD_BIHAR_BEFIQR",
                 "last_update":          now,
             })
@@ -373,16 +392,9 @@ async def _get_stations(force_refresh: bool = False) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _scheduled_refresh() -> None:
-    """
-    Called by APScheduler every _POLL_MINUTES.
-    Fetches fresh data and only updates the cache if data has changed
-    (detected by comparing Gandhighat current_level_m as a canary).
-    """
     log.info("[WRD Bihar] Scheduled refresh started")
     try:
         fresh = _fetch_befiqr_live()
-
-        # Change detection: compare canary station level
         new_levels = {s["station"]: s["current_level_m"] for s in fresh["stations"]}
         old_result = _CACHE.get(_CACHE_KEY)
         if old_result:
@@ -393,19 +405,15 @@ def _scheduled_refresh() -> None:
             log.info("[WRD Bihar] Portal data changed — updating cache")
         else:
             log.info("[WRD Bihar] Cache was empty — populating")
-
         _CACHE[_CACHE_KEY] = fresh
         log.info(f"[WRD Bihar] Cache refreshed: {fresh['station_count']} stations at {fresh['timestamp']}")
-
     except RuntimeError as exc:
         log.warning(f"[WRD Bihar] Scheduled refresh failed: {exc}")
 
 
 def start_scheduler() -> None:
-    """Start APScheduler background job. Call once from app startup."""
     global _scheduler
     if _scheduler and _scheduler.running:
-        log.info("[WRD Bihar] Scheduler already running — skipping start")
         return
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata", daemon=True)
     _scheduler.add_job(
@@ -414,15 +422,14 @@ def start_scheduler() -> None:
         id="wrd_bihar_refresh",
         name=f"WRD Bihar BeFIQR scrape every {_POLL_MINUTES} min",
         replace_existing=True,
-        max_instances=1,         # prevent overlapping runs
-        misfire_grace_time=120,  # allow 2 min delay before skipping
+        max_instances=1,
+        misfire_grace_time=120,
     )
     _scheduler.start()
     log.info(f"[WRD Bihar] Scheduler started — polling every {_POLL_MINUTES} min (IST)")
 
 
 def stop_scheduler() -> None:
-    """Gracefully stop the scheduler. Call from app shutdown."""
     global _scheduler
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
@@ -439,7 +446,6 @@ async def get_wrd_bihar_stations(
     river: Optional[str] = None,
     district: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """All 31 WRD Bihar stations. Filters: ?river=Ganga ?district=Patna ?force_refresh=true"""
     result = await _get_stations(force_refresh=force_refresh)
     stations = result.get("stations", [])
     if river:
@@ -453,7 +459,6 @@ async def get_wrd_bihar_stations(
 
 @router.get("/stations/{station_name}")
 async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) -> Dict[str, Any]:
-    """Single station by name (case-insensitive partial match)."""
     all_data = await _get_stations(force_refresh=force_refresh)
     key = _normalize(station_name)
     matches = [
@@ -469,7 +474,6 @@ async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) 
 
 @router.get("/summary")
 async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
-    """Bihar flood summary — alert level, counts, top 5 alerts."""
     all_data = await _get_stations(force_refresh=force_refresh)
     stations = all_data.get("stations", [])
 
@@ -479,10 +483,11 @@ async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
     for s in stations:
         status = s.get("status", "UNKNOWN")
         counts[status] = counts.get(status, 0) + 1
-        current = s.get("current_level_m")
+        above_dl = s.get("above_below_danger_m")
         dl = s.get("danger_level_m")
+        current = s.get("current_level_m")
         if current is not None and dl and dl > 0:
-            alert_stations.append({**s, "_pct": round((current / dl) * 100, 1)})
+            alert_stations.append({**s, "_pct": round(current / dl * 100, 1)})
 
     alert_stations.sort(key=lambda x: x["_pct"], reverse=True)
 
@@ -503,7 +508,8 @@ async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
         "top_alerts": [
             {"station": s["station"], "river": s["river"], "district": s["district"],
              "current_level_m": s["current_level_m"], "danger_level_m": s["danger_level_m"],
-             "pct_of_danger": s["_pct"], "status": s["status"]}
+             "above_below_danger_m": s.get("above_below_danger_m"),
+             "status": s["status"]}
             for s in alert_stations[:5]
         ],
     }
@@ -511,42 +517,31 @@ async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
 
 @router.get("/refresh")
 async def force_refresh_wrd_bihar() -> Dict[str, Any]:
-    """
-    Force immediate scrape of BeFIQR and update the cache.
-    Returns new data directly. Useful for manual trigger or testing.
-    """
     log.info("[WRD Bihar] Manual /refresh triggered")
     result = await _get_stations(force_refresh=True)
     return {
-        "refreshed": True,
-        "status": result["status"],
-        "data_source": result["data_source"],
-        "timestamp": result["timestamp"],
+        "refreshed":     True,
+        "status":        result["status"],
+        "data_source":   result["data_source"],
+        "timestamp":     result["timestamp"],
         "station_count": result["station_count"],
-        "_cache_hit": result.get("_cache_hit", False),
+        "_cache_hit":    result.get("_cache_hit", False),
     }
 
 
 @router.get("/scheduler/status")
 async def scheduler_status() -> Dict[str, Any]:
-    """APScheduler job info — next run time, poll interval, running state."""
     global _scheduler
     if not _scheduler or not _scheduler.running:
-        return {"running": False, "message": "Scheduler not started. Call start_scheduler() on app startup."}
-
+        return {"running": False, "message": "Scheduler not started."}
     job = _scheduler.get_job("wrd_bihar_refresh")
-    next_run = None
-    if job and job.next_run_time:
-        next_run = job.next_run_time.isoformat()
-
+    next_run = job.next_run_time.isoformat() if (job and job.next_run_time) else None
     cached = _CACHE.get(_CACHE_KEY)
-    last_cached_at = cached["timestamp"] if cached else None
-
     return {
         "running":            True,
         "poll_interval_min":  _POLL_MINUTES,
         "next_run_ist":       next_run,
-        "last_cached_at_utc": last_cached_at,
+        "last_cached_at_utc": cached["timestamp"] if cached else None,
         "cache_has_data":     cached is not None,
         "job_id":             "wrd_bihar_refresh",
     }
@@ -554,7 +549,6 @@ async def scheduler_status() -> Dict[str, Any]:
 
 @router.get("/health")
 async def wrd_bihar_health() -> Dict[str, Any]:
-    """Check if BeFIQR portal is reachable."""
     primary_url = _WRD_URLS[0]
     try:
         resp = requests.get(primary_url, headers=_HEADERS, timeout=(4, 10))
