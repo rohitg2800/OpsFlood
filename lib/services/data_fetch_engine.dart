@@ -1,13 +1,17 @@
-// lib/services/data_fetch_engine.dart  v2.1
+// lib/services/data_fetch_engine.dart  v2.2
 //
-// Bug fixes vs v2.0:
-//   #7  GloFAS HFL clamp: estLevel was not clamped to [0, hfl].
-//       When GloFAS discharge >> mean discharge (peak monsoon), the formula
-//       (Q/Qmean) * DL * 0.85 could produce physically impossible values
-//       (e.g. 63.72 m for Taibpur whose HFL is 38.16 m).
-//       Fix: clamp GloFAS estimated level to [0, s.hfl * 0.98].
-//       0.98 factor: GloFAS can theoretically hit HFL but rarely exceeds it;
-//       any result >= HFL should be treated as data anomaly, not EMERGENCY.
+// v2.1 → v2.2 changes:
+//   Forecast Step 6: WRD-covered stations now use ws.forecast24h (bulletin-
+//   accurate 24h predicted level from FMISC/CWC model) instead of the
+//   GloFAS rate-of-rise heuristic. The heuristic is retained as fallback
+//   for GLOFAS/SEED stations not covered by WRD bulletin.
+//
+//   Logic:
+//     source == 'WRD_LIVE' && ws.forecast24h != null
+//       → forecastLevel24h = ws.forecast24h (clamped to hfl)
+//         forecastLevel48h / 72h = heuristic from that anchor (not bulletin)
+//     otherwise
+//       → all three = heuristic from current level
 //
 library;
 
@@ -23,7 +27,7 @@ import '../models/river_station.dart';
 import 'wrd_bihar_service.dart';
 import 'fcm_broadcast_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 class StationReading {
   final String  stationName;
   final String  river;
@@ -206,15 +210,15 @@ class DataFetchSnapshot {
   final String?              error;
   final bool                 fromBroadcast;
 
-  int    get totalStations    => stations.length;
-  int    get liveStations     => stations.where((s) => s.isLive).length;
-  int    get criticalCount    => stations.where((s) => s.riskLabel == 'CRITICAL').length;
-  int    get dangerCount      => stations.where((s) =>
+  int    get totalStations   => stations.length;
+  int    get liveStations    => stations.where((s) => s.isLive).length;
+  int    get criticalCount   => stations.where((s) => s.riskLabel == 'CRITICAL').length;
+  int    get dangerCount     => stations.where((s) =>
       s.riskLabel == 'CRITICAL' || s.riskLabel == 'DANGER').length;
-  int    get warningCount     => stations.where((s) => s.riskLabel == 'WARNING').length;
-  double get maxLevel         => stations.isEmpty ? 0
+  int    get warningCount    => stations.where((s) => s.riskLabel == 'WARNING').length;
+  double get maxLevel        => stations.isEmpty ? 0
       : stations.map((s) => s.currentLevel).reduce(math.max);
-  String get maxLevelStation  => stations.isEmpty ? '—'
+  String get maxLevelStation => stations.isEmpty ? '—'
       : stations.reduce((a, b) =>
           a.currentLevel > b.currentLevel ? a : b).stationName;
 
@@ -222,7 +226,7 @@ class DataFetchSnapshot {
     required this.stations,
     required this.sources,
     required this.fetchedAt,
-    this.isLoading    = false,
+    this.isLoading     = false,
     this.error,
     this.fromBroadcast = false,
   });
@@ -232,13 +236,10 @@ class DataFetchSnapshot {
     fetchedAt: DateTime.now(), isLoading: true,
   );
 
-  String toCompressedJson() {
-    final payload = jsonEncode({
-      'ts': fetchedAt.millisecondsSinceEpoch,
-      'st': stations.map((s) => s.toJson()).toList(),
-    });
-    return payload;
-  }
+  String toCompressedJson() => jsonEncode({
+    'ts': fetchedAt.millisecondsSinceEpoch,
+    'st': stations.map((s) => s.toJson()).toList(),
+  });
 
   static DataFetchSnapshot? fromCompressedJson(String raw) {
     try {
@@ -260,7 +261,7 @@ class DataFetchSnapshot {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 class DataFetchEngine {
   DataFetchEngine._() {
     _last = _buildSeedSnapshot();
@@ -291,11 +292,14 @@ class DataFetchEngine {
   DataFetchSnapshot? _last;
   DataFetchSnapshot? get last => _last;
 
-  Timer? _timer;
-  bool   _running      = false;
-  int    _errorStreak  = 0;
+  Timer?   _timer;
+  bool     _running     = false;
+  int      _errorStreak = 0;
 
   final Map<String, List<_LevelSample>> _history = {};
+
+  // v2.2: track forecast24h values from WRD scrape so Step 6 can use them
+  final Map<String, double> _wrdForecast24h = {};
 
   void start() {
     if (_running) return;
@@ -318,21 +322,18 @@ class DataFetchEngine {
   void _onBroadcastSnapshot(DataFetchSnapshot snap) {
     _last = snap;
     if (!_ctrl.isClosed) _ctrl.add(snap);
-    _log('FCM broadcast applied: ${snap.stations.length} stations, fetchedAt=${snap.fetchedAt}');
+    _log('FCM broadcast applied: ${snap.stations.length} stations');
   }
 
   void _scheduleNext(Duration d) {
     _timer?.cancel();
     _timer = Timer(d, () {
-      final last = _last;
+      final last     = _last;
       final fcmFresh = last != null &&
           last.fromBroadcast &&
           DateTime.now().difference(last.fetchedAt) < _fcmStaleness;
-      if (!fcmFresh) {
-        _fetchCycle();
-      } else {
-        _log('FCM snapshot fresh — skipping on-device HTTP cycle');
-      }
+      if (!fcmFresh) _fetchCycle();
+      else _log('FCM snapshot fresh — skipping HTTP cycle');
       final backoff = _errorStreak > 0
           ? Duration(seconds: math.min(
               _baseInterval.inSeconds * (1 << _errorStreak.clamp(0, 6)),
@@ -344,10 +345,10 @@ class DataFetchEngine {
 
   Future<void> _fetchCycle() async {
     _log('fetch cycle start');
-    final sources  = <SourceStatus>[];
-    final now      = DateTime.now();
+    final sources = <SourceStatus>[];
+    final now     = DateTime.now();
 
-    // ── Step 1: Seed map ────────────────────────────────────────────────────
+    // ── Step 1: Seed ──────────────────────────────────────────────────────────
     final Map<String, StationReading> stations = {};
     for (final g in kBiharGauges) {
       final key  = _normaliseKey(g.station);
@@ -376,9 +377,10 @@ class DataFetchEngine {
         name: 'SEED', healthy: true,
         stationCount: stations.length, isFromSeed: true));
 
-    // ── Step 2: WRD Bihar ────────────────────────────────────────────────
+    // ── Step 2: WRD Bihar ─────────────────────────────────────────────────────
     final wrdStart = DateTime.now();
     int wrdCount   = 0;
+    _wrdForecast24h.clear();  // reset before each cycle
     try {
       final wrdList = await WrdBiharService.instance.fetch();
       for (final ws in wrdList) {
@@ -390,7 +392,6 @@ class DataFetchEngine {
         final dl   = (ws.dangerLevel  != null && ws.dangerLevel!  > 0)
             ? ws.dangerLevel!  : base.dangerLevel;
         final live = ws.source == 'WRD_BIHAR_LIVE';
-        final prog = dl > 0 ? (cl / dl * 100).clamp(0.0, 200.0) : 0.0;
         final key  = _normaliseKey(ws.site);
         stations[key] = base.copyWith(
           currentLevel: cl,
@@ -399,24 +400,30 @@ class DataFetchEngine {
           isLive:       live,
           fetchedAt:    now,
         );
+        // v2.2: stash bulletin forecast24h keyed by normalised station name
+        if (ws.forecast24h != null && ws.forecast24h! > 0) {
+          _wrdForecast24h[key] = ws.forecast24h!;
+        }
         wrdCount++;
       }
       sources.add(SourceStatus(
-        name: 'WRD_BIHAR', healthy: wrdCount > 0,
+        name:          'WRD_BIHAR',
+        healthy:       wrdCount > 0,
         latencyMs:     DateTime.now().difference(wrdStart).inMilliseconds,
         stationCount:  wrdCount,
         lastSuccessAt: wrdCount > 0 ? now : null,
       ));
     } catch (e) {
       sources.add(SourceStatus(
-        name: 'WRD_BIHAR', healthy: false,
+        name:         'WRD_BIHAR',
+        healthy:      false,
         latencyMs:    DateTime.now().difference(wrdStart).inMilliseconds,
         errorMessage: e.toString(),
       ));
       _log('WRD Bihar failed: $e');
     }
 
-    // ── Step 3: CWC multi-URL race ──────────────────────────────────────────
+    // ── Step 3: CWC multi-URL race ────────────────────────────────────────────
     final cwcStart  = DateTime.now();
     int   cwcCount  = 0;
     final cwcFutures = _cwcCodes.entries.map((e) =>
@@ -430,8 +437,8 @@ class DataFetchEngine {
       if (r == null || r.value == null) continue;
       final base = _findBase(stations, r.key, '');
       if (base == null) continue;
-      final cl   = r.value!;
-      final key  = _normaliseKey(r.key);
+      final cl  = r.value!;
+      final key = _normaliseKey(r.key);
       stations[key] = base.copyWith(
         currentLevel: cl,
         riskLabel: StationReading._deriveRisk(cl, base.warningLevel, base.dangerLevel),
@@ -449,7 +456,7 @@ class DataFetchEngine {
       lastSuccessAt: cwcCount > 0 ? now : null,
     ));
 
-    // ── Step 4: GloFAS + Open-Meteo ──────────────────────────────────────────
+    // ── Step 4: GloFAS + Open-Meteo ───────────────────────────────────────────
     final stList = stations.values.toList();
     final Map<int, double> dischargeByIdx = {};
     final Map<int, double> meanByIdx      = {};
@@ -491,10 +498,10 @@ class DataFetchEngine {
 
     // Open-Meteo rainfall batched
     for (int bStart = 0; bStart < stList.length; bStart += _openMeteoBatch) {
-      final bEnd    = math.min(bStart + _openMeteoBatch, stList.length);
-      final batch   = stList.sublist(bStart, bEnd);
-      final bLats   = batch.map((s) => s.lat.toString()).join(',');
-      final bLons   = batch.map((s) => s.lon.toString()).join(',');
+      final bEnd  = math.min(bStart + _openMeteoBatch, stList.length);
+      final batch = stList.sublist(bStart, bEnd);
+      final bLats = batch.map((s) => s.lat.toString()).join(',');
+      final bLons = batch.map((s) => s.lon.toString()).join(',');
       try {
         final res = await http.get(Uri.parse(
           'https://api.open-meteo.com/v1/forecast'
@@ -516,10 +523,7 @@ class DataFetchEngine {
       }
     }
 
-    // Merge GloFAS + rain into stations
-    // FIX #7: clamp GloFAS estimated level to [0, hfl * 0.98]
-    // so physically impossible values (e.g. 63m for a 38m HFL station)
-    // are never emitted as EMERGENCY alerts.
+    // Merge GloFAS + rain into SEED-only stations (FIX #7: HFL clamp retained)
     for (int i = 0; i < stList.length; i++) {
       final s    = stList[i];
       final key  = _normaliseKey(s.stationName);
@@ -528,10 +532,8 @@ class DataFetchEngine {
       final rain = rainByIdx[i];
       if (s.source == 'SEED' && dis != null && mean != null &&
           mean > 0 && s.dangerLevel > 0) {
-        // Estimate level from discharge ratio, but never exceed 98% of HFL.
-        // HFL is the all-time record — GloFAS cannot legitimately exceed it.
         final rawEstimate = (dis / mean) * s.dangerLevel * 0.85;
-        final maxAllowed  = s.hfl * 0.98;   // FIX #7: hard ceiling
+        final maxAllowed  = s.hfl * 0.98;
         final estLevel    = rawEstimate.clamp(0.0, maxAllowed);
         stations[key] = s.copyWith(
           currentLevel:   estLevel,
@@ -546,7 +548,7 @@ class DataFetchEngine {
       }
     }
 
-    // ── Step 5: Rate of rise ─────────────────────────────────────────────
+    // ── Step 5: Rate of rise ──────────────────────────────────────────────────
     final withRoR = <StationReading>[];
     for (final s in stations.values) {
       final key  = _normaliseKey(s.stationName);
@@ -563,14 +565,34 @@ class DataFetchEngine {
       withRoR.add(s.copyWith(rateOfRiseMph: ror));
     }
 
-    // ── Step 6: 24/48/72h forecast ─────────────────────────────────────────
+    // ── Step 6: 24/48/72h forecast ────────────────────────────────────────────
+    //
+    // v2.2 change: WRD_LIVE stations use bulletin forecast24h for the 24h slot.
+    // 48h and 72h still use heuristic anchored from the bulletin 24h value.
+    // GLOFAS/SEED stations: all three slots use heuristic from current level.
     final finalList = withRoR.map((s) {
       if (!s.isLive) return s;
-      final ror     = s.rateOfRiseMph ?? 0.0;
-      final rainMod = s.rainfall24hMm != null
+      final key      = _normaliseKey(s.stationName);
+      final ror      = s.rateOfRiseMph ?? 0.0;
+      final rainMod  = s.rainfall24hMm != null
           ? (s.rainfall24hMm! / 50.0).clamp(0.0, 1.5) : 0.3;
-      final rise    = ror * rainMod;
-      // FIX #7: forecasts also clamped to HFL
+      final rise     = ror * rainMod;
+
+      // Bulletin 24h forecast available for this station?
+      final bulletinF24 = _wrdForecast24h[key];
+      if (bulletinF24 != null && s.source == 'WRD_LIVE') {
+        // Use bulletin for 24h; extrapolate 48/72 from that anchor.
+        // If ror is near-zero use simple linear from bulletin value.
+        final f24 = bulletinF24.clamp(0.0, s.hfl);
+        final delta = rise > 0 ? rise : (f24 - s.currentLevel) / 24.0;
+        return s.copyWith(
+          forecastLevel24h: f24,
+          forecastLevel48h: (f24 + delta * 24).clamp(0.0, s.hfl),
+          forecastLevel72h: (f24 + delta * 48).clamp(0.0, s.hfl),
+        );
+      }
+
+      // Fallback: full heuristic (GloFAS / SEED / WRD_DISK)
       return s.copyWith(
         forecastLevel24h: (s.currentLevel + rise * 24).clamp(0.0, s.hfl),
         forecastLevel48h: (s.currentLevel + rise * 48).clamp(0.0, s.hfl),
@@ -589,7 +611,8 @@ class DataFetchEngine {
     _errorStreak = 0;
     if (!_ctrl.isClosed) _ctrl.add(snap);
     _log('cycle done: ${finalList.length} stations, '
-        '${finalList.where((s) => s.isLive).length} live');
+        '${finalList.where((s) => s.isLive).length} live, '
+        '${_wrdForecast24h.length} bulletin-24h forecasts');
   }
 
   Future<double?> _fetchCwcStationRaced(String code) async {
@@ -603,7 +626,7 @@ class DataFetchEngine {
       try {
         final res = await http.get(
           Uri.parse(url),
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/2.1'},
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/2.2'},
         ).timeout(_cwcTimeout);
         if (res.statusCode != 200) return null;
         return _extractLevel(jsonDecode(res.body));
@@ -679,7 +702,7 @@ class DataFetchEngine {
   }
 
   static DataFetchSnapshot _buildSeedSnapshot() {
-    final now = DateTime.now();
+    final now   = DateTime.now();
     final seeds = kBiharGauges.map((g) {
       final cl   = g.warningLevel * 0.70;
       final prog = g.dangerLevel > 0
