@@ -4,7 +4,7 @@ Scrapes BeFIQR portal (irrigation.befiqr.in) — the official Central Flood
 Control Cell, Water Resources Department, Govt of Bihar.
 
 Routes:
-  GET /api/wrd-bihar/stations            — all 31 stations (live or fallback)
+  GET /api/wrd-bihar/stations            — all stations (live or fallback)
   GET /api/wrd-bihar/stations/{name}     — single station by name
   GET /api/wrd-bihar/summary             — danger/warning/normal counts + top alerts
   GET /api/wrd-bihar/health              — portal reachability check
@@ -76,51 +76,77 @@ _HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Station registry — 31 WRD Bihar gauge stations
+# Station registry — WRD Bihar BeFIQR gauge stations
+# HFL and danger_level_m are in metres above sea level (ASL).
 # ---------------------------------------------------------------------------
 _STATION_REGISTRY: List[Dict[str, Any]] = [
-    # Adhwara
-    {"station": "Ekmighat",       "river": "Adhwara",      "district": "Darbhanga / Bahadurpur",  "hfl": 49.52, "danger_level_m": 46.94, "lat": 26.095, "lon": 85.902},
-    {"station": "Kamtaul",        "river": "Adhwara",      "district": "Darbhanga / Jale",         "hfl": 53.05, "danger_level_m": 50.00, "lat": 26.272, "lon": 85.959},
-    {"station": "Sonbarsa",       "river": "Adhwara",      "district": "Sitamarhi / Sonbarsa",     "hfl": 83.20, "danger_level_m": 81.85, "lat": 26.799, "lon": 85.483},
-    # Bagmati
-    {"station": "Benibad",        "river": "Bagmati",      "district": "Muzaffarpur / Gaighat",    "hfl": 50.12, "danger_level_m": 48.68, "lat": 26.005, "lon": 85.608},
-    {"station": "Dheng Bridge",   "river": "Bagmati",      "district": "Sitamarhi / Suppi",        "hfl": 73.47, "danger_level_m": 71.00, "lat": 26.587, "lon": 85.480},
-    {"station": "Hayaghat",       "river": "Bagmati",      "district": "Darbhanga / Hayaghat",     "hfl": 48.96, "danger_level_m": 45.72, "lat": 25.985, "lon": 85.806},
-    # Burhi Gandak
-    {"station": "Khagaria",       "river": "Burhi Gandak", "district": "Khagaria / Khagaria",      "hfl": 39.22, "danger_level_m": 36.58, "lat": 25.502, "lon": 86.467},
-    {"station": "Rosera",         "river": "Burhi Gandak", "district": "Samastipur / Rosera",      "hfl": 46.56, "danger_level_m": 42.63, "lat": 25.868, "lon": 85.992},
-    {"station": "Samastipur",     "river": "Burhi Gandak", "district": "Samastipur / Samastipur",  "hfl": 49.40, "danger_level_m": 46.00, "lat": 25.877, "lon": 85.782},
-    {"station": "Sikandarpur",    "river": "Burhi Gandak", "district": "Muzaffarpur / Musahari",   "hfl": 54.29, "danger_level_m": 52.53, "lat": 26.098, "lon": 85.396},
-    # Gandak
-    {"station": "Chatia",         "river": "Gandak",       "district": "East Champaran / Areraj",  "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
-    {"station": "Dumariaghat",    "river": "Gandak",       "district": "Gopalganj / Sidhwalia",    "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
-    {"station": "Hajipur",        "river": "Gandak",       "district": "Vaishali / Hajipur",       "hfl": 50.93, "danger_level_m": 50.32, "lat": 25.686, "lon": 85.208},
-    {"station": "Rewaghat",       "river": "Gandak",       "district": "Muzaffarpur / Saraiya",    "hfl": 55.46, "danger_level_m": 54.41, "lat": 25.940, "lon": 85.383},
-    # Ganga
-    {"station": "Bhagalpur",      "river": "Ganga",        "district": "Bhagalpur / Nathnagar",    "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
-    {"station": "Buxar",          "river": "Ganga",        "district": "Buxar / Buxar",             "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
-    {"station": "Dighaghat",      "river": "Ganga",        "district": "Patna / Patna Rural",      "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
-    {"station": "Gandhighat",     "river": "Ganga",        "district": "Patna / Patna Rural",      "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
-    {"station": "Hathidah",       "river": "Ganga",        "district": "Patna / Mokameh",          "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
-    {"station": "Kahalgaon",      "river": "Ganga",        "district": "Bhagalpur / Gopalpur",     "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
-    {"station": "Munger",         "river": "Ganga",        "district": "Munger / Sadar Munger",    "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
-    # Ghaghra
-    {"station": "Darauli",        "river": "Ghaghra",      "district": "Siwan / Darauli",           "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
-    {"station": "Gangpur Siswan", "river": "Ghaghra",      "district": "Siwan / Siswan",            "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
-    # Kamalabalan
-    {"station": "Jhanjharpur",    "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur",  "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
-    # Kamla
-    {"station": "Jainagar",       "river": "Kamla",        "district": "Madhubani / Jainagar",      "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
-    # Kosi
-    {"station": "Baltara",        "river": "Kosi",         "district": "Khagaria / Beldaur",       "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
-    {"station": "Basua",          "river": "Kosi",         "district": "Supaul / Supaul",          "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
-    {"station": "Kursela",        "river": "Kosi",         "district": "Katihar / Kursela",        "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
-    # Mahananda
-    {"station": "Dhengraghat",    "river": "Mahananda",    "district": "Purnia / Baisi",            "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
-    {"station": "Taibpur",        "river": "Mahananda",    "district": "Kishanganj / Thakurganj",  "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
-    # Punpun
-    {"station": "Sripalpur",      "river": "Punpun",       "district": "Patna / Phulwari",         "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
+    # ── Adhwara ──────────────────────────────────────────────────────────────
+    {"station": "Ekmighat",         "river": "Adhwara",      "district": "Darbhanga / Bahadurpur",    "hfl": 49.52, "danger_level_m": 46.94, "lat": 26.095, "lon": 85.902},
+    {"station": "Kamtaul",          "river": "Adhwara",      "district": "Darbhanga / Jale",           "hfl": 53.05, "danger_level_m": 50.00, "lat": 26.272, "lon": 85.959},
+    {"station": "Sonbarsa",         "river": "Adhwara",      "district": "Sitamarhi / Sonbarsa",       "hfl": 83.20, "danger_level_m": 81.85, "lat": 26.799, "lon": 85.483},
+
+    # ── Bagmati ───────────────────────────────────────────────────────────────
+    {"station": "Benibad",          "river": "Bagmati",      "district": "Muzaffarpur / Gaighat",      "hfl": 50.12, "danger_level_m": 48.68, "lat": 26.005, "lon": 85.608},
+    {"station": "Dheng Bridge",     "river": "Bagmati",      "district": "Sitamarhi / Suppi",          "hfl": 73.47, "danger_level_m": 71.00, "lat": 26.587, "lon": 85.480},
+    {"station": "Hayaghat",         "river": "Bagmati",      "district": "Darbhanga / Hayaghat",       "hfl": 48.96, "danger_level_m": 45.72, "lat": 25.985, "lon": 85.806},
+    {"station": "Runisaidpur",      "river": "Bagmati",      "district": "Sitamarhi / Runisaidpur",    "hfl": 76.30, "danger_level_m": 74.42, "lat": 26.549, "lon": 85.712},
+    {"station": "Sitamarhi",        "river": "Bagmati",      "district": "Sitamarhi / Sadar",          "hfl": 79.20, "danger_level_m": 77.22, "lat": 26.593, "lon": 85.489},
+    {"station": "Nirmali",          "river": "Bagmati",      "district": "Supaul / Nirmali",           "hfl": 46.35, "danger_level_m": 44.22, "lat": 26.313, "lon": 86.587},
+
+    # ── Burhi Gandak ──────────────────────────────────────────────────────────
+    {"station": "Khagaria",         "river": "Burhi Gandak", "district": "Khagaria / Khagaria",        "hfl": 39.22, "danger_level_m": 36.58, "lat": 25.502, "lon": 86.467},
+    {"station": "Muzaffarpur",      "river": "Burhi Gandak", "district": "Muzaffarpur / Sadar",        "hfl": 53.26, "danger_level_m": 51.21, "lat": 26.121, "lon": 85.391},
+    {"station": "Rosera",           "river": "Burhi Gandak", "district": "Samastipur / Rosera",        "hfl": 46.56, "danger_level_m": 42.63, "lat": 25.868, "lon": 85.992},
+    {"station": "Samastipur",       "river": "Burhi Gandak", "district": "Samastipur / Samastipur",    "hfl": 49.40, "danger_level_m": 46.00, "lat": 25.877, "lon": 85.782},
+    {"station": "Sikandra",         "river": "Burhi Gandak", "district": "Samastipur / Pusa",          "hfl": 51.10, "danger_level_m": 48.77, "lat": 25.989, "lon": 85.676},
+    {"station": "Sikandarpur",      "river": "Burhi Gandak", "district": "Muzaffarpur / Musahari",     "hfl": 54.29, "danger_level_m": 52.53, "lat": 26.098, "lon": 85.396},
+
+    # ── Gandak ────────────────────────────────────────────────────────────────
+    {"station": "Chatia",           "river": "Gandak",       "district": "East Champaran / Areraj",    "hfl": 70.04, "danger_level_m": 69.15, "lat": 26.838, "lon": 84.879},
+    {"station": "Dumariaghat",      "river": "Gandak",       "district": "Gopalganj / Sidhwalia",      "hfl": 64.36, "danger_level_m": 62.22, "lat": 26.491, "lon": 84.427},
+    {"station": "Gopalpur",         "river": "Gandak",       "district": "Gopalganj / Kuchaikot",      "hfl": 66.40, "danger_level_m": 64.50, "lat": 26.620, "lon": 84.226},
+    {"station": "Hajipur",          "river": "Gandak",       "district": "Vaishali / Hajipur",         "hfl": 50.93, "danger_level_m": 50.32, "lat": 25.686, "lon": 85.208},
+    {"station": "Mirganj",          "river": "Gandak",       "district": "Gopalganj / Mirganj",        "hfl": 62.48, "danger_level_m": 60.98, "lat": 26.483, "lon": 84.368},
+    {"station": "Rewaghat",         "river": "Gandak",       "district": "Muzaffarpur / Saraiya",      "hfl": 55.46, "danger_level_m": 54.41, "lat": 25.940, "lon": 85.383},
+
+    # ── Ganga ─────────────────────────────────────────────────────────────────
+    {"station": "Barh",             "river": "Ganga",        "district": "Patna / Barh",               "hfl": 47.65, "danger_level_m": 45.73, "lat": 25.482, "lon": 85.712},
+    {"station": "Bhagalpur",        "river": "Ganga",        "district": "Bhagalpur / Nathnagar",      "hfl": 34.86, "danger_level_m": 33.68, "lat": 25.244, "lon": 86.972},
+    {"station": "Buxar",            "river": "Ganga",        "district": "Buxar / Buxar",              "hfl": 62.10, "danger_level_m": 60.30, "lat": 25.564, "lon": 83.976},
+    {"station": "Dighaghat",        "river": "Ganga",        "district": "Patna / Patna Rural",        "hfl": 52.52, "danger_level_m": 50.45, "lat": 25.608, "lon": 85.046},
+    {"station": "Gandhighat",       "river": "Ganga",        "district": "Patna / Patna Rural",        "hfl": 50.52, "danger_level_m": 48.60, "lat": 25.594, "lon": 85.138},
+    {"station": "Hathidah",         "river": "Ganga",        "district": "Patna / Mokameh",            "hfl": 43.52, "danger_level_m": 41.76, "lat": 25.390, "lon": 85.614},
+    {"station": "Kahalgaon",        "river": "Ganga",        "district": "Bhagalpur / Gopalpur",       "hfl": 32.87, "danger_level_m": 31.09, "lat": 25.241, "lon": 87.248},
+    {"station": "Munger",           "river": "Ganga",        "district": "Munger / Sadar Munger",      "hfl": 40.99, "danger_level_m": 39.33, "lat": 25.375, "lon": 86.473},
+    {"station": "Sultanganj",       "river": "Ganga",        "district": "Bhagalpur / Sultanganj",     "hfl": 36.14, "danger_level_m": 34.45, "lat": 25.252, "lon": 86.744},
+
+    # ── Ghaghra ───────────────────────────────────────────────────────────────
+    {"station": "Darauli",          "river": "Ghaghra",      "district": "Siwan / Darauli",            "hfl": 61.82, "danger_level_m": 60.82, "lat": 26.012, "lon": 84.548},
+    {"station": "Gangpur Siswan",   "river": "Ghaghra",      "district": "Siwan / Siswan",             "hfl": 58.26, "danger_level_m": 57.04, "lat": 26.219, "lon": 84.358},
+
+    # ── Kamalabalan ───────────────────────────────────────────────────────────
+    {"station": "Jhanjharpur",      "river": "Kamalabalan",  "district": "Madhubani / Jhanjharpur",    "hfl": 53.11, "danger_level_m": 50.00, "lat": 26.264, "lon": 86.280},
+
+    # ── Kamla ─────────────────────────────────────────────────────────────────
+    {"station": "Jainagar",         "river": "Kamla",        "district": "Madhubani / Jainagar",       "hfl": 71.35, "danger_level_m": 67.75, "lat": 26.599, "lon": 85.916},
+    {"station": "Salempur",         "river": "Kamla",        "district": "Madhubani / Salempur",       "hfl": 56.80, "danger_level_m": 54.60, "lat": 26.398, "lon": 86.096},
+
+    # ── Kosi ──────────────────────────────────────────────────────────────────
+    {"station": "Baltara",          "river": "Kosi",         "district": "Khagaria / Beldaur",         "hfl": 36.40, "danger_level_m": 33.85, "lat": 25.458, "lon": 86.584},
+    {"station": "Basua",            "river": "Kosi",         "district": "Supaul / Supaul",            "hfl": 49.24, "danger_level_m": 47.75, "lat": 26.124, "lon": 86.604},
+    {"station": "Birpur",           "river": "Kosi",         "district": "Supaul / Birpur",            "hfl": 54.42, "danger_level_m": 52.98, "lat": 26.508, "lon": 86.918},
+    {"station": "Koparia",          "river": "Kosi",         "district": "Supaul / Triveniganj",       "hfl": 47.85, "danger_level_m": 46.20, "lat": 26.203, "lon": 86.772},
+    {"station": "Kursela",          "river": "Kosi",         "district": "Katihar / Kursela",          "hfl": 32.10, "danger_level_m": 30.00, "lat": 25.468, "lon": 87.258},
+    {"station": "Naugachia",        "river": "Kosi",         "district": "Bhagalpur / Naugachia",      "hfl": 33.85, "danger_level_m": 32.10, "lat": 25.390, "lon": 87.097},
+
+    # ── Mahananda ─────────────────────────────────────────────────────────────
+    {"station": "Benipur",          "river": "Mahananda",    "district": "Madhubani / Benipur",        "hfl": 53.10, "danger_level_m": 51.21, "lat": 26.118, "lon": 86.082},
+    {"station": "Bhimnagar",        "river": "Mahananda",    "district": "Supaul / Bhimnagar",         "hfl": 67.85, "danger_level_m": 66.50, "lat": 26.737, "lon": 87.077},
+    {"station": "Dhengraghat",      "river": "Mahananda",    "district": "Purnia / Baisi",             "hfl": 38.20, "danger_level_m": 35.65, "lat": 26.079, "lon": 87.456},
+    {"station": "Taibpur",          "river": "Mahananda",    "district": "Kishanganj / Thakurganj",    "hfl": 67.22, "danger_level_m": 66.00, "lat": 26.399, "lon": 88.016},
+
+    # ── Punpun ────────────────────────────────────────────────────────────────
+    {"station": "Sripalpur",        "river": "Punpun",       "district": "Patna / Phulwari",           "hfl": 53.91, "danger_level_m": 50.60, "lat": 25.550, "lon": 85.080},
 ]
 
 _REGISTRY_MAP: Dict[str, Dict[str, Any]] = {
@@ -158,6 +184,12 @@ def _enrich(station_name: str) -> Dict[str, Any]:
     for rk, rv in _REGISTRY_MAP.items():
         if rk in key or key in rk:
             return rv
+    # No match — warn so new BeFIQR stations surface immediately in logs
+    log.warning(
+        "[WRD Bihar] Unmatched station '%s' — not in _STATION_REGISTRY. "
+        "Add it with correct lat/lon/hfl/danger_level_m to get accurate data.",
+        station_name,
+    )
     return {"station": station_name, "river": "Unknown", "district": "Bihar",
             "hfl": None, "danger_level_m": None, "lat": 25.8, "lon": 85.4}
 
@@ -179,7 +211,6 @@ def _status_label(
     if current is None or above_dl is None:
         return "UNKNOWN"
     if above_dl >= 0:
-        # At or above danger level
         return "CRITICAL" if (hfl and current >= hfl * 0.97) else "DANGER"
     if above_dl >= -3.0:
         return "WARNING"
@@ -263,11 +294,8 @@ def _parse_befiqr_table(soup: BeautifulSoup) -> List[Dict[str, Any]]:
 
             # ----------------------------------------------------------------
             # above_below_danger_m: ALWAYS computed as (current - danger_level)
-            # Convention:  negative = river BELOW danger level (safe)
-            #              positive = river ABOVE danger level (flooding!)
-            # We deliberately IGNORE BeFIQR's own "above/below" column because
-            # it returns unsigned magnitudes and the sign must be inferred from
-            # context — which we can compute directly here.
+            # negative = river BELOW danger level (safe)
+            # positive = river ABOVE danger level (flooding!)
             # ----------------------------------------------------------------
             above_dl: Optional[float] = None
             if current is not None and dl is not None and dl > 0:
@@ -446,6 +474,7 @@ async def get_wrd_bihar_stations(
     river: Optional[str] = None,
     district: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """All WRD Bihar stations. Filters: ?river=Ganga ?district=Patna ?force_refresh=true"""
     result = await _get_stations(force_refresh=force_refresh)
     stations = result.get("stations", [])
     if river:
@@ -459,6 +488,7 @@ async def get_wrd_bihar_stations(
 
 @router.get("/stations/{station_name}")
 async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """Single station by name (case-insensitive partial match)."""
     all_data = await _get_stations(force_refresh=force_refresh)
     key = _normalize(station_name)
     matches = [
@@ -474,6 +504,7 @@ async def get_wrd_bihar_station(station_name: str, force_refresh: bool = False) 
 
 @router.get("/summary")
 async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
+    """Bihar flood summary — alert level, counts, top 5 alerts."""
     all_data = await _get_stations(force_refresh=force_refresh)
     stations = all_data.get("stations", [])
 
@@ -483,9 +514,8 @@ async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
     for s in stations:
         status = s.get("status", "UNKNOWN")
         counts[status] = counts.get(status, 0) + 1
-        above_dl = s.get("above_below_danger_m")
-        dl = s.get("danger_level_m")
         current = s.get("current_level_m")
+        dl = s.get("danger_level_m")
         if current is not None and dl and dl > 0:
             alert_stations.append({**s, "_pct": round(current / dl * 100, 1)})
 
@@ -517,6 +547,7 @@ async def get_wrd_bihar_summary(force_refresh: bool = False) -> Dict[str, Any]:
 
 @router.get("/refresh")
 async def force_refresh_wrd_bihar() -> Dict[str, Any]:
+    """Force immediate scrape of BeFIQR and update the cache."""
     log.info("[WRD Bihar] Manual /refresh triggered")
     result = await _get_stations(force_refresh=True)
     return {
@@ -531,6 +562,7 @@ async def force_refresh_wrd_bihar() -> Dict[str, Any]:
 
 @router.get("/scheduler/status")
 async def scheduler_status() -> Dict[str, Any]:
+    """APScheduler job info — next run time, poll interval, running state."""
     global _scheduler
     if not _scheduler or not _scheduler.running:
         return {"running": False, "message": "Scheduler not started."}
@@ -549,6 +581,7 @@ async def scheduler_status() -> Dict[str, Any]:
 
 @router.get("/health")
 async def wrd_bihar_health() -> Dict[str, Any]:
+    """Check if BeFIQR portal is reachable."""
     primary_url = _WRD_URLS[0]
     try:
         resp = requests.get(primary_url, headers=_HEADERS, timeout=(4, 10))
