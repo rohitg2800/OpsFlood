@@ -1,11 +1,9 @@
 from fastapi import APIRouter
 import os
+import sys
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------------
-# Resolve repo root so we can count model artifacts without importing app.py
-# ---------------------------------------------------------------------------
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_DIR = os.path.abspath(os.path.join(_BACKEND_DIR, os.pardir, os.pardir))
 _ARTIFACTS_ROOT = os.path.join(_REPO_DIR, "artifacts", "dvc", "models")
@@ -13,7 +11,6 @@ _FLOOD_KEYWORDS = ("flood", "scaler", "feature", "indo")
 
 
 def _count_artifacts() -> int:
-    """Count model artifact files under the DVC artifacts store."""
     if not os.path.isdir(_ARTIFACTS_ROOT):
         return 0
     count = 0
@@ -24,14 +21,18 @@ def _count_artifacts() -> int:
     return count
 
 
-def health() -> dict:
-    """
-    Return a lightweight health payload.
+def _glofas_cached_count() -> int:
+    """Read GLOFAS_STATION_CACHE length from app module without circular import."""
+    for mod_name in ("backend.app", "app"):
+        mod = sys.modules.get(mod_name)
+        if mod is not None:
+            cache = getattr(mod, "GLOFAS_STATION_CACHE", None)
+            if isinstance(cache, list):
+                return len(cache)
+    return 0
 
-    Designed as a plain sync function (no FastAPI Request dependency)
-    so it can be called directly from unit tests without spinning up
-    the full app or hitting the database.
-    """
+
+def health() -> dict:
     db_env_set = bool(
         os.environ.get("DATABASE_URL")
         or os.environ.get("NEON_DATABASE_URL")
@@ -44,7 +45,7 @@ def health() -> dict:
 
     return {
         "status": "ok",
-        "version": "8.5",
+        "version": "1.1.0",
         "database": {
             "configured": db_env_set,
             "note": "env var present" if db_env_set else "not configured",
@@ -53,6 +54,7 @@ def health() -> dict:
             "scheduler_enabled": ingestion_enabled,
         },
         "artifact_count": _count_artifacts(),
+        "glofas_stations_cached": _glofas_cached_count(),
     }
 
 
