@@ -24,7 +24,6 @@ import logging
 
 logger = logging.getLogger("opsflood")
 
-# Resolve data/model paths relative to this backend folder (works regardless of CWD)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.abspath(os.path.join(BASE_DIR, os.pardir))
 FRONTEND_DIST_DIR = os.path.join(REPO_DIR, "frontend", "dist")
@@ -49,7 +48,6 @@ import importlib.util as _importlib_util
 
 
 def _is_package_context() -> bool:
-    """True when running as `uvicorn backend.app:app` (Render/production)."""
     return _importlib_util.find_spec("backend") is not None
 
 
@@ -110,6 +108,15 @@ operational_store = PostgresOperationalStore()
 operational_store.initialize()
 
 SOURCE_POLICY_MODES = {"OPEN_DATA", "OFFICIAL_VIEW_ONLY", "FALLBACK"}
+
+
+def env_flag(key: str, default: bool = False) -> bool:
+    val = os.getenv(key, "").strip().lower()
+    if val in ("1", "true", "yes"):
+        return True
+    if val in ("0", "false", "no"):
+        return False
+    return default
 
 
 def get_source_policy_mode() -> str:
@@ -321,3 +328,80 @@ def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: 
     if policy.get("allow_live_cwc_in_app"):
         pass  # live CWC telemetry path — implemented in routers/telemetry.py
     return policy
+
+
+# ── FastAPI application ────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="OpsFlood API",
+    description="Flood monitoring, prediction and telemetry backend for the Android Flood App.",
+    version="1.1.0",
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Router registrations ───────────────────────────────────────────────────────
+app.include_router(core_router)
+app.include_router(predict_router)
+app.include_router(weather_router)
+app.include_router(telemetry_router)
+app.include_router(ingestion_router)
+app.include_router(live_levels_router)
+app.include_router(wrd_bihar_router)
+app.include_router(cwc_ffs_router)
+app.include_router(fcm_router)
+app.include_router(data_gov_cwc_router)
+app.include_router(model_artifacts_router)
+
+
+# ── Startup / shutdown ─────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("OpsFlood API starting up — version 1.1.0")
+    try:
+        wrd_start_scheduler()
+        logger.info("WRD Bihar scheduler started")
+    except Exception as exc:
+        logger.warning(f"WRD Bihar scheduler start failed (non-fatal): {exc}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("OpsFlood API shutting down")
+    try:
+        wrd_stop_scheduler()
+    except Exception as exc:
+        logger.warning(f"WRD Bihar scheduler stop failed (non-fatal): {exc}")
+
+
+# ── Health check ───────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "1.1.0", "timestamp": current_timestamp_iso()}
+
+
+@app.get("/api/source-policy")
+async def source_policy():
+    return get_source_policy_payload()
+
+
+# ── Static frontend (serve React/Vite build) ───────────────────────────────────
+
+if os.path.isdir(FRONTEND_DIST_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST_DIR, "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        file_path = os.path.join(FRONTEND_DIST_DIR, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_INDEX_PATH)
