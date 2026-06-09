@@ -82,9 +82,11 @@ if _is_package_context():
     from backend.routers.fcm import router as fcm_router
     from backend.routers.data_gov_cwc import router as data_gov_cwc_router
     from backend.routers.model_artifacts import router as model_artifacts_router
-    # ── NEW: Flutter-facing routes ──────────────────────────────────────────
+    # ── Flutter-facing routes ────────────────────────────────────────────────
     from backend.routers.glofas import router as glofas_router
     from backend.routers.rainfall import router as rainfall_router
+    from backend.routers.cwc_stations import router as cwc_stations_router
+    from backend.routers.news import router as news_router
 else:
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import (
@@ -114,9 +116,11 @@ else:
     from routers.fcm import router as fcm_router
     from routers.data_gov_cwc import router as data_gov_cwc_router
     from routers.model_artifacts import router as model_artifacts_router
-    # ── NEW: Flutter-facing routes ──────────────────────────────────────────
+    # ── Flutter-facing routes ────────────────────────────────────────────────
     from routers.glofas import router as glofas_router
     from routers.rainfall import router as rainfall_router
+    from routers.cwc_stations import router as cwc_stations_router
+    from routers.news import router as news_router
 
 
 warnings.filterwarnings('ignore')
@@ -353,8 +357,6 @@ def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: 
 GLOFAS_STATION_CACHE: List[Dict[str, Any]] = []
 _glofas_cache_lock = threading.Lock()
 
-# Bihar is handled by WRD Bihar BeFIQR (31 real gauge stations).
-# All other flood-prone Indian states use GloFAS Open-Meteo discharge.
 _GLOFAS_STATIONS = [
     {"station_name": "Kolhapur",     "state_name": "Maharashtra",      "river_name": "Panchganga",    "lat": 16.705, "lon": 74.243,  "warning_discharge": 1200.0,  "danger_discharge": 2000.0},
     {"station_name": "Kochi",        "state_name": "Kerala",           "river_name": "Periyar",       "lat": 9.931,  "lon": 76.267,  "warning_discharge": 800.0,   "danger_discharge": 1400.0},
@@ -483,17 +485,10 @@ def stop_glofas_thread():
 
 
 # ---------------------------------------------------------------------------
-# WRD Bihar eager warm (run once at startup in a background thread)
+# WRD Bihar eager warm
 # ---------------------------------------------------------------------------
 
 def _eager_warm_wrd_bihar() -> None:
-    """
-    Runs once at startup in a daemon thread.
-    Fetches BeFIQR live data and populates the WRD Bihar TTLCache
-    so that /api/live-levels?state=bihar returns real data immediately
-    (without waiting for the first APScheduler tick ~15 min away).
-    Falls back to tactical registry if BeFIQR is unreachable.
-    """
     logger.info("[WRD Bihar] Eager warm starting...")
     try:
         result = _wrd_fetch_live()
@@ -517,12 +512,11 @@ def start_wrd_bihar_eager_warm() -> None:
     t.start()
 
 
-# ── FastAPI application ─────────────────────────────────────────────────────
-
+# ── FastAPI application ─────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="OpsFlood API",
     description="Flood monitoring, prediction and telemetry backend for the Android Flood App.",
-    version="1.2.0",
+    version="1.3.0",
 )
 
 app.add_middleware(
@@ -544,30 +538,29 @@ app.include_router(cwc_ffs_router)
 app.include_router(fcm_router)
 app.include_router(data_gov_cwc_router)
 app.include_router(model_artifacts_router)
-# ── Flutter-facing routes ───────────────────────────────────────────────────
+# ── Flutter-facing routes ────────────────────────────────────────────────
 app.include_router(glofas_router)
 app.include_router(rainfall_router)
+app.include_router(cwc_stations_router)   # GET /api/cwc-stations
+app.include_router(news_router)            # GET /api/news
 
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("OpsFlood API starting up — version 1.2.0")
+    logger.info("OpsFlood API starting up — version 1.3.0")
 
-    # 1. WRD Bihar — eager warm (fills cache immediately from BeFIQR)
     try:
         start_wrd_bihar_eager_warm()
         logger.info("WRD Bihar eager warm thread launched")
     except Exception as exc:
         logger.warning(f"WRD Bihar eager warm failed (non-fatal): {exc}")
 
-    # 2. WRD Bihar APScheduler — keeps cache fresh every 15 min
     try:
         wrd_start_scheduler()
         logger.info("WRD Bihar APScheduler started")
     except Exception as exc:
         logger.warning(f"WRD Bihar scheduler start failed (non-fatal): {exc}")
 
-    # 3. GloFAS warm cache thread — non-Bihar states
     try:
         start_glofas_thread()
         logger.info("GloFAS warm_cache thread started")
@@ -593,7 +586,7 @@ async def health():
     glofas_count = len(GLOFAS_STATION_CACHE)
     return {
         "status": "ok",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "timestamp": current_timestamp_iso(),
         "glofas_stations_cached": glofas_count,
     }
