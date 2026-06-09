@@ -22,18 +22,14 @@ router = APIRouter(tags=["live-levels"])
 
 # ---------------------------------------------------------------------------
 # GloFAS cache accessor
-# The main app.py stores the GloFAS cache in a module-level dict.
-# We import it at call time (not import time) to avoid circular imports.
 # ---------------------------------------------------------------------------
 
 def _get_glofas_cache() -> List[Dict[str, Any]]:
     """
     Return the in-memory GloFAS station list built by app.py.
     Returns [] if not yet populated or unavailable.
-    The cache variable is named GLOFAS_STATION_CACHE in app.py.
     """
     try:
-        # app module is the top-level entry point registered as 'backend.app' or 'app'
         for mod_name in ('backend.app', 'app'):
             mod = sys.modules.get(mod_name)
             if mod is not None:
@@ -56,14 +52,12 @@ def _risk_from_capacity(cap: float) -> str:
     return "LOW"
 
 def _risk_from_discharge(discharge: float, danger_q: float, warning_q: float) -> str:
-    """Map GloFAS river_discharge to risk using danger/warning thresholds."""
-    if danger_q > 0 and discharge >= danger_q:    return "CRITICAL"
-    if warning_q > 0 and discharge >= warning_q:  return "HIGH"
-    if warning_q > 0 and discharge >= warning_q * 0.7: return "MODERATE"
+    if danger_q > 0 and discharge >= danger_q:           return "CRITICAL"
+    if warning_q > 0 and discharge >= warning_q:         return "HIGH"
+    if warning_q > 0 and discharge >= warning_q * 0.7:   return "MODERATE"
     return "LOW"
 
 def _capacity_from_discharge(discharge: float, danger_q: float) -> float:
-    """Convert discharge to a 0-100 capacity percent."""
     if danger_q <= 0:
         return 50.0
     return min(round(discharge / danger_q * 100.0, 1), 100.0)
@@ -78,69 +72,69 @@ def _alert_from_risk(risk: str) -> str:
 
 
 _BASE_LEVELS: Dict[str, Dict[str, float]] = {
-    "maharashtra":     {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 4.1, "cap": 78.0},
-    "kerala":          {"safe": 1.8, "warning": 2.8, "danger": 4.0, "current": 3.2, "cap": 74.0},
-    "assam":           {"safe": 3.0, "warning": 5.0, "danger": 7.5, "current": 6.8, "cap": 88.0},
-    "bihar":           {"safe": 4.0, "warning": 6.0, "danger": 8.0, "current": 7.1, "cap": 86.0},
-    "odisha":          {"safe": 3.5, "warning": 5.5, "danger": 7.0, "current": 5.0, "cap": 65.0},
-    "west_bengal":     {"safe": 3.0, "warning": 5.0, "danger": 6.5, "current": 4.5, "cap": 62.0},
-    "uttar_pradesh":   {"safe": 4.5, "warning": 6.5, "danger": 9.0, "current": 5.5, "cap": 55.0},
-    "andhra_pradesh":  {"safe": 3.0, "warning": 4.5, "danger": 6.0, "current": 4.8, "cap": 73.0},
-    "telangana":       {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.8, "cap": 60.0},
-    "karnataka":       {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 55.0},
-    "gujarat":         {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.5, "cap": 42.0},
-    "rajasthan":       {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.0, "cap": 38.0},
-    "madhya_pradesh":  {"safe": 3.0, "warning": 4.5, "danger": 6.0, "current": 3.5, "cap": 52.0},
-    "chhattisgarh":    {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.0, "cap": 48.0},
-    "jharkhand":       {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.2, "cap": 50.0},
-    "punjab":          {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.5, "cap": 54.0},
-    "haryana":         {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.8, "cap": 46.0},
-    "himachal_pradesh":{"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 52.0},
-    "uttarakhand":     {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 52.0},
-    "tamil_nadu":      {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.8, "cap": 48.0},
-    "arunachal_pradesh":{"safe": 3.0,"warning": 5.0,"danger": 7.5,"current": 5.5, "cap": 67.0},
-    "manipur":         {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.0, "cap": 44.0},
-    "meghalaya":       {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.2, "cap": 48.0},
-    "nagaland":        {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.8, "cap": 38.0},
-    "mizoram":         {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.8, "cap": 38.0},
-    "tripura":         {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.1, "cap": 46.0},
-    "sikkim":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.5, "cap": 58.0},
-    "goa":             {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.6, "cap": 32.0},
-    "delhi":           {"safe": 2.5, "warning": 4.0, "danger": 6.0, "current": 3.5, "cap": 50.0},
-    "jammu_and_kashmir":{"safe": 2.0,"warning": 3.5,"danger": 5.5,"current": 3.8, "cap": 62.0},
+    "maharashtra":      {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 4.1, "cap": 78.0},
+    "kerala":           {"safe": 1.8, "warning": 2.8, "danger": 4.0, "current": 3.2, "cap": 74.0},
+    "assam":            {"safe": 3.0, "warning": 5.0, "danger": 7.5, "current": 6.8, "cap": 88.0},
+    "bihar":            {"safe": 4.0, "warning": 6.0, "danger": 8.0, "current": 7.1, "cap": 86.0},
+    "odisha":           {"safe": 3.5, "warning": 5.5, "danger": 7.0, "current": 5.0, "cap": 65.0},
+    "west_bengal":      {"safe": 3.0, "warning": 5.0, "danger": 6.5, "current": 4.5, "cap": 62.0},
+    "uttar_pradesh":    {"safe": 4.5, "warning": 6.5, "danger": 9.0, "current": 5.5, "cap": 55.0},
+    "andhra_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0, "current": 4.8, "cap": 73.0},
+    "telangana":        {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.8, "cap": 60.0},
+    "karnataka":        {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 55.0},
+    "gujarat":          {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.5, "cap": 42.0},
+    "rajasthan":        {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.0, "cap": 38.0},
+    "madhya_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0, "current": 3.5, "cap": 52.0},
+    "chhattisgarh":     {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.0, "cap": 48.0},
+    "jharkhand":        {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.2, "cap": 50.0},
+    "punjab":           {"safe": 2.5, "warning": 4.0, "danger": 5.5, "current": 3.5, "cap": 54.0},
+    "haryana":          {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.8, "cap": 46.0},
+    "himachal_pradesh": {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 52.0},
+    "uttarakhand":      {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 52.0},
+    "tamil_nadu":       {"safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 2.8, "cap": 48.0},
+    "arunachal_pradesh":{"safe": 3.0, "warning": 5.0, "danger": 7.5, "current": 5.5, "cap": 67.0},
+    "manipur":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.0, "cap": 44.0},
+    "meghalaya":        {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.2, "cap": 48.0},
+    "nagaland":         {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.8, "cap": 38.0},
+    "mizoram":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.8, "cap": 38.0},
+    "tripura":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.1, "cap": 46.0},
+    "sikkim":           {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 2.5, "cap": 58.0},
+    "goa":              {"safe": 1.5, "warning": 2.5, "danger": 3.5, "current": 1.6, "cap": 32.0},
+    "delhi":            {"safe": 2.5, "warning": 4.0, "danger": 6.0, "current": 3.5, "cap": 50.0},
+    "jammu_and_kashmir":{"safe": 2.0, "warning": 3.5, "danger": 5.5, "current": 3.8, "cap": 62.0},
 }
 
 _CITY_RIVER_MAP: Dict[str, tuple] = {
-    "maharashtra":     ("Kolhapur",   "Panchganga"),
-    "kerala":          ("Kochi",      "Periyar"),
-    "assam":           ("Guwahati",   "Brahmaputra"),
-    "bihar":           ("Patna",      "Ganga"),
-    "odisha":          ("Cuttack",    "Mahanadi"),
-    "west_bengal":     ("Kolkata",    "Hooghly"),
-    "uttar_pradesh":   ("Varanasi",   "Ganga"),
-    "andhra_pradesh":  ("Vijayawada", "Krishna"),
-    "telangana":       ("Hyderabad",  "Musi"),
-    "karnataka":       ("Mysuru",     "Kaveri"),
-    "gujarat":         ("Vadodara",   "Vishwamitri"),
-    "rajasthan":       ("Kota",       "Chambal"),
-    "madhya_pradesh":  ("Jabalpur",   "Narmada"),
-    "chhattisgarh":    ("Raipur",     "Mahanadi"),
-    "jharkhand":       ("Dhanbad",    "Damodar"),
-    "punjab":          ("Ludhiana",   "Sutlej"),
-    "haryana":         ("Ambala",     "Ghaggar"),
-    "himachal_pradesh":("Mandi",      "Beas"),
-    "uttarakhand":     ("Haridwar",   "Ganga"),
-    "tamil_nadu":      ("Chennai",    "Adyar"),
-    "arunachal_pradesh":("Pasighat",  "Brahmaputra"),
-    "manipur":         ("Imphal",     "Imphal River"),
-    "meghalaya":       ("Shillong",   "Umiam"),
-    "nagaland":        ("Dimapur",    "Dhansiri"),
-    "mizoram":         ("Aizawl",     "Tlawng"),
-    "tripura":         ("Agartala",   "Haora"),
-    "sikkim":          ("Gangtok",    "Teesta"),
-    "goa":             ("Panaji",     "Mandovi"),
-    "delhi":           ("New Delhi",  "Yamuna"),
-    "jammu_and_kashmir":("Srinagar",  "Jhelum"),
+    "maharashtra":      ("Kolhapur",    "Panchganga"),
+    "kerala":           ("Kochi",       "Periyar"),
+    "assam":            ("Guwahati",    "Brahmaputra"),
+    "bihar":            ("Patna",       "Ganga"),
+    "odisha":           ("Cuttack",     "Mahanadi"),
+    "west_bengal":      ("Kolkata",     "Hooghly"),
+    "uttar_pradesh":    ("Varanasi",    "Ganga"),
+    "andhra_pradesh":   ("Vijayawada",  "Krishna"),
+    "telangana":        ("Hyderabad",   "Musi"),
+    "karnataka":        ("Mysuru",      "Kaveri"),
+    "gujarat":          ("Vadodara",    "Vishwamitri"),
+    "rajasthan":        ("Kota",        "Chambal"),
+    "madhya_pradesh":   ("Jabalpur",    "Narmada"),
+    "chhattisgarh":     ("Raipur",      "Mahanadi"),
+    "jharkhand":        ("Dhanbad",     "Damodar"),
+    "punjab":           ("Ludhiana",    "Sutlej"),
+    "haryana":          ("Ambala",      "Ghaggar"),
+    "himachal_pradesh": ("Mandi",       "Beas"),
+    "uttarakhand":      ("Haridwar",    "Ganga"),
+    "tamil_nadu":       ("Chennai",     "Adyar"),
+    "arunachal_pradesh":("Pasighat",    "Brahmaputra"),
+    "manipur":          ("Imphal",      "Imphal River"),
+    "meghalaya":        ("Shillong",    "Umiam"),
+    "nagaland":         ("Dimapur",     "Dhansiri"),
+    "mizoram":          ("Aizawl",      "Tlawng"),
+    "tripura":          ("Agartala",    "Haora"),
+    "sikkim":           ("Gangtok",     "Teesta"),
+    "goa":              ("Panaji",      "Mandovi"),
+    "delhi":            ("New Delhi",   "Yamuna"),
+    "jammu_and_kashmir":("Srinagar",    "Jhelum"),
 }
 
 _STATE_DISPLAY: Dict[str, str] = {
@@ -163,91 +157,99 @@ def _normalise_state_key(state_str: str) -> str:
     return state_str.strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def _build_levels_from_glofas(glofas_cache: List[Dict]) -> List[Dict[str, Any]]:
+def _build_station_record(
+    station: Dict[str, Any],
+    now_iso: str,
+    state_key: str,
+) -> Dict[str, Any]:
+    """Convert a raw GloFAS cache entry to the live-levels wire format."""
+    city      = str(station.get("station_name") or station.get("city") or station.get("name") or "").strip()
+    state     = str(station.get("state_name")   or station.get("state") or "").strip()
+    river     = str(station.get("river_name")   or station.get("river") or "").strip()
+    discharge = float(station.get("river_discharge") or station.get("discharge") or 0.0)
+    warning_q = float(station.get("warning_discharge") or station.get("warning_level") or 0.0)
+    danger_q  = float(station.get("danger_discharge")  or station.get("danger_level")  or 0.0)
+
+    base      = _BASE_LEVELS.get(state_key, {"safe": 2.0, "warning": 3.5, "danger": 5.0})
+    current_m = float(station.get("current_level_m") or station.get("gauge_level") or 0.0)
+    warning_m = float(station.get("warning_level_m") or base["warning"])
+    danger_m  = float(station.get("danger_level_m")  or base["danger"])
+    safe_m    = float(station.get("safe_level_m")    or base["safe"])
+
+    if current_m == 0.0 and discharge > 0 and danger_q > 0:
+        current_m = round(safe_m + (danger_m - safe_m) * (discharge / danger_q), 2)
+        current_m = min(current_m, danger_m * 1.5)
+
+    capacity = _capacity_from_discharge(discharge, danger_q) if danger_q > 0 \
+               else _capacity_from_discharge(current_m - safe_m, danger_m - safe_m)
+    risk     = str(station.get("risk_level") or "").upper() or _risk_from_discharge(discharge, danger_q, warning_q)
+    ts       = str(station.get("timestamp") or station.get("updated_at") or now_iso)
+
+    return {
+        "city":             city,
+        "state":            state,
+        "river_name":       river,
+        "station":          city,
+        "current_level":    current_m,
+        "safe_level":       safe_m,
+        "warning_level":    warning_m,
+        "danger_level":     danger_m,
+        "river_discharge":  discharge,
+        "capacity_percent": capacity,
+        "risk_level":       risk,
+        "status":           _status_from_risk(risk),
+        "alert":            _alert_from_risk(risk),
+        "flow_rate":        discharge if discharge > 0 else None,
+        "lat":              station.get("lat"),
+        "lon":              station.get("lon"),
+        "data_source":      "OPEN_METEO_GLOFAS",
+        "timestamp":        ts,
+        # keep discharge for dedup comparison — stripped before return if needed
+        "_discharge":       discharge,
+    }
+
+
+def _build_levels_from_glofas(glofas_cache: List[Dict]) -> tuple:
     """
-    Convert the raw GloFAS station list into the standard live-levels format
-    the Flutter app expects:
-      city, state, river_name, current_level, safe_level, warning_level,
-      danger_level, capacity_percent, risk_level, status, alert,
-      flow_rate, data_source, timestamp
+    Convert the raw GloFAS station list into the standard live-levels format.
+
+    When multiple stations share the same state (e.g. Bihar has Patna + Darbhanga)
+    the station with the HIGHEST river_discharge wins — it represents the
+    worst-case risk for the state in the app's single-row-per-state view.
     """
     now_iso = current_timestamp_iso()
-    result: List[Dict[str, Any]] = []
-    seen_state_keys: set = set()
+
+    # Pass 1: collect all valid records keyed by state, keeping highest discharge
+    best_by_state: Dict[str, Dict[str, Any]] = {}
 
     for station in glofas_cache:
-        # GloFAS fields: station_name, state_name, river_name, lat, lon,
-        #   river_discharge (m3/s), warning_discharge, danger_discharge,
-        #   risk_level, timestamp, ...
-        city  = str(station.get("station_name") or station.get("city") or station.get("name") or "").strip()
+        city  = str(station.get("station_name") or station.get("city") or "").strip()
         state = str(station.get("state_name")   or station.get("state") or "").strip()
-        river = str(station.get("river_name")   or station.get("river") or "").strip()
-
         if not city or not state:
             continue
 
         state_key = _normalise_state_key(state)
+        record    = _build_station_record(station, now_iso, state_key)
+        discharge = record["_discharge"]
 
-        # Take one representative station per state (highest discharge wins)
-        # This matches the app’s Pass2 best-by-state logic.
-        discharge    = float(station.get("river_discharge")    or station.get("discharge")    or 0.0)
-        warning_q    = float(station.get("warning_discharge")  or station.get("warning_level") or 0.0)
-        danger_q     = float(station.get("danger_discharge")   or station.get("danger_level")  or 0.0)
+        existing = best_by_state.get(state_key)
+        if existing is None or discharge > existing["_discharge"]:
+            best_by_state[state_key] = record
 
-        base = _BASE_LEVELS.get(state_key, {"safe": 2.0, "warning": 3.5, "danger": 5.0})
+    # Pass 2: strip internal field and emit final list
+    result: List[Dict[str, Any]] = []
+    for state_key, record in best_by_state.items():
+        record.pop("_discharge", None)
+        result.append(record)
 
-        # Use GloFAS discharge as current_level (m3/s is real; scale to metres
-        # using the existing base danger_level ratio if absolute metre values missing).
-        # If the GloFAS station exposes metre values directly, prefer those.
-        current_m    = float(station.get("current_level_m") or station.get("gauge_level") or 0.0)
-        warning_m    = float(station.get("warning_level_m") or base["warning"])
-        danger_m     = float(station.get("danger_level_m")  or base["danger"])
-        safe_m       = float(station.get("safe_level_m")    or base["safe"])
-
-        # If no metre values from GloFAS, derive from discharge ratio
-        if current_m == 0.0 and discharge > 0 and danger_q > 0:
-            # scale: danger_q discharge → danger_m metres
-            current_m = round(safe_m + (danger_m - safe_m) * (discharge / danger_q), 2)
-            current_m = min(current_m, danger_m * 1.5)   # cap at 150% of danger level
-
-        capacity = _capacity_from_discharge(discharge, danger_q) if danger_q > 0 \
-                   else _capacity_from_discharge(current_m - safe_m, danger_m - safe_m)
-
-        risk   = str(station.get("risk_level") or "").upper() or _risk_from_discharge(discharge, danger_q, warning_q)
-        status = _status_from_risk(risk)
-        alert  = _alert_from_risk(risk)
-        ts     = str(station.get("timestamp") or station.get("updated_at") or now_iso)
-
-        result.append({
-            "city":             city,
-            "state":            state,
-            "river_name":       river,
-            "station":          city,
-            "current_level":    current_m,
-            "safe_level":       safe_m,
-            "warning_level":    warning_m,
-            "danger_level":     danger_m,
-            "river_discharge":  discharge,   # raw GloFAS value (m3/s) — extra info
-            "capacity_percent": capacity,
-            "risk_level":       risk,
-            "status":           status,
-            "alert":            alert,
-            "flow_rate":        discharge if discharge > 0 else None,
-            "lat":              station.get("lat"),
-            "lon":              station.get("lon"),
-            "data_source":      "OPEN_METEO_GLOFAS",
-            "timestamp":        ts,
-        })
-
-        seen_state_keys.add(state_key)
-
-    return result, seen_state_keys
+    covered_states = set(best_by_state.keys())
+    return result, covered_states
 
 
 def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, Any]]:
     """Build river-level list from STATE_SEVERITY_MATRIX for states NOT covered by GloFAS."""
-    exclude = exclude_state_keys or set()
-    now_iso = current_timestamp_iso()
+    exclude  = exclude_state_keys or set()
+    now_iso  = current_timestamp_iso()
     result: List[Dict[str, Any]] = []
     seen_states: set = set()
 
@@ -259,15 +261,12 @@ def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, 
         base = _BASE_LEVELS.get(state_key, {
             "safe": 2.0, "warning": 3.5, "danger": 5.0, "current": 3.0, "cap": 50.0,
         })
-        city, river = _CITY_RIVER_MAP.get(state_key, ("Unknown", "River"))
+        city, river   = _CITY_RIVER_MAP.get(state_key, ("Unknown", "River"))
         state_display = _STATE_DISPLAY.get(state_key, state_key.replace("_", " ").title())
 
         matrix_severity = entry.get("default_severity", "MODERATE").upper()
-        cap_override = {"CRITICAL": 88.0, "HIGH": 75.0, "MODERATE": 55.0, "LOW": 35.0}.get(matrix_severity, base["cap"])
-        capacity = cap_override
-        risk = _risk_from_capacity(capacity)
-        status = _status_from_risk(risk)
-        alert = _alert_from_risk(risk)
+        capacity = {"CRITICAL": 88.0, "HIGH": 75.0, "MODERATE": 55.0, "LOW": 35.0}.get(matrix_severity, base["cap"])
+        risk     = _risk_from_capacity(capacity)
 
         danger_level  = float(entry.get("danger_threshold_m")  or base["danger"])
         warning_level = float(entry.get("warning_threshold_m") or base["warning"])
@@ -285,8 +284,8 @@ def _build_levels_from_matrix(exclude_state_keys: set = None) -> List[Dict[str, 
             "danger_level":     danger_level,
             "capacity_percent": round(capacity, 1),
             "risk_level":       risk,
-            "status":           status,
-            "alert":            alert,
+            "status":           _status_from_risk(risk),
+            "alert":            _alert_from_risk(risk),
             "flow_rate":        None,
             "data_source":      "STATE_SEVERITY_MATRIX",
             "timestamp":        now_iso,
@@ -306,12 +305,14 @@ def _build_all_levels() -> List[Dict[str, Any]]:
     if glofas_cache:
         glofas_levels, covered_states = _build_levels_from_glofas(glofas_cache)
         matrix_levels = _build_levels_from_matrix(exclude_state_keys=covered_states)
-        all_levels = glofas_levels + matrix_levels
-        print(f"[live_levels] ✅ GloFAS: {len(glofas_levels)} stations, "
-              f"Matrix fallback: {len(matrix_levels)} states")
+        all_levels    = glofas_levels + matrix_levels
+        print(
+            f"[live_levels] \u2705 GloFAS: {len(glofas_levels)} states covered, "
+            f"Matrix fallback: {len(matrix_levels)} states"
+        )
     else:
         all_levels = _build_levels_from_matrix()
-        print("[live_levels] ⚠️  GloFAS cache empty — using static matrix")
+        print("[live_levels] \u26a0\ufe0f  GloFAS cache empty — using static matrix")
 
     all_levels.sort(key=lambda x: x["capacity_percent"], reverse=True)
     return all_levels
@@ -329,23 +330,23 @@ async def get_live_levels(
     levels = _build_all_levels()
 
     if state:
-        norm = state.strip().lower()
+        norm   = state.strip().lower()
         levels = [item for item in levels if norm in item["state"].lower()]
 
     levels = levels[:limit]
 
-    glofas_count  = sum(1 for l in levels if l.get("data_source") == "OPEN_METEO_GLOFAS")
-    matrix_count  = len(levels) - glofas_count
-    data_source   = "GLOFAS+MATRIX" if glofas_count > 0 else "OPSFLOOD_MATRIX"
+    glofas_count = sum(1 for l in levels if l.get("data_source") == "OPEN_METEO_GLOFAS")
+    matrix_count = len(levels) - glofas_count
+    data_source  = "GLOFAS+MATRIX" if glofas_count > 0 else "OPSFLOOD_MATRIX"
 
     return {
-        "status":      "success",
-        "data_source": data_source,
+        "status":       "success",
+        "data_source":  data_source,
         "glofas_count": glofas_count,
         "matrix_count": matrix_count,
-        "total":       len(levels),
-        "timestamp":   current_timestamp_iso(),
-        "data":        levels,
+        "total":        len(levels),
+        "timestamp":    current_timestamp_iso(),
+        "data":         levels,
     }
 
 
@@ -366,21 +367,21 @@ async def get_critical_alerts(
         if severity and severity.strip().upper() != risk:                       continue
 
         alerts.append({
-            "id":            f"{item['city']}_{item['state']}_alert".replace(" ", "_"),
-            "city":          item["city"],
-            "state":         item["state"],
-            "severity":      risk,
-            "title":         f"{item['city']} flood alert",
-            "message":       (
+            "id":             f"{item['city']}_{item['state']}_alert".replace(" ", "_"),
+            "city":           item["city"],
+            "state":          item["state"],
+            "severity":       risk,
+            "title":          f"{item['city']} flood alert",
+            "message":        (
                 f"{item['river_name']} is at "
                 f"{item['capacity_percent']:.0f}% capacity \u2014 {risk.lower()} risk."
             ),
-            "river_name":    item["river_name"],
-            "current_level": item["current_level"],
-            "danger_level":  item["danger_level"],
-            "data_source":   item.get("data_source", "UNKNOWN"),
-            "timestamp":     now_iso,
-            "resolved":      False,
+            "river_name":     item["river_name"],
+            "current_level":  item["current_level"],
+            "danger_level":   item["danger_level"],
+            "data_source":    item.get("data_source", "UNKNOWN"),
+            "timestamp":      now_iso,
+            "resolved":       False,
             "recommendation": (
                 "Immediate evacuation. Contact NDRF."
                 if risk == "CRITICAL" else
