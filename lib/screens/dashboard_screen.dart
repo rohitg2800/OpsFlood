@@ -1,15 +1,11 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard Screen v2 (Redesign)
+// EQUINOX-BH — Dashboard Screen v3 (Bihar live data wired)
 //
-// Design direction:
-//   Dark command-center / flood-ops aesthetic.
-//   Hero section: full-width avg-capacity arc gauge with live colour.
-//   KPI grid: 2×2 instead of 4-column cramped strip.
-//   Station tiles: status colour runs as left accent bar + ring icon.
-//   Section headers: full-width coloured underline pill.
-//   Capacity bars: gradient fill (safe → danger colour).
-//   Removed: light cream background → deep scaffoldBg from theme.
-//   Typography floor: 11px minimum on all visible text.
+// v3 changes (on top of v2):
+//   • Imports biharDashboardProvider for Bihar-specific KPIs
+//   • Adds "BIHAR LIVE" section: 3 KPI chips (stations, avg rainfall,
+//     avg GloFAS discharge) + top-alert station cards from WRD data
+//   • Existing liveLevelsProvider / FloodData pipeline unchanged
 library;
 
 import 'dart:math' as math;
@@ -21,6 +17,8 @@ import 'package:intl/intl.dart';
 
 import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
+import '../providers/bihar_dashboard_provider.dart';
+import '../providers/bihar_live_provider.dart';
 import '../services/real_time_service.dart';
 import '../theme/river_theme.dart';
 import 'dashboard_screen_part2.dart';
@@ -111,7 +109,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     HapticFeedback.mediumImpact();
     _gaugeCtrl.reset(); _entryCtrl.reset();
     try {
-      await ref.read(realTimeProvider).refreshData();
+      await Future.wait([
+        ref.read(realTimeProvider).refreshData(),
+        ref.read(biharLiveProvider.notifier).refresh(),
+      ]);
     } finally {
       if (mounted) {
         setState(() => _isRefreshing = false);
@@ -128,6 +129,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final critCount  = ref.watch(criticalCountProvider);
     final isOffline  = ref.watch(isOfflineProvider);
     final isWakingUp = ref.watch(isWakingUpProvider);
+
+    // Bihar live scalars
+    final biharCount     = ref.watch(biharStationCountProvider);
+    final biharCritical  = ref.watch(biharCriticalCountProvider);
+    final biharWarning   = ref.watch(biharWarningCountProvider);
+    final biharRainfall  = ref.watch(biharAvgRainfallProvider);
+    final biharDischarge = ref.watch(biharAvgDischargeProvider);
+    final biharAlerts    = ref.watch(biharTopAlertsProvider);
+    final biharLoading   = ref.watch(biharIsLoadingProvider);
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -184,6 +194,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   gaugeAnim: _gaugeAnim,
                   entryCtrl: _entryCtrl,
                   reduceMotion: _reduceMotion,
+                ),
+              ),
+
+              // ── ★ BIHAR LIVE section ───────────────────────────────────
+              SliverToBoxAdapter(
+                child: _SectionHeader(
+                  label: 'BIHAR LIVE',
+                  icon: Icons.water_drop_rounded,
+                  color: AppPalette.cyan,
+                  t: t,
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _BiharLivePanel(
+                  t: t,
+                  stationCount:   biharCount,
+                  criticalCount:  biharCritical,
+                  warningCount:   biharWarning,
+                  avgRainfall:    biharRainfall,
+                  avgDischarge:   biharDischarge,
+                  topAlerts:      biharAlerts,
+                  isLoading:      biharLoading,
                 ),
               ),
 
@@ -293,6 +325,259 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         ),
       ),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _BiharLivePanel  ★ new
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BiharLivePanel extends StatelessWidget {
+  final RiverColors t;
+  final int stationCount;
+  final int criticalCount;
+  final int warningCount;
+  final double? avgRainfall;
+  final double? avgDischarge;
+  final List<BiharStationData> topAlerts;
+  final bool isLoading;
+
+  const _BiharLivePanel({
+    required this.t,
+    required this.stationCount,
+    required this.criticalCount,
+    required this.warningCount,
+    required this.avgRainfall,
+    required this.avgDischarge,
+    required this.topAlerts,
+    required this.isLoading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: Center(
+          child: SizedBox(
+            height: 36,
+            width: 36,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppPalette.cyan),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── KPI chip row ──────────────────────────────────────────────
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _BiharChip(
+                  icon: Icons.sensors_rounded,
+                  label: '$stationCount Stations',
+                  color: AppPalette.cyan,
+                ),
+                const SizedBox(width: 8),
+                if (criticalCount > 0) ...[
+                  _BiharChip(
+                    icon: Icons.warning_rounded,
+                    label: '$criticalCount Critical',
+                    color: AppPalette.danger,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (warningCount > 0) ...[
+                  _BiharChip(
+                    icon: Icons.info_outline_rounded,
+                    label: '$warningCount Warning',
+                    color: AppPalette.warning,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (avgRainfall != null)
+                  _BiharChip(
+                    icon: Icons.grain,
+                    label: '${avgRainfall!.toStringAsFixed(1)} mm avg rain',
+                    color: Colors.lightBlue,
+                  ),
+                const SizedBox(width: 8),
+                if (avgDischarge != null)
+                  _BiharChip(
+                    icon: Icons.water,
+                    label: '${_fmt(avgDischarge!)} m³/s GloFAS',
+                    color: AppPalette.cyan,
+                  ),
+              ],
+            ),
+          ),
+
+          // ── Top alert station mini-cards ──────────────────────────────
+          if (topAlerts.isNotEmpty) ...
+            [
+              const SizedBox(height: 10),
+              ...topAlerts.map((s) => _BiharAlertRow(t: t, station: s)),
+            ]
+          else ...
+            [
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppPalette.safe.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: AppPalette.safe.withValues(alpha: 0.2)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded,
+                        color: AppPalette.safe, size: 16),
+                    SizedBox(width: 8),
+                    Text('All Bihar stations within safe limits',
+                        style: TextStyle(
+                            color: AppPalette.safe,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ],
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(double v) {
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v.toStringAsFixed(0);
+  }
+}
+
+class _BiharChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _BiharChip(
+      {required this.icon, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+class _BiharAlertRow extends StatelessWidget {
+  final RiverColors t;
+  final BiharStationData station;
+  const _BiharAlertRow({required this.t, required this.station});
+
+  @override
+  Widget build(BuildContext context) {
+    final s     = station;
+    final color = s.isCritical ? AppPalette.danger : AppPalette.warning;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(s.isCritical
+                  ? Icons.warning_rounded
+                  : Icons.info_outline_rounded,
+              color: color,
+              size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.city,
+                    style: TextStyle(
+                        color: t.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13)),
+                Text(
+                  [s.river, s.district]
+                      .where((v) => v.isNotEmpty)
+                      .join(' · '),
+                  style: TextStyle(
+                      color: t.textSecondary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (s.currentLevel != null)
+                Text(
+                  '${s.currentLevel!.toStringAsFixed(2)} m',
+                  style: TextStyle(
+                      color: t.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13),
+                ),
+              if (s.discharge != null)
+                Text(
+                  '${_fmt(s.discharge!)} m³/s',
+                  style: const TextStyle(
+                      color: AppPalette.cyan, fontSize: 11),
+                ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(s.riskLabel,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(double v) {
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v.toStringAsFixed(0);
   }
 }
 
@@ -485,7 +770,7 @@ class _StatusBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _HeroGauge — full-width arc gauge showing avg capacity
+// _HeroGauge
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _HeroGauge extends StatelessWidget {
@@ -533,7 +818,6 @@ class _HeroGauge extends StatelessWidget {
         color: t.cardBg,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: gaugeColor.withValues(alpha: 0.25)),
-        // Subtle top glow matching gauge colour
         boxShadow: [
           BoxShadow(
             color: gaugeColor.withValues(alpha: 0.10),
@@ -544,7 +828,6 @@ class _HeroGauge extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Arc gauge
           AnimatedBuilder(
             animation: gaugeAnim,
             builder: (_, __) {
@@ -560,7 +843,7 @@ class _HeroGauge extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(height: 20), // optical centre in arc
+                        const SizedBox(height: 20),
                         Text(
                           '${(avgCap * gaugeAnim.value).toStringAsFixed(0)}%',
                           style: TextStyle(
@@ -590,7 +873,6 @@ class _HeroGauge extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          // Status pill
           AnimatedBuilder(
             animation: pulseCtrl,
             builder: (_, __) => Container(
@@ -632,7 +914,6 @@ class _HeroGauge extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // Quick stats row below gauge
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -699,17 +980,16 @@ class _GaugeDivider extends StatelessWidget {
   const _GaugeDivider({required this.t});
   @override
   Widget build(BuildContext context) {
-    return Container(
-        width: 1, height: 32, color: t.stroke);
+    return Container(width: 1, height: 32, color: t.stroke);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ArcGaugePainter — semicircular arc gauge
+// _ArcGaugePainter
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ArcGaugePainter extends CustomPainter {
-  final double value; // 0.0 – 1.0
+  final double value;
   final Color color;
   final Color trackColor;
 
@@ -722,7 +1002,7 @@ class _ArcGaugePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
-    final cy = size.height * 0.85; // push centre down so arc sits at bottom
+    final cy = size.height * 0.85;
     final radius = math.min(cx, cy) * 0.92;
     const startAngle = math.pi;
     const sweepAngle = math.pi;
@@ -744,26 +1024,16 @@ class _ArcGaugePainter extends CustomPainter {
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
 
-    final rect =
-        Rect.fromCircle(center: Offset(cx, cy), radius: radius);
-
-    // Track
+    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
     canvas.drawArc(rect, startAngle, sweepAngle, false, trackPaint);
-    // Value
     if (value > 0) {
-      canvas.drawArc(
-          rect, startAngle, sweepAngle * value, false, valuePaint);
+      canvas.drawArc(rect, startAngle, sweepAngle * value, false, valuePaint);
     }
-
-    // Tip dot
     if (value > 0.02) {
       final tipAngle = startAngle + sweepAngle * value;
       final tipX = cx + radius * math.cos(tipAngle);
       final tipY = cy + radius * math.sin(tipAngle);
-      canvas.drawCircle(
-          Offset(tipX, tipY),
-          8,
-          Paint()..color = color);
+      canvas.drawCircle(Offset(tipX, tipY), 8, Paint()..color = color);
     }
   }
 
@@ -773,7 +1043,7 @@ class _ArcGaugePainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _KpiGrid — 2×2 grid replacing old 4-column cramped strip
+// _KpiGrid
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _KpiGrid extends StatelessWidget {
@@ -872,7 +1142,6 @@ class _KpiGrid extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  // Left colour ring icon
                   Container(
                     width: 40,
                     height: 40,
@@ -948,7 +1217,7 @@ class _KpiItem {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SectionHeader — coloured accent pill + label
+// _SectionHeader
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -996,9 +1265,7 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _StationTile — redesigned with left colour accent bar + ring icon
-// Fix: IntrinsicHeight wraps the Row so CrossAxisAlignment.stretch gets a
-// finite height from the content Column instead of the unbounded list item.
+// _StationTile
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationTile extends StatelessWidget {
@@ -1043,15 +1310,10 @@ class _StationTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: t.stroke),
         ),
-        // FIX: IntrinsicHeight gives the Row a finite height derived from
-        // the content Column, resolving the "BoxConstraints forces an
-        // infinite height" crash when CrossAxisAlignment.stretch is used
-        // inside a SliverList item (which has unbounded height).
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Left colour accent bar
               Container(
                 width: 4,
                 decoration: BoxDecoration(
@@ -1062,7 +1324,6 @@ class _StationTile extends StatelessWidget {
                   ),
                 ),
               ),
-              // Main content
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
@@ -1071,7 +1332,6 @@ class _StationTile extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          // Ring icon
                           Container(
                             width: 34,
                             height: 34,
@@ -1146,7 +1406,6 @@ class _StationTile extends StatelessWidget {
 
                       const SizedBox(height: 10),
 
-                      // Gradient capacity bar
                       AnimatedBuilder(
                         animation: gaugeAnim,
                         builder: (_, __) {
@@ -1210,7 +1469,6 @@ class _StationTile extends StatelessWidget {
                         },
                       ),
 
-                      // Warning / Danger chips
                       if (data.dangerLevel != null ||
                           data.warningLevel != null)
                         Padding(
@@ -1323,7 +1581,6 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              // Hero gauge skeleton
               Container(
                 height: 220,
                 decoration: BoxDecoration(
@@ -1332,7 +1589,6 @@ class _LoadingSkeletonState extends State<_LoadingSkeleton>
                 ),
               ),
               const SizedBox(height: 12),
-              // 2×2 KPI skeleton
               GridView.count(
                 crossAxisCount: 2,
                 shrinkWrap: true,
