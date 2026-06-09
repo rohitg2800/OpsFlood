@@ -1,9 +1,6 @@
 // lib/screens/settings_screen.dart
-// OpsFlood — SettingsScreen v3
-//
-// Language section now uses LocaleNotifier — switching to Hindi immediately
-// translates every screen in the app (MaterialApp.locale is driven by
-// localeProvider in main.dart).
+// OpsFlood — SettingsScreen v4
+// v4: Added “Reset Onboarding” tile under a new ADVANCED section.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,7 +10,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/context_l10n.dart';
 import '../providers/theme_provider.dart';
 import '../providers/locale_provider.dart';
+import '../providers/onboarding_provider.dart';
 import '../theme/river_theme.dart';
+import 'onboarding_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   static const String route = '/settings';
@@ -80,7 +79,7 @@ class SettingsScreen extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
 
-                    // ─────────────── LANGUAGE ──────────────────────────
+                    // ─────────────── LANGUAGE ──────────────────
                     _SectionLabel(s.appLanguage, t: t),
                     const SizedBox(height: 10),
                     Row(
@@ -125,7 +124,7 @@ class SettingsScreen extends ConsumerWidget {
 
                     const SizedBox(height: 28),
 
-                    // ─────────────── THEME ─────────────────────────────
+                    // ──────────────── THEME ───────────────────
                     _SectionLabel(s.selectTheme, t: t),
                     const SizedBox(height: 10),
                     ...AppThemeMode.values.map((m) => _ThemeTile(
@@ -139,6 +138,13 @@ class SettingsScreen extends ConsumerWidget {
                                 .setMode(m);
                           },
                         )),
+
+                    const SizedBox(height: 28),
+
+                    // ─────────────── ADVANCED ─────────────────
+                    _SectionLabel('Advanced', t: t),
+                    const SizedBox(height: 10),
+                    _ResetOnboardingTile(t: t),
                   ],
                 ),
               ),
@@ -165,7 +171,99 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-// ── Language chip ────────────────────────────────────────────────────────────
+// ── Reset Onboarding Tile ────────────────────────────────────────────────
+
+class _ResetOnboardingTile extends ConsumerWidget {
+  final RiverColors t;
+  const _ResetOnboardingTile({required this.t});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      onTap: () async {
+        HapticFeedback.mediumImpact();
+        // Confirm before resetting
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: t.cardBg,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Text('Reset Onboarding',
+                style: TextStyle(
+                    color: t.textPrimary, fontWeight: FontWeight.w800)),
+            content: Text(
+              'This will show the onboarding tutorial again on next app launch.',
+              style: TextStyle(color: t.textSecondary, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('Cancel',
+                    style: TextStyle(color: t.textSecondary)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('Reset',
+                    style: TextStyle(
+                        color: t.accent, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true && context.mounted) {
+          await ref.read(onboardingProvider.notifier).reset();
+          if (context.mounted) {
+            Navigator.pushReplacementNamed(
+                context, OnboardingScreen.route);
+          }
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: t.cardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.stroke),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.replay_rounded,
+                color: t.textSecondary, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Reset Onboarding',
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Replay the intro tutorial',
+                    style: TextStyle(
+                        color: t.textSecondary, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                color: t.textSecondary, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Language chip ────────────────────────────────────────────────────────────────
 
 class _LangChip extends StatelessWidget {
   final String   label;
@@ -204,11 +302,7 @@ class _LangChip extends StatelessWidget {
               width: active ? 1.5 : 1,
             ),
             boxShadow: active
-                ? [
-                    BoxShadow(
-                        color: t.accentGlow,
-                        blurRadius: 10)
-                  ]
+                ? [BoxShadow(color: t.accentGlow, blurRadius: 10)]
                 : [],
           ),
           child: Row(
@@ -316,11 +410,9 @@ class _ThemeTile extends StatelessWidget {
               child: Text(
                 _label(mode, context),
                 style: TextStyle(
-                  color:
-                      selected ? t.accent : t.textPrimary,
-                  fontWeight: selected
-                      ? FontWeight.w800
-                      : FontWeight.w500,
+                  color: selected ? t.accent : t.textPrimary,
+                  fontWeight:
+                      selected ? FontWeight.w800 : FontWeight.w500,
                   fontSize: 14,
                 ),
               ),

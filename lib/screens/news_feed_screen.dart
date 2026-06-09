@@ -17,8 +17,12 @@ class NewsFeedScreen extends ConsumerWidget {
     final t = RiverColors.of(context);
     final s = context.l10n;
 
-    final alerts = service.imdAlerts;
+    final alerts     = service.imdAlerts;
     final advisories = service.ndmaAdvisories;
+
+    Future<void> onRefresh() async {
+      await service.refreshData();
+    }
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -33,41 +37,47 @@ class NewsFeedScreen extends ConsumerWidget {
         ),
         iconTheme: const IconThemeData(color: AppPalette.gold),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _SectionHeader(label: s.imdAlertsTitle, color: AppPalette.cyan),
-          if (alerts.isEmpty)
-            _EmptyCard(message: s.noActiveImdAlerts, color: AppPalette.cyan)
-          else
-            ...alerts.map((a) => _AlertCard(item: a, color: AppPalette.warning, t: t)),
-          const SizedBox(height: 20),
-          _SectionHeader(label: s.ndmaAdvisoriesTitle, color: AppPalette.gold),
-          if (advisories.isEmpty)
-            _EmptyCard(message: s.noActiveNdmaAdvisories, color: AppPalette.gold)
-          else
-            ...advisories.map((a) => _AlertCard(item: a, color: AppPalette.gold, t: t)),
-          const SizedBox(height: 20),
-          _SectionHeader(label: s.officialSources, color: AppPalette.textGrey),
-          _LinkCard(
-            title: s.imdFloodForecasting,
-            url: 'https://ffs.imd.gov.in',
-            color: AppPalette.cyan,
-            t: t,
-          ),
-          _LinkCard(
-            title: s.ndmaAdvisoriesLink,
-            url: 'https://ndma.gov.in',
-            color: AppPalette.gold,
-            t: t,
-          ),
-          _LinkCard(
-            title: s.cwcFloodBulletin,
-            url: 'https://cwc.gov.in',
-            color: AppPalette.safe,
-            t: t,
-          ),
-        ],
+      body: RefreshIndicator(
+        onRefresh: onRefresh,
+        color: AppPalette.cyan,
+        backgroundColor: AppPalette.abyss2,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          children: [
+            _SectionHeader(label: s.imdAlertsTitle, color: AppPalette.cyan),
+            if (alerts.isEmpty)
+              _EmptyCard(message: s.noActiveImdAlerts, color: AppPalette.cyan)
+            else
+              ...alerts.map((a) => _AlertCard(item: a, color: AppPalette.warning, t: t)),
+            const SizedBox(height: 20),
+            _SectionHeader(label: s.ndmaAdvisoriesTitle, color: AppPalette.gold),
+            if (advisories.isEmpty)
+              _EmptyCard(message: s.noActiveNdmaAdvisories, color: AppPalette.gold)
+            else
+              ...advisories.map((a) => _AlertCard(item: a, color: AppPalette.gold, t: t)),
+            const SizedBox(height: 20),
+            _SectionHeader(label: s.officialSources, color: AppPalette.textGrey),
+            _LinkCard(
+              title: s.imdFloodForecasting,
+              url: 'https://ffs.imd.gov.in',
+              color: AppPalette.cyan,
+              t: t,
+            ),
+            _LinkCard(
+              title: s.ndmaAdvisoriesLink,
+              url: 'https://ndma.gov.in',
+              color: AppPalette.gold,
+              t: t,
+            ),
+            _LinkCard(
+              title: s.cwcFloodBulletin,
+              url: 'https://cwc.gov.in',
+              color: AppPalette.safe,
+              t: t,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -126,9 +136,9 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = item is Map ? item['title'] ?? item['heading'] ?? 'Alert' : item.toString();
-    final desc = item is Map ? item['summary'] ?? item['description'] ?? '' : '';
-    final dateStr = item is Map ? item['date'] ?? item['issued_at'] ?? '' : '';
+    final title   = item is Map ? item['title']   ?? item['heading']     ?? 'Alert' : item.toString();
+    final desc    = item is Map ? item['summary']  ?? item['description'] ?? ''      : '';
+    final dateStr = item is Map ? item['date']     ?? item['issued_at']  ?? ''      : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -151,17 +161,13 @@ class _AlertCard extends StatelessWidget {
           ),
           if (desc.toString().isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(
-              desc.toString(),
-              style: const TextStyle(color: AppPalette.textGrey, fontSize: 12),
-            ),
+            Text(desc.toString(),
+                style: const TextStyle(color: AppPalette.textGrey, fontSize: 12)),
           ],
           if (dateStr.toString().isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(
-              dateStr.toString(),
-              style: const TextStyle(color: AppPalette.textGrey, fontSize: 11),
-            ),
+            Text(dateStr.toString(),
+                style: const TextStyle(color: AppPalette.textGrey, fontSize: 11)),
           ],
         ],
       ),
