@@ -1,21 +1,14 @@
-// lib/services/data_fetch_engine.dart  v2.0
+// lib/services/data_fetch_engine.dart  v2.1
 //
-// Central data-fetch orchestrator — FULLY FIXED
+// Bug fixes vs v2.0:
+//   #7  GloFAS HFL clamp: estLevel was not clamped to [0, hfl].
+//       When GloFAS discharge >> mean discharge (peak monsoon), the formula
+//       (Q/Qmean) * DL * 0.85 could produce physically impossible values
+//       (e.g. 63.72 m for Taibpur whose HFL is 38.16 m).
+//       Fix: clamp GloFAS estimated level to [0, s.hfl * 0.98].
+//       0.98 factor: GloFAS can theoretically hit HFL but rarely exceeds it;
+//       any result >= HFL should be treated as data anomaly, not EMERGENCY.
 //
-// Bug fixes vs v1.0:
-//   #1  Pre-seeds _last at construction → no 0-station flash at startup
-//   #2  Seed-only CWC result flagged via SourceStatus.isFromSeed
-//   #3  CWC per-station timeout 4s; BEAMS JSON tried first; 4 URLs raced
-//   #4  Open-Meteo batched in groups of 8 (short URL); timeout 8s
-//   #5  _findBase strips parens + 5-char prefix match
-//   #6  FcmBroadcastService.applySnapshot() consulted first every cycle;
-//       on-device HTTP runs only when FCM snapshot is stale (>3 min)
-//
-// Scale architecture (100K+ users):
-//   Firebase Cloud Function pushes a FCM data-only topic message every 60s
-//   to topic 'flood_bihar_snapshot'. Every device applies it instantly.
-//   On-device HTTP fetch is a warm-standby that activates when FCM is stale.
-//   Govt scrape load: O(1) server, not O(N_users).
 library;
 
 import 'dart:async';
@@ -30,8 +23,6 @@ import '../models/river_station.dart';
 import 'wrd_bihar_service.dart';
 import 'fcm_broadcast_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// StationReading
 // ─────────────────────────────────────────────────────────────────────────────
 class StationReading {
   final String  stationName;
@@ -145,7 +136,6 @@ class StationReading {
     return 'NORMAL';
   }
 
-  // ── JSON serialisation (used by FCM broadcast) ───────────────────────────
   Map<String, dynamic> toJson() => {
     'n': stationName, 'r': river, 'd': district, 's': state,
     'la': lat, 'lo': lon,
@@ -188,9 +178,6 @@ class StationReading {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SourceStatus
-// ─────────────────────────────────────────────────────────────────────────────
 class SourceStatus {
   final String    name;
   final bool      healthy;
@@ -198,8 +185,6 @@ class SourceStatus {
   final int       stationCount;
   final DateTime? lastSuccessAt;
   final String?   errorMessage;
-  // FIX #2: flag seed-only results so mergedStationsProvider treats them
-  // with lowest priority, not as live CWC data.
   final bool      isFromSeed;
 
   const SourceStatus({
@@ -213,16 +198,12 @@ class SourceStatus {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DataFetchSnapshot
-// ─────────────────────────────────────────────────────────────────────────────
 class DataFetchSnapshot {
   final List<StationReading> stations;
   final List<SourceStatus>   sources;
   final DateTime             fetchedAt;
   final bool                 isLoading;
   final String?              error;
-  // true when snapshot came from FCM broadcast (not on-device HTTP)
   final bool                 fromBroadcast;
 
   int    get totalStations    => stations.length;
@@ -251,7 +232,6 @@ class DataFetchSnapshot {
     fetchedAt: DateTime.now(), isLoading: true,
   );
 
-  // ── JSON serialisation for FCM payload ───────────────────────────────────
   String toCompressedJson() {
     final payload = jsonEncode({
       'ts': fetchedAt.millisecondsSinceEpoch,
@@ -281,35 +261,28 @@ class DataFetchSnapshot {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DataFetchEngine v2.0 — singleton
-// ─────────────────────────────────────────────────────────────────────────────
 class DataFetchEngine {
   DataFetchEngine._() {
-    // FIX #1: pre-seed _last so mergedStationsProvider never gets 0 stations
-    // on first frame. Seed is replaced by real data within the first cycle.
     _last = _buildSeedSnapshot();
   }
   static final instance = DataFetchEngine._();
 
   static const _baseInterval   = Duration(seconds: 45);
-  static const _cwcTimeout     = Duration(seconds: 4);   // FIX #3: was 14s
-  static const _httpTimeout    = Duration(seconds: 8);   // FIX #4: was 14s
-  static const _fcmStaleness   = Duration(minutes: 3);   // FIX #6
+  static const _cwcTimeout     = Duration(seconds: 4);
+  static const _httpTimeout    = Duration(seconds: 8);
+  static const _fcmStaleness   = Duration(minutes: 3);
   static const _maxBackoffMin  = Duration(minutes: 5);
-  // FIX #4: batch size for Open-Meteo — max 8 stations per request
   static const _openMeteoBatch = 8;
 
-  // CWC FFS + fallback URLs per station code
-  // FIX #3: 4 URLs in priority order — fastest responder wins via Future.any
   static const _cwcCodes = <String, String>{
-    'Birpur (CWC)':      'KOSI-BIRPUR',
-    'Basua':             'KOSI-BASUA',
-    'Kursela':           'KOSI-KURSELA',
-    'Dumariaghat':       'GANDAK-DUMARIAGHAT',
-    'Hajipur':           'GANDAK-HAJIPUR',
-    'Gandhighat':        'GANGA-GANDHIGHAT',
-    'Bhagalpur':         'GANGA-BHAGALPUR',
-    'Sripalpur':         'PUNPUN-SRIPALPUR',
+    'Birpur (CWC)':  'KOSI-BIRPUR',
+    'Basua':         'KOSI-BASUA',
+    'Kursela':       'KOSI-KURSELA',
+    'Dumariaghat':   'GANDAK-DUMARIAGHAT',
+    'Hajipur':       'GANDAK-HAJIPUR',
+    'Gandhighat':    'GANGA-GANDHIGHAT',
+    'Bhagalpur':     'GANGA-BHAGALPUR',
+    'Sripalpur':     'PUNPUN-SRIPALPUR',
   };
 
   final _ctrl = StreamController<DataFetchSnapshot>.broadcast();
@@ -324,13 +297,10 @@ class DataFetchEngine {
 
   final Map<String, List<_LevelSample>> _history = {};
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
   void start() {
     if (_running) return;
     _running = true;
-    // Emit seed snapshot immediately so widgets never see empty state
     if (_last != null) _ctrl.add(_last!);
-    // FIX #6: subscribe to FCM broadcast topic
     FcmBroadcastService.instance.init();
     FcmBroadcastService.instance.snapshots.listen(_onBroadcastSnapshot);
     _fetchCycle();
@@ -345,18 +315,15 @@ class DataFetchEngine {
 
   Future<void> forceRefresh() => _fetchCycle();
 
-  // FIX #6: called when FCM delivers a broadcast snapshot
   void _onBroadcastSnapshot(DataFetchSnapshot snap) {
     _last = snap;
     if (!_ctrl.isClosed) _ctrl.add(snap);
-    _log('FCM broadcast applied: ${snap.stations.length} stations, '
-        'fetchedAt=${snap.fetchedAt}');
+    _log('FCM broadcast applied: ${snap.stations.length} stations, fetchedAt=${snap.fetchedAt}');
   }
 
   void _scheduleNext(Duration d) {
     _timer?.cancel();
     _timer = Timer(d, () {
-      // FIX #6: skip on-device HTTP fetch if FCM snapshot is fresh
       final last = _last;
       final fcmFresh = last != null &&
           last.fromBroadcast &&
@@ -375,13 +342,12 @@ class DataFetchEngine {
     });
   }
 
-  // ── Main fetch cycle ──────────────────────────────────────────────────────
   Future<void> _fetchCycle() async {
     _log('fetch cycle start');
     final sources  = <SourceStatus>[];
     final now      = DateTime.now();
 
-    // ── Step 1: Build seed map ────────────────────────────────────────────
+    // ── Step 1: Seed map ────────────────────────────────────────────────────
     final Map<String, StationReading> stations = {};
     for (final g in kBiharGauges) {
       final key  = _normaliseKey(g.station);
@@ -410,7 +376,7 @@ class DataFetchEngine {
         name: 'SEED', healthy: true,
         stationCount: stations.length, isFromSeed: true));
 
-    // ── Step 2: WRD Bihar ─────────────────────────────────────────────────
+    // ── Step 2: WRD Bihar ────────────────────────────────────────────────
     final wrdStart = DateTime.now();
     int wrdCount   = 0;
     try {
@@ -450,9 +416,7 @@ class DataFetchEngine {
       _log('WRD Bihar failed: $e');
     }
 
-    // ── Step 3: CWC multi-URL race (FIX #3) ──────────────────────────────
-    // Each station is fetched by racing 4 URLs with a 4s timeout each.
-    // The fastest URL that returns a valid level wins.
+    // ── Step 3: CWC multi-URL race ──────────────────────────────────────────
     final cwcStart  = DateTime.now();
     int   cwcCount  = 0;
     final cwcFutures = _cwcCodes.entries.map((e) =>
@@ -485,13 +449,12 @@ class DataFetchEngine {
       lastSuccessAt: cwcCount > 0 ? now : null,
     ));
 
-    // ── Step 4: GloFAS + Open-Meteo batched (FIX #4) ─────────────────────
+    // ── Step 4: GloFAS + Open-Meteo ──────────────────────────────────────────
     final stList = stations.values.toList();
     final Map<int, double> dischargeByIdx = {};
     final Map<int, double> meanByIdx      = {};
     final Map<int, double> rainByIdx      = {};
 
-    // GloFAS — single call (their API handles multi lat/lon well, no URL issue)
     final glofasStart = DateTime.now();
     try {
       final lats = stList.map((s) => s.lat.toString()).join(',');
@@ -526,7 +489,7 @@ class DataFetchEngine {
       _log('GloFAS failed: $e');
     }
 
-    // Open-Meteo rainfall — FIX #4: batched in groups of _openMeteoBatch
+    // Open-Meteo rainfall batched
     for (int bStart = 0; bStart < stList.length; bStart += _openMeteoBatch) {
       final bEnd    = math.min(bStart + _openMeteoBatch, stList.length);
       final batch   = stList.sublist(bStart, bEnd);
@@ -554,6 +517,9 @@ class DataFetchEngine {
     }
 
     // Merge GloFAS + rain into stations
+    // FIX #7: clamp GloFAS estimated level to [0, hfl * 0.98]
+    // so physically impossible values (e.g. 63m for a 38m HFL station)
+    // are never emitted as EMERGENCY alerts.
     for (int i = 0; i < stList.length; i++) {
       final s    = stList[i];
       final key  = _normaliseKey(s.stationName);
@@ -562,7 +528,11 @@ class DataFetchEngine {
       final rain = rainByIdx[i];
       if (s.source == 'SEED' && dis != null && mean != null &&
           mean > 0 && s.dangerLevel > 0) {
-        final estLevel = (dis / mean) * s.dangerLevel * 0.85;
+        // Estimate level from discharge ratio, but never exceed 98% of HFL.
+        // HFL is the all-time record — GloFAS cannot legitimately exceed it.
+        final rawEstimate = (dis / mean) * s.dangerLevel * 0.85;
+        final maxAllowed  = s.hfl * 0.98;   // FIX #7: hard ceiling
+        final estLevel    = rawEstimate.clamp(0.0, maxAllowed);
         stations[key] = s.copyWith(
           currentLevel:   estLevel,
           flowRateCumecs: dis,
@@ -576,7 +546,7 @@ class DataFetchEngine {
       }
     }
 
-    // ── Step 5: Rate of rise ──────────────────────────────────────────────
+    // ── Step 5: Rate of rise ─────────────────────────────────────────────
     final withRoR = <StationReading>[];
     for (final s in stations.values) {
       final key  = _normaliseKey(s.stationName);
@@ -593,17 +563,18 @@ class DataFetchEngine {
       withRoR.add(s.copyWith(rateOfRiseMph: ror));
     }
 
-    // ── Step 6: 24/48/72h forecast ────────────────────────────────────────
+    // ── Step 6: 24/48/72h forecast ─────────────────────────────────────────
     final finalList = withRoR.map((s) {
       if (!s.isLive) return s;
       final ror     = s.rateOfRiseMph ?? 0.0;
       final rainMod = s.rainfall24hMm != null
           ? (s.rainfall24hMm! / 50.0).clamp(0.0, 1.5) : 0.3;
       final rise    = ror * rainMod;
+      // FIX #7: forecasts also clamped to HFL
       return s.copyWith(
-        forecastLevel24h: (s.currentLevel + rise * 24).clamp(0.0, s.hfl * 1.1),
-        forecastLevel48h: (s.currentLevel + rise * 48).clamp(0.0, s.hfl * 1.1),
-        forecastLevel72h: (s.currentLevel + rise * 72).clamp(0.0, s.hfl * 1.1),
+        forecastLevel24h: (s.currentLevel + rise * 24).clamp(0.0, s.hfl),
+        forecastLevel48h: (s.currentLevel + rise * 48).clamp(0.0, s.hfl),
+        forecastLevel72h: (s.currentLevel + rise * 72).clamp(0.0, s.hfl),
       );
     }).toList()
       ..sort((a, b) => b.progressPct.compareTo(a.progressPct));
@@ -621,26 +592,18 @@ class DataFetchEngine {
         '${finalList.where((s) => s.isLive).length} live');
   }
 
-  // ── CWC multi-URL race (FIX #3) ───────────────────────────────────────────
-  // Races 4 endpoints. Returns the level from whichever responds first
-  // and provides a valid non-null level within _cwcTimeout.
   Future<double?> _fetchCwcStationRaced(String code) async {
     final urls = [
-      // Priority 1: BEAMS Bihar JSON (fastest in-country)
       'https://beams.fmiscwrdbihar.gov.in/ffs/api/station/$code',
-      // Priority 2: India-WRIS river monitoring API
       'https://indiawris.gov.in/wris/#/riverMonitoring?station=$code',
-      // Priority 3: CWC FFS official
       'https://ffs.india-water.gov.in/ffs/api/station/$code',
-      // Priority 4: CWC FFS alternate path
       'https://ffs.india-water.gov.in/ffs/pages/getFloodData.php?station=$code',
     ];
-    // Race all 4 — first non-null level wins
     final futures = urls.map((url) async {
       try {
         final res = await http.get(
           Uri.parse(url),
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/2.0'},
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/2.1'},
         ).timeout(_cwcTimeout);
         if (res.statusCode != 200) return null;
         return _extractLevel(jsonDecode(res.body));
@@ -648,8 +611,6 @@ class DataFetchEngine {
         return null;
       }
     }).toList();
-
-    // Return first non-null result, or null if all fail
     final results = await Future.wait(futures);
     for (final r in results) {
       if (r != null) return r;
@@ -675,19 +636,13 @@ class DataFetchEngine {
     return null;
   }
 
-  // ── _findBase — FIX #5: strips parens + 5-char prefix match ──────────────
   StationReading? _findBase(
       Map<String, StationReading> map, String site, String district) {
-    // 1. Exact normalised key
     final sk = _normaliseKey(site);
     if (map.containsKey(sk)) return map[sk];
-
-    // 2. Substring both ways
     for (final key in map.keys) {
       if (key.contains(sk) || sk.contains(key)) return map[key];
     }
-
-    // 3. FIX #5: strip parenthetical suffix e.g. 'birpur (cwc)' → 'birpur'
     final stripped = sk.replaceAll(RegExp(r'\s*\(.*\)'), '').trim();
     if (stripped != sk) {
       if (map.containsKey(stripped)) return map[stripped];
@@ -695,15 +650,11 @@ class DataFetchEngine {
         if (key.contains(stripped) || stripped.contains(key)) return map[key];
       }
     }
-
-    // 4. FIX #5: 5-char prefix match
     final prefix = sk.length > 5 ? sk.substring(0, 5) : sk;
     for (final key in map.keys) {
       final kp = key.length > 5 ? key.substring(0, 5) : key;
       if (kp == prefix) return map[key];
     }
-
-    // 5. District fallback
     if (district.isNotEmpty) {
       final dk = _normaliseKey(district);
       for (final key in map.keys) {
@@ -713,7 +664,6 @@ class DataFetchEngine {
     return null;
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   static String _normaliseKey(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ' ').trim();
 
@@ -728,7 +678,6 @@ class DataFetchEngine {
     return [];
   }
 
-  // FIX #1: build initial seed snapshot so _last is never null
   static DataFetchSnapshot _buildSeedSnapshot() {
     final now = DateTime.now();
     final seeds = kBiharGauges.map((g) {

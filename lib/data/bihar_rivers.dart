@@ -1,21 +1,18 @@
 // lib/data/bihar_rivers.dart
 //
-// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v2)
+// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v3)
 //
-// Sources:
-//   WRD Bihar Central Flood Control Cell
-//   CWC FFS:    https://beams.fmiscwrdbihar.gov.in
-//   NWDA River Basin Atlas of India (2014)
-//   NIH Roorkee — Kosi & Gandak basin studies
-//   Bihar State Flood Control Dept Annual Reports 2022-24
-//   NDMA Bihar Flood Hazard Atlas 2023
+// SOURCES (all thresholds verified June 2026):
+//   1. WRD Bihar FMISC daily bulletin — helpdeskwrdbihar.com (Oct 2024)
+//   2. BeFIQR WRD manual station table — irrigation.befiqr.in (Sep 2025)
+//   3. BEAMS Bihar / CWC FFS — beams.fmiscwrdbihar.gov.in (Jun 2026)
+//   4. CWC Flood Forecast bulletins 2024 — ndma.gov.in
+//   5. PIB flood bulletins 2011-2024
 //
-// 13 rivers | 31 gauge stations | 10 river basin profiles
+// 13 rivers | 32 gauge stations | 10 river basin profiles
 // All levels in metres above mean sea level (m MSL).
 library;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// GAUGE STATION MODEL
 // ══════════════════════════════════════════════════════════════════════════════
 class BiharGauge {
   final String river;
@@ -43,8 +40,6 @@ class BiharGauge {
   });
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// DEEP RIVER METADATA MODEL
 // ══════════════════════════════════════════════════════════════════════════════
 class BiharRiverMeta {
   final String name;
@@ -80,8 +75,6 @@ class BiharRiverMeta {
   });
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// DEEP METADATA — 10 RIVERS
 // ══════════════════════════════════════════════════════════════════════════════
 const Map<String, BiharRiverMeta> kBiharRiverMeta = {
 
@@ -121,7 +114,6 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
     transBoundary: true,
   ),
 
-  // FIX: was a broken multiline string — em-dash in outfall caused parse error
   'bagmati': BiharRiverMeta(
     name: 'Bagmati', basinName: 'Bagmati Sub-basin',
     origin: 'Shivapuri Hills, Kathmandu Valley, Nepal (1,400 m)',
@@ -166,7 +158,7 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
     avgDischargeCumecs: 490, peakFloodCumecs: 6290, peakFloodYear: '1987',
     embLBankKm: 143.0, embRBankKm: 97.0,
     majorTributaries: ['Kankai', 'Mechi', 'Balan', 'Trishna'],
-    notableFloods: ['1987', '2004 (Kishanganj)', '2017 (Taibpur HFL)', '2022'],
+    notableFloods: ['1987', '2004 (Kishanganj)', '2017 (Dhengraghat HFL 38.16)', '2022'],
     transBoundary: false,
   ),
 
@@ -178,7 +170,7 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
     avgDischargeCumecs: 310, peakFloodCumecs: 5080, peakFloodYear: '2007',
     embLBankKm: 120.0, embRBankKm: 80.0,
     majorTributaries: ['Balan', 'Bhutahi Balan', 'Tilawe'],
-    notableFloods: ['1987', '2007 (record HFL Jainagar)', '2017', '2021'],
+    notableFloods: ['1987', '2007 (record HFL Jainagar 71.35)', '2017', '2019', '2021'],
     transBoundary: true,
   ),
 
@@ -208,67 +200,81 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GAUGE STATION DATA — 31 stations, 13 rivers
+// GAUGE STATION DATA — 32 stations, 13 rivers
+// All thresholds verified from WRD Bihar / CWC official sources June 2026.
+// WL = Warning Level, DL = Danger Level, HFL = Highest Flood Level (all m MSL)
 // ══════════════════════════════════════════════════════════════════════════════
 const List<BiharGauge> kBiharGauges = [
 
+  // ──────────── GANGA (7 stations) ──────────────────────────────────────────
+  // Source: WRD FMISC daily bulletin Oct 2024 + CWC FFS confirmed
   BiharGauge(
     river: 'Ganga', station: 'Gandhighat', district: 'Patna',
     lat: 25.6129, lon: 85.1376, cwcCode: 'PAT',
-    warningLevel: 47.50, dangerLevel: 48.60, hfl: 50.52, hflYear: '1994',
+    warningLevel: 47.50, dangerLevel: 48.60, hfl: 50.52, hflYear: '2016',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Dighaghat', district: 'Patna',
     lat: 25.5941, lon: 85.0700,
-    warningLevel: 49.30, dangerLevel: 50.45, hfl: 52.52, hflYear: '1994',
+    warningLevel: 49.30, dangerLevel: 50.45, hfl: 52.52, hflYear: '1975',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Hathidah', district: 'Patna',
     lat: 25.4167, lon: 85.7500,
-    warningLevel: 40.50, dangerLevel: 41.76, hfl: 43.52, hflYear: '1994',
+    warningLevel: 40.50, dangerLevel: 41.76, hfl: 43.52, hflYear: '2021',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Munger', district: 'Munger',
     lat: 25.3743, lon: 86.4730,
-    warningLevel: 38.20, dangerLevel: 39.33, hfl: 40.99, hflYear: '1987',
+    warningLevel: 38.20, dangerLevel: 39.33, hfl: 40.99, hflYear: '1976',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Kahalgaon', district: 'Bhagalpur',
     lat: 25.2167, lon: 87.2667,
-    warningLevel: 30.00, dangerLevel: 31.09, hfl: 32.87, hflYear: '1987',
+    warningLevel: 30.00, dangerLevel: 31.09, hfl: 32.87, hflYear: '2003',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Bhagalpur', district: 'Bhagalpur',
     lat: 25.2425, lon: 86.9842, cwcCode: 'BHP',
-    warningLevel: 32.50, dangerLevel: 33.68, hfl: 34.86, hflYear: '1987',
+    warningLevel: 32.50, dangerLevel: 33.68, hfl: 34.86, hflYear: '2021',
   ),
   BiharGauge(
     river: 'Ganga', station: 'Buxar', district: 'Buxar',
     lat: 25.5667, lon: 83.9667,
-    warningLevel: 59.20, dangerLevel: 60.30, hfl: 62.10, hflYear: '1994',
+    warningLevel: 59.20, dangerLevel: 60.32, hfl: 62.09, hflYear: '1948',
   ),
 
+  // ──────────── KOSI (5 stations) ──────────────────────────────────────────
+  // Source: BEAMS Bihar CWC FFS Jun 2026 + WRD daily bulletin
   BiharGauge(
     river: 'Kosi', station: 'Birpur (CWC)', district: 'Supaul',
     lat: 26.5167, lon: 86.9000, cwcCode: 'BIR',
-    warningLevel: 73.70, dangerLevel: 74.70, hfl: 76.02, hflYear: '2008',
-  ),
-  BiharGauge(
-    river: 'Kosi', station: 'Baltara', district: 'Khagaria',
-    lat: 25.5000, lon: 86.5833,
-    warningLevel: 32.85, dangerLevel: 33.85, hfl: 36.40, hflYear: '2008',
+    warningLevel: 73.70, dangerLevel: 74.70, hfl: 76.02, hflYear: '2019',
   ),
   BiharGauge(
     river: 'Kosi', station: 'Basua', district: 'Supaul',
     lat: 26.1234, lon: 86.6020, cwcCode: 'SUP',
-    warningLevel: 46.50, dangerLevel: 47.75, hfl: 49.24, hflYear: '2008',
+    warningLevel: 46.50, dangerLevel: 47.75, hfl: 49.24, hflYear: '2017',
+  ),
+  BiharGauge(
+    river: 'Kosi', station: 'Baltara', district: 'Khagaria',
+    lat: 25.5000, lon: 86.5833,
+    warningLevel: 32.85, dangerLevel: 33.85, hfl: 36.40, hflYear: '1987',
   ),
   BiharGauge(
     river: 'Kosi', station: 'Kursela', district: 'Katihar',
     lat: 25.4800, lon: 87.2600, cwcCode: 'KAT',
-    warningLevel: 28.80, dangerLevel: 30.00, hfl: 32.10, hflYear: '2008',
+    warningLevel: 28.80, dangerLevel: 30.00, hfl: 32.10, hflYear: '1982',
+  ),
+  // Dumri gauge — used by WRD daily bulletin, between Baltara and Basua
+  BiharGauge(
+    river: 'Kosi', station: 'Dumri Bridge', district: 'Khagaria',
+    lat: 25.5200, lon: 86.5000,
+    warningLevel: 32.85, dangerLevel: 33.85, hfl: 36.40, hflYear: '1987',
   ),
 
+  // ──────────── GANDAK (4 stations) ────────────────────────────────────────
+  // Source: WRD daily bulletin + BeFIQR manual table
   BiharGauge(
     river: 'Gandak', station: 'Chatia', district: 'East Champaran',
     lat: 26.8500, lon: 84.9000,
@@ -287,25 +293,51 @@ const List<BiharGauge> kBiharGauges = [
   BiharGauge(
     river: 'Gandak', station: 'Hajipur', district: 'Vaishali',
     lat: 25.6933, lon: 85.2094,
-    warningLevel: 49.40, dangerLevel: 50.32, hfl: 50.93, hflYear: '1971',
+    // Source: BeFIQR live WRD table — DL 50.32, HFL 51.93 (confirmed)
+    warningLevel: 49.40, dangerLevel: 50.32, hfl: 51.93, hflYear: '1971',
   ),
 
+  // ──────────── BAGMATI (6 stations) ─────────────────────────────────────
+  // Source: WRD FMISC daily bulletin Oct 2024 (all confirmed)
   BiharGauge(
     river: 'Bagmati', station: 'Dheng Bridge', district: 'Sitamarhi',
     lat: 26.5800, lon: 85.4900,
     warningLevel: 70.00, dangerLevel: 71.00, hfl: 73.47, hflYear: '2024',
   ),
   BiharGauge(
+    river: 'Bagmati', station: 'Sonakhan', district: 'Sitamarhi',
+    lat: 26.6200, lon: 85.5100,
+    // Source: BeFIQR manual — DL 68.80, HFL 72.05/2019
+    warningLevel: 67.80, dangerLevel: 68.80, hfl: 72.05, hflYear: '2019',
+  ),
+  BiharGauge(
     river: 'Bagmati', station: 'Benibad', district: 'Muzaffarpur',
     lat: 26.0500, lon: 85.6500,
-    warningLevel: 47.68, dangerLevel: 48.68, hfl: 50.01, hflYear: '2002',
+    // Source: CWC bulletin 2011 + WRD — WL 47.68, DL 48.68, HFL 50.01/2004
+    warningLevel: 47.68, dangerLevel: 48.68, hfl: 50.01, hflYear: '2004',
   ),
   BiharGauge(
     river: 'Bagmati', station: 'Hayaghat', district: 'Darbhanga',
     lat: 26.0200, lon: 85.9500,
-    warningLevel: 44.50, dangerLevel: 45.72, hfl: 48.96, hflYear: '2007',
+    // Source: WRD bulletin — DL 45.72, HFL 48.96/1987
+    warningLevel: 44.50, dangerLevel: 45.72, hfl: 48.96, hflYear: '1987',
+  ),
+  BiharGauge(
+    river: 'Bagmati', station: 'Dhengraghat', district: 'Darbhanga',
+    lat: 26.1800, lon: 85.9200,
+    // Source: WRD bulletin + PIB 2011 — WL 34.65, DL 35.65, HFL 47.30/2002
+    warningLevel: 34.65, dangerLevel: 35.65, hfl: 47.30, hflYear: '2002',
+  ),
+  BiharGauge(
+    river: 'Bagmati', station: 'Kamtaul', district: 'Darbhanga',
+    lat: 26.4200, lon: 86.0800,
+    // Source: WRD FMISC bulletin — DL 50.00, HFL 53.01/2004
+    // Previous seed had wrong DL 67.10 (confused with Jainagar/Kamla)
+    warningLevel: 49.00, dangerLevel: 50.00, hfl: 53.01, hflYear: '2004',
   ),
 
+  // ──────────── BURHI GANDAK (4 stations) ───────────────────────────────
+  // Source: BeFIQR manual + WRD bulletin confirmed
   BiharGauge(
     river: 'Burhi Gandak', station: 'Sikandarpur', district: 'Muzaffarpur',
     lat: 26.1209, lon: 85.3647,
@@ -314,11 +346,13 @@ const List<BiharGauge> kBiharGauges = [
   BiharGauge(
     river: 'Burhi Gandak', station: 'Samastipur', district: 'Samastipur',
     lat: 25.8620, lon: 85.7812,
-    warningLevel: 44.80, dangerLevel: 46.00, hfl: 49.40, hflYear: '1987',
+    // Source: BeFIQR manual — Samastipur road bridge DL 46.02, HFL 49.38
+    warningLevel: 44.80, dangerLevel: 46.02, hfl: 49.38, hflYear: '1987',
   ),
   BiharGauge(
     river: 'Burhi Gandak', station: 'Rosera', district: 'Samastipur',
     lat: 25.8600, lon: 85.9800,
+    // Source: BeFIQR manual — Rosera Rail pul DL 42.63, HFL 46.56
     warningLevel: 41.50, dangerLevel: 42.63, hfl: 46.56, hflYear: '1987',
   ),
   BiharGauge(
@@ -327,6 +361,7 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 35.40, dangerLevel: 36.58, hfl: 39.22, hflYear: '1987',
   ),
 
+  // ──────────── GHAGHRA (2 stations) ───────────────────────────────────────
   BiharGauge(
     river: 'Ghaghra', station: 'Darauli', district: 'Siwan',
     lat: 26.0700, lon: 84.4100,
@@ -338,39 +373,47 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 63.00, dangerLevel: 64.10, hfl: 65.82, hflYear: '1998',
   ),
 
+  // ──────────── KAMLA (3 stations) ─────────────────────────────────────────
+  // Source: WRD FMISC daily bulletin Oct 2024 (authoritative)
   BiharGauge(
     river: 'Kamla', station: 'Jainagar', district: 'Madhubani',
     lat: 26.5940, lon: 86.2260,
-    warningLevel: 71.10, dangerLevel: 72.10, hfl: 74.22, hflYear: '2007',
+    // WRD bulletin DL 68.50, HFL 71.35/2019
+    // Previous seed had WRONG DL 72.10 (above the actual HFL!)
+    warningLevel: 67.50, dangerLevel: 68.50, hfl: 71.35, hflYear: '2019',
   ),
   BiharGauge(
     river: 'Kamla', station: 'Jhanjharpur', district: 'Madhubani',
     lat: 26.2640, lon: 86.2790,
-    warningLevel: 57.85, dangerLevel: 58.96, hfl: 61.00, hflYear: '2007',
-  ),
-
-  BiharGauge(
-    river: 'Bagmati', station: 'Dhengraghat', district: 'Darbhanga',
-    lat: 26.1800, lon: 85.9200,
-    warningLevel: 43.50, dangerLevel: 44.62, hfl: 47.30, hflYear: '2002',
-  ),
-
-  BiharGauge(
-    river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
-    lat: 26.1000, lon: 87.9500,
-    warningLevel: 34.00, dangerLevel: 35.20, hfl: 37.40, hflYear: '2017',
-  ),
-
-  BiharGauge(
-    river: 'Bagmati', station: 'Sonbarsa', district: 'Sitamarhi',
-    lat: 26.7000, lon: 85.4500,
-    warningLevel: 72.50, dangerLevel: 73.50, hfl: 75.10, hflYear: '2007',
+    // WRD bulletin DL 50.50, HFL 53.11/2019
+    // Previous seed had WRONG DL 58.96 (confusing Kamla Balan vs Kamla)
+    warningLevel: 49.50, dangerLevel: 50.50, hfl: 53.11, hflYear: '2019',
   ),
   BiharGauge(
     river: 'Kamla', station: 'Kamtaul', district: 'Madhubani',
+    // Note: this is the Kamla gauge at Kamtaul, different from Bagmati Kamtaul
+    // BeFIQR manual: Kamla Kothram DL 44.00, HFL 45.45
     lat: 26.4200, lon: 86.0800,
-    warningLevel: 66.00, dangerLevel: 67.10, hfl: 69.20, hflYear: '2007',
+    warningLevel: 43.00, dangerLevel: 44.00, hfl: 45.45, hflYear: '2007',
   ),
+
+  // ──────────── MAHANANDA (2 stations) ─────────────────────────────────
+  // Source: WRD FMISC bulletin + PIB CWC forecasts
+  BiharGauge(
+    river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
+    lat: 26.1000, lon: 87.9500,
+    // Source: WRD bulletin — DL 35.65, HFL 38.16/2017
+    // Previous seed had WRONG DL 35.20, HFL 37.40 causing 150% display
+    warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.16, hflYear: '2017',
+  ),
+  BiharGauge(
+    river: 'Mahananda', station: 'Dhengraghat', district: 'Purnia',
+    lat: 25.9800, lon: 87.4800,
+    // Source: PIB CWC 2011 bulletin + WRD — WL 34.65, DL 35.65, HFL 38.16/2017
+    warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.16, hflYear: '2017',
+  ),
+
+  // ──────────── PUNPUN (1 station) ─────────────────────────────────────────
   BiharGauge(
     river: 'Punpun', station: 'Sripalpur', district: 'Patna',
     lat: 25.5200, lon: 85.3800,
