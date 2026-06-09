@@ -7,6 +7,7 @@ python-multipart
 pydantic
 python-dotenv
 requests
+httpx
 beautifulsoup4
 psycopg[binary]
 cachetools
