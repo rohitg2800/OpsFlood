@@ -1,52 +1,40 @@
-// lib/services/kosi_birpur_service.dart  v3.0
+// lib/services/kosi_birpur_service.dart  v3.1
 //
-// Live Kosi @ Birpur barrage gauge data
-// ─────────────────────────────────────────────────────────────────────────────
-// SOURCE PRIORITY — all fired in parallel, first non-null wins:
+// FIXES vs v3.0:
+//   • WRIS redirect loop: india-water.gov.in returns 3xx that re-appends the
+//     path prefix on every hop → 'wriswriswriswrisWRIS/API/...'. Fixed by
+//     using an IOClient with followRedirects:false and handling the single
+//     legitimate redirect manually.
 //
-//  A. BEAMS Bihar JSON (api.beams.bihar.gov.in)          — fastest
-//  B. BefiqrCwcService (BEAMS → befiqr fallback)          — fast
-//  C. India-WRIS v2 REST (indiawris.gov.in)               — reliable
-//  D. CWC FFS endpoint 1 (getFloodData.php)               — slow/blocked
-//  E. CWC FFS endpoint 2 (api/station/KOSI-BIRPUR)        — slow/blocked
-//
-// All 5 are raced with Future.any() — total wait = max(individual)
-// not sum. D & E are expected to timeout; they cost 0 extra time because
-// A/B/C win first in practice.
-//
-// DATUM: All levels in CWC AMSL metres.
-//   Birpur WRD local danger = 74.70 m
-//   Birpur CWC AMSL danger  = 214.00 m  (offset +139.30)
-// ─────────────────────────────────────────────────────────────────────────────
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import 'befiqr_cwc_service.dart';
 
 // ── Official CWC AMSL thresholds for Kosi @ Birpur ─────────────────────────
+const double kBirpurDangerLevel       = 214.00;
+const double kBirpurWarningLevel      = 213.00;
+const double kBirpurNormalLevel       = 210.00;
+const double kBirpurHFL               = 215.32;
+const double kBirpurWarningDischarge  = 22000.0;
+const double kBirpurDangerDischarge   = 27014.0;
 
-const double kBirpurDangerLevel  = 214.00;
-const double kBirpurWarningLevel = 213.00;
-const double kBirpurNormalLevel  = 210.00;
-const double kBirpurHFL          = 215.32;
-const double kBirpurWarningDischarge = 22000.0;
-const double kBirpurDangerDischarge  = 27014.0;
-
-// ───────────────────────────────────────────────────────────────────────────
-
+// ─────────────────────────────────────────────────────────────────────────────
 class KosiBirpurReading {
-  final double levelM;
-  final double dangerLevel;
-  final double warningLevel;
+  final double  levelM;
+  final double  dangerLevel;
+  final double  warningLevel;
   final double? dischargeCumecs;
   final double? levelWrd;
   final String? trend;
   final DateTime observedAt;
-  final String  source;
+  final String   source;
 
   const KosiBirpurReading({
     required this.levelM,
@@ -75,39 +63,86 @@ class KosiBirpurReading {
   double get fillFraction => (levelM / dangerLevel).clamp(0.0, 1.1);
 
   CwcStation toCwcStation() => CwcStation(
-        river:        'Kosi',
-        site:         'Birpur',
-        currentLevel: levelM,
-        dangerLevel:  dangerLevel,
-        warningLevel: warningLevel,
-        trend:        trend,
-        source:       source,
-        fetchedAt:    observedAt,
-      );
+    river:        'Kosi',
+    site:         'Birpur',
+    currentLevel: levelM,
+    dangerLevel:  dangerLevel,
+    warningLevel: warningLevel,
+    trend:        trend,
+    source:       source,
+    isFromSeed:   source == 'SEED',
+    fetchedAt:    observedAt,
+  );
+}
+
+// ── HTTP client that does NOT follow redirects ──────────────────────────────
+// WRIS server has a misconfigured redirect that appends its own path prefix
+// on every 3xx response. After 5 hops the URL becomes:
+//   indiawris.gov.in/wriswriswriswrisWRIS/API/...
+// Solution: disable automatic redirects, follow only the FIRST Location header
+// manually (genuine server-side path normalisation), then stop.
+http.Client _noRedirectClient() {
+  final inner = HttpClient()..maxConnectionsPerHost = 4;
+  inner.findProxy = null;
+  return IOClient(inner);
+}
+
+/// Follow at most one redirect manually. Returns the final response.
+/// If the server sends a redirect loop (same host + same path prefix appearing
+/// twice), aborts and returns the original response.
+Future<http.Response> _getNoLoop(String url,
+    {Map<String, String>? headers, Duration timeout = const Duration(seconds: 6)}) async {
+  final client = _noRedirectClient();
+  try {
+    final req     = http.Request('GET', Uri.parse(url));
+    if (headers != null) req.headers.addAll(headers);
+    final stream  = await client.send(req).timeout(timeout);
+    var resp       = await http.Response.fromStream(stream);
+
+    // Follow at most ONE redirect — but only if the Location header doesn’t
+    // reintroduce the current path as a prefix (the WRIS loop pattern).
+    if (resp.statusCode >= 300 && resp.statusCode < 400) {
+      final loc = resp.headers['location'];
+      if (loc != null) {
+        final origPath  = Uri.parse(url).path.toLowerCase();
+        final redirPath = Uri.parse(loc).path.toLowerCase();
+        // Abort if the redirect target contains the original path as a prefix
+        // (classic loop: /WRIS/API → /wrisWRIS/API → /wriswrisWRIS/API ...)
+        final isLoop = redirPath.contains(origPath) && redirPath != origPath;
+        if (!isLoop) {
+          final req2   = http.Request('GET', Uri.parse(loc));
+          if (headers != null) req2.headers.addAll(headers);
+          final stream2 = await client.send(req2).timeout(timeout);
+          resp = await http.Response.fromStream(stream2);
+        } else {
+          debugPrint('[WRIS] redirect loop detected, aborting: $loc');
+        }
+      }
+    }
+    return resp;
+  } finally {
+    client.close();
+  }
 }
 
 // ── KosiBirpurService ───────────────────────────────────────────────────────
 
 class KosiBirpurService {
   static const _raceTimeout = Duration(seconds: 7);
-
   final BefiqrCwcService _cwcSvc = BefiqrCwcService();
 
   /// Returns the best available live reading for Kosi @ Birpur.
   /// Fires all 5 sources in parallel — first non-null live result wins.
-  /// Never throws — falls back to seed if every future returns null or errors.
+  /// Never throws — falls back to seed if every future returns null.
   Future<KosiBirpurReading> fetchLive() async {
-    // Build all 5 source futures. Each returns null on failure — never throws.
     final futures = <Future<KosiBirpurReading?>>[
-      _tryBeamsDirect(),      // A — fastest
-      _tryFromCwcService(),   // B — BEAMS via befiqr fallback
-      _tryWRIS(),             // C — India-WRIS v2
-      _tryFFSEndpoint('https://ffs.india-water.gov.in/ffs/pages/getFloodData.php'),   // D
-      _tryFFSEndpoint('https://ffs.india-water.gov.in/ffs/api/station/KOSI-BIRPUR'), // E
+      _tryBeamsDirect(),
+      _tryFromCwcService(),
+      _tryWRIS(),
+      _tryFFSEndpoint('https://ffs.india-water.gov.in/ffs/pages/getFloodData.php'),
+      _tryFFSEndpoint('https://ffs.india-water.gov.in/ffs/api/station/KOSI-BIRPUR'),
     ];
 
-    // Race: first non-null result wins. We use a Completer so we can
-    // resolve on the first non-null and let the rest finish silently.
     final completer = Completer<KosiBirpurReading?>();
     int pending = futures.length;
 
@@ -117,31 +152,20 @@ class KosiBirpurService {
           completer.complete(result);
         } else {
           pending--;
-          if (pending == 0 && !completer.isCompleted) {
-            completer.complete(null); // all failed
-          }
+          if (pending == 0 && !completer.isCompleted) completer.complete(null);
         }
       }).catchError((_) {
         pending--;
-        if (pending == 0 && !completer.isCompleted) {
-          completer.complete(null);
-        }
+        if (pending == 0 && !completer.isCompleted) completer.complete(null);
       });
     }
 
     final result = await completer.future.timeout(
-      _raceTimeout,
-      onTimeout: () => null,
-    );
-
-    if (result != null) return result;
-    return _seed();
+      _raceTimeout, onTimeout: () => null);
+    return result ?? _seed();
   }
 
   // ── Source A: BEAMS Bihar direct JSON ─────────────────────────────────────
-  // BEAMS exposes a direct JSON endpoint that doesn't go through the
-  // befiqr proxy. Faster and more reliable on Indian networks.
-
   Future<KosiBirpurReading?> _tryBeamsDirect() async {
     final urls = [
       'https://api.beams.bihar.gov.in/api/stations/live?river=KOSI&site=BIRPUR',
@@ -151,19 +175,12 @@ class KosiBirpurService {
       try {
         final resp = await http.get(
           Uri.parse(url),
-          headers: {
-            'Accept':     'application/json',
-            'User-Agent': 'OpsFlood/3.0',
-          },
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
         ).timeout(const Duration(seconds: 5));
-
         if (resp.statusCode == 200) {
-          final body = jsonDecode(resp.body);
-          // Handle both array and object responses
-          final List<dynamic> items = body is List
-              ? body
+          final body  = jsonDecode(resp.body);
+          final items = body is List ? body
               : (body['data'] as List? ?? body['stations'] as List? ?? []);
-
           for (final item in items) {
             final name = (item['site'] ?? item['station_name'] ?? '').toString().toLowerCase();
             if (!name.contains('birpur')) continue;
@@ -172,7 +189,7 @@ class KosiBirpurService {
               debugPrint('[KosiBirpur] BEAMS-direct ✅ $level m');
               return KosiBirpurReading(
                 levelM:       level,
-                dangerLevel:  _parseDbl(item['danger_level']) ?? kBirpurDangerLevel,
+                dangerLevel:  _parseDbl(item['danger_level'])  ?? kBirpurDangerLevel,
                 warningLevel: _parseDbl(item['warning_level']) ?? kBirpurWarningLevel,
                 trend:        item['trend']?.toString(),
                 observedAt:   DateTime.tryParse(item['observed_at']?.toString() ?? '') ?? DateTime.now(),
@@ -186,19 +203,16 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Source B: BefiqrCwcService (BEAMS → befiqr → internal seed) ──────────
-
+  // ── Source B: BefiqrCwcService ─────────────────────────────────────────────
   Future<KosiBirpurReading?> _tryFromCwcService() async {
     try {
-      final stations = await _cwcSvc.fetchStations()
-          .timeout(const Duration(seconds: 6));
-      final birpur = stations.where((s) =>
+      final stations = await _cwcSvc.fetchStations().timeout(const Duration(seconds: 6));
+      final birpur   = stations.where((s) =>
+          !s.isFromSeed &&
           s.river.toLowerCase().contains('kosi') &&
           s.site.toLowerCase().contains('birpur')).toList();
-
       if (birpur.isNotEmpty) {
         final s = birpur.first;
-        if (s.source == 'SEED') return null;
         debugPrint('[KosiBirpur] BefiqrCwc ✅ ${s.currentLevel} m (${s.source})');
         return KosiBirpurReading(
           levelM:       s.currentLevel,
@@ -215,35 +229,31 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Source C: India-WRIS v2 ────────────────────────────────────────────────
-  // Station GD_00441 = Birpur (CWC gauge on Kosi)
-  // v2 endpoint changed from /wris/api/v1/ to /WRIS/API/ in 2025.
-
+  // ── Source C: India-WRIS — redirect-safe ─────────────────────────────────
+  // Uses _getNoLoop() instead of http.get() to avoid the indiawris.gov.in
+  // redirect loop that produces wriswriswriswrisWRIS/API/... URLs.
   Future<KosiBirpurReading?> _tryWRIS() async {
     final uris = [
-      // v2 (2025+ correct path)
       'https://indiawris.gov.in/WRIS/API/hydrograph?station_id=GD_00441&parameter=WL&days=1',
-      // v1 legacy fallback
       'https://indiawris.gov.in/wris/api/v1/hydrograph?station_id=GD_00441&parameter=WL&duration=1',
-      // discharge fallback
       'https://indiawris.gov.in/WRIS/API/hydrograph?station_id=GD_00441&parameter=Q&days=1',
     ];
     for (final u in uris) {
       try {
-        final resp = await http.get(
-          Uri.parse(u),
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
-        ).timeout(const Duration(seconds: 6));
-
+        final resp = await _getNoLoop(
+          u,
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
+          timeout: const Duration(seconds: 6),
+        );
         if (resp.statusCode == 200) {
           final body = jsonDecode(resp.body);
           final list = (body['data'] as List? ?? body['hydrograph'] as List?);
           if (list != null && list.isNotEmpty) {
             final latest = list.last as Map<String, dynamic>;
             final val    = _parseDbl(latest['value'] ?? latest['wl'] ?? latest['level']);
-            final obsAt  = DateTime.tryParse(latest['date']?.toString() ?? latest['time']?.toString() ?? '') ?? DateTime.now();
+            final obsAt  = DateTime.tryParse(
+                latest['date']?.toString() ?? latest['time']?.toString() ?? '') ?? DateTime.now();
             if (val != null && val > 100) {
-              // WL in AMSL — good
               debugPrint('[KosiBirpur] WRIS WL ✅ $val m');
               return KosiBirpurReading(
                 levelM:       val,
@@ -254,7 +264,6 @@ class KosiBirpurService {
               );
             }
             if (val != null && val > 0) {
-              // Discharge — convert to stage
               final h = _dischargeToLevel(val);
               debugPrint('[KosiBirpur] WRIS Q=$val → H=$h m');
               return KosiBirpurReading(
@@ -275,10 +284,7 @@ class KosiBirpurService {
     return null;
   }
 
-  // ── Source D/E: CWC FFS — single-endpoint wrapper ─────────────────────────
-  // Called twice in parallel from fetchLive() with different URLs.
-  // Expected to timeout on Indian mobile networks — logged as info only.
-
+  // ── Source D/E: CWC FFS endpoints ──────────────────────────────────────────
   Future<KosiBirpurReading?> _tryFFSEndpoint(String url) async {
     try {
       final resp = await http.post(
@@ -287,18 +293,13 @@ class KosiBirpurService {
           'Content-Type': 'application/json',
           'Accept':       'application/json',
           'Referer':      'https://ffs.india-water.gov.in/',
-          'User-Agent':   'Mozilla/5.0 (OpsFlood/3.0)',
+          'User-Agent':   'Mozilla/5.0 (OpsFlood/3.1)',
         },
-        body: jsonEncode({
-          'station_id': 'BR-1',
-          'river':      'KOSI',
-          'state':      'BIHAR',
-        }),
+        body: jsonEncode({'station_id': 'BR-1', 'river': 'KOSI', 'state': 'BIHAR'}),
       ).timeout(const Duration(seconds: 6));
-
       if (resp.statusCode == 200) {
-        final body = jsonDecode(resp.body) as Map<String, dynamic>;
-        final data = body['data'] as Map<String, dynamic>? ?? body;
+        final body  = jsonDecode(resp.body) as Map<String, dynamic>;
+        final data  = body['data'] as Map<String, dynamic>? ?? body;
         final level = _parseDbl(
             data['current_level'] ?? data['gauge_level'] ??
             data['level']         ?? data['wl']);
@@ -315,14 +316,12 @@ class KosiBirpurService {
         }
       }
     } catch (e) {
-      // Expected on Indian networks — FFS is geoblocked. Log as info.
       debugPrint('[KosiBirpur] FFS[$url] skipped: $e');
     }
     return null;
   }
 
   // ── Seed ──────────────────────────────────────────────────────────────────
-
   KosiBirpurReading _seed() {
     debugPrint('[KosiBirpur] ⚠️ all sources failed — SEED');
     return KosiBirpurReading(
@@ -334,11 +333,9 @@ class KosiBirpurService {
     );
   }
 
-  // ── Utilities ─────────────────────────────────────────────────────────────
-
+  // ── Utilities ──────────────────────────────────────────────────────────────────
   static double _dischargeToLevel(double q) {
-    const qDesign = kBirpurDangerDischarge;
-    final ratio   = (q / qDesign).clamp(0.0, 1.2);
+    final ratio = (q / kBirpurDangerDischarge).clamp(0.0, 1.2);
     return 205.0 + 9.0 * (ratio < 1 ? ratio : 1.0);
   }
 
