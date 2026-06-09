@@ -220,4 +220,7 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get comingSoon => 'जल्द आएगा';
+
+  @override
+  String get monitors => 'Monitors';
 }

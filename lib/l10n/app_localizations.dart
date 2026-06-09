@@ -523,6 +523,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Coming soon'**
   String get comingSoon;
+
+  /// No description provided for @monitors.
+  ///
+  /// In en, this message translates to:
+  /// **'Monitors'**
+  String get monitors;
 }
 
 class _AppLocalizationsDelegate
