@@ -1,6 +1,7 @@
-// lib/screens/alerts_screen.dart  v4.1 — fully live, AlertEngine driven
+// lib/screens/alerts_screen.dart  v4.2 — overflow fix in _StatusBar
 //
 // v4.1 adds:  static const route = '/alerts'  (required by main.dart router)
+// v4.2 fixes: RenderFlex overflow in _StatusBar (row of source chips)
 //
 // Reads alertsProvider (via data_fetch_provider) which is rebuilt automatically
 // on every DataFetchEngine tick (every 45 s).
@@ -12,7 +13,8 @@
 //   • Alert cards: colour-coded, expandable, with level progress bar
 //   • Pull-to-refresh forces DataFetchEngine.forceRefresh()
 //   • "No alerts" empty state with last-updated timestamp
-//   • Source health row at bottom (CWC / WRD / GloFAS)
+//   • Source health row at bottom (CWC / WRD / GloFAS) — horizontally
+//     scrollable so it never overflows on small screens
 library;
 
 import 'package:flutter/material.dart';
@@ -213,7 +215,15 @@ class _AlertBadge extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _StatusBar
+// _StatusBar  — FIX v4.2
+//
+// OLD: single Row[ ...chips, Spacer(), timestamp ]
+//      → overflows when 4-5 chips fill 379px constraint
+//
+// NEW: Column[
+//        Align(right) → timestamp          ← never overflows, always fits
+//        SingleChildScrollView(horizontal) → chips  ← scrolls, never wraps
+//      ]
 // ─────────────────────────────────────────────────────────────────────────────
 class _StatusBar extends StatelessWidget {
   final List<SourceStatus> sources;
@@ -224,19 +234,43 @@ class _StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final fmt =
         lastUpdate != null ? DateFormat('HH:mm:ss').format(lastUpdate!) : '—';
+
+    // Filter out seed-only sources from display unless all are seeds
+    final display = sources.where((s) => !s.isFromSeed).toList();
+    final chips   = (display.isEmpty ? sources : display)
+        .map((s) => _SourceChip(
+              name:        s.name,
+              healthy:     s.healthy,
+              count:       s.stationCount,
+              isFromSeed:  s.isFromSeed,
+            ))
+        .toList();
+
     return Container(
       color: const Color(0xFF0D47A1),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          ...sources.map((s) => _SourceChip(
-                name:    s.name,
-                healthy: s.healthy,
-                count:   s.stationCount,
-              )),
-          const Spacer(),
-          Text('Updated $fmt',
-              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          // ── timestamp row — right-aligned, never overflows ──────────────
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'Updated $fmt',
+              style: const TextStyle(color: Colors.white70, fontSize: 10),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // ── chip strip — horizontally scrollable, never overflows ───────
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: chips,
+            ),
+          ),
         ],
       ),
     );
@@ -247,31 +281,52 @@ class _SourceChip extends StatelessWidget {
   final String name;
   final bool   healthy;
   final int    count;
-  const _SourceChip(
-      {required this.name, required this.healthy, required this.count});
+  final bool   isFromSeed;
+  const _SourceChip({
+    required this.name,
+    required this.healthy,
+    required this.count,
+    this.isFromSeed = false,
+  });
   @override
   Widget build(BuildContext context) {
+    // Seed chips shown with a muted grey style so they're visually distinct
+    // from live-source chips — users can immediately tell what's real data.
+    final borderColor = isFromSeed
+        ? Colors.white38
+        : (healthy ? Colors.greenAccent : Colors.redAccent);
+    final bgColor = isFromSeed
+        ? Colors.white.withOpacity(0.08)
+        : (healthy
+            ? Colors.green.withOpacity(0.25)
+            : Colors.red.withOpacity(0.25));
+    final iconColor = isFromSeed
+        ? Colors.white38
+        : (healthy ? Colors.greenAccent : Colors.redAccent);
+    final icon = isFromSeed
+        ? Icons.circle_outlined
+        : (healthy ? Icons.check_circle : Icons.error);
+
     return Container(
       margin: const EdgeInsets.only(right: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: healthy
-            ? Colors.green.withOpacity(0.25)
-            : Colors.red.withOpacity(0.25),
+        color:        bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: healthy ? Colors.greenAccent : Colors.redAccent,
-            width: 0.8),
+        border:       Border.all(color: borderColor, width: 0.8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(healthy ? Icons.check_circle : Icons.error,
-              size: 10,
-              color: healthy ? Colors.greenAccent : Colors.redAccent),
+          Icon(icon, size: 10, color: iconColor),
           const SizedBox(width: 4),
-          Text('$name${count > 0 ? " $count" : ""}',
-              style: const TextStyle(color: Colors.white, fontSize: 10)),
+          Text(
+            '$name${count > 0 ? " $count" : ""}',
+            style: TextStyle(
+              color:    isFromSeed ? Colors.white54 : Colors.white,
+              fontSize: 10,
+            ),
+          ),
         ],
       ),
     );
@@ -597,9 +652,12 @@ class _ExpandedBody extends StatelessWidget {
             const Icon(Icons.schedule_rounded,
                 size: 12, color: Colors.black38),
             const SizedBox(width: 4),
-            Text('Issued $issued  ·  Expires $exp',
-                style: const TextStyle(fontSize: 10, color: Colors.black45)),
-            const Spacer(),
+            Flexible(
+              child: Text('Issued $issued  ·  Expires $exp',
+                  style: const TextStyle(fontSize: 10, color: Colors.black45),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 4),
             if (a.rateOfRiseMph != null)
               _MetaTag(
                   icon: Icons.trending_up,
