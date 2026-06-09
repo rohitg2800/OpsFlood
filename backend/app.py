@@ -82,6 +82,9 @@ if _is_package_context():
     from backend.routers.fcm import router as fcm_router
     from backend.routers.data_gov_cwc import router as data_gov_cwc_router
     from backend.routers.model_artifacts import router as model_artifacts_router
+    # ── NEW: Flutter-facing routes ──────────────────────────────────────────
+    from backend.routers.glofas import router as glofas_router
+    from backend.routers.rainfall import router as rainfall_router
 else:
     from data_pipeline import IngestionTarget, OperationalDataPipeline, ScheduledIngestionService
     from state_severity_matrix import (
@@ -111,6 +114,9 @@ else:
     from routers.fcm import router as fcm_router
     from routers.data_gov_cwc import router as data_gov_cwc_router
     from routers.model_artifacts import router as model_artifacts_router
+    # ── NEW: Flutter-facing routes ──────────────────────────────────────────
+    from routers.glofas import router as glofas_router
+    from routers.rainfall import router as rainfall_router
 
 
 warnings.filterwarnings('ignore')
@@ -516,7 +522,7 @@ def start_wrd_bihar_eager_warm() -> None:
 app = FastAPI(
     title="OpsFlood API",
     description="Flood monitoring, prediction and telemetry backend for the Android Flood App.",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -538,11 +544,14 @@ app.include_router(cwc_ffs_router)
 app.include_router(fcm_router)
 app.include_router(data_gov_cwc_router)
 app.include_router(model_artifacts_router)
+# ── Flutter-facing routes ───────────────────────────────────────────────────
+app.include_router(glofas_router)
+app.include_router(rainfall_router)
 
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("OpsFlood API starting up — version 1.1.0")
+    logger.info("OpsFlood API starting up — version 1.2.0")
 
     # 1. WRD Bihar — eager warm (fills cache immediately from BeFIQR)
     try:
@@ -584,7 +593,7 @@ async def health():
     glofas_count = len(GLOFAS_STATION_CACHE)
     return {
         "status": "ok",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "timestamp": current_timestamp_iso(),
         "glofas_stations_cached": glofas_count,
     }
