@@ -38,6 +38,10 @@ import 'screens/map_screen.dart';
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
+// ── DataFetchEngine: started here so the first fetch fires before
+//    any screen renders. The engine is a singleton; all providers
+//    subscribe to its stream via dataFetchProvider.
+import 'services/data_fetch_engine.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
     FlutterLocalNotificationsPlugin();
@@ -74,19 +78,17 @@ Future<void> main() async {
     ),
   );
 
+  // ── Start the data fetch engine before the widget tree mounts so the
+  //    first snapshot is already in-flight when screens render.
+  DataFetchEngine.instance.start();
+
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
 // ─── Root app ────────────────────────────────────────────────────────────────
-// Each AppThemeMode gets its own ThemeData with the correct RiverColors
-// ThemeExtension injected. MaterialApp receives both theme: and darkTheme:
-// filled with the right palette; themeMode: selects the slot.
 class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
 
-  /// Build the ThemeData for a given mode.
-  /// For system mode, only darkTheme uses this; lightTheme is handled
-  /// separately in build().
   static ThemeData _themeFor(AppThemeMode mode) {
     switch (mode) {
       case AppThemeMode.light:
@@ -102,7 +104,7 @@ class FloodWatchApp extends ConsumerWidget {
       case AppThemeMode.roboticLight:
         return const RoboticTheme(isDark: false).toThemeData();
       case AppThemeMode.system:
-        return RiverColors.darkTheme(); // replaced in build()
+        return RiverColors.darkTheme();
     }
   }
 
@@ -111,9 +113,6 @@ class FloodWatchApp extends ConsumerWidget {
     final mode          = ref.watch(themeModeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
 
-    // For system: provide correct light + dark. For every other mode:
-    // fill BOTH slots with the same ThemeData so Flutter always picks it
-    // regardless of which ThemeMode slot it resolves to.
     final ThemeData lightSlot;
     final ThemeData darkSlot;
 

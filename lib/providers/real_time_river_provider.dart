@@ -1,5 +1,5 @@
 // lib/providers/real_time_river_provider.dart
-// v4 — single merged source of truth for ALL screens.
+// v5 — DataFetchEngine stations merged into mergedStationsProvider.
 //
 // Architecture:
 //   WrdBiharService (scrape) ──► wrdStationsProvider  (AsyncNotifier, 15-min auto-refresh)
@@ -12,18 +12,14 @@
 //                                       │
 //                         ┌─────────────┴────────────────────────────────────┐
 //                         ▼                                                  ▼
-//               cwcStationsProvider                                  (other sources)
+//               cwcStationsProvider                            dataFetchStationsProvider
+//                (befiqr CWC scrape)                           (DataFetchEngine 45-s tick)
 //                         │
 //                         ▼
 //              ┌──────────────────────┐
 //              │  mergedStationsProvider  ◄─── ALL screens consume this
-//              │  (WRD + CWC deduped)  │
+//              │  (CWC > DataFetch > WRD deduped) │
 //              └──────────────────────┘
-//                         │
-//          ┌──────────────┼────────────────┐
-//          ▼              ▼                ▼
-//   mergedCritical  mergedSevere    mergedTotal …
-//  (Monitors badge) (Alerts counts) (Dashboard KPIs)
 library;
 
 import 'dart:async';
@@ -35,6 +31,7 @@ import '../services/wrd_bihar_service.dart';
 import '../services/befiqr_cwc_service.dart';
 import 'station_history_provider.dart';
 import 'cwc_provider.dart';
+import 'data_fetch_provider.dart';
 
 // ── 1. Raw WrdStation list — auto-refreshes every 15 min ──────────────────────
 class WrdStationsNotifier extends AsyncNotifier<List<WrdStation>> {
@@ -65,10 +62,6 @@ final wrdStationsProvider =
         WrdStationsNotifier.new);
 
 // ── 2. WrdStation → RiverStation adapter ──────────────────────────────────────
-//
-// FIX: ?? 0.0 fallbacks so nullable WrdStation doubles satisfy
-// RiverStation's required non-nullable fields. When thresholds are
-// genuinely missing the station degrades to DangerClass.normal.
 RiverStation _wrdToRiverStation(WrdStation s) {
   final cur = s.currentLevel ?? 0.0;
   final dl  = s.dangerLevel  ?? 0.0;
@@ -92,7 +85,7 @@ RiverStation _wrdToRiverStation(WrdStation s) {
   );
 }
 
-// ── CwcStation → RiverStation adapter (kept here to avoid import cycles) ──────
+// ── CwcStation → RiverStation adapter ──────────────────────────────────────
 RiverStation _cwcToRiverStation(CwcStation s) => RiverStation(
   city:        s.site,
   state:       'Bihar',
@@ -128,7 +121,7 @@ final realTimeRiverProvider =
     }
   }
 
-  final stations = async.asData?.value ?? [];
+  final stations  = async.asData?.value ?? [];
   final converted = stations.map(_wrdToRiverStation).toList();
 
   ref.read(stationHistoryProvider.notifier).pushSnapshot(converted);
@@ -141,50 +134,55 @@ final realTimeRiverProvider =
 
 // ── 4. mergedStationsProvider — THE single source of truth for all screens ────
 //
-// Merges WRD + CWC stations with deduplication by station name.
-// When both sources have the same station, CWC wins (it has real
-// threshold data; WRD may have null levels that fall back to 0.0).
-//
-// This is identical logic to mapStationsProvider in map_command_provider.dart
-// but WITHOUT the Bihar/national filter — screens can filter themselves.
+// Priority: CWC (highest) > DataFetchEngine > WRD (lowest)
+// Deduplication is by station name (case-insensitive).
+// This means screens that watch mergedStationsProvider automatically
+// benefit from DataFetchEngine's 45-s CWC FFS + GloFAS + Open-Meteo data.
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   final wrdAsync = ref.watch(realTimeRiverProvider);
   final cwcAsync = ref.watch(cwcStationsProvider);
 
-  // CWC stations converted
+  // ── 4a. CWC stations (highest priority) ──────────────────────────────────
   final cwcList = (cwcAsync.asData?.value ?? const [])
       .map(_cwcToRiverStation)
       .toList();
-
-  // WRD stations — only include those NOT already covered by CWC
   final cwcNames = {for (final s in cwcList) s.station.toLowerCase()};
-  final wrdList  = (wrdAsync.asData?.value ?? const [])
+
+  // ── 4b. DataFetchEngine stations (second priority) ────────────────────────
+  //    Only include stations NOT already covered by CWC.
+  final dfStations = ref.watch(dataFetchStationsProvider)
       .where((s) => !cwcNames.contains(s.station.toLowerCase()))
       .toList();
+  final dfNames = {for (final s in dfStations) s.station.toLowerCase()};
 
-  final merged = [...cwcList, ...wrdList];
+  // ── 4c. WRD stations (lowest priority) ───────────────────────────────────
+  //    Only include stations NOT already in CWC or DataFetch.
+  final wrdList = (wrdAsync.asData?.value ?? const [])
+      .where((s) =>
+          !cwcNames.contains(s.station.toLowerCase()) &&
+          !dfNames.contains(s.station.toLowerCase()))
+      .toList();
+
+  final merged = [...cwcList, ...dfStations, ...wrdList];
   merged.sort((a, b) => b.riskScore.compareTo(a.riskScore));
 
   if (kDebugMode) {
-    debugPrint('[Merged] ${cwcList.length} CWC + ${wrdList.length} WRD-only '
-        '= ${merged.length} total stations');
+    debugPrint('[Merged] ${cwcList.length} CWC + ${dfStations.length} DataFetch '
+        '+ ${wrdList.length} WRD-only = ${merged.length} total');
   }
   return merged;
 });
 
-// ── 5. Count providers — derived from mergedStations (same for ALL screens) ───
+// ── 5. Count providers ────────────────────────────────────────────────────────
 
-/// Total station count.
 final mergedTotalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider).length);
 
-/// Stations AT or ABOVE HFL — extreme danger.
 final mergedExtremeCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) => s.dangerClass == DangerClass.extreme)
         .length);
 
-/// Stations AT or ABOVE danger level (severe + extreme).
 final mergedCriticalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) =>
@@ -192,34 +190,28 @@ final mergedCriticalCountProvider = Provider<int>((ref) =>
             s.dangerClass == DangerClass.extreme)
         .length);
 
-/// Stations above warning but below danger.
 final mergedElevatedCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) => s.dangerClass == DangerClass.aboveNormal)
         .length);
 
-/// Normal stations.
 final mergedNormalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) => s.dangerClass == DangerClass.normal)
         .length);
 
-/// Bihar-only subset (for Monitors / Alerts screens).
 final mergedBiharStationsProvider = Provider<List<RiverStation>>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) => s.state.toLowerCase().contains('bihar'))
         .toList());
 
-// ── 6. Legacy convenience providers (keep for backward compat) ────────────────
+// ── 6. Legacy convenience providers ──────────────────────────────────────────
 
-/// Total WRD station count (raw, before merge).
 final wrdStationCountProvider = Provider<int>((ref) {
   final async = ref.watch(wrdStationsProvider);
   return async.asData?.value.length ?? 0;
 });
 
-/// Stations currently AT or ABOVE danger level (merged source).
-// FIX: renamed from wrdCriticalStationsProvider — now uses merged data.
 final wrdCriticalStationsProvider = Provider<List<RiverStation>>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) =>
@@ -227,15 +219,11 @@ final wrdCriticalStationsProvider = Provider<List<RiverStation>>((ref) =>
             s.dangerClass == DangerClass.severe)
         .toList());
 
-/// Stations above WARNING but below danger (merged source).
-// FIX: was DangerClass.high (non-existent) → DangerClass.aboveNormal.
-// FIX: now uses merged data instead of WRD-only.
 final wrdWarningStationsProvider = Provider<List<RiverStation>>((ref) =>
     ref.watch(mergedStationsProvider)
         .where((s) => s.dangerClass == DangerClass.aboveNormal)
         .toList());
 
-/// Stations grouped by river — used by RiverMonitorScreen.
 final wrdByRiverProvider = Provider<Map<String, List<RiverStation>>>((ref) {
   final list = ref.watch(mergedStationsProvider);
   final map  = <String, List<RiverStation>>{};
@@ -248,17 +236,14 @@ final wrdByRiverProvider = Provider<Map<String, List<RiverStation>>>((ref) {
   return map;
 });
 
-/// Is the WRD fetch currently in-flight?
 final wrdIsLoadingProvider = Provider<bool>((ref) =>
     ref.watch(wrdStationsProvider).isLoading);
 
-/// Last fetch error message (null = no error).
 final wrdErrorProvider = Provider<String?>((ref) {
   final async = ref.watch(wrdStationsProvider);
   return async.hasError ? async.error.toString() : null;
 });
 
-/// Whether latest data is from live scrape vs disk cache.
 final wrdIsLiveProvider = Provider<bool>((ref) {
   final async = ref.watch(wrdStationsProvider);
   final list  = async.asData?.value ?? [];

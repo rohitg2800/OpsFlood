@@ -1,9 +1,12 @@
-// lib/screens/alerts_screen.dart  v4.0 — fully live, AlertEngine driven
+// lib/screens/alerts_screen.dart  v4.1 — fully live, AlertEngine driven
+//
+// v4.1 adds:  static const route = '/alerts'  (required by main.dart router)
 //
 // Reads alertsProvider (via data_fetch_provider) which is rebuilt automatically
 // on every DataFetchEngine tick (every 45 s).
 //
 // Features:
+//   • static const route = '/alerts'
 //   • Animated badge on AppBar showing live alert count
 //   • Filter chips: All / Emergency / Critical / Warning / Info
 //   • Alert cards: colour-coded, expandable, with level progress bar
@@ -52,6 +55,9 @@ IconData _severityIcon(AlertSeverity s) {
 // AlertsScreen
 // ─────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends ConsumerStatefulWidget {
+  // ← route const required by main.dart router
+  static const String route = '/alerts';
+
   const AlertsScreen({super.key});
 
   @override
@@ -60,9 +66,9 @@ class AlertsScreen extends ConsumerStatefulWidget {
 
 class _AlertsScreenState extends ConsumerState<AlertsScreen>
     with TickerProviderStateMixin {
-  AlertSeverity? _filter;  // null = All
+  AlertSeverity? _filter;
   late AnimationController _badgeCtrl;
-  late Animation<double>    _badgePulse;
+  late Animation<double>   _badgePulse;
   int _prevCount = 0;
 
   @override
@@ -94,15 +100,15 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     final sources   = ref.watch(sourceStatusProvider);
     final fetchSnap = ref.watch(dataFetchProvider);
 
-    // Pulse badge when count increases
     if (allAlerts.length > _prevCount) {
       _badgeCtrl.forward(from: 0);
     }
     _prevCount = allAlerts.length;
 
-    final shown      = _filtered(allAlerts);
-    final isLoading  = fetchSnap.isLoading ||
-        fetchSnap.when(data: (s) => s.isLoading, loading: () => true, error: (_, __) => false);
+    final shown     = _filtered(allAlerts);
+    final isLoading = fetchSnap.isLoading ||
+        fetchSnap.when(
+            data: (s) => s.isLoading, loading: () => true, error: (_, __) => false);
     final lastUpdate = fetchSnap.when(
       data:    (s) => s.fetchedAt,
       loading: ()  => null,
@@ -116,17 +122,14 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
         onRefresh: () => DataFetchEngine.instance.forceRefresh(),
         child: CustomScrollView(
           slivers: [
-            // ── Status bar
-            SliverToBoxAdapter(child: _StatusBar(sources: sources, lastUpdate: lastUpdate)),
-
-            // ── Filter chips
-            SliverToBoxAdapter(child: _FilterRow(
-              selected: _filter,
-              all:      allAlerts,
+            SliverToBoxAdapter(
+                child: _StatusBar(sources: sources, lastUpdate: lastUpdate)),
+            SliverToBoxAdapter(
+                child: _FilterRow(
+              selected:  _filter,
+              all:       allAlerts,
               onChanged: (v) => setState(() => _filter = v),
             )),
-
-            // ── Alert list
             if (isLoading && allAlerts.isEmpty)
               const SliverFillRemaining(child: _LoadingState())
             else if (shown.isEmpty)
@@ -135,9 +138,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (ctx, i) {
-                    if (i == shown.length) {
-                      return const SizedBox(height: 24);
-                    }
+                    if (i == shown.length) return const SizedBox(height: 24);
                     return _AlertCard(alert: shown[i]);
                   },
                   childCount: shown.length + 1,
@@ -160,8 +161,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
         if (loading)
           const Padding(
             padding: EdgeInsets.all(16),
-            child: SizedBox(width: 20, height: 20,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2)),
           )
         else
           Padding(
@@ -190,14 +194,17 @@ class _AlertBadge extends StatelessWidget {
       children: [
         const Icon(Icons.notifications_active_rounded),
         Positioned(
-          top: 0, right: 0,
+          top: 0,
+          right: 0,
           child: Container(
             padding: const EdgeInsets.all(3),
-            decoration: const BoxDecoration(
-                color: Colors.red, shape: BoxShape.circle),
+            decoration:
+                const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
             child: Text('$count',
-                style: const TextStyle(fontSize: 9,
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                style: const TextStyle(
+                    fontSize: 9,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold)),
           ),
         ),
       ],
@@ -215,19 +222,18 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = lastUpdate != null
-        ? DateFormat('HH:mm:ss').format(lastUpdate!)
-        : '—';
+    final fmt =
+        lastUpdate != null ? DateFormat('HH:mm:ss').format(lastUpdate!) : '—';
     return Container(
       color: const Color(0xFF0D47A1),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Row(
         children: [
           ...sources.map((s) => _SourceChip(
-            name:    s.name,
-            healthy: s.healthy,
-            count:   s.stationCount,
-          )),
+                name:    s.name,
+                healthy: s.healthy,
+                count:   s.stationCount,
+              )),
           const Spacer(),
           Text('Updated $fmt',
               style: const TextStyle(color: Colors.white70, fontSize: 11)),
@@ -241,23 +247,28 @@ class _SourceChip extends StatelessWidget {
   final String name;
   final bool   healthy;
   final int    count;
-  const _SourceChip({required this.name, required this.healthy, required this.count});
+  const _SourceChip(
+      {required this.name, required this.healthy, required this.count});
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(right: 6),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: healthy ? Colors.green.withOpacity(0.25) : Colors.red.withOpacity(0.25),
+        color: healthy
+            ? Colors.green.withOpacity(0.25)
+            : Colors.red.withOpacity(0.25),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: healthy ? Colors.greenAccent : Colors.redAccent, width: 0.8),
+            color: healthy ? Colors.greenAccent : Colors.redAccent,
+            width: 0.8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(healthy ? Icons.check_circle : Icons.error,
-              size: 10, color: healthy ? Colors.greenAccent : Colors.redAccent),
+              size: 10,
+              color: healthy ? Colors.greenAccent : Colors.redAccent),
           const SizedBox(width: 4),
           Text('$name${count > 0 ? " $count" : ""}',
               style: const TextStyle(color: Colors.white, fontSize: 10)),
@@ -271,14 +282,13 @@ class _SourceChip extends StatelessWidget {
 // _FilterRow
 // ─────────────────────────────────────────────────────────────────────────────
 class _FilterRow extends StatelessWidget {
-  final AlertSeverity?      selected;
-  final List<FloodAlert>    all;
+  final AlertSeverity?               selected;
+  final List<FloodAlert>             all;
   final ValueChanged<AlertSeverity?> onChanged;
-  const _FilterRow({
-    required this.selected,
-    required this.all,
-    required this.onChanged,
-  });
+  const _FilterRow(
+      {required this.selected,
+      required this.all,
+      required this.onChanged});
 
   int _count(AlertSeverity? s) {
     if (s == null) return all.length;
@@ -293,11 +303,30 @@ class _FilterRow extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         children: [
-          _Chip(label: 'All (${_count(null)})',         selected: selected == null,              onTap: () => onChanged(null)),
-          _Chip(label: '🔴 Emergency (${_count(AlertSeverity.emergency)})', selected: selected == AlertSeverity.emergency, color: const Color(0xFFB71C1C), onTap: () => onChanged(AlertSeverity.emergency)),
-          _Chip(label: '🚨 Critical (${_count(AlertSeverity.critical)})',   selected: selected == AlertSeverity.critical,  color: const Color(0xFFE64A19), onTap: () => onChanged(AlertSeverity.critical)),
-          _Chip(label: '⚠️ Warning (${_count(AlertSeverity.warning)})',     selected: selected == AlertSeverity.warning,   color: const Color(0xFFF9A825), onTap: () => onChanged(AlertSeverity.warning)),
-          _Chip(label: 'ℹ️ Info (${_count(AlertSeverity.info)})',           selected: selected == AlertSeverity.info,      color: const Color(0xFF1976D2), onTap: () => onChanged(AlertSeverity.info)),
+          _Chip(
+              label:    'All (${_count(null)})',
+              selected: selected == null,
+              onTap:    () => onChanged(null)),
+          _Chip(
+              label:    '🔴 Emergency (${_count(AlertSeverity.emergency)})',
+              selected: selected == AlertSeverity.emergency,
+              color:    const Color(0xFFB71C1C),
+              onTap:    () => onChanged(AlertSeverity.emergency)),
+          _Chip(
+              label:    '🚨 Critical (${_count(AlertSeverity.critical)})',
+              selected: selected == AlertSeverity.critical,
+              color:    const Color(0xFFE64A19),
+              onTap:    () => onChanged(AlertSeverity.critical)),
+          _Chip(
+              label:    '⚠️ Warning (${_count(AlertSeverity.warning)})',
+              selected: selected == AlertSeverity.warning,
+              color:    const Color(0xFFF9A825),
+              onTap:    () => onChanged(AlertSeverity.warning)),
+          _Chip(
+              label:    'ℹ️ Info (${_count(AlertSeverity.info)})',
+              selected: selected == AlertSeverity.info,
+              color:    const Color(0xFF1976D2),
+              onTap:    () => onChanged(AlertSeverity.info)),
         ],
       ),
     );
@@ -305,11 +334,15 @@ class _FilterRow extends StatelessWidget {
 }
 
 class _Chip extends StatelessWidget {
-  final String   label;
-  final bool     selected;
-  final Color?   color;
+  final String     label;
+  final bool       selected;
+  final Color?     color;
   final VoidCallback onTap;
-  const _Chip({required this.label, required this.selected, required this.onTap, this.color});
+  const _Chip(
+      {required this.label,
+      required this.selected,
+      required this.onTap,
+      this.color});
   @override
   Widget build(BuildContext context) {
     final c = color ?? const Color(0xFF0D47A1);
@@ -318,17 +351,26 @@ class _Chip extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color:        selected ? c : Colors.white,
+          color: selected ? c : Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border:       Border.all(color: c),
-          boxShadow:    selected ? [BoxShadow(color: c.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 2))] : null,
+          border: Border.all(color: c),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                      color:  c.withOpacity(0.3),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2))
+                ]
+              : null,
         ),
         child: Text(label,
             style: TextStyle(
-                color: selected ? Colors.white : c,
-                fontSize: 12, fontWeight: FontWeight.w600)),
+                color:      selected ? Colors.white : c,
+                fontSize:   12,
+                fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -353,13 +395,17 @@ class _AlertCardState extends State<_AlertCard>
   @override
   void initState() {
     super.initState();
-    _ctrl   = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 250));
     _rotate = Tween<double>(begin: 0, end: 0.5).animate(
         CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
@@ -373,52 +419,50 @@ class _AlertCardState extends State<_AlertCard>
     final fg = _severityColor(a.severity);
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin:    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Column(
           children: [
-            // ── Header stripe
             Container(height: 4, color: fg),
-
-            // ── Main row
             InkWell(
               onTap: _toggle,
               child: Container(
-                color: bg,
+                color:   bg,
                 padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    // Icon
                     CircleAvatar(
                       radius: 22,
                       backgroundColor: fg.withOpacity(0.15),
-                      child: Icon(_severityIcon(a.severity), color: fg, size: 22),
+                      child:
+                          Icon(_severityIcon(a.severity), color: fg, size: 22),
                     ),
                     const SizedBox(width: 12),
-                    // Text
-                    Expanded(child: Column(
+                    Expanded(
+                        child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
                           _SeverityBadge(severity: a.severity),
                           const SizedBox(width: 6),
-                          Expanded(child: Text(a.title,
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  color: fg),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis)),
+                          Expanded(
+                              child: Text(a.title,
+                                  style: TextStyle(
+                                      fontSize:   13,
+                                      fontWeight: FontWeight.w700,
+                                      color:      fg),
+                                  maxLines:  2,
+                                  overflow:  TextOverflow.ellipsis)),
                         ]),
                         const SizedBox(height: 4),
                         Text('${a.river} · ${a.district}',
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.black54)),
                         const SizedBox(height: 4),
-                        // Level progress bar (only when thresholdLevel > 0)
                         if (a.thresholdLevel > 0)
                           _LevelBar(
                             current:   a.currentLevel,
@@ -427,21 +471,17 @@ class _AlertCardState extends State<_AlertCard>
                           ),
                       ],
                     )),
-                    // Chevron
                     RotationTransition(
                       turns: _rotate,
-                      child: Icon(Icons.expand_more_rounded,
-                          color: fg),
+                      child: Icon(Icons.expand_more_rounded, color: fg),
                     ),
                   ],
                 ),
               ),
             ),
-
-            // ── Expandable body
             AnimatedSize(
               duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
+              curve:    Curves.easeInOut,
               child: _expanded
                   ? _ExpandedBody(alert: a, fg: fg)
                   : const SizedBox.shrink(),
@@ -459,14 +499,15 @@ class _SeverityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding:    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color:        _severityColor(severity),
-        borderRadius: BorderRadius.circular(4),
-      ),
+          color:        _severityColor(severity),
+          borderRadius: BorderRadius.circular(4)),
       child: Text(severity.label,
           style: const TextStyle(
-              color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800,
+              color:      Colors.white,
+              fontSize:   9,
+              fontWeight: FontWeight.w800,
               letterSpacing: 0.5)),
     );
   }
@@ -476,14 +517,15 @@ class _LevelBar extends StatelessWidget {
   final double current;
   final double threshold;
   final Color  color;
-  const _LevelBar({
-    required this.current,
-    required this.threshold,
-    required this.color,
-  });
+  const _LevelBar(
+      {required this.current,
+      required this.threshold,
+      required this.color});
   @override
   Widget build(BuildContext context) {
-    final pct = (threshold > 0 ? (current / threshold).clamp(0.0, 1.5) : 0.0);
+    final pct = threshold > 0
+        ? (current / threshold).clamp(0.0, 1.5)
+        : 0.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -497,9 +539,10 @@ class _LevelBar extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 2),
-        Text('${current.toStringAsFixed(2)} m / '
-             'threshold ${threshold.toStringAsFixed(2)} m '
-             '(${(pct * 100).toStringAsFixed(0)}%)',
+        Text(
+            '${current.toStringAsFixed(2)} m / '
+            'threshold ${threshold.toStringAsFixed(2)} m '
+            '(${(pct * 100).toStringAsFixed(0)}%)',
             style: const TextStyle(fontSize: 10, color: Colors.black54)),
       ],
     );
@@ -515,18 +558,18 @@ class _ExpandedBody extends StatelessWidget {
     final a      = alert;
     final issued = DateFormat('dd MMM HH:mm').format(a.issuedAt);
     final exp    = a.expiresAt != null
-        ? DateFormat('dd MMM HH:mm').format(a.expiresAt!) : 'No expiry';
+        ? DateFormat('dd MMM HH:mm').format(a.expiresAt!)
+        : 'No expiry';
     return Container(
       color:   Colors.white,
       padding: const EdgeInsets.all(16),
-      child:   Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Description
           Text(a.body,
-              style: const TextStyle(fontSize: 13, height: 1.5, color: Colors.black87)),
+              style: const TextStyle(
+                  fontSize: 13, height: 1.5, color: Colors.black87)),
           const SizedBox(height: 12),
-          // Recommended action
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -539,17 +582,20 @@ class _ExpandedBody extends StatelessWidget {
               children: [
                 Icon(Icons.tips_and_updates_rounded, color: fg, size: 18),
                 const SizedBox(width: 8),
-                Expanded(child: Text(a.action,
-                    style: TextStyle(
-                        fontSize: 12, color: fg,
-                        fontWeight: FontWeight.w600, height: 1.4))),
+                Expanded(
+                    child: Text(a.action,
+                        style: TextStyle(
+                            fontSize:   12,
+                            color:      fg,
+                            fontWeight: FontWeight.w600,
+                            height:     1.4))),
               ],
             ),
           ),
           const SizedBox(height: 10),
-          // Meta row
           Row(children: [
-            const Icon(Icons.schedule_rounded, size: 12, color: Colors.black38),
+            const Icon(Icons.schedule_rounded,
+                size: 12, color: Colors.black38),
             const SizedBox(width: 4),
             Text('Issued $issued  ·  Expires $exp',
                 style: const TextStyle(fontSize: 10, color: Colors.black45)),
@@ -576,16 +622,16 @@ class _MetaTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(left: 6),
+      margin:  const EdgeInsets.only(left: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color:        Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(4),
-      ),
+          color:        Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(4)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 10, color: Colors.black54),
         const SizedBox(width: 3),
-        Text(text, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+        Text(text,
+            style: const TextStyle(fontSize: 10, color: Colors.black54)),
       ]),
     );
   }
@@ -600,19 +646,27 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = lastUpdate != null
-        ? DateFormat('HH:mm:ss dd MMM').format(lastUpdate!) : '—';
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      const Icon(Icons.check_circle_outline_rounded, size: 72, color: Colors.green),
-      const SizedBox(height: 16),
-      const Text('No Active Alerts',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.black87)),
-      const SizedBox(height: 8),
-      const Text('All monitored stations are within safe levels.',
-          style: TextStyle(color: Colors.black45)),
-      const SizedBox(height: 16),
-      Text('Last checked: $t',
-          style: const TextStyle(fontSize: 11, color: Colors.black38)),
-    ]));
+        ? DateFormat('HH:mm:ss dd MMM').format(lastUpdate!)
+        : '—';
+    return Center(
+        child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+          const Icon(Icons.check_circle_outline_rounded,
+              size: 72, color: Colors.green),
+          const SizedBox(height: 16),
+          const Text('No Active Alerts',
+              style: TextStyle(
+                  fontSize:   20,
+                  fontWeight: FontWeight.w700,
+                  color:      Colors.black87)),
+          const SizedBox(height: 8),
+          const Text('All monitored stations are within safe levels.',
+              style: TextStyle(color: Colors.black45)),
+          const SizedBox(height: 16),
+          Text('Last checked: $t',
+              style: const TextStyle(fontSize: 11, color: Colors.black38)),
+        ]));
   }
 }
 
@@ -620,10 +674,14 @@ class _LoadingState extends StatelessWidget {
   const _LoadingState();
   @override
   Widget build(BuildContext context) {
-    return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      CircularProgressIndicator(strokeWidth: 2),
-      SizedBox(height: 16),
-      Text('Fetching live data…', style: TextStyle(color: Colors.black54)),
-    ]));
+    return const Center(
+        child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+          CircularProgressIndicator(strokeWidth: 2),
+          SizedBox(height: 16),
+          Text('Fetching live data…',
+              style: TextStyle(color: Colors.black54)),
+        ]));
   }
 }
