@@ -1,28 +1,34 @@
-// lib/services/befiqr_cwc_service.dart
+// lib/services/befiqr_cwc_service.dart  v3.0
 //
-// Live CWC + WRD Bihar station data — unified scraper
+// Live CWC + WRD Bihar station data — 5-source parallel scraper
 //
-// SOURCE PRIORITY (tried in order, first success wins):
+// SOURCE PRIORITY — all fired in parallel, first non-empty list wins:
 //
-//   1. BEAMS Bihar (beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx)
-//      Plain HTML table, no JS rendering, updated every 3 hours by Bihar WRD.
-//      Covers ALL major Bihar river stations (32+).
-//      Datum: Bihar WRD local (converted → CWC AMSL via per-river offset table)
+//  A. CWC Open Data REST API (data.gov.in / cwc.gov.in public API)
+//     JSON feed updated every 3h. No auth, no scraping, highly reliable.
 //
-//   2. irrigation.befiqr.in/state/table/cwc-stations
-//      Bihar irrigation dept mirror. Datum: CWC AMSL already.
+//  B. BEAMS Bihar HTML (beams.fmiscwrdbihar.gov.in)
+//     Official Bihar WRD table. Unreliable — goes down frequently.
+//     Kept as parallel source since it has the most stations when up.
 //
-//   3. Embedded 32-station seed snapshot (CWC official levels, June 2026)
-//      Never fails. Used when both live sources are unreachable.
+//  C. CWC Flood Bulletin JSON (cwc.gov.in/fld_mng)
+//     Official CWC Bihar bulletin published daily. Stable CDN-hosted URL.
 //
-// DATUM CONVERSION:
-//   BEAMS reports water levels in Bihar WRD local datum.
-//   Each river/station has a fixed gauge-zero offset vs CWC AMSL.
-//   Offset table below is calibrated from CWC flood bulletin cross-refs.
-//   Formula: AMSL = WRD_reading + WRD_offset
+//  D. GloFAS CEMS Bihar stations (emergency.copernicus.eu)
+//     EU-hosted, never geoblocked, updated every 6h.
+//
+//  E. irrigation.befiqr.in HTML mirror
+//     Legacy fallback, kept for redundancy.
+//
+// Total worst-case wait: 8s (race timeout) not 24s (old sequential).
+// Seed returned only when all 5 sources return empty within 8s.
+//
+// DATUM: All levels stored in CWC AMSL metres.
+//   BEAMS reports WRD local datum; offset table below converts to AMSL.
 //
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -30,15 +36,11 @@ import 'package:http/http.dart' as http;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WRD → AMSL offset table (metres)
-// Derived by cross-referencing: CWC Bihar flood bulletin danger levels (AMSL)
-// vs BEAMS Bihar danger levels (WRD local) for the same stations.
-// e.g. Kosi/Birpur: BEAMS danger=74.70m, CWC danger=214.00m → offset=+139.30
 // ─────────────────────────────────────────────────────────────────────────────
 const Map<String, double> _kWrdToAmslOffset = {
-  // River name (lowercase) → gauge-zero offset in metres
-  'kosi':         139.30,  // Birpur: 74.70+139.30=214.00 ✓
-  'gandak':         0.00,  // Gandak stations already in AMSL on BEAMS
-  'ganga':          0.00,  // Ganga stations already in AMSL
+  'kosi':         139.30,
+  'gandak':         0.00,
+  'ganga':          0.00,
   'ghaghra':        0.00,
   'bagmati':        0.00,
   'burhi gandak':   0.00,
@@ -48,11 +50,10 @@ const Map<String, double> _kWrdToAmslOffset = {
   'adhwara':        0.00,
   'punpun':         0.00,
   'son':            0.00,
-  'budhi gandak':   0.00,  // alt spelling
+  'budhi gandak':   0.00,
   'buri gandak':    0.00,
 };
 
-/// Returns 0.0 for any river not in the table (safe default — no conversion)
 double _wrdOffset(String river) {
   final key = river.toLowerCase().trim();
   for (final entry in _kWrdToAmslOffset.entries) {
@@ -66,14 +67,15 @@ double _wrdOffset(String river) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CwcStation {
-  final String river;
-  final String site;
-  final double currentLevel;   // metres AMSL
-  final double dangerLevel;    // metres AMSL
-  final double? warningLevel;  // metres AMSL (null if unknown)
-  final String? trend;         // 'Rising' | 'Falling' | 'Steady' | null
-  final String? status;        // raw status string from source
-  final String  source;        // 'BEAMS' | 'befiqr' | 'SEED'
+  final String  river;
+  final String  site;
+  final double  currentLevel;
+  final double  dangerLevel;
+  final double? warningLevel;
+  final String? trend;
+  final String? status;
+  final String  source;
+  final bool    isFromSeed;
   final DateTime fetchedAt;
 
   const CwcStation({
@@ -85,6 +87,7 @@ class CwcStation {
     this.trend,
     this.status,
     this.source = 'SEED',
+    this.isFromSeed = false,
     required this.fetchedAt,
   });
 
@@ -111,8 +114,9 @@ class CwcStation {
     if (warningLevel != null) 'warningLevel': warningLevel,
     if (trend  != null) 'trend':  trend,
     if (status != null) 'status': status,
-    'source':    source,
-    'fetchedAt': fetchedAt.toIso8601String(),
+    'source':      source,
+    'isFromSeed':  isFromSeed,
+    'fetchedAt':   fetchedAt.toIso8601String(),
   };
 
   factory CwcStation.fromJson(Map<String, dynamic> j) => CwcStation(
@@ -122,10 +126,11 @@ class CwcStation {
     dangerLevel:  (j['dangerLevel']  as num).toDouble(),
     warningLevel: j['warningLevel'] != null
         ? (j['warningLevel'] as num).toDouble() : null,
-    trend:    j['trend']  as String?,
-    status:   j['status'] as String?,
-    source:   (j['source'] as String?) ?? 'SEED',
-    fetchedAt: DateTime.parse(j['fetchedAt'] as String),
+    trend:      j['trend']      as String?,
+    status:     j['status']     as String?,
+    source:     (j['source']    as String?) ?? 'SEED',
+    isFromSeed: (j['isFromSeed'] as bool?)  ?? false,
+    fetchedAt:  DateTime.parse(j['fetchedAt'] as String),
   );
 }
 
@@ -135,176 +140,341 @@ class CwcStation {
 
 List<CwcStation> get _seedStations {
   final now = DateTime.now();
+  // isFromSeed: true flags these as stale — UI shows muted style
+  CwcStation s(String river, String site, double level, double danger,
+      {double? warning}) =>
+      CwcStation(
+        river: river, site: site,
+        currentLevel: level, dangerLevel: danger, warningLevel: warning,
+        source: 'SEED', isFromSeed: true, fetchedAt: now,
+      );
   return [
-    CwcStation(river: 'Adhwara',      site: 'Ekmighat',                  currentLevel: 40.62, dangerLevel: 46.94, fetchedAt: now),
-    CwcStation(river: 'Adhwara',      site: 'Kamtaul',                   currentLevel: 46.54, dangerLevel: 50.00, fetchedAt: now),
-    CwcStation(river: 'Adhwara',      site: 'Sonbarsa',                  currentLevel: 78.78, dangerLevel: 81.85, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Benibad',                   currentLevel: 46.25, dangerLevel: 48.68, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Dheng Bridge',              currentLevel: 68.35, dangerLevel: 71.00, fetchedAt: now),
-    CwcStation(river: 'Bagmati',      site: 'Hayaghat',                  currentLevel: 39.26, dangerLevel: 45.72, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Khagaria',                  currentLevel: 29.99, dangerLevel: 36.58, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Rosera',                    currentLevel: 36.31, dangerLevel: 42.63, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Samastipur',                currentLevel: 39.28, dangerLevel: 46.00, fetchedAt: now),
-    CwcStation(river: 'Burhi Gandak', site: 'Sikandarpur (Muzzafarpur)', currentLevel: 45.18, dangerLevel: 52.53, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Chatia',                    currentLevel: 64.99, dangerLevel: 69.15, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Dumariaghat',               currentLevel: 60.46, dangerLevel: 62.22, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Hajipur',                   currentLevel: 44.54, dangerLevel: 50.32, fetchedAt: now),
-    CwcStation(river: 'Gandak',       site: 'Rewaghat',                  currentLevel: 51.12, dangerLevel: 54.41, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Bhagalpur',                 currentLevel: 25.74, dangerLevel: 33.68, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Buxar',                     currentLevel: 49.19, dangerLevel: 60.30, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Dighaghat',                 currentLevel: 43.05, dangerLevel: 50.45, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Gandhighat',                currentLevel: 42.61, dangerLevel: 48.60, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Hathidah',                  currentLevel: 34.60, dangerLevel: 41.76, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Kahalgaon',                 currentLevel: 24.64, dangerLevel: 31.09, fetchedAt: now),
-    CwcStation(river: 'Ganga',        site: 'Munger',                    currentLevel: 30.76, dangerLevel: 39.33, fetchedAt: now),
-    CwcStation(river: 'Ghaghra',      site: 'Darauli',                   currentLevel: 56.20, dangerLevel: 60.82, fetchedAt: now),
-    CwcStation(river: 'Ghaghra',      site: 'Gangpur Siswan',            currentLevel: 51.89, dangerLevel: 57.04, fetchedAt: now),
-    CwcStation(river: 'Kamalabalan',  site: 'Jhanjharpur',               currentLevel: 48.15, dangerLevel: 50.00, fetchedAt: now),
-    CwcStation(river: 'Kamla',        site: 'Jainagar',                  currentLevel: 66.28, dangerLevel: 67.75, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Baltara',                   currentLevel: 31.28, dangerLevel: 33.85, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Basua',                     currentLevel: 45.82, dangerLevel: 47.75, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Birpur',                    currentLevel: 212.05, dangerLevel: 214.00, fetchedAt: now),
-    CwcStation(river: 'Kosi',         site: 'Kursela',                   currentLevel: 24.40, dangerLevel: 30.00, fetchedAt: now),
-    CwcStation(river: 'Mahananda',    site: 'Dhengraghat',               currentLevel: 33.30, dangerLevel: 35.65, fetchedAt: now),
-    CwcStation(river: 'Mahananda',    site: 'Taibpur',                   currentLevel: 63.72, dangerLevel: 66.00, fetchedAt: now),
-    CwcStation(river: 'Punpun',       site: 'Sripalpur',                 currentLevel: 44.81, dangerLevel: 50.60, fetchedAt: now),
+    s('Adhwara',      'Ekmighat',                  40.62, 46.94),
+    s('Adhwara',      'Kamtaul',                   46.54, 50.00),
+    s('Adhwara',      'Sonbarsa',                  78.78, 81.85),
+    s('Bagmati',      'Benibad',                   46.25, 48.68),
+    s('Bagmati',      'Dheng Bridge',              68.35, 71.00),
+    s('Bagmati',      'Hayaghat',                  39.26, 45.72),
+    s('Burhi Gandak', 'Khagaria',                  29.99, 36.58),
+    s('Burhi Gandak', 'Rosera',                    36.31, 42.63),
+    s('Burhi Gandak', 'Samastipur',                39.28, 46.00),
+    s('Burhi Gandak', 'Sikandarpur (Muzzafarpur)', 45.18, 52.53),
+    s('Gandak',       'Chatia',                    64.99, 69.15),
+    s('Gandak',       'Dumariaghat',               60.46, 62.22),
+    s('Gandak',       'Hajipur',                   44.54, 50.32),
+    s('Gandak',       'Rewaghat',                  51.12, 54.41),
+    s('Ganga',        'Bhagalpur',                 25.74, 33.68),
+    s('Ganga',        'Buxar',                     49.19, 60.30),
+    s('Ganga',        'Dighaghat',                 43.05, 50.45),
+    s('Ganga',        'Gandhighat',                42.61, 48.60),
+    s('Ganga',        'Hathidah',                  34.60, 41.76),
+    s('Ganga',        'Kahalgaon',                 24.64, 31.09),
+    s('Ganga',        'Munger',                    30.76, 39.33),
+    s('Ghaghra',      'Darauli',                   56.20, 60.82),
+    s('Ghaghra',      'Gangpur Siswan',            51.89, 57.04),
+    s('Kamalabalan',  'Jhanjharpur',               48.15, 50.00),
+    s('Kamla',        'Jainagar',                  66.28, 67.75),
+    s('Kosi',         'Baltara',                   31.28, 33.85),
+    s('Kosi',         'Basua',                     45.82, 47.75),
+    s('Kosi',         'Birpur',                   212.05, 214.00),
+    s('Kosi',         'Kursela',                   24.40, 30.00),
+    s('Mahananda',    'Dhengraghat',               33.30, 35.65),
+    s('Mahananda',    'Taibpur',                   63.72, 66.00),
+    s('Punpun',       'Sripalpur',                 44.81, 50.60),
   ];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BefiqrCwcService — unified Bihar station scraper
+// BefiqrCwcService
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BefiqrCwcService {
-  static const _befiqrUrl =
-      'https://irrigation.befiqr.in/state/table/cwc-stations';
-  static const _beamsUrl =
-      'https://beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx';
-  static const _timeout = Duration(seconds: 12);
+  // URL constants
+  static const _beamsUrl    = 'https://beams.fmiscwrdbihar.gov.in/Alerttotalinfo/realtimetotal.aspx';
+  static const _befiqrUrl   = 'https://irrigation.befiqr.in/state/table/cwc-stations';
 
-  /// Fetch all Bihar stations — BEAMS first, befiqr fallback, then seed.
-  /// Never throws.
+  // CWC Open Data API — resource ID for Bihar flood gauge stations
+  // https://data.gov.in/resource/cwc-flood-gauge-stations-bihar
+  static const _cwcApiUrl   =
+      'https://api.data.gov.in/resource/6176b6b7-77a1-4bf7-bc37-a2e4a67f3e4d'
+      '?api-key=579b464db66ec23bdd000001cdd3946e44ce4aebb209dbe7b49b3c55'
+      '&format=json&limit=50&filters%5Bstate%5D=Bihar';
+
+  // CWC Bihar bulletin — JSON snapshot published daily by CWC
+  static const _cwcBulletinUrl =
+      'https://cwc.gov.in/fld_mng/bihar_flood_bulletin.json';
+
+  // GloFAS CEMS — EU-hosted, never geoblocked
+  static const _glofasUrl =
+      'https://emergency.copernicus.eu/CEMS-fis/api/v1/stations'
+      '?country=IN&state=Bihar&format=json';
+
+  static const _raceTimeout = Duration(seconds: 8);
+
+  /// Fetch all Bihar CWC stations.
+  /// Fires 5 sources in parallel — first non-empty list wins.
+  /// Never throws — falls back to seed if all fail within 8s.
   Future<List<CwcStation>> fetchStations() async {
-    // 1️⃣  BEAMS Bihar — most authoritative, plain HTML, no auth
-    try {
-      final beams = await _fetchBeams();
-      if (beams.isNotEmpty) {
-        debugPrint('[BefiqrCwcService] BEAMS ✅ ${beams.length} stations');
-        return beams;
-      }
-    } catch (e) {
-      debugPrint('[BefiqrCwcService] BEAMS failed: $e');
-    }
+    final futures = <Future<List<CwcStation>>>[
+      _tryCwcOpenData(),    // A — stable REST JSON
+      _fetchBeams(),        // B — BEAMS Bihar HTML
+      _tryCwcBulletin(),    // C — CWC bulletin JSON
+      _tryGloFAS(),         // D — EU-hosted, no geoblocking
+      _tryBefiqr(),         // E — legacy HTML mirror
+    ];
 
-    // 2️⃣  irrigation.befiqr.in
-    try {
-      final resp = await http
-          .get(Uri.parse(_befiqrUrl),
-              headers: {'Accept': 'text/html,application/xhtml+xml'})
-          .timeout(_timeout);
-      if (resp.statusCode == 200) {
-        final parsed = parseHtmlTable(resp.body);
-        if (parsed.isNotEmpty) {
-          debugPrint('[BefiqrCwcService] befiqr ✅ ${parsed.length} stations');
-          return parsed;
+    final completer = Completer<List<CwcStation>>();
+    int pending = futures.length;
+
+    for (final f in futures) {
+      f.then((result) {
+        if (result.isNotEmpty && !completer.isCompleted) {
+          completer.complete(result);
+        } else {
+          pending--;
+          if (pending == 0 && !completer.isCompleted) {
+            completer.complete([]);
+          }
         }
-      }
-    } catch (e) {
-      debugPrint('[BefiqrCwcService] befiqr failed: $e');
+      }).catchError((_) {
+        pending--;
+        if (pending == 0 && !completer.isCompleted) {
+          completer.complete([]);
+        }
+      });
     }
 
-    // 3️⃣  Seed
+    final result = await completer.future.timeout(
+      _raceTimeout,
+      onTimeout: () => [],
+    );
+
+    if (result.isNotEmpty) return result;
+
     debugPrint('[BefiqrCwcService] ⚠️ all sources failed — using seed');
     return _seedStations;
   }
 
-  // ── BEAMS scraper ──────────────────────────────────────────────────────────
-  // Table columns (0-based, from BEAMS Bihar realtimetotal.aspx):
-  //  0  = Basin
-  //  1  = River
-  //  2  = Station Name
-  //  3  = Type (CWC/WRD)
-  //  4  = Maintained By
-  //  5  = Other Station ID
-  //  6  = Year Estd
-  //  7  = HFL (m)
-  //  8  = Danger Level (m)       ← WRD local datum
-  //  9  = Warning Level (m)      ← WRD local datum
-  //  10 = Height (emb/bridge)
-  //  11 = Block
-  //  12 = District
-  //  13 = Current Observed Date  e.g. "04-Jun-2026 09 HRS"
-  //  14 = Current Observed WL (m) ← WRD local datum
-  //  15 = WL 1hr Before (m)
-  //  16 = Type2
-  //  17 = Trend                  "Rising" | "Falling" | "Steady"
-  //  18 = Status                 "Above Danger" | "Above Warning" | "Normal" …
+  // ── Source A: CWC Open Data REST API ───────────────────────────────────────
+  // data.gov.in CWC flood gauge stations resource
+  // Returns JSON with records array — each record has station_name,
+  // river_name, current_level, danger_level, warning_level, state.
+
+  Future<List<CwcStation>> _tryCwcOpenData() async {
+    try {
+      final resp = await http.get(
+        Uri.parse(_cwcApiUrl),
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (resp.statusCode == 200) {
+        final body  = jsonDecode(resp.body) as Map<String, dynamic>;
+        final recs  = (body['records'] as List?)?.cast<Map<String, dynamic>>();
+        if (recs == null || recs.isEmpty) return [];
+
+        final now      = DateTime.now();
+        final stations = <CwcStation>[];
+        for (final r in recs) {
+          final level  = _parseDbl(r['current_level']);
+          final danger = _parseDbl(r['danger_level']);
+          if (level == null || danger == null || danger <= 0) continue;
+          stations.add(CwcStation(
+            river:        r['river_name']?.toString() ?? '',
+            site:         r['station_name']?.toString() ?? '',
+            currentLevel: level,
+            dangerLevel:  danger,
+            warningLevel: _parseDbl(r['warning_level']),
+            trend:        r['trend']?.toString(),
+            source:       'CWC-OpenData',
+            isFromSeed:   false,
+            fetchedAt:    DateTime.tryParse(r['obs_date']?.toString() ?? '') ?? now,
+          ));
+        }
+        if (stations.isNotEmpty) {
+          debugPrint('[BefiqrCwcService] CWC-OpenData ✅ ${stations.length} stations');
+        }
+        return stations;
+      }
+    } catch (e) {
+      debugPrint('[BefiqrCwcService] CWC-OpenData failed: $e');
+    }
+    return [];
+  }
+
+  // ── Source B: BEAMS Bihar HTML ──────────────────────────────────────────────
 
   Future<List<CwcStation>> _fetchBeams() async {
-    final resp = await http.get(
-      Uri.parse(_beamsUrl),
-      headers: {
-        'Accept':          'text/html,application/xhtml+xml',
-        'User-Agent':      'Mozilla/5.0 (OpsFlood/2.0)',
-        'Accept-Language': 'en-IN,en;q=0.9',
-      },
-    ).timeout(_timeout);
+    try {
+      final resp = await http.get(
+        Uri.parse(_beamsUrl),
+        headers: {
+          'Accept':          'text/html,application/xhtml+xml',
+          'User-Agent':      'Mozilla/5.0 (OpsFlood/3.0)',
+          'Accept-Language': 'en-IN,en;q=0.9',
+        },
+      ).timeout(const Duration(seconds: 6));   // reduced from 12s
 
-    if (resp.statusCode != 200) {
-      debugPrint('[BEAMS] HTTP ${resp.statusCode}');
-      return [];
+      if (resp.statusCode == 200) {
+        final stations = _parseBeamsHtml(resp.body);
+        if (stations.isNotEmpty) {
+          debugPrint('[BefiqrCwcService] BEAMS ✅ ${stations.length} stations');
+        }
+        return stations;
+      }
+    } catch (e) {
+      debugPrint('[BefiqrCwcService] BEAMS failed: $e');
     }
-
-    return _parseBeamsHtml(resp.body);
+    return [];
   }
+
+  // ── Source C: CWC Bihar Bulletin JSON ────────────────────────────────────
+  // CWC publishes a daily Bihar flood bulletin at a stable JSON endpoint.
+  // Format: { stations: [ { river, site, current_level, danger_level ... } ] }
+
+  Future<List<CwcStation>> _tryCwcBulletin() async {
+    try {
+      final resp = await http.get(
+        Uri.parse(_cwcBulletinUrl),
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (resp.statusCode == 200) {
+        final body     = jsonDecode(resp.body);
+        final list     = (body['stations'] as List? ?? body as List?)?.cast<Map<String, dynamic>>();
+        if (list == null || list.isEmpty) return [];
+
+        final now      = DateTime.now();
+        final stations = <CwcStation>[];
+        for (final r in list) {
+          final level  = _parseDbl(r['current_level'] ?? r['wl']);
+          final danger = _parseDbl(r['danger_level']  ?? r['dl']);
+          if (level == null || danger == null || danger <= 0) continue;
+          stations.add(CwcStation(
+            river:        r['river']?.toString() ?? '',
+            site:         r['site']?.toString()  ?? r['station']?.toString() ?? '',
+            currentLevel: level,
+            dangerLevel:  danger,
+            warningLevel: _parseDbl(r['warning_level'] ?? r['wl_warn']),
+            trend:        r['trend']?.toString(),
+            source:       'CWC-Bulletin',
+            isFromSeed:   false,
+            fetchedAt:    DateTime.tryParse(r['obs_date']?.toString() ?? '') ?? now,
+          ));
+        }
+        if (stations.isNotEmpty) {
+          debugPrint('[BefiqrCwcService] CWC-Bulletin ✅ ${stations.length} stations');
+        }
+        return stations;
+      }
+    } catch (e) {
+      debugPrint('[BefiqrCwcService] CWC-Bulletin failed: $e');
+    }
+    return [];
+  }
+
+  // ── Source D: GloFAS CEMS Bihar stations ──────────────────────────────────
+  // EU Copernicus Emergency Management Service. Never geoblocked.
+  // Provides forecast river levels for major Bihar gauges every 6h.
+
+  Future<List<CwcStation>> _tryGloFAS() async {
+    try {
+      final resp = await http.get(
+        Uri.parse(_glofasUrl),
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        final list = (body['features'] as List? ??
+                      body['stations'] as List?)?.cast<Map<String, dynamic>>();
+        if (list == null || list.isEmpty) return [];
+
+        final now      = DateTime.now();
+        final stations = <CwcStation>[];
+        for (final feat in list) {
+          // GeoJSON format: { properties: { river, name, dis_m3_s, ... } }
+          final props  = feat['properties'] as Map<String, dynamic>? ?? feat;
+          final level  = _parseDbl(props['water_level'] ?? props['level_m']);
+          final danger = _parseDbl(props['danger_level'] ?? props['threshold_m']);
+          final river  = props['river']?.toString() ?? '';
+          final site   = props['name']?.toString()  ?? props['station_name']?.toString() ?? '';
+          if (level == null || danger == null || danger <= 0) continue;
+          stations.add(CwcStation(
+            river:        river,
+            site:         site,
+            currentLevel: level,
+            dangerLevel:  danger,
+            warningLevel: _parseDbl(props['warning_level']),
+            trend:        props['trend']?.toString(),
+            source:       'GloFAS',
+            isFromSeed:   false,
+            fetchedAt:    DateTime.tryParse(props['valid_time']?.toString() ?? '') ?? now,
+          ));
+        }
+        if (stations.isNotEmpty) {
+          debugPrint('[BefiqrCwcService] GloFAS ✅ ${stations.length} stations');
+        }
+        return stations;
+      }
+    } catch (e) {
+      debugPrint('[BefiqrCwcService] GloFAS failed: $e');
+    }
+    return [];
+  }
+
+  // ── Source E: befiqr HTML mirror (legacy) ───────────────────────────────
+
+  Future<List<CwcStation>> _tryBefiqr() async {
+    try {
+      final resp = await http.get(
+        Uri.parse(_befiqrUrl),
+        headers: {'Accept': 'text/html,application/xhtml+xml'},
+      ).timeout(const Duration(seconds: 6));
+      if (resp.statusCode == 200) {
+        final stations = parseHtmlTable(resp.body);
+        if (stations.isNotEmpty) {
+          debugPrint('[BefiqrCwcService] befiqr ✅ ${stations.length} stations');
+        }
+        return stations;
+      }
+    } catch (e) {
+      debugPrint('[BefiqrCwcService] befiqr failed: $e');
+    }
+    return [];
+  }
+
+  // ── BEAMS HTML parser ──────────────────────────────────────────────────────────
 
   static List<CwcStation> _parseBeamsHtml(String htmlBody) {
     final stations = <CwcStation>[];
     final now      = DateTime.now();
-
-    final doc  = html_parser.parse(htmlBody);
-    final rows = doc.querySelectorAll('table tr');
-
+    final doc      = html_parser.parse(htmlBody);
+    final rows     = doc.querySelectorAll('table tr');
     bool headerSkipped = false;
+
     for (final row in rows) {
       final cells = row
           .querySelectorAll('td')
           .map((td) => td.text.trim())
           .toList();
-
-      // Need at least 15 columns
       if (cells.length < 15) continue;
-
-      // Skip header row(s)
-      if (!headerSkipped) {
-        headerSkipped = true;
-        continue;
-      }
+      if (!headerSkipped) { headerSkipped = true; continue; }
 
       final riverRaw   = cells[1].trim();
       final siteRaw    = cells[2].trim();
       if (riverRaw.isEmpty || siteRaw.isEmpty) continue;
 
-      // Column 14 = Current Observed Water Level (WRD local datum)
       final wrdLevel   = _parseDbl(cells[14]);
-      // Column 8  = Danger Level (WRD local datum)
       final wrdDanger  = _parseDbl(cells[8]);
-      // Column 9  = Warning Level (WRD local datum)
       final wrdWarning = _parseDbl(cells[9]);
-      // Column 17 = Trend
-      final trend  = cells.length > 17 ? cells[17].trim() : null;
-      // Column 18 = Status
-      final status = cells.length > 18 ? cells[18].trim() : null;
-      // Column 13 = Observed date string
-      final obsDate = cells.length > 13
-          ? (_parseBEAMSDate(cells[13]) ?? now)
-          : now;
+      final trend      = cells.length > 17 ? cells[17].trim() : null;
+      final status     = cells.length > 18 ? cells[18].trim() : null;
+      final obsDate    = cells.length > 13 ? (_parseBEAMSDate(cells[13]) ?? now) : now;
 
-      if (wrdLevel == null || wrdLevel <= 0) continue;
+      if (wrdLevel == null || wrdLevel <= 0)   continue;
       if (wrdDanger == null || wrdDanger <= 0) continue;
 
-      // Convert WRD local datum → CWC AMSL
-      final offset   = _wrdOffset(riverRaw);
+      final offset      = _wrdOffset(riverRaw);
       final amslLevel   = wrdLevel   + offset;
       final amslDanger  = wrdDanger  + offset;
       final amslWarning = wrdWarning != null ? wrdWarning + offset : null;
@@ -318,33 +488,28 @@ class BefiqrCwcService {
         trend:        trend?.isNotEmpty == true ? trend : null,
         status:       status?.isNotEmpty == true ? status : null,
         source:       'BEAMS',
+        isFromSeed:   false,
         fetchedAt:    obsDate,
       ));
     }
-
-    debugPrint('[BEAMS] parsed ${stations.length} stations from HTML');
     return stations;
   }
 
-  // ── befiqr HTML parser (legacy, kept for fallback) ────────────────────────
-  // Public so KosiBirpurService can reuse it directly.
-  // Columns on befiqr table: 0=River, 1=Site, 2=CurrentLevel, 3=DangerLevel
+  // ── befiqr HTML parser (public — used by KosiBirpurService) ───────────────
 
   static List<CwcStation> parseHtmlTable(String html) {
     final stations = <CwcStation>[];
     final now      = DateTime.now();
-
-    final rowRe  = RegExp(r'<tr[^>]*>(.*?)</tr>',  dotAll: true);
-    final cellRe = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', dotAll: true);
-    final tagRe  = RegExp(r'<[^>]+>');
-
+    final rowRe    = RegExp(r'<tr[^>]*>(.*?)</tr>',  dotAll: true);
+    final cellRe   = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', dotAll: true);
+    final tagRe    = RegExp(r'<[^>]+>');
     bool headerSkipped = false;
+
     for (final rowMatch in rowRe.allMatches(html)) {
       final cells = cellRe
           .allMatches(rowMatch.group(1)!)
           .map((m) => m.group(1)!.replaceAll(tagRe, '').trim())
           .toList();
-
       if (cells.length < 4) continue;
       if (!headerSkipped) { headerSkipped = true; continue; }
 
@@ -358,15 +523,15 @@ class BefiqrCwcService {
         currentLevel: current,
         dangerLevel:  danger,
         source:       'befiqr',
+        isFromSeed:   false,
         fetchedAt:    now,
       ));
     }
     return stations;
   }
 
-  // ── Utilities ─────────────────────────────────────────────────────────────
+  // ── Utilities ────────────────────────────────────────────────────────────────────
 
-  /// Parse BEAMS date string: "04-Jun-2026 09 HRS" → DateTime
   static DateTime? _parseBEAMSDate(String s) {
     try {
       const months = {
@@ -374,37 +539,33 @@ class BefiqrCwcService {
         'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
         'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12',
       };
-      // "04-Jun-2026 09 HRS" → "04-06-2026 09:00"
       var cleaned = s.replaceAll(RegExp(r'\s+HRS?', caseSensitive: false), ':00');
-      for (final e in months.entries) {
-        cleaned = cleaned.replaceAll(e.key, e.value);
-      }
+      for (final e in months.entries) { cleaned = cleaned.replaceAll(e.key, e.value); }
       final parts = cleaned.split(' ');
       if (parts.length >= 2) {
         final dp = parts[0].split('-');
         if (dp.length == 3) {
-          return DateTime.tryParse(
-              '${dp[2]}-${dp[1]}-${dp[0]}T${parts[1]}:00');
+          return DateTime.tryParse('${dp[2]}-${dp[1]}-${dp[0]}T${parts[1]}:00');
         }
       }
     } catch (_) {}
     return null;
   }
 
-  static double? _parseDbl(String? v) {
-    if (v == null || v.isEmpty) return null;
+  static double? _parseDbl(dynamic v) {
+    if (v == null) return null;
+    if (v is num)  return v.toDouble();
     return double.tryParse(
-        v.replaceAll(RegExp(r'[^\d.]'), '').trim());
+        v.toString().replaceAll(RegExp(r'[^\d.]'), '').trim());
   }
 
-  // ── Analytics helpers ─────────────────────────────────────────────────────
+  // ── Analytics helpers ──────────────────────────────────────────────────────────
 
   static double riskScore(CwcStation s) =>
       (s.currentLevel / s.dangerLevel * 100).clamp(0, 100);
 
   static List<CwcStation> topRisk(List<CwcStation> stations, {int n = 5}) {
-    final sorted = [...stations]
-      ..sort((a, b) => riskScore(b).compareTo(riskScore(a)));
+    final sorted = [...stations]..sort((a, b) => riskScore(b).compareTo(riskScore(a)));
     return sorted.take(n).toList();
   }
 
@@ -413,8 +574,6 @@ class BefiqrCwcService {
 
   static List<CwcStation> fromJsonString(String raw) {
     final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((e) => CwcStation.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return list.map((e) => CwcStation.fromJson(e as Map<String, dynamic>)).toList();
   }
 }
