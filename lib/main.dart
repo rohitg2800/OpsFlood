@@ -13,6 +13,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
 import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
+import 'screens/main_shell.dart';
 import 'screens/home_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/alerts_screen.dart';
@@ -38,9 +39,6 @@ import 'screens/map_screen.dart';
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
-// ── DataFetchEngine: started here so the first fetch fires before
-//    any screen renders. The engine is a singleton; all providers
-//    subscribe to its stream via dataFetchProvider.
 import 'services/data_fetch_engine.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
@@ -78,14 +76,12 @@ Future<void> main() async {
     ),
   );
 
-  // ── Start the data fetch engine before the widget tree mounts so the
-  //    first snapshot is already in-flight when screens render.
   DataFetchEngine.instance.start();
 
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
-// ─── Root app ────────────────────────────────────────────────────────────────
+// ── Root app ─────────────────────────────────────────────────────────────────────
 class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
 
@@ -141,13 +137,20 @@ class FloodWatchApp extends ConsumerWidget {
         Locale('en'),
         Locale('hi'),
       ],
+      // ★ Splash → MainShell (with persistent bottom nav)
       initialRoute: SplashScreen.route,
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case SplashScreen.route:
             return _fade(const SplashScreen());
+
+          // ★ Both HomeScreen and shell route land on the same shell
           case HomeScreen.route:
-            return _fade(const HomeScreen());
+          case MainShell.route:
+            return _fade(const MainShell());
+
+          // Individual screens still accessible as full-screen routes
+          // (e.g. pushed from city detail or deep links)
           case DashboardScreen.route:
             return _fade(const DashboardScreen());
           case AlertsScreen.route:
