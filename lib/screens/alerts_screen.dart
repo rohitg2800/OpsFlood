@@ -1,455 +1,629 @@
-// lib/screens/alerts_screen.dart
-// Bihar Flood Command — Alerts HUD v4
+// lib/screens/alerts_screen.dart  v4.0 — fully live, AlertEngine driven
 //
-// v4 data-sync fix:
-//   • _buildCommandStrip now derives CRITICAL / SEVERE / ELEVATED / TOTAL
-//     counts from mergedCriticalCountProvider + mergedElevatedCountProvider
-//     + mergedTotalCountProvider (RiverStation merged WRD+CWC source).
-//   • IMD/NDMA text alerts are still shown in the list when available.
-//   • TOTAL tile shows real station count — never shows 0 when stations exist.
+// Reads alertsProvider (via data_fetch_provider) which is rebuilt automatically
+// on every DataFetchEngine tick (every 45 s).
+//
+// Features:
+//   • Animated badge on AppBar showing live alert count
+//   • Filter chips: All / Emergency / Critical / Warning / Info
+//   • Alert cards: colour-coded, expandable, with level progress bar
+//   • Pull-to-refresh forces DataFetchEngine.forceRefresh()
+//   • "No alerts" empty state with last-updated timestamp
+//   • Source health row at bottom (CWC / WRD / GloFAS)
 library;
 
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../l10n/context_l10n.dart';
-import '../providers/flood_providers.dart';
-import '../providers/real_time_river_provider.dart';
-import '../theme/river_theme.dart';
+import '../providers/data_fetch_provider.dart';
+import '../services/alert_engine.dart';
+import '../services/data_fetch_engine.dart';
 
-// ─── Bihar districts constant ──────────────────────────────────────────────
-const _biharDistricts = [
-  'Patna','Muzaffarpur','Darbhanga','Bhagalpur','Gaya','Purnia',
-  'Saran','Begusarai','Samastipur','Vaishali','East Champaran',
-  'West Champaran','Sitamarhi','Madhubani','Supaul','Araria',
-  'Kishanganj','Katihar','Madhepura','Saharsa','Khagaria',
-  'Sheikhpura','Lakhisarai','Munger','Jamui','Banka','Nawada',
-  'Nalanda','Sheohar','Gopalganj','Siwan','Bhojpur','Buxar',
-  'Rohtas','Kaimur','Aurangabad','Jehanabad','Arwal',
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Isolated clock widget
-// ─────────────────────────────────────────────────────────────────────────────
-class _HudClockWidget extends StatefulWidget {
-  const _HudClockWidget();
-  @override
-  State<_HudClockWidget> createState() => _HudClockWidgetState();
-}
-class _HudClockWidgetState extends State<_HudClockWidget> {
-  late final Timer _clock;
-  String _timeStr = '';
-  @override
-  void initState() {
-    super.initState();
-    _tick();
-    _clock = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-  }
-  void _tick() {
-    if (!mounted) return;
-    setState(() { _timeStr = DateFormat('HH:mm:ss').format(DateTime.now()); });
-  }
-  @override
-  void dispose() { _clock.cancel(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Text(
-      'SYS CLOCK $_timeStr · BSDMA FEED',
-      style: TextStyle(color: t.textSecondary.withValues(alpha: 0.6), fontSize: 10, letterSpacing: 1),
-    );
+// ── colour helpers ────────────────────────────────────────────────────────────
+Color _severityColor(AlertSeverity s, {bool dark = false}) {
+  switch (s) {
+    case AlertSeverity.emergency: return dark ? const Color(0xFF8B0000) : const Color(0xFFB71C1C);
+    case AlertSeverity.critical:  return dark ? const Color(0xFFBF360C) : const Color(0xFFE64A19);
+    case AlertSeverity.warning:   return dark ? const Color(0xFFF57F17) : const Color(0xFFF9A825);
+    case AlertSeverity.info:      return dark ? const Color(0xFF1565C0) : const Color(0xFF1976D2);
   }
 }
 
+Color _severityBg(AlertSeverity s) {
+  switch (s) {
+    case AlertSeverity.emergency: return const Color(0xFFFFEBEE);
+    case AlertSeverity.critical:  return const Color(0xFFFBE9E7);
+    case AlertSeverity.warning:   return const Color(0xFFFFFDE7);
+    case AlertSeverity.info:      return const Color(0xFFE3F2FD);
+  }
+}
+
+IconData _severityIcon(AlertSeverity s) {
+  switch (s) {
+    case AlertSeverity.emergency: return Icons.warning_amber_rounded;
+    case AlertSeverity.critical:  return Icons.crisis_alert_rounded;
+    case AlertSeverity.warning:   return Icons.notifications_active_rounded;
+    case AlertSeverity.info:      return Icons.info_outline_rounded;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AlertsScreen
+// ─────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends ConsumerStatefulWidget {
-  static const route = '/alerts';
   const AlertsScreen({super.key});
+
   @override
   ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
 }
 
 class _AlertsScreenState extends ConsumerState<AlertsScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-  String _filter = 'ALL';
-  final _filters = ['ALL', 'CRITICAL', 'SEVERE', 'MODERATE', 'SAFE'];
+    with TickerProviderStateMixin {
+  AlertSeverity? _filter;  // null = All
+  late AnimationController _badgeCtrl;
+  late Animation<double>    _badgePulse;
+  int _prevCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
+    _badgeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _badgePulse = Tween<double>(begin: 1.0, end: 1.3).animate(
+      CurvedAnimation(parent: _badgeCtrl, curve: Curves.elasticOut),
+    );
   }
 
   @override
-  void dispose() { _pulse.dispose(); super.dispose(); }
+  void dispose() {
+    _badgeCtrl.dispose();
+    super.dispose();
+  }
+
+  List<FloodAlert> _filtered(List<FloodAlert> all) {
+    if (_filter == null) return all;
+    return all.where((a) => a.severity == _filter).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final t          = RiverColors.of(context);
-    final imdAlerts  = ref.watch(imdAlertsProvider);
-    final ndmaAlerts = ref.watch(ndmaAdvisoriesProvider);
-    final allAlerts  = [...imdAlerts, ...ndmaAlerts];
+    final allAlerts = ref.watch(alertsProvider);
+    final sources   = ref.watch(sourceStatusProvider);
+    final fetchSnap = ref.watch(dataFetchProvider);
 
-    // ✅ River-station counts from merged source
-    final criticalCount = ref.watch(mergedCriticalCountProvider);
-    final elevatedCount = ref.watch(mergedElevatedCountProvider);
-    final totalCount    = ref.watch(mergedTotalCountProvider);
+    // Pulse badge when count increases
+    if (allAlerts.length > _prevCount) {
+      _badgeCtrl.forward(from: 0);
+    }
+    _prevCount = allAlerts.length;
 
-    final filtered = _filter == 'ALL'
-        ? allAlerts
-        : allAlerts.where((a) {
-            final sev = _severity(a).toUpperCase();
-            return sev.contains(_filter);
-          }).toList();
+    final shown      = _filtered(allAlerts);
+    final isLoading  = fetchSnap.isLoading ||
+        fetchSnap.when(data: (s) => s.isLoading, loading: () => true, error: (_, __) => false);
+    final lastUpdate = fetchSnap.when(
+      data:    (s) => s.fetchedAt,
+      loading: ()  => null,
+      error:   (_, __) => null,
+    );
 
     return Scaffold(
-      backgroundColor: t.scaffoldBg,
-      body: NestedScrollView(
-        headerSliverBuilder: (_, __) => [
-          SliverToBoxAdapter(child: _buildHUDHeader(t)),
-          SliverToBoxAdapter(child: _buildCommandStrip(t, criticalCount, elevatedCount, totalCount)),
-          SliverToBoxAdapter(child: _buildFilterBar(t)),
-        ],
-        body: filtered.isEmpty
-            ? _NoSignal(label: 'NO ALERTS · BIHAR CLEAR', t: t)
-            : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                itemCount: filtered.length,
-                itemBuilder: (_, i) => _AlertTile(raw: filtered[i], t: t),
-              ),
-      ),
-    );
-  }
+      backgroundColor: const Color(0xFFF5F7FA),
+      appBar: _buildAppBar(allAlerts.length, isLoading),
+      body: RefreshIndicator(
+        onRefresh: () => DataFetchEngine.instance.forceRefresh(),
+        child: CustomScrollView(
+          slivers: [
+            // ── Status bar
+            SliverToBoxAdapter(child: _StatusBar(sources: sources, lastUpdate: lastUpdate)),
 
-  Widget _buildHUDHeader(RiverColors t) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
-      decoration: BoxDecoration(
-        color: t.scaffoldBg,
-        border: Border(bottom: BorderSide(color: AppPalette.cyan.withValues(alpha: 0.15))),
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.30)),
-                color: t.cardBg,
-              ),
-              child: const Icon(Icons.arrow_back_ios_new_rounded, color: AppPalette.cyan, size: 14),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('ALERT COMMAND · BIHAR',
-                    style: TextStyle(color: AppPalette.cyan, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 2)),
-                const _HudClockWidget(),
-              ],
-            ),
-          ),
-          AnimatedBuilder(
-            animation: _pulse,
-            builder: (_, __) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppPalette.critical.withValues(alpha: 0.08 + 0.08 * _pulse.value),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: AppPalette.critical.withValues(alpha: 0.40)),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Container(
-                  width: 6, height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppPalette.critical.withValues(alpha: 0.5 + 0.5 * _pulse.value),
-                  ),
+            // ── Filter chips
+            SliverToBoxAdapter(child: _FilterRow(
+              selected: _filter,
+              all:      allAlerts,
+              onChanged: (v) => setState(() => _filter = v),
+            )),
+
+            // ── Alert list
+            if (isLoading && allAlerts.isEmpty)
+              const SliverFillRemaining(child: _LoadingState())
+            else if (shown.isEmpty)
+              SliverFillRemaining(child: _EmptyState(lastUpdate: lastUpdate))
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) {
+                    if (i == shown.length) {
+                      return const SizedBox(height: 24);
+                    }
+                    return _AlertCard(alert: shown[i]);
+                  },
+                  childCount: shown.length + 1,
                 ),
-                const SizedBox(width: 5),
-                const Text('LIVE', style: TextStyle(color: AppPalette.critical, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-              ]),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(int count, bool loading) {
+    return AppBar(
+      elevation: 0,
+      backgroundColor: const Color(0xFF0D47A1),
+      foregroundColor: Colors.white,
+      title: const Text('Flood Alerts',
+          style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+      actions: [
+        if (loading)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: SizedBox(width: 20, height: 20,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: ScaleTransition(
+              scale: _badgePulse,
+              child: _AlertBadge(count: count),
             ),
           ),
-        ],
-      ),
+      ],
     );
-  }
-
-  // ✅ Command strip now uses river-station merged counts, not IMD/NDMA list length
-  Widget _buildCommandStrip(
-    RiverColors t,
-    int criticalCount,
-    int elevatedCount,
-    int totalCount,
-  ) {
-    final tiles = [
-      ('CRITICAL', criticalCount,          AppPalette.critical),
-      ('SEVERE',   0,                       AppPalette.danger),   // severe subset of critical if needed
-      ('MODERATE', elevatedCount,           AppPalette.amber),
-      ('SAFE',     totalCount - criticalCount - elevatedCount, AppPalette.safe),
-      ('TOTAL',    totalCount,              AppPalette.cyan),
-    ];
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Row(
-        children: tiles.map((tile) => Expanded(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: tile.$3.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: tile.$3.withValues(alpha: 0.25)),
-            ),
-            child: Column(
-              children: [
-                Text('${tile.$2.clamp(0, 9999)}',
-                    style: TextStyle(
-                      color: tile.$3, fontSize: 18, fontWeight: FontWeight.w900,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    )),
-                const SizedBox(height: 2),
-                Text(tile.$1,
-                    style: TextStyle(
-                      color: t.textSecondary.withValues(alpha: 0.6),
-                      fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8,
-                    )),
-              ],
-            ),
-          ),
-        )).toList(),
-      ),
-    );
-  }
-
-  Widget _buildFilterBar(RiverColors t) {
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: _filters.map((f) {
-          final active = _filter == f;
-          final col = _colorForFilter(f);
-          return GestureDetector(
-            onTap: () => setState(() => _filter = f),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: active ? col.withValues(alpha: 0.15) : t.cardBg,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: active ? col : t.stroke),
-              ),
-              child: Center(
-                child: Text(f,
-                    style: TextStyle(
-                      color: active ? col : t.textSecondary,
-                      fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.2,
-                    )),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  String _severity(dynamic raw) {
-    try {
-      return (raw as dynamic)['severity']?.toString() ??
-          (raw as dynamic)['alert_level']?.toString() ?? 'safe';
-    } catch (_) { return 'safe'; }
-  }
-
-  Color _colorForFilter(String f) {
-    switch (f) {
-      case 'CRITICAL': return AppPalette.critical;
-      case 'SEVERE':   return AppPalette.danger;
-      case 'MODERATE': return AppPalette.amber;
-      case 'SAFE':     return AppPalette.safe;
-      default:         return AppPalette.cyan;
-    }
   }
 }
 
-// ─── Alert Tile ──────────────────────────────────────────────────────────────
-class _AlertTile extends StatelessWidget {
-  final dynamic raw;
-  final RiverColors t;
-  const _AlertTile({required this.raw, required this.t});
-
-  String _f(String key, [String fb = '—']) {
-    try {
-      final v = (raw as dynamic)[key];
-      return v?.toString().isNotEmpty == true ? v.toString() : fb;
-    } catch (_) { return fb; }
+// ─────────────────────────────────────────────────────────────────────────────
+// _AlertBadge
+// ─────────────────────────────────────────────────────────────────────────────
+class _AlertBadge extends StatelessWidget {
+  final int count;
+  const _AlertBadge({required this.count});
+  @override
+  Widget build(BuildContext context) {
+    if (count == 0) return const Icon(Icons.notifications_none_rounded);
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        const Icon(Icons.notifications_active_rounded),
+        Positioned(
+          top: 0, right: 0,
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: const BoxDecoration(
+                color: Colors.red, shape: BoxShape.circle),
+            child: Text('$count',
+                style: const TextStyle(fontSize: 9,
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ],
+    );
   }
+}
 
-  Color get _col {
-    final s = _f('severity', _f('alert_level', 'low')).toLowerCase();
-    if (s.contains('extreme') || s.contains('critical') || s.contains('red')) return AppPalette.critical;
-    if (s.contains('severe')  || s.contains('orange')   || s.contains('high'))  return AppPalette.danger;
-    if (s.contains('moderate')|| s.contains('yellow')   || s.contains('medium')) return AppPalette.amber;
-    return AppPalette.safe;
+// ─────────────────────────────────────────────────────────────────────────────
+// _StatusBar
+// ─────────────────────────────────────────────────────────────────────────────
+class _StatusBar extends StatelessWidget {
+  final List<SourceStatus> sources;
+  final DateTime?          lastUpdate;
+  const _StatusBar({required this.sources, this.lastUpdate});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = lastUpdate != null
+        ? DateFormat('HH:mm:ss').format(lastUpdate!)
+        : '—';
+    return Container(
+      color: const Color(0xFF0D47A1),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(
+        children: [
+          ...sources.map((s) => _SourceChip(
+            name:    s.name,
+            healthy: s.healthy,
+            count:   s.stationCount,
+          )),
+          const Spacer(),
+          Text('Updated $fmt',
+              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SourceChip extends StatelessWidget {
+  final String name;
+  final bool   healthy;
+  final int    count;
+  const _SourceChip({required this.name, required this.healthy, required this.count});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: healthy ? Colors.green.withOpacity(0.25) : Colors.red.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: healthy ? Colors.greenAccent : Colors.redAccent, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(healthy ? Icons.check_circle : Icons.error,
+              size: 10, color: healthy ? Colors.greenAccent : Colors.redAccent),
+          const SizedBox(width: 4),
+          Text('$name${count > 0 ? " $count" : ""}',
+              style: const TextStyle(color: Colors.white, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _FilterRow
+// ─────────────────────────────────────────────────────────────────────────────
+class _FilterRow extends StatelessWidget {
+  final AlertSeverity?      selected;
+  final List<FloodAlert>    all;
+  final ValueChanged<AlertSeverity?> onChanged;
+  const _FilterRow({
+    required this.selected,
+    required this.all,
+    required this.onChanged,
+  });
+
+  int _count(AlertSeverity? s) {
+    if (s == null) return all.length;
+    return all.where((a) => a.severity == s).length;
   }
 
   @override
   Widget build(BuildContext context) {
-    final col    = _col;
-    final title  = _f('title', _f('headline', 'Alert'));
-    final desc   = _f('description', _f('message', ''));
-    final source = _f('source', _f('agency', ''));
-    final area   = _f('area', _f('district', ''));
-    final rawDate= _f('issued_at', _f('date', ''));
-    String dateStr = '';
-    if (rawDate.isNotEmpty) {
-      final dt = DateTime.tryParse(rawDate);
-      dateStr = dt != null ? DateFormat('dd MMM · HH:mm').format(dt.toLocal()) : rawDate;
-    }
-    final isBihar = _biharDistricts.any((d) => area.toLowerCase().contains(d.toLowerCase()));
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: t.cardBg, borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: col.withValues(alpha: 0.22)),
-        boxShadow: [BoxShadow(color: col.withValues(alpha: 0.07), blurRadius: 10, offset: const Offset(0, 3))],
-      ),
-      child: Column(
+    return SizedBox(
+      height: 52,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         children: [
-          Container(
-            height: 2,
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
-              gradient: LinearGradient(colors: [col.withValues(alpha: 0.8), col.withValues(alpha: 0)]),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: col.withValues(alpha: 0.10),
-                      border: Border.all(color: col.withValues(alpha: 0.28)),
-                    ),
-                    child: Icon(_iconFor(col), color: col, size: 16),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(title, style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.w800, height: 1.3)),
-                      if (area.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Row(children: [
-                          Icon(Icons.location_on_rounded, color: t.textSecondary, size: 10),
-                          const SizedBox(width: 3),
-                          Text(area, style: TextStyle(
-                            color: isBihar ? AppPalette.cyan : t.textSecondary,
-                            fontSize: 10, fontWeight: isBihar ? FontWeight.w700 : FontWeight.w400,
-                          )),
-                          if (isBihar) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: AppPalette.cyan.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(3),
-                                border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
-                              ),
-                              child: const Text('BIHAR', style: TextStyle(color: AppPalette.cyan, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
-                            ),
-                          ],
-                        ]),
-                      ],
-                    ]),
-                  ),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: col.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(3),
-                        border: Border.all(color: col.withValues(alpha: 0.30)),
-                      ),
-                      child: Text(
-                        _f('severity', _f('alert_level', 'INFO')).toUpperCase().replaceAll('_', ' '),
-                        style: TextStyle(color: col, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.8),
-                      ),
-                    ),
-                    if (dateStr.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(dateStr, style: TextStyle(color: t.textSecondary.withValues(alpha: 0.6), fontSize: 10)),
-                    ],
-                  ]),
-                ]),
-                if (desc.isNotEmpty && desc != '—') ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity, padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: t.cardBgElevated, borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: t.stroke),
-                    ),
-                    child: Text(desc, style: TextStyle(color: t.textSecondary, fontSize: 10.5, height: 1.55)),
-                  ),
-                ],
-                if (source.isNotEmpty && source != '—') ...[
-                  const SizedBox(height: 6),
-                  Row(children: [
-                    Icon(Icons.sensors_rounded, color: t.textSecondary.withValues(alpha: 0.6), size: 10),
-                    const SizedBox(width: 4),
-                    Text(source, style: TextStyle(color: t.textSecondary.withValues(alpha: 0.6), fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-                  ]),
-                ],
-              ],
-            ),
-          ),
+          _Chip(label: 'All (${_count(null)})',         selected: selected == null,              onTap: () => onChanged(null)),
+          _Chip(label: '🔴 Emergency (${_count(AlertSeverity.emergency)})', selected: selected == AlertSeverity.emergency, color: const Color(0xFFB71C1C), onTap: () => onChanged(AlertSeverity.emergency)),
+          _Chip(label: '🚨 Critical (${_count(AlertSeverity.critical)})',   selected: selected == AlertSeverity.critical,  color: const Color(0xFFE64A19), onTap: () => onChanged(AlertSeverity.critical)),
+          _Chip(label: '⚠️ Warning (${_count(AlertSeverity.warning)})',     selected: selected == AlertSeverity.warning,   color: const Color(0xFFF9A825), onTap: () => onChanged(AlertSeverity.warning)),
+          _Chip(label: 'ℹ️ Info (${_count(AlertSeverity.info)})',           selected: selected == AlertSeverity.info,      color: const Color(0xFF1976D2), onTap: () => onChanged(AlertSeverity.info)),
         ],
       ),
     );
   }
+}
 
-  IconData _iconFor(Color c) {
-    if (c == AppPalette.critical) return Icons.crisis_alert_rounded;
-    if (c == AppPalette.danger)   return Icons.warning_rounded;
-    if (c == AppPalette.amber)    return Icons.warning_amber_rounded;
-    return Icons.check_circle_outline_rounded;
+class _Chip extends StatelessWidget {
+  final String   label;
+  final bool     selected;
+  final Color?   color;
+  final VoidCallback onTap;
+  const _Chip({required this.label, required this.selected, required this.onTap, this.color});
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? const Color(0xFF0D47A1);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color:        selected ? c : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border:       Border.all(color: c),
+          boxShadow:    selected ? [BoxShadow(color: c.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 2))] : null,
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: selected ? Colors.white : c,
+                fontSize: 12, fontWeight: FontWeight.w600)),
+      ),
+    );
   }
 }
 
-// ─── No Signal ────────────────────────────────────────────────────────────────
-class _NoSignal extends StatelessWidget {
-  final String label;
-  final RiverColors t;
-  const _NoSignal({required this.label, required this.t});
+// ─────────────────────────────────────────────────────────────────────────────
+// _AlertCard
+// ─────────────────────────────────────────────────────────────────────────────
+class _AlertCard extends StatefulWidget {
+  final FloodAlert alert;
+  const _AlertCard({required this.alert});
   @override
-  Widget build(BuildContext context) => Center(
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(
-        width: 72, height: 72,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(colors: [AppPalette.safe.withValues(alpha: 0.12), t.cardBg]),
-          border: Border.all(color: AppPalette.safe.withValues(alpha: 0.25)),
+  State<_AlertCard> createState() => _AlertCardState();
+}
+
+class _AlertCardState extends State<_AlertCard>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+  late AnimationController _ctrl;
+  late Animation<double>   _rotate;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl   = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _rotate = Tween<double>(begin: 0, end: 0.5).animate(
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    _expanded ? _ctrl.forward() : _ctrl.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a  = widget.alert;
+    final bg = _severityBg(a.severity);
+    final fg = _severityColor(a.severity);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          children: [
+            // ── Header stripe
+            Container(height: 4, color: fg),
+
+            // ── Main row
+            InkWell(
+              onTap: _toggle,
+              child: Container(
+                color: bg,
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    // Icon
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: fg.withOpacity(0.15),
+                      child: Icon(_severityIcon(a.severity), color: fg, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    // Text
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          _SeverityBadge(severity: a.severity),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(a.title,
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: fg),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis)),
+                        ]),
+                        const SizedBox(height: 4),
+                        Text('${a.river} · ${a.district}',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.black54)),
+                        const SizedBox(height: 4),
+                        // Level progress bar (only when thresholdLevel > 0)
+                        if (a.thresholdLevel > 0)
+                          _LevelBar(
+                            current:   a.currentLevel,
+                            threshold: a.thresholdLevel,
+                            color:     fg,
+                          ),
+                      ],
+                    )),
+                    // Chevron
+                    RotationTransition(
+                      turns: _rotate,
+                      child: Icon(Icons.expand_more_rounded,
+                          color: fg),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── Expandable body
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              child: _expanded
+                  ? _ExpandedBody(alert: a, fg: fg)
+                  : const SizedBox.shrink(),
+            ),
+          ],
         ),
-        child: const Icon(Icons.sensors_off_rounded, color: AppPalette.safe, size: 30),
       ),
-      const SizedBox(height: 14),
-      Text(label, style: TextStyle(color: t.textSecondary, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
-      const SizedBox(height: 6),
-      Text('38 BIHAR DISTRICTS MONITORED', style: TextStyle(color: t.textSecondary.withValues(alpha: 0.6), fontSize: 10, letterSpacing: 1)),
-    ]),
-  );
+    );
+  }
+}
+
+class _SeverityBadge extends StatelessWidget {
+  final AlertSeverity severity;
+  const _SeverityBadge({required this.severity});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color:        _severityColor(severity),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(severity.label,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800,
+              letterSpacing: 0.5)),
+    );
+  }
+}
+
+class _LevelBar extends StatelessWidget {
+  final double current;
+  final double threshold;
+  final Color  color;
+  const _LevelBar({
+    required this.current,
+    required this.threshold,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final pct = (threshold > 0 ? (current / threshold).clamp(0.0, 1.5) : 0.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value:           pct.clamp(0.0, 1.0),
+            minHeight:       6,
+            backgroundColor: Colors.black12,
+            valueColor:      AlwaysStoppedAnimation(color),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text('${current.toStringAsFixed(2)} m / '
+             'threshold ${threshold.toStringAsFixed(2)} m '
+             '(${(pct * 100).toStringAsFixed(0)}%)',
+            style: const TextStyle(fontSize: 10, color: Colors.black54)),
+      ],
+    );
+  }
+}
+
+class _ExpandedBody extends StatelessWidget {
+  final FloodAlert alert;
+  final Color      fg;
+  const _ExpandedBody({required this.alert, required this.fg});
+  @override
+  Widget build(BuildContext context) {
+    final a      = alert;
+    final issued = DateFormat('dd MMM HH:mm').format(a.issuedAt);
+    final exp    = a.expiresAt != null
+        ? DateFormat('dd MMM HH:mm').format(a.expiresAt!) : 'No expiry';
+    return Container(
+      color:   Colors.white,
+      padding: const EdgeInsets.all(16),
+      child:   Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Description
+          Text(a.body,
+              style: const TextStyle(fontSize: 13, height: 1.5, color: Colors.black87)),
+          const SizedBox(height: 12),
+          // Recommended action
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color:        fg.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(8),
+              border:       Border.all(color: fg.withOpacity(0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.tips_and_updates_rounded, color: fg, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(a.action,
+                    style: TextStyle(
+                        fontSize: 12, color: fg,
+                        fontWeight: FontWeight.w600, height: 1.4))),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Meta row
+          Row(children: [
+            const Icon(Icons.schedule_rounded, size: 12, color: Colors.black38),
+            const SizedBox(width: 4),
+            Text('Issued $issued  ·  Expires $exp',
+                style: const TextStyle(fontSize: 10, color: Colors.black45)),
+            const Spacer(),
+            if (a.rateOfRiseMph != null)
+              _MetaTag(
+                  icon: Icons.trending_up,
+                  text: '${a.rateOfRiseMph!.toStringAsFixed(2)} m/h'),
+            if (a.rainfall24hMm != null)
+              _MetaTag(
+                  icon: Icons.water_drop,
+                  text: '${a.rainfall24hMm!.toStringAsFixed(0)} mm'),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaTag extends StatelessWidget {
+  final IconData icon;
+  final String   text;
+  const _MetaTag({required this.icon, required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color:        Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 10, color: Colors.black54),
+        const SizedBox(width: 3),
+        Text(text, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+      ]),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _EmptyState / _LoadingState
+// ─────────────────────────────────────────────────────────────────────────────
+class _EmptyState extends StatelessWidget {
+  final DateTime? lastUpdate;
+  const _EmptyState({this.lastUpdate});
+  @override
+  Widget build(BuildContext context) {
+    final t = lastUpdate != null
+        ? DateFormat('HH:mm:ss dd MMM').format(lastUpdate!) : '—';
+    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.check_circle_outline_rounded, size: 72, color: Colors.green),
+      const SizedBox(height: 16),
+      const Text('No Active Alerts',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.black87)),
+      const SizedBox(height: 8),
+      const Text('All monitored stations are within safe levels.',
+          style: TextStyle(color: Colors.black45)),
+      const SizedBox(height: 16),
+      Text('Last checked: $t',
+          style: const TextStyle(fontSize: 11, color: Colors.black38)),
+    ]));
+  }
+}
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      CircularProgressIndicator(strokeWidth: 2),
+      SizedBox(height: 16),
+      Text('Fetching live data…', style: TextStyle(color: Colors.black54)),
+    ]));
+  }
 }
