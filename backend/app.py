@@ -74,7 +74,6 @@ if _is_package_context():
     from backend.routers.wrd_bihar import router as wrd_bihar_router
     from backend.routers.wrd_bihar import start_scheduler as wrd_start_scheduler
     from backend.routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
-    # ── FIX 1: Register previously missing routers ──────────────────────────
     from backend.routers.cwc_ffs import router as cwc_ffs_router
     from backend.routers.fcm import router as fcm_router
     from backend.routers.data_gov_cwc import router as data_gov_cwc_router
@@ -100,7 +99,6 @@ else:
     from routers.wrd_bihar import router as wrd_bihar_router
     from routers.wrd_bihar import start_scheduler as wrd_start_scheduler
     from routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
-    # ── FIX 1: Register previously missing routers ──────────────────────────
     from routers.cwc_ffs import router as cwc_ffs_router
     from routers.fcm import router as fcm_router
     from routers.data_gov_cwc import router as data_gov_cwc_router
@@ -320,4 +318,6 @@ def persist_telemetry_record(state_name: str, station_name: str, limit: int, tel
 
 def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: str = "Kolhapur", limit: int = 6) -> Dict[str, Any]:
     policy = get_source_policy_payload()
-    if policy.get("allow_live_cwc_in_a
+    if policy.get("allow_live_cwc_in_app"):
+        pass  # live CWC telemetry path — implemented in routers/telemetry.py
+    return policy
