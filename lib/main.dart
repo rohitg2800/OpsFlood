@@ -15,12 +15,14 @@ import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/main_shell.dart';
-import 'screens/home_screen.dart';
+// home_screen.dart   — DELETED (legacy v7 shell, superseded by main_shell)
+// prediction_screen.dart — DELETED (legacy, predict_screen is canonical)
+// manual_predict_screen.dart — DELETED (not wired in main_shell)
+// india_river_explorer_screen.dart — DELETED (coming-soon stub)
 import 'screens/dashboard_screen.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/monitors_screen.dart';
 import 'screens/predict_screen.dart';
-import 'screens/prediction_screen.dart';
 import 'screens/city_detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/sos_screen.dart';
@@ -29,9 +31,7 @@ import 'screens/river_monitor_screen.dart';
 import 'screens/river_detail_screen.dart';
 import 'screens/state_matrix_screen.dart';
 import 'screens/model_info_screen.dart';
-import 'screens/manual_predict_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
-import 'screens/india_river_explorer_screen.dart';
 import 'screens/cwc_station_detail_screen.dart';
 import 'services/befiqr_cwc_service.dart';
 import 'screens/live_stations_screen.dart';
@@ -49,7 +49,7 @@ final FlutterLocalNotificationsPlugin _localNotifications =
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  debugPrint('[FCM BG] ${message.notification?.title}');
+  debugPrint('[FCM BG] \${message.notification?.title}');
 }
 
 Future<void> main() async {
@@ -141,8 +141,10 @@ class FloodWatchApp extends ConsumerWidget {
             return _fade(const SplashScreen());
           case OnboardingScreen.route:
             return _fade(const OnboardingScreen());
-          case HomeScreen.route:
+          // '/home' and '/shell' both resolve to MainShell
+          // (home_screen.dart was the legacy v7 shell — now deleted)
           case MainShell.route:
+          case '/home':
             return _fade(const MainShell());
           case DashboardScreen.route:
             return _fade(const DashboardScreen());
@@ -152,8 +154,9 @@ class FloodWatchApp extends ConsumerWidget {
             return _fade(const MonitorsScreen());
           case PredictScreen.route:
             return _fade(const PredictScreen());
-          case PredictionScreen.route:
-            return _fade(const PredictionScreen());
+          // PredictionScreen.route REMOVED — prediction_screen.dart deleted
+          // ManualPredictScreen.route REMOVED — manual_predict_screen.dart deleted
+          // IndiaRiverExplorerScreen.route REMOVED — stub deleted
           case SettingsScreen.route:
             return _fade(const SettingsScreen());
           case SosScreen.route:
@@ -166,12 +169,8 @@ class FloodWatchApp extends ConsumerWidget {
             return _fade(const StateMatrixScreen());
           case ModelInfoScreen.route:
             return _fade(const ModelInfoScreen());
-          case ManualPredictScreen.route:
-            return _fade(const ManualPredictScreen());
           case BiharRiverMapScreen.route:
             return _fade(const BiharRiverMapScreen());
-          case IndiaRiverExplorerScreen.route:
-            return _fade(const IndiaRiverExplorerScreen());
           case LiveStationsScreen.route:
             return _fade(const LiveStationsScreen());
           case NewsFeedScreen.route:
