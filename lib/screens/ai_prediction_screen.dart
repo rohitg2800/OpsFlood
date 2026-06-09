@@ -352,7 +352,7 @@ class _SectionHeader extends StatelessWidget {
         Text(label,
             style: TextStyle(
               color: rc.textSecondary,
-              fontSize: 12,           // was 10–11; bumped for accessibility
+              fontSize: 12,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.0,
             )),
@@ -1195,9 +1195,18 @@ class _ForecastBars extends StatelessWidget {
     final days   = data.forecast.take(7).toList();
     final maxRain =
         days.map((d) => d.rainMm).reduce(math.max).clamp(1.0, double.infinity);
-    // Flood alert threshold line at 30 mm/day
-    const threshold = 30.0;
+    const threshold    = 30.0;
     final thresholdFrac = (threshold / maxRain).clamp(0.0, 1.0);
+
+    // Bar budget inside SizedBox(height: 90):
+    //   rain label  ≈ 14px  (fontSize 10 + line-height)
+    //   SizedBox(2) =  2px
+    //   bar          ≤ 56px  ← was 60, reduced to guarantee fit
+    //   SizedBox(4) =  4px
+    //   day label   ≈ 14px
+    //   total       = 90px  ✓
+    const double _kBarMax = 56.0;
+    const double _kBarMin =  2.0;
 
     return AnimatedBuilder(
       animation: barCtrl,
@@ -1208,7 +1217,7 @@ class _ForecastBars extends StatelessWidget {
             // Threshold line
             if (maxRain > threshold)
               Positioned(
-                bottom: 18 + (1 - thresholdFrac) * 60,
+                bottom: 18 + (1 - thresholdFrac) * _kBarMax,
                 left: 0, right: 0,
                 child: Row(
                   children: [
@@ -1262,7 +1271,9 @@ class _ForecastBars extends StatelessWidget {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: Container(
-                              height: 60 * frac + 4,
+                              // FIX: was 60 * frac + 4 — exceeded 90px slot.
+                              // Now capped at 56px max + 2px min.
+                              height: _kBarMax * frac + _kBarMin,
                               color: col,
                             ),
                           ),
