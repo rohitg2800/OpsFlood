@@ -1,28 +1,23 @@
 // lib/screens/splash_screen.dart
-// OpsFlood Universe Splash — 3-layer architecture:
-//   Layer 1: Generative starfield (CustomPainter)
-//   Layer 2: OpsFlood branding (FadeTransition)
-//   Layer 3: Data-fetch progress (pulses with galactic core)
+// OpsFlood — SplashScreen v3
 //
-// NOTE: Class is named SplashScreen (not SplashPage) to match existing
-//       routes in main.dart that reference SplashScreen.route.
+// After the boot animation completes:
+//   • If onboarding not done  → /onboarding
+//   • Otherwise               → /shell
+library;
 
-import 'dart:ui' show Size;
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../widgets/universe_splash_painter.dart';
-import 'home_screen.dart';
 
-// ─── Minimum splash display time ─────────────────────────────────────────────
-const _kMinSplashMs = 2800;
-
-// ─── SplashScreen ─────────────────────────────────────────────────────────────
+import '../providers/onboarding_provider.dart';
+import '../theme/river_theme.dart';
+import 'main_shell.dart';
+import 'onboarding_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
-  const SplashScreen({super.key});
-
-  // Route constant expected by main.dart
   static const String route = '/';
+  const SplashScreen({super.key});
 
   @override
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
@@ -30,324 +25,222 @@ class SplashScreen extends ConsumerStatefulWidget {
 
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
-
-  // Animation controllers
-  late final AnimationController _universeCtrl;
-  late final AnimationController _pulseCtrl;
-  late final AnimationController _brandCtrl;
-  late final AnimationController _exitCtrl;
-
-  // Derived animations
-  late final Animation<double> _coreGlow;
-  late final Animation<double> _brandFade;
-  late final Animation<double> _exitFade;
-
-  // Star field — built once after first layout
-  List<StarParticle> _stars      = [];
-  bool               _starsReady = false;
-
-  // Data fetch state
-  double _fetchProg  = 0.0;
-  String _fetchLabel = 'INITIALISING SYSTEMS...';
-
-  late final DateTime _startTime;
+  late final AnimationController _ring;
+  late final AnimationController _text;
+  late final Animation<double>    _ringScale;
+  late final Animation<double>    _ringOpacity;
+  late final Animation<double>    _textOpacity;
+  late final Animation<Offset>    _textSlide;
 
   @override
   void initState() {
     super.initState();
-    _startTime = DateTime.now();
 
-    // Universe runs continuously until exit
-    _universeCtrl = AnimationController(
-      vsync:    this,
-      duration: const Duration(seconds: 60),
-    )..repeat();
+    _ring = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400));
+    _text = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 700));
 
-    // Core pulse — 2.4 s sine wave
-    _pulseCtrl = AnimationController(
-      vsync:    this,
-      duration: const Duration(milliseconds: 2400),
-    )..repeat(reverse: true);
-    _coreGlow = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
+    _ringScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+        CurvedAnimation(parent: _ring, curve: Curves.easeOutBack));
+    _ringOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(
+            parent: _ring,
+            curve: const Interval(0.0, 0.5, curve: Curves.easeIn)));
+    _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: _text, curve: Curves.easeIn));
+    _textSlide = Tween<Offset>(
+            begin: const Offset(0, 0.25), end: Offset.zero)
+        .animate(
+            CurvedAnimation(parent: _text, curve: Curves.easeOutCubic));
 
-    // Brand logo fades in after 600 ms
-    _brandCtrl = AnimationController(
-      vsync:    this,
-      duration: const Duration(milliseconds: 900),
-    );
-    _brandFade = CurvedAnimation(parent: _brandCtrl, curve: Curves.easeOut);
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (mounted) _brandCtrl.forward();
+    _ring.forward().then((_) {
+      _text.forward().then((_) {
+        Future.delayed(const Duration(milliseconds: 500), _navigate);
+      });
     });
+  }
 
-    // Exit fade
-    _exitCtrl = AnimationController(
-      vsync:    this,
-      duration: const Duration(milliseconds: 800),
+  Future<void> _navigate() async {
+    final done = await ref.read(onboardingProvider.future);
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(
+      context,
+      done ? MainShell.route : OnboardingScreen.route,
     );
-    _exitFade = CurvedAnimation(parent: _exitCtrl, curve: Curves.easeIn);
-    _exitCtrl.addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
-        Navigator.of(context).pushReplacementNamed(HomeScreen.route);
-      }
-    });
-
-    _initializeData();
   }
 
   @override
   void dispose() {
-    _universeCtrl.dispose();
-    _pulseCtrl.dispose();
-    _brandCtrl.dispose();
-    _exitCtrl.dispose();
+    _ring.dispose();
+    _text.dispose();
     super.dispose();
   }
 
-  // ─── Data initialisation ───────────────────────────────────────────────────
-
-  Future<void> _initializeData() async {
-    try {
-      _setStatus('CONNECTING WRD BIHAR...', 0.0);
-      await _fetchWrd();
-      _setStatus('WRD SYNC COMPLETE', 0.5);
-
-      _setStatus('CONNECTING CWC DIRECT...', 0.5);
-      await _fetchCwc();
-      _setStatus('ALL SYSTEMS ONLINE', 1.0);
-    } catch (_) {
-      _setStatus('PARTIAL DATA — CONTINUING', 1.0);
-    } finally {
-      final elapsed   = DateTime.now().difference(_startTime).inMilliseconds;
-      final remaining = _kMinSplashMs - elapsed;
-      if (remaining > 0) await Future.delayed(Duration(milliseconds: remaining));
-      if (mounted) _exitCtrl.forward();
-    }
-  }
-
-  void _setStatus(String label, double progress) {
-    if (!mounted) return;
-    setState(() { _fetchLabel = label; _fetchProg = progress; });
-  }
-
-  // ── Replace these stubs with your actual service calls: ───────────────────
-  Future<void> _fetchWrd() async {
-    // await WrdBiharService.instance.fetch();
-    await Future.delayed(const Duration(milliseconds: 900));
-  }
-
-  Future<void> _fetchCwc() async {
-    // await CwcDirectService.instance.fetchAll();
-    await Future.delayed(const Duration(milliseconds: 700));
-  }
-
-  // ─── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFF030508),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = Size(constraints.maxWidth, constraints.maxHeight);
-          if (!_starsReady) {
-            _stars      = buildStarField(320, size);
-            _starsReady = true;
-          }
-
-          return AnimatedBuilder(
-            animation: Listenable.merge([_universeCtrl, _pulseCtrl, _exitCtrl]),
-            builder: (context, _) {
-              final fadeOut = _exitFade.value;
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  // Layer 1 — Starfield universe
-                  RepaintBoundary(
-                    child: CustomPaint(
-                      painter: UniversePainter(
-                        animation: _universeCtrl,
-                        stars:     _stars,
-                        coreGlow:  _coreGlow,
-                        fadeOut:   fadeOut,
-                      ),
-                      size: size,
-                    ),
-                  ),
-
-                  // Layer 2 — Branding
-                  FadeTransition(
-                    opacity: _brandFade,
-                    child: Opacity(
-                      opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
-                      child: _BrandingOverlay(coreGlow: _coreGlow),
-                    ),
-                  ),
-
-                  // Layer 3 — Progress / service monitor
-                  Positioned(
-                    bottom: 60, left: 40, right: 40,
-                    child: Opacity(
-                      opacity: (1.0 - fadeOut).clamp(0.0, 1.0),
-                      child: _ProgressLayer(
-                        label:    _fetchLabel,
-                        progress: _fetchProg,
-                        pulse:    _coreGlow,
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─── Branding overlay ─────────────────────────────────────────────────────────
-
-class _BrandingOverlay extends StatelessWidget {
-  const _BrandingOverlay({required this.coreGlow});
-  final Animation<double> coreGlow;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedBuilder(
-            animation: coreGlow,
-            builder: (_, __) {
-              const accent = Color(0xFF00FFB2);
-              final p = coreGlow.value;
-              return Container(
-                width: 72, height: 72,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: accent.withValues(alpha: 0.6 + 0.4 * p),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color:      accent.withValues(alpha: 0.25 + 0.15 * p),
-                      blurRadius: 18 + 10 * p,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.water_drop_outlined,
-                  color: Color(0xFF00FFB2),
-                  size: 38,
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'OPSFLOOD',
-            style: TextStyle(
-              fontFamily: 'RobotoMono', fontSize: 26,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFFE0F0FF), letterSpacing: 5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'REAL-TIME FLOOD INTELLIGENCE',
-            style: TextStyle(
-              fontFamily: 'RobotoMono', fontSize: 10,
-              color: Color(0xFF5A7080), letterSpacing: 2.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Progress layer ───────────────────────────────────────────────────────────
-
-class _ProgressLayer extends StatelessWidget {
-  const _ProgressLayer({
-    required this.label,
-    required this.progress,
-    required this.pulse,
-  });
-
-  final String            label;
-  final double            progress;
-  final Animation<double> pulse;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: pulse,
-      builder: (_, __) {
-        const accent = Color(0xFF00FFB2);
-        final p = pulse.value;
-        return Column(
+      backgroundColor: t.scaffoldBg,
+      body: Center(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 6, height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: accent.withValues(alpha: 0.5 + 0.5 * p),
-                    boxShadow: [
-                      BoxShadow(color: accent.withValues(alpha: 0.4 * p), blurRadius: 6),
-                    ],
-                  ),
+            // Animated ring + icon
+            AnimatedBuilder(
+              animation: _ring,
+              builder: (_, __) => Opacity(
+                opacity: _ringOpacity.value,
+                child: Transform.scale(
+                  scale: _ringScale.value,
+                  child: _LogoRing(t: t),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 400),
-                    child: Text(
-                      label,
-                      key: ValueKey(label),
-                      style: const TextStyle(
-                        fontFamily: 'RobotoMono', fontSize: 10,
-                        color: Color(0xFF5A7080), letterSpacing: 1.4,
-                      ),
-                    ),
-                  ),
-                ),
-                Text(
-                  '${(progress * 100).toInt()}%',
-                  style: TextStyle(
-                    fontFamily: 'RobotoMono', fontSize: 10,
-                    color: accent.withValues(alpha: 0.8), letterSpacing: 1,
-                  ),
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 8),
-            Container(
-              height: 2,
-              color: const Color(0xFF111620),
-              child: FractionallySizedBox(
-                alignment: Alignment.centerLeft,
-                widthFactor: progress,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: accent,
-                    boxShadow: [
-                      BoxShadow(color: accent.withValues(alpha: 0.6 * p), blurRadius: 6),
+            const SizedBox(height: 32),
+            // Animated title + tagline
+            AnimatedBuilder(
+              animation: _text,
+              builder: (_, __) => Opacity(
+                opacity: _textOpacity.value,
+                child: SlideTransition(
+                  position: _textSlide,
+                  child: Column(
+                    children: [
+                      Text(
+                        'EQUINOX',
+                        style: TextStyle(
+                          color: t.accent,
+                          fontSize: 36,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 6,
+                        ),
+                      ),
+                      Text(
+                        'BR-05',
+                        style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Flood Intelligence System',
+                        style: TextStyle(
+                          color: t.textSecondary.withValues(alpha: 0.7),
+                          fontSize: 12,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
+}
+
+// ── Animated concentric rings logo ───────────────────────────────────────────
+
+class _LogoRing extends StatefulWidget {
+  final RiverColors t;
+  const _LogoRing({required this.t});
+
+  @override
+  State<_LogoRing> createState() => _LogoRingState();
+}
+
+class _LogoRingState extends State<_LogoRing>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin;
+
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(
+        vsync: this,
+        duration: const Duration(seconds: 6))
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.t;
+    return SizedBox(
+      width: 140,
+      height: 140,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Outer spinning arc
+          AnimatedBuilder(
+            animation: _spin,
+            builder: (_, __) => Transform.rotate(
+              angle: _spin.value * 2 * math.pi,
+              child: CustomPaint(
+                size: const Size(140, 140),
+                painter: _ArcPainter(color: t.accent, strokeWidth: 2),
+              ),
+            ),
+          ),
+          // Inner glow ring
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: t.accent.withValues(alpha: 0.08),
+              border: Border.all(
+                  color: t.accent.withValues(alpha: 0.28), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                    color: t.accentGlow, blurRadius: 32)
+              ],
+            ),
+          ),
+          // Centre icon
+          Icon(Icons.flood_rounded, color: t.accent, size: 44),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArcPainter extends CustomPainter {
+  final Color  color;
+  final double strokeWidth;
+  const _ArcPainter({required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color       = color.withValues(alpha: 0.55)
+      ..style       = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap   = StrokeCap.round;
+    const gap   = 0.25; // radians gap
+    const sweep = math.pi * 2 - gap * 2;
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      gap,
+      sweep,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ArcPainter old) => false;
 }

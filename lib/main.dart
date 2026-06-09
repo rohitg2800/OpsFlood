@@ -13,6 +13,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
 import 'models/flood_data.dart';
 import 'screens/splash_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/main_shell.dart';
 import 'screens/home_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -102,7 +103,6 @@ class FloodWatchApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final mode          = ref.watch(themeModeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
-    // ★ Watch locale provider — rebuilds MaterialApp on language change
     final locale        = ref.watch(localeProvider);
 
     final ThemeData lightSlot;
@@ -123,7 +123,6 @@ class FloodWatchApp extends ConsumerWidget {
       theme:                      lightSlot,
       darkTheme:                  darkSlot,
       themeMode:                  themeNotifier.flutterMode,
-      // ★ Locale wired here — changing localeProvider rebuilds full app
       locale:                     locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
@@ -140,6 +139,8 @@ class FloodWatchApp extends ConsumerWidget {
         switch (settings.name) {
           case SplashScreen.route:
             return _fade(const SplashScreen());
+          case OnboardingScreen.route:
+            return _fade(const OnboardingScreen());
           case HomeScreen.route:
           case MainShell.route:
             return _fade(const MainShell());
