@@ -1,15 +1,9 @@
-// lib/providers/real_time_river_provider.dart  v7
+// lib/providers/real_time_river_provider.dart  v7.1
 //
-// CHANGE vs v6:
-//   Birpur is no longer deduplicated from DataFetch in the generic loop.
-//   Instead, mergedStationsProvider removes the raw DataFetch Birpur entry
-//   and injects the enriched kosiBirpurProvider result in its place.
-//   This guarantees exactly ONE Birpur in the final list with the best
-//   available level AND discharge/trend metadata.
-//
-//   All other fixes from v6 are preserved:
-//   #1 cold-start blank, #2 seed-CWC collision,
-//   #3 DataFetch exclusion, #4 dedup normaliser.
+// v7 → v7.1 fix:
+//   Removed dangling references to undefined constants
+//   kBirpurWarningLevel / kBirpurDangerLevel in the Birpur seed-fallback block.
+//   Replaced with inline literals matching kBiharGauges (211.50 / 212.40 m).
 //
 library;
 
@@ -44,6 +38,12 @@ bool _sameStation(String a, String b) {
 
 bool _isBirpur(String name) =>
     name.toLowerCase().contains('birpur');
+
+// Birpur thresholds — single source of truth for this file.
+// Must match kBiharGauges entry for Birpur in data/bihar_rivers.dart.
+const double _kBirpurWarning = 211.50;
+const double _kBirpurDanger  = 212.40;
+const double _kBirpurHfl     = _kBirpurDanger + 1.5; // 213.90
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Raw WrdStation list — auto-refreshes every 15 min
@@ -193,14 +193,20 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       isLive: birpurReading.source != 'SEED',
     );
   } else {
-    // Still loading — use DataFetch Birpur if available, else seed
+    // Still loading — use DataFetch Birpur if available, else seed.
+    // FIX v7.1: inline literals replace removed kBirpurWarningLevel /
+    // kBirpurDangerLevel constants.
     final dfBirpur = ref.watch(dataFetchStationsProvider)
         .where((s) => _isBirpur(s.station)).firstOrNull;
     birpurStation = dfBirpur ?? RiverStation(
       city: 'Birpur', state: 'Bihar', river: 'Kosi', station: 'Birpur',
-      current: 210.80, warning: kBirpurWarningLevel, danger: kBirpurDangerLevel,
-      hfl: kBirpurDangerLevel + 1.5, dataSource: 'SEED',
-      lastUpdated: '00:00', isLive: false,
+      current:     210.80,
+      warning:     _kBirpurWarning,   // 211.50 m
+      danger:      _kBirpurDanger,    // 212.40 m
+      hfl:         _kBirpurHfl,       // 213.90 m
+      dataSource: 'SEED',
+      lastUpdated: '00:00',
+      isLive: false,
     );
   }
 
