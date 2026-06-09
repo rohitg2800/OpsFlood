@@ -12,10 +12,7 @@ final criticalAlertCountProvider = Provider<int>((ref) {
   return liveAsync.when(
     data: (data) {
       if (data == null) return 0;
-      return data.stations.where((s) {
-        final risk = s.riskLevel.toUpperCase();
-        return risk == 'CRITICAL' || risk == 'DANGER';
-      }).length;
+      return data.stations.where((s) => s.isCritical).length;
     },
     loading: () => 0,
     error: (_, __) => 0,

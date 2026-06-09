@@ -37,19 +37,16 @@ class RealTimeService extends ChangeNotifier {
   int       get queuedOfflineCycles => _fetchEngine.queuedOfflineCycles;
 
   // ── Per-source health passthrough ──────────────────────────────────────
-  // Full SourceHealth objects (healthy bool + latencyMs + lastSuccessAt + lastError)
   SourceHealth get glofasHealth => _fetchEngine.glofasHealth;
   SourceHealth get imdHealth    => _fetchEngine.imdHealth;
   SourceHealth get wrdHealth    => _fetchEngine.wrdHealth;
   SourceHealth get cwcHealth    => _fetchEngine.cwcHealth;
 
-  // Convenience booleans — used directly by SystemStats in dashboard_screen_part2
   bool get glofasHealthy => _fetchEngine.glofasHealthy;
   bool get imdHealthy    => _fetchEngine.imdHealthy;
   bool get wrdHealthy    => _fetchEngine.wrdHealthy;
   bool get cwcHealthy    => _fetchEngine.cwcHealthy;
 
-  // Convenience latencies — null until first successful fetch
   int? get glofasLatencyMs => _fetchEngine.glofasLatencyMs;
   int? get imdLatencyMs    => _fetchEngine.imdLatencyMs;
   int? get wrdLatencyMs    => _fetchEngine.wrdLatencyMs;
@@ -76,7 +73,7 @@ class RealTimeService extends ChangeNotifier {
 
   // ── Per-city ─────────────────────────────────────────────────────────
   List<RiverLevelSnapshot> trendForCity(String city) =>
-      _fetchEngine.trendForCity(city);
+      _fetchEngine.trendForCity(city).cast<RiverLevelSnapshot>();
 
   FloodData? dataForCity(String city) =>
       _fetchEngine.floodDataForCity(city);

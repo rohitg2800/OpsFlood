@@ -113,6 +113,7 @@ class _FallbackLocalizations extends AppLocalizations {
   @override String get tip => 'Tip';
   @override String get predictAutoFillTip => 'Navigate from a City Detail screen to auto-fill the river level and city name.';
   @override String get required_ => 'Required';
+  @override String get required => 'Required';
   @override String get selectLanguage => 'Select Language';
   @override String get english => 'English';
   @override String get hindi => 'Hindi';
