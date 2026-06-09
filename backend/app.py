@@ -74,6 +74,10 @@ if _is_package_context():
     from backend.routers.wrd_bihar import router as wrd_bihar_router
     from backend.routers.wrd_bihar import start_scheduler as wrd_start_scheduler
     from backend.routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
+    from backend.routers.wrd_bihar import _fetch_befiqr_live as _wrd_fetch_live
+    from backend.routers.wrd_bihar import _tactical_fallback as _wrd_fallback
+    from backend.routers.wrd_bihar import _CACHE as _wrd_cache
+    from backend.routers.wrd_bihar import _CACHE_KEY as _wrd_cache_key
     from backend.routers.cwc_ffs import router as cwc_ffs_router
     from backend.routers.fcm import router as fcm_router
     from backend.routers.data_gov_cwc import router as data_gov_cwc_router
@@ -99,6 +103,10 @@ else:
     from routers.wrd_bihar import router as wrd_bihar_router
     from routers.wrd_bihar import start_scheduler as wrd_start_scheduler
     from routers.wrd_bihar import stop_scheduler as wrd_stop_scheduler
+    from routers.wrd_bihar import _fetch_befiqr_live as _wrd_fetch_live
+    from routers.wrd_bihar import _tactical_fallback as _wrd_fallback
+    from routers.wrd_bihar import _CACHE as _wrd_cache
+    from routers.wrd_bihar import _CACHE_KEY as _wrd_cache_key
     from routers.cwc_ffs import router as cwc_ffs_router
     from routers.fcm import router as fcm_router
     from routers.data_gov_cwc import router as data_gov_cwc_router
@@ -328,61 +336,59 @@ def persist_telemetry_record(state_name: str, station_name: str, limit: int, tel
 def build_policy_bound_telemetry(state_name: str = "Maharashtra", station_name: str = "Kolhapur", limit: int = 6) -> Dict[str, Any]:
     policy = get_source_policy_payload()
     if policy.get("allow_live_cwc_in_app"):
-        pass  # live CWC telemetry path — implemented in routers/telemetry.py
+        pass
     return policy
 
 
-# ── GloFAS warm cache ───────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# GloFAS warm cache  (non-Bihar states only)
+# ---------------------------------------------------------------------------
 
-# Shared in-memory list consumed by live_levels.py via sys.modules lookup
 GLOFAS_STATION_CACHE: List[Dict[str, Any]] = []
 _glofas_cache_lock = threading.Lock()
 
-# One representative gauging station per Indian flood-prone state
-# lat/lon sourced from CWC gauge registry & GloFAS station database
+# Bihar is handled by WRD Bihar BeFIQR (31 real gauge stations).
+# All other flood-prone Indian states use GloFAS Open-Meteo discharge.
 _GLOFAS_STATIONS = [
-    {"station_name": "Kolhapur",    "state_name": "Maharashtra",     "river_name": "Panchganga",   "lat": 16.705,  "lon": 74.243,  "warning_discharge": 1200.0, "danger_discharge": 2000.0},
-    {"station_name": "Patna",       "state_name": "Bihar",           "river_name": "Ganga",        "lat": 25.594,  "lon": 85.138,  "warning_discharge": 28000.0,"danger_discharge": 45000.0},
-    {"station_name": "Kochi",       "state_name": "Kerala",          "river_name": "Periyar",      "lat": 9.931,   "lon": 76.267,  "warning_discharge": 800.0,  "danger_discharge": 1400.0},
-    {"station_name": "Guwahati",    "state_name": "Assam",           "river_name": "Brahmaputra",  "lat": 26.144,  "lon": 91.736,  "warning_discharge": 40000.0,"danger_discharge": 72000.0},
-    {"station_name": "Haridwar",    "state_name": "Uttarakhand",     "river_name": "Ganga",        "lat": 29.945,  "lon": 78.164,  "warning_discharge": 5000.0, "danger_discharge": 9000.0},
-    {"station_name": "Surat",       "state_name": "Gujarat",         "river_name": "Tapi",         "lat": 21.170,  "lon": 72.831,  "warning_discharge": 3000.0, "danger_discharge": 6000.0},
-    {"station_name": "Cuttack",     "state_name": "Odisha",          "river_name": "Mahanadi",     "lat": 20.462,  "lon": 85.883,  "warning_discharge": 14000.0,"danger_discharge": 25000.0},
-    {"station_name": "Kolkata",     "state_name": "West Bengal",     "river_name": "Hooghly",      "lat": 22.573,  "lon": 88.364,  "warning_discharge": 6000.0, "danger_discharge": 11000.0},
-    {"station_name": "Varanasi",    "state_name": "Uttar Pradesh",   "river_name": "Ganga",        "lat": 25.317,  "lon": 83.005,  "warning_discharge": 20000.0,"danger_discharge": 36000.0},
-    {"station_name": "Vijayawada",  "state_name": "Andhra Pradesh",  "river_name": "Krishna",      "lat": 16.506,  "lon": 80.648,  "warning_discharge": 5000.0, "danger_discharge": 10000.0},
-    {"station_name": "Jabalpur",    "state_name": "Madhya Pradesh",  "river_name": "Narmada",      "lat": 23.181,  "lon": 79.987,  "warning_discharge": 4000.0, "danger_discharge": 8000.0},
-    {"station_name": "Raipur",      "state_name": "Chhattisgarh",    "river_name": "Mahanadi",     "lat": 21.251,  "lon": 81.630,  "warning_discharge": 2500.0, "danger_discharge": 5000.0},
-    {"station_name": "Ludhiana",    "state_name": "Punjab",          "river_name": "Sutlej",       "lat": 30.901,  "lon": 75.857,  "warning_discharge": 3000.0, "danger_discharge": 6000.0},
-    {"station_name": "Darbhanga",   "state_name": "Bihar",           "river_name": "Bagmati",      "lat": 26.152,  "lon": 85.897,  "warning_discharge": 700.0,  "danger_discharge": 1200.0},
-    {"station_name": "Pasighat",    "state_name": "Arunachal Pradesh","river_name": "Brahmaputra", "lat": 28.067,  "lon": 95.333,  "warning_discharge": 8000.0, "danger_discharge": 15000.0},
-    {"station_name": "Imphal",      "state_name": "Manipur",         "river_name": "Imphal River", "lat": 24.817,  "lon": 93.936,  "warning_discharge": 300.0,  "danger_discharge": 600.0},
-    {"station_name": "Shillong",    "state_name": "Meghalaya",       "river_name": "Umiam",        "lat": 25.567,  "lon": 91.883,  "warning_discharge": 250.0,  "danger_discharge": 500.0},
-    {"station_name": "Agartala",    "state_name": "Tripura",         "river_name": "Haora",        "lat": 23.831,  "lon": 91.286,  "warning_discharge": 200.0,  "danger_discharge": 400.0},
-    {"station_name": "Gangtok",     "state_name": "Sikkim",          "river_name": "Teesta",       "lat": 27.329,  "lon": 88.612,  "warning_discharge": 500.0,  "danger_discharge": 1000.0},
-    {"station_name": "New Delhi",   "state_name": "Delhi",           "river_name": "Yamuna",       "lat": 28.644,  "lon": 77.216,  "warning_discharge": 5000.0, "danger_discharge": 9000.0},
-    {"station_name": "Srinagar",    "state_name": "Jammu and Kashmir","river_name": "Jhelum",      "lat": 34.083,  "lon": 74.797,  "warning_discharge": 1500.0, "danger_discharge": 3000.0},
-    {"station_name": "Kozhikode",   "state_name": "Kerala",          "river_name": "Chaliyar",     "lat": 11.259,  "lon": 75.780,  "warning_discharge": 600.0,  "danger_discharge": 1100.0},
-    {"station_name": "Mysuru",      "state_name": "Karnataka",       "river_name": "Kaveri",       "lat": 12.296,  "lon": 76.639,  "warning_discharge": 2000.0, "danger_discharge": 4000.0},
-    {"station_name": "Chennai",     "state_name": "Tamil Nadu",      "river_name": "Adyar",        "lat": 13.083,  "lon": 80.271,  "warning_discharge": 800.0,  "danger_discharge": 1500.0},
-    {"station_name": "Dhanbad",     "state_name": "Jharkhand",       "river_name": "Damodar",      "lat": 23.800,  "lon": 86.433,  "warning_discharge": 1500.0, "danger_discharge": 3000.0},
-    {"station_name": "Ambala",      "state_name": "Haryana",         "river_name": "Ghaggar",      "lat": 30.378,  "lon": 76.776,  "warning_discharge": 800.0,  "danger_discharge": 1600.0},
-    {"station_name": "Mandi",       "state_name": "Himachal Pradesh","river_name": "Beas",         "lat": 31.709,  "lon": 76.932,  "warning_discharge": 1000.0, "danger_discharge": 2000.0},
-    {"station_name": "Kota",        "state_name": "Rajasthan",       "river_name": "Chambal",      "lat": 25.183,  "lon": 75.833,  "warning_discharge": 2000.0, "danger_discharge": 4000.0},
-    {"station_name": "Hyderabad",   "state_name": "Telangana",       "river_name": "Musi",         "lat": 17.385,  "lon": 78.487,  "warning_discharge": 1000.0, "danger_discharge": 2000.0},
-    {"station_name": "Panaji",      "state_name": "Goa",             "river_name": "Mandovi",      "lat": 15.499,  "lon": 73.824,  "warning_discharge": 400.0,  "danger_discharge": 800.0},
+    {"station_name": "Kolhapur",     "state_name": "Maharashtra",      "river_name": "Panchganga",    "lat": 16.705, "lon": 74.243,  "warning_discharge": 1200.0,  "danger_discharge": 2000.0},
+    {"station_name": "Kochi",        "state_name": "Kerala",           "river_name": "Periyar",       "lat": 9.931,  "lon": 76.267,  "warning_discharge": 800.0,   "danger_discharge": 1400.0},
+    {"station_name": "Guwahati",     "state_name": "Assam",            "river_name": "Brahmaputra",   "lat": 26.144, "lon": 91.736,  "warning_discharge": 40000.0, "danger_discharge": 72000.0},
+    {"station_name": "Haridwar",     "state_name": "Uttarakhand",      "river_name": "Ganga",         "lat": 29.945, "lon": 78.164,  "warning_discharge": 5000.0,  "danger_discharge": 9000.0},
+    {"station_name": "Surat",        "state_name": "Gujarat",          "river_name": "Tapi",          "lat": 21.170, "lon": 72.831,  "warning_discharge": 3000.0,  "danger_discharge": 6000.0},
+    {"station_name": "Cuttack",      "state_name": "Odisha",           "river_name": "Mahanadi",      "lat": 20.462, "lon": 85.883,  "warning_discharge": 14000.0, "danger_discharge": 25000.0},
+    {"station_name": "Kolkata",      "state_name": "West Bengal",      "river_name": "Hooghly",       "lat": 22.573, "lon": 88.364,  "warning_discharge": 6000.0,  "danger_discharge": 11000.0},
+    {"station_name": "Varanasi",     "state_name": "Uttar Pradesh",    "river_name": "Ganga",         "lat": 25.317, "lon": 83.005,  "warning_discharge": 20000.0, "danger_discharge": 36000.0},
+    {"station_name": "Vijayawada",   "state_name": "Andhra Pradesh",   "river_name": "Krishna",       "lat": 16.506, "lon": 80.648,  "warning_discharge": 5000.0,  "danger_discharge": 10000.0},
+    {"station_name": "Jabalpur",     "state_name": "Madhya Pradesh",   "river_name": "Narmada",       "lat": 23.181, "lon": 79.987,  "warning_discharge": 4000.0,  "danger_discharge": 8000.0},
+    {"station_name": "Raipur",       "state_name": "Chhattisgarh",     "river_name": "Mahanadi",      "lat": 21.251, "lon": 81.630,  "warning_discharge": 2500.0,  "danger_discharge": 5000.0},
+    {"station_name": "Ludhiana",     "state_name": "Punjab",           "river_name": "Sutlej",        "lat": 30.901, "lon": 75.857,  "warning_discharge": 3000.0,  "danger_discharge": 6000.0},
+    {"station_name": "Pasighat",     "state_name": "Arunachal Pradesh","river_name": "Brahmaputra",   "lat": 28.067, "lon": 95.333,  "warning_discharge": 8000.0,  "danger_discharge": 15000.0},
+    {"station_name": "Imphal",       "state_name": "Manipur",          "river_name": "Imphal River",  "lat": 24.817, "lon": 93.936,  "warning_discharge": 300.0,   "danger_discharge": 600.0},
+    {"station_name": "Shillong",     "state_name": "Meghalaya",        "river_name": "Umiam",         "lat": 25.567, "lon": 91.883,  "warning_discharge": 250.0,   "danger_discharge": 500.0},
+    {"station_name": "Agartala",     "state_name": "Tripura",          "river_name": "Haora",         "lat": 23.831, "lon": 91.286,  "warning_discharge": 200.0,   "danger_discharge": 400.0},
+    {"station_name": "Gangtok",      "state_name": "Sikkim",           "river_name": "Teesta",        "lat": 27.329, "lon": 88.612,  "warning_discharge": 500.0,   "danger_discharge": 1000.0},
+    {"station_name": "New Delhi",    "state_name": "Delhi",            "river_name": "Yamuna",        "lat": 28.644, "lon": 77.216,  "warning_discharge": 5000.0,  "danger_discharge": 9000.0},
+    {"station_name": "Srinagar",     "state_name": "Jammu and Kashmir","river_name": "Jhelum",        "lat": 34.083, "lon": 74.797,  "warning_discharge": 1500.0,  "danger_discharge": 3000.0},
+    {"station_name": "Mysuru",       "state_name": "Karnataka",        "river_name": "Kaveri",        "lat": 12.296, "lon": 76.639,  "warning_discharge": 2000.0,  "danger_discharge": 4000.0},
+    {"station_name": "Chennai",      "state_name": "Tamil Nadu",       "river_name": "Adyar",         "lat": 13.083, "lon": 80.271,  "warning_discharge": 800.0,   "danger_discharge": 1500.0},
+    {"station_name": "Dhanbad",      "state_name": "Jharkhand",        "river_name": "Damodar",       "lat": 23.800, "lon": 86.433,  "warning_discharge": 1500.0,  "danger_discharge": 3000.0},
+    {"station_name": "Ambala",       "state_name": "Haryana",          "river_name": "Ghaggar",       "lat": 30.378, "lon": 76.776,  "warning_discharge": 800.0,   "danger_discharge": 1600.0},
+    {"station_name": "Mandi",        "state_name": "Himachal Pradesh", "river_name": "Beas",          "lat": 31.709, "lon": 76.932,  "warning_discharge": 1000.0,  "danger_discharge": 2000.0},
+    {"station_name": "Kota",         "state_name": "Rajasthan",        "river_name": "Chambal",       "lat": 25.183, "lon": 75.833,  "warning_discharge": 2000.0,  "danger_discharge": 4000.0},
+    {"station_name": "Hyderabad",    "state_name": "Telangana",        "river_name": "Musi",          "lat": 17.385, "lon": 78.487,  "warning_discharge": 1000.0,  "danger_discharge": 2000.0},
+    {"station_name": "Panaji",       "state_name": "Goa",              "river_name": "Mandovi",       "lat": 15.499, "lon": 73.824,  "warning_discharge": 400.0,   "danger_discharge": 800.0},
+    {"station_name": "Dimapur",      "state_name": "Nagaland",         "river_name": "Dhansiri",      "lat": 25.900, "lon": 93.726,  "warning_discharge": 300.0,   "danger_discharge": 600.0},
+    {"station_name": "Aizawl",       "state_name": "Mizoram",          "river_name": "Tlawng",        "lat": 23.727, "lon": 92.717,  "warning_discharge": 200.0,   "danger_discharge": 400.0},
 ]
 
 GLOFAS_API_URL = "https://flood-api.open-meteo.com/v1/flood"
 GLOFAS_REFRESH_INTERVAL_SECONDS = 900  # 15 minutes
-GLOFAS_REQUEST_TIMEOUT_SECONDS = 15    # per-station timeout
+GLOFAS_REQUEST_TIMEOUT_SECONDS = 15
 _glofas_thread: threading.Thread | None = None
 _glofas_stop_event = threading.Event()
 
 
 def _fetch_glofas_station(station: Dict[str, Any]) -> Dict[str, Any] | None:
-    """Fetch current river discharge for one station from Open-Meteo GloFAS.
-    Returns enriched station dict or None on any error."""
     try:
         resp = requests.get(
             GLOFAS_API_URL,
@@ -427,8 +433,6 @@ def _fetch_glofas_station(station: Dict[str, Any]) -> Dict[str, Any] | None:
 
 
 def _refresh_glofas_cache() -> int:
-    """Fetch all stations sequentially (IO-bound, not CPU-bound).
-    Returns number of stations successfully updated."""
     updated: List[Dict[str, Any]] = []
     for station in _GLOFAS_STATIONS:
         result = _fetch_glofas_station(station)
@@ -438,14 +442,13 @@ def _refresh_glofas_cache() -> int:
         with _glofas_cache_lock:
             GLOFAS_STATION_CACHE.clear()
             GLOFAS_STATION_CACHE.extend(updated)
-        logger.info(f"[GloFAS] Cache refreshed — {len(updated)}/{len(_GLOFAS_STATIONS)} stations updated")
+        logger.info(f"[GloFAS] Cache refreshed — {len(updated)}/{len(_GLOFAS_STATIONS)} stations")
     else:
         logger.warning("[GloFAS] All station fetches failed — cache unchanged")
     return len(updated)
 
 
 def _glofas_warm_cache_loop():
-    """Background daemon thread: refresh GloFAS cache every 15 minutes."""
     logger.info("[GloFAS] warm_cache thread started")
     while not _glofas_stop_event.is_set():
         try:
@@ -473,7 +476,42 @@ def stop_glofas_thread():
     _glofas_stop_event.set()
 
 
-# ── FastAPI application ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# WRD Bihar eager warm (run once at startup in a background thread)
+# ---------------------------------------------------------------------------
+
+def _eager_warm_wrd_bihar() -> None:
+    """
+    Runs once at startup in a daemon thread.
+    Fetches BeFIQR live data and populates the WRD Bihar TTLCache
+    so that /api/live-levels?state=bihar returns real data immediately
+    (without waiting for the first APScheduler tick ~15 min away).
+    Falls back to tactical registry if BeFIQR is unreachable.
+    """
+    logger.info("[WRD Bihar] Eager warm starting...")
+    try:
+        result = _wrd_fetch_live()
+        _wrd_cache[_wrd_cache_key] = result
+        logger.info(
+            f"[WRD Bihar] Eager warm complete — "
+            f"{result['station_count']} stations from {result['data_source']}"
+        )
+    except Exception as exc:
+        logger.warning(f"[WRD Bihar] Eager warm failed ({exc}) — loading fallback registry")
+        try:
+            fallback = _wrd_fallback(str(exc))
+            _wrd_cache[_wrd_cache_key] = fallback
+            logger.info(f"[WRD Bihar] Fallback loaded — {fallback['station_count']} stations")
+        except Exception as fb_exc:
+            logger.warning(f"[WRD Bihar] Fallback also failed: {fb_exc}")
+
+
+def start_wrd_bihar_eager_warm() -> None:
+    t = threading.Thread(target=_eager_warm_wrd_bihar, name="wrd_bihar_eager_warm", daemon=True)
+    t.start()
+
+
+# ── FastAPI application ─────────────────────────────────────────────────────
 
 app = FastAPI(
     title="OpsFlood API",
@@ -481,7 +519,6 @@ app = FastAPI(
     version="1.1.0",
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -490,7 +527,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Router registrations ───────────────────────────────────────────────────────
 app.include_router(core_router)
 app.include_router(predict_router)
 app.include_router(weather_router)
@@ -504,16 +540,25 @@ app.include_router(data_gov_cwc_router)
 app.include_router(model_artifacts_router)
 
 
-# ── Startup / shutdown ─────────────────────────────────────────────────────────
-
 @app.on_event("startup")
 async def startup_event():
     logger.info("OpsFlood API starting up — version 1.1.0")
+
+    # 1. WRD Bihar — eager warm (fills cache immediately from BeFIQR)
+    try:
+        start_wrd_bihar_eager_warm()
+        logger.info("WRD Bihar eager warm thread launched")
+    except Exception as exc:
+        logger.warning(f"WRD Bihar eager warm failed (non-fatal): {exc}")
+
+    # 2. WRD Bihar APScheduler — keeps cache fresh every 15 min
     try:
         wrd_start_scheduler()
-        logger.info("WRD Bihar scheduler started")
+        logger.info("WRD Bihar APScheduler started")
     except Exception as exc:
         logger.warning(f"WRD Bihar scheduler start failed (non-fatal): {exc}")
+
+    # 3. GloFAS warm cache thread — non-Bihar states
     try:
         start_glofas_thread()
         logger.info("GloFAS warm_cache thread started")
@@ -534,8 +579,6 @@ async def shutdown_event():
         logger.warning(f"GloFAS thread stop failed (non-fatal): {exc}")
 
 
-# ── Health check ───────────────────────────────────────────────────────────────
-
 @app.get("/health")
 async def health():
     glofas_count = len(GLOFAS_STATION_CACHE)
@@ -551,8 +594,6 @@ async def health():
 async def source_policy():
     return get_source_policy_payload()
 
-
-# ── Static frontend (serve React/Vite build) ───────────────────────────────────
 
 if os.path.isdir(FRONTEND_DIST_DIR):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST_DIR, "assets")), name="assets")
