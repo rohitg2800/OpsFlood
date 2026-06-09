@@ -21,11 +21,10 @@ router = APIRouter(tags=["live-levels"])
 
 
 # ---------------------------------------------------------------------------
-# Cache accessors (avoid circular imports via sys.modules)
+# Cache accessors
 # ---------------------------------------------------------------------------
 
 def _get_glofas_cache() -> List[Dict[str, Any]]:
-    """GloFAS station list built by app.py warm_cache thread."""
     try:
         for mod_name in ("backend.app", "app"):
             mod = sys.modules.get(mod_name)
@@ -39,15 +38,11 @@ def _get_glofas_cache() -> List[Dict[str, Any]]:
 
 
 def _get_wrd_bihar_stations() -> List[Dict[str, Any]]:
-    """
-    Pull latest WRD Bihar station list from the BeFIQR router cache.
-    Returns [] if not yet populated.
-    """
     try:
         for mod_name in ("backend.routers.wrd_bihar", "routers.wrd_bihar"):
             mod = sys.modules.get(mod_name)
             if mod is not None:
-                cache = getattr(mod, "_CACHE", None)
+                cache     = getattr(mod, "_CACHE", None)
                 cache_key = getattr(mod, "_CACHE_KEY", None)
                 if cache is not None and cache_key and cache_key in cache:
                     return cache[cache_key].get("stations", [])
@@ -61,35 +56,75 @@ def _get_wrd_bihar_stations() -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _risk_from_capacity(cap: float) -> str:
-    if cap >= 85: return "CRITICAL"
-    if cap >= 70: return "HIGH"
-    if cap >= 50: return "MODERATE"
+    if cap >= 100: return "CRITICAL"
+    if cap >= 85:  return "HIGH"
+    if cap >= 70:  return "MODERATE"
     return "LOW"
 
 def _risk_from_discharge(discharge: float, danger_q: float, warning_q: float) -> str:
-    if danger_q > 0 and discharge >= danger_q:          return "CRITICAL"
-    if warning_q > 0 and discharge >= warning_q:        return "HIGH"
-    if warning_q > 0 and discharge >= warning_q * 0.7:  return "MODERATE"
+    if danger_q > 0 and discharge >= danger_q:         return "CRITICAL"
+    if warning_q > 0 and discharge >= warning_q:       return "HIGH"
+    if warning_q > 0 and discharge >= warning_q * 0.7: return "MODERATE"
     return "LOW"
 
-def _risk_from_wrd_status(status: str) -> str:
+def _risk_from_above_dl(above_dl: Optional[float], wrd_status: str) -> str:
+    """
+    Primary: use above_below_danger_m (positive = above DL = flooding).
+    Secondary: fall back to wrd_status label.
+    """
+    if above_dl is not None:
+        if above_dl > 0:    return "CRITICAL"   # above danger level
+        if above_dl > -1.0: return "HIGH"       # within 1 m of DL
+        if above_dl > -3.0: return "MODERATE"   # within 3 m of DL
+        return "LOW"
+    # fallback to WRD label
     return {
         "CRITICAL": "CRITICAL",
         "DANGER":   "HIGH",
         "WARNING":  "MODERATE",
         "NORMAL":   "LOW",
-    }.get((status or "").upper(), "LOW")
+        "UNKNOWN":  "LOW",
+    }.get((wrd_status or "").upper(), "LOW")
 
 def _capacity_from_discharge(discharge: float, danger_q: float) -> float:
     if danger_q <= 0:
         return 50.0
-    return min(round(discharge / danger_q * 100.0, 1), 100.0)
+    return min(round(discharge / danger_q * 100.0, 1), 130.0)
 
-def _capacity_from_levels(current_m: float, safe_m: float, danger_m: float) -> float:
-    span = danger_m - safe_m
-    if span <= 0:
-        return 50.0
-    return min(round((current_m - safe_m) / span * 100.0, 1), 100.0)
+def _capacity_from_asl_levels(
+    current_m: Optional[float],
+    danger_m: float,
+    hfl_m: Optional[float],
+    above_dl: Optional[float],
+) -> float:
+    """
+    Bihar gauges are in absolute metres above sea level (ASL).
+    We cannot use (current - safe) / (danger - safe) because
+    'safe' is meaningless in ASL space.
+
+    Instead we use above_below_danger_m directly:
+      above_dl >= 0  → >= 100 % (above danger)
+      above_dl == -DL_span → 0 % (at safe low-water)
+
+    We define the span as danger_m - (danger_m - 10)  = 10 m window
+    below danger as a reasonable operational range for Bihar rivers.
+    If HFL is available we can use (danger - hfl_low) as span.
+    """
+    if above_dl is not None:
+        # Positive = above DL; cap at 130 %
+        span = 10.0  # 10-metre window below danger level
+        pct  = 100.0 + (above_dl / span * 100.0) if above_dl >= 0 \
+               else 100.0 + (above_dl / span * 100.0)
+        return round(min(max(pct, 0.0), 130.0), 1)
+
+    if current_m is not None and danger_m > 0:
+        # Direct ratio (may over/underestimate for ASL values but acceptable)
+        span = 10.0
+        above = current_m - danger_m
+        pct   = 100.0 + (above / span * 100.0)
+        return round(min(max(pct, 0.0), 130.0), 1)
+
+    return 50.0
 
 def _status_from_risk(risk: str) -> str:
     return {"CRITICAL": "RISING", "HIGH": "RISING",
@@ -101,40 +136,40 @@ def _alert_from_risk(risk: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Base level tables (metre thresholds per state)
+# Base level tables
 # ---------------------------------------------------------------------------
 
 _BASE_LEVELS: Dict[str, Dict[str, float]] = {
-    "maharashtra":      {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 78.0},
-    "kerala":           {"safe": 1.8, "warning": 2.8, "danger": 4.0, "cap": 74.0},
-    "assam":            {"safe": 3.0, "warning": 5.0, "danger": 7.5, "cap": 88.0},
-    "bihar":            {"safe": 4.0, "warning": 6.0, "danger": 8.0, "cap": 86.0},
-    "odisha":           {"safe": 3.5, "warning": 5.5, "danger": 7.0, "cap": 65.0},
-    "west_bengal":      {"safe": 3.0, "warning": 5.0, "danger": 6.5, "cap": 62.0},
-    "uttar_pradesh":    {"safe": 4.5, "warning": 6.5, "danger": 9.0, "cap": 55.0},
-    "andhra_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0, "cap": 73.0},
-    "telangana":        {"safe": 2.5, "warning": 4.0, "danger": 5.5, "cap": 60.0},
-    "karnataka":        {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 55.0},
-    "gujarat":          {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 42.0},
-    "rajasthan":        {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 38.0},
-    "madhya_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0, "cap": 52.0},
-    "chhattisgarh":     {"safe": 2.5, "warning": 4.0, "danger": 5.5, "cap": 48.0},
-    "jharkhand":        {"safe": 2.5, "warning": 4.0, "danger": 5.5, "cap": 50.0},
-    "punjab":           {"safe": 2.5, "warning": 4.0, "danger": 5.5, "cap": 54.0},
-    "haryana":          {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 46.0},
-    "himachal_pradesh": {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 52.0},
-    "uttarakhand":      {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 52.0},
-    "tamil_nadu":       {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 48.0},
-    "arunachal_pradesh":{"safe": 3.0, "warning": 5.0, "danger": 7.5, "cap": 67.0},
-    "manipur":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 44.0},
-    "meghalaya":        {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 48.0},
-    "nagaland":         {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 38.0},
-    "mizoram":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 38.0},
-    "tripura":          {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 46.0},
-    "sikkim":           {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 58.0},
-    "goa":              {"safe": 1.5, "warning": 2.5, "danger": 3.5, "cap": 32.0},
-    "delhi":            {"safe": 2.5, "warning": 4.0, "danger": 6.0, "cap": 50.0},
-    "jammu_and_kashmir":{"safe": 2.0, "warning": 3.5, "danger": 5.5, "cap": 62.0},
+    "maharashtra":      {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 78.0},
+    "kerala":           {"safe": 1.8, "warning": 2.8, "danger": 4.0,  "cap": 74.0},
+    "assam":            {"safe": 3.0, "warning": 5.0, "danger": 7.5,  "cap": 88.0},
+    "bihar":            {"safe": 4.0, "warning": 6.0, "danger": 8.0,  "cap": 86.0},
+    "odisha":           {"safe": 3.5, "warning": 5.5, "danger": 7.0,  "cap": 65.0},
+    "west_bengal":      {"safe": 3.0, "warning": 5.0, "danger": 6.5,  "cap": 62.0},
+    "uttar_pradesh":    {"safe": 4.5, "warning": 6.5, "danger": 9.0,  "cap": 55.0},
+    "andhra_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0,  "cap": 73.0},
+    "telangana":        {"safe": 2.5, "warning": 4.0, "danger": 5.5,  "cap": 60.0},
+    "karnataka":        {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 55.0},
+    "gujarat":          {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 42.0},
+    "rajasthan":        {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 38.0},
+    "madhya_pradesh":   {"safe": 3.0, "warning": 4.5, "danger": 6.0,  "cap": 52.0},
+    "chhattisgarh":     {"safe": 2.5, "warning": 4.0, "danger": 5.5,  "cap": 48.0},
+    "jharkhand":        {"safe": 2.5, "warning": 4.0, "danger": 5.5,  "cap": 50.0},
+    "punjab":           {"safe": 2.5, "warning": 4.0, "danger": 5.5,  "cap": 54.0},
+    "haryana":          {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 46.0},
+    "himachal_pradesh": {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 52.0},
+    "uttarakhand":      {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 52.0},
+    "tamil_nadu":       {"safe": 2.0, "warning": 3.5, "danger": 5.0,  "cap": 48.0},
+    "arunachal_pradesh":{"safe": 3.0, "warning": 5.0, "danger": 7.5,  "cap": 67.0},
+    "manipur":          {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 44.0},
+    "meghalaya":        {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 48.0},
+    "nagaland":         {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 38.0},
+    "mizoram":          {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 38.0},
+    "tripura":          {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 46.0},
+    "sikkim":           {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 58.0},
+    "goa":              {"safe": 1.5, "warning": 2.5, "danger": 3.5,  "cap": 32.0},
+    "delhi":            {"safe": 2.5, "warning": 4.0, "danger": 6.0,  "cap": 50.0},
+    "jammu_and_kashmir":{"safe": 2.0, "warning": 3.5, "danger": 5.5,  "cap": 62.0},
 }
 
 _CITY_RIVER_MAP: Dict[str, tuple] = {
@@ -191,72 +226,67 @@ def _normalise_state_key(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# WRD Bihar builder  — 31 individual gauge stations
+# WRD Bihar builder — 31 individual ASL gauge stations
 # ---------------------------------------------------------------------------
 
 def _build_levels_from_wrd_bihar(
     wrd_stations: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
-    Convert all 31 WRD Bihar BeFIQR stations to the live-levels wire format.
-    Each station becomes its own row (multi-station view for Bihar).
-    Fields used: station, river, district, lat, lon,
-                 current_level_m, danger_level_m, hfl_m,
-                 above_below_danger_m, change_24h_m, trend, status.
+    All WRD Bihar BeFIQR stations use absolute metres above sea level (ASL).
+    Risk and capacity are derived from above_below_danger_m (signed distance
+    from danger level), NOT from current_level / danger_level ratio.
     """
     now_iso = current_timestamp_iso()
-    base    = _BASE_LEVELS.get("bihar", {"safe": 4.0, "warning": 6.0, "danger": 8.0})
     result: List[Dict[str, Any]] = []
 
     for s in wrd_stations:
-        city        = str(s.get("station") or "").strip()
-        river       = str(s.get("river") or "Unknown").strip()
-        district    = str(s.get("district") or "Bihar").strip()
-        lat         = s.get("lat", 25.8)
-        lon         = s.get("lon", 85.4)
-        current_m   = s.get("current_level_m")      # may be None (BeFIQR not updated yet)
-        danger_m    = s.get("danger_level_m") or base["danger"]
-        hfl_m       = s.get("hfl_m")
-        safe_m      = base["safe"]
-        warning_m   = base["warning"]
-        above_dl    = s.get("above_below_danger_m")  # +ve = above DL, -ve = below DL
-        change_24h  = s.get("change_24h_m")
-        trend       = s.get("trend", "—")
-        wrd_status  = s.get("status", "UNKNOWN")
-        source_raw  = s.get("source", "WRD_BIHAR_BEFIQR")
-        last_update = s.get("last_update", now_iso)
+        city       = str(s.get("station") or "").strip()
+        river      = str(s.get("river") or "Unknown").strip()
+        district   = str(s.get("district") or "Bihar").strip()
+        lat        = s.get("lat", 25.8)
+        lon        = s.get("lon", 85.4)
+        current_m  = s.get("current_level_m")       # ASL metres, may be None
+        danger_m   = s.get("danger_level_m") or 0.0  # ASL metres
+        hfl_m      = s.get("hfl_m")                  # ASL metres
+        above_dl   = s.get("above_below_danger_m")   # +ve = above DL (flooding!)
+        change_24h = s.get("change_24h_m")
+        trend      = s.get("trend", "\u2014")
+        wrd_status = s.get("status", "UNKNOWN")
+        source_raw = s.get("source", "WRD_BIHAR_BEFIQR")
+        last_update= s.get("last_update", now_iso)
 
-        if city == "":
+        if not city:
             continue
 
-        # Capacity percent: use current vs danger if available
-        if current_m is not None and danger_m > 0:
-            capacity = _capacity_from_levels(current_m, safe_m, danger_m)
-        else:
-            # Fallback: derive from WRD status label
-            capacity = {"CRITICAL": 96.0, "DANGER": 88.0,
-                        "WARNING": 70.0, "NORMAL": 40.0}.get(wrd_status.upper(), 50.0)
+        # ---- Risk: driven by signed distance from danger level ----
+        risk     = _risk_from_above_dl(above_dl, wrd_status)
 
-        risk   = _risk_from_wrd_status(wrd_status) if wrd_status != "UNKNOWN" \
-                 else _risk_from_capacity(capacity)
-        status = _status_from_risk(risk)
-        alert  = _alert_from_risk(risk)
+        # ---- Capacity: 100% = at DL, >100% = above DL, uses 10m window ----
+        capacity = _capacity_from_asl_levels(current_m, danger_m, hfl_m, above_dl)
+
+        status   = _status_from_risk(risk)
+        alert    = _alert_from_risk(risk)
+
+        # ---- Safe / warning expressed in ASL space for display ----
+        # Use danger_m - 10 as "safe" and danger_m - 3 as "warning" in ASL
+        safe_display    = round(danger_m - 10.0, 2) if danger_m > 10 else 0.0
+        warning_display = round(danger_m - 3.0,  2) if danger_m > 3  else danger_m
 
         result.append({
-            # Standard live-levels fields (Flutter app reads these)
             "city":                 city,
             "state":                "Bihar",
             "river_name":           river,
             "station":              city,
             "current_level":        current_m,
-            "safe_level":           safe_m,
-            "warning_level":        warning_m,
+            "safe_level":           safe_display,
+            "warning_level":        warning_display,
             "danger_level":         danger_m,
-            "capacity_percent":     round(max(0.0, capacity), 1),
+            "capacity_percent":     capacity,
             "risk_level":           risk,
             "status":               status,
             "alert":                alert,
-            "flow_rate":            None,   # WRD reports metres, not m3/s
+            "flow_rate":            None,
             "lat":                  lat,
             "lon":                  lon,
             "data_source":          "WRD_BIHAR_BEFIQR" if "FALLBACK" not in source_raw else "WRD_BIHAR_FALLBACK",
@@ -274,7 +304,7 @@ def _build_levels_from_wrd_bihar(
 
 
 # ---------------------------------------------------------------------------
-# GloFAS builder  — all states except Bihar (which uses WRD)
+# GloFAS builder — all states except Bihar
 # ---------------------------------------------------------------------------
 
 def _build_station_record(
@@ -299,7 +329,7 @@ def _build_station_record(
         current_m = min(current_m, danger_m * 1.5)
 
     capacity = _capacity_from_discharge(discharge, danger_q) if danger_q > 0 \
-               else _capacity_from_levels(current_m, safe_m, danger_m)
+               else min(round((current_m - safe_m) / max(danger_m - safe_m, 0.01) * 100, 1), 130.0)
     risk     = str(station.get("risk_level") or "").upper() or \
                _risk_from_discharge(discharge, danger_q, warning_q)
     ts       = str(station.get("timestamp") or now_iso)
@@ -331,10 +361,6 @@ def _build_levels_from_glofas(
     glofas_cache: List[Dict],
     exclude_state_keys: set,
 ) -> tuple:
-    """
-    Highest-discharge-wins deduplication per state.
-    Skips any state in exclude_state_keys (e.g. Bihar handled by WRD).
-    """
     now_iso = current_timestamp_iso()
     best_by_state: Dict[str, Dict[str, Any]] = {}
 
@@ -346,7 +372,6 @@ def _build_levels_from_glofas(
         state_key = _normalise_state_key(state)
         if state_key in exclude_state_keys:
             continue
-
         record    = _build_station_record(station, now_iso, state_key)
         discharge = record["_discharge"]
         existing  = best_by_state.get(state_key)
@@ -357,12 +382,11 @@ def _build_levels_from_glofas(
     for record in best_by_state.values():
         record.pop("_discharge", None)
         result.append(record)
-
     return result, set(best_by_state.keys())
 
 
 # ---------------------------------------------------------------------------
-# Matrix fallback  — states with no live data at all
+# Matrix fallback
 # ---------------------------------------------------------------------------
 
 def _build_levels_from_matrix(exclude_state_keys: set) -> List[Dict[str, Any]]:
@@ -374,17 +398,16 @@ def _build_levels_from_matrix(exclude_state_keys: set) -> List[Dict[str, Any]]:
         if state_key in seen or state_key in exclude_state_keys:
             continue
         seen.add(state_key)
-
         base          = _BASE_LEVELS.get(state_key, {"safe": 2.0, "warning": 3.5, "danger": 5.0, "cap": 50.0})
         city, river   = _CITY_RIVER_MAP.get(state_key, ("Unknown", "River"))
         state_display = _STATE_DISPLAY.get(state_key, state_key.replace("_", " ").title())
         severity      = entry.get("default_severity", "MODERATE").upper()
-        capacity      = {"CRITICAL": 88.0, "HIGH": 75.0, "MODERATE": 55.0, "LOW": 35.0}.get(severity, base.get("cap", 50.0))
+        capacity      = {"CRITICAL": 105.0, "HIGH": 88.0, "MODERATE": 55.0, "LOW": 35.0}.get(severity, base.get("cap", 50.0))
         risk          = _risk_from_capacity(capacity)
         danger_m      = float(entry.get("danger_threshold_m")  or base["danger"])
         warning_m     = float(entry.get("warning_threshold_m") or base["warning"])
         safe_m        = base["safe"]
-        current       = round(safe_m + (danger_m - safe_m) * (capacity / 100.0), 2)
+        current       = round(safe_m + (danger_m - safe_m) * min(capacity / 100.0, 1.3), 2)
 
         result.append({
             "city":             city,
@@ -413,16 +436,10 @@ def _build_levels_from_matrix(exclude_state_keys: set) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _build_all_levels() -> List[Dict[str, Any]]:
-    """
-    Priority merge:
-      1. WRD Bihar  — 31 real gauge stations (individual rows)
-      2. GloFAS     — best station per non-Bihar state
-      3. Matrix     — fallback for states with no live source
-    """
     covered: set = set()
     all_levels: List[Dict[str, Any]] = []
 
-    # ── 1. WRD Bihar (“best source” for Bihar) ─────────────────────────────
+    # 1. WRD Bihar
     wrd_stations = _get_wrd_bihar_stations()
     if wrd_stations:
         bihar_levels = _build_levels_from_wrd_bihar(wrd_stations)
@@ -430,9 +447,9 @@ def _build_all_levels() -> List[Dict[str, Any]]:
         covered.add("bihar")
         print(f"[live_levels] \u2705 WRD Bihar: {len(bihar_levels)} stations")
     else:
-        print("[live_levels] \u26a0\ufe0f  WRD Bihar cache empty — Bihar will use GloFAS/matrix")
+        print("[live_levels] \u26a0\ufe0f  WRD Bihar cache empty")
 
-    # ── 2. GloFAS (skip Bihar if already covered) ──────────────────────────
+    # 2. GloFAS (skip Bihar)
     glofas_cache = _get_glofas_cache()
     if glofas_cache:
         glofas_levels, glofas_covered = _build_levels_from_glofas(glofas_cache, exclude_state_keys=covered)
@@ -442,7 +459,7 @@ def _build_all_levels() -> List[Dict[str, Any]]:
     else:
         print("[live_levels] \u26a0\ufe0f  GloFAS cache empty")
 
-    # ── 3. Matrix fallback for remaining states ───────────────────────────
+    # 3. Matrix fallback
     matrix_levels = _build_levels_from_matrix(exclude_state_keys=covered)
     all_levels.extend(matrix_levels)
     print(f"[live_levels] Matrix fallback: {len(matrix_levels)} states")
@@ -461,12 +478,6 @@ async def get_live_levels(
     limit: int = 100,
     river: Optional[str] = None,
 ):
-    """
-    All river gauge stations.
-    Bihar returns 31 individual WRD stations (HFL + DL + current level).
-    Other states return one representative GloFAS/matrix entry each.
-    Optional filters: ?state=Bihar ?river=Bagmati ?limit=10
-    """
     levels = _build_all_levels()
 
     if state:
@@ -519,6 +530,7 @@ async def get_critical_alerts(
         if state    and state.strip().lower()    not in item["state"].lower():  continue
         if severity and severity.strip().upper() != risk:                       continue
 
+        above_dl = item.get("above_below_danger_m")
         alerts.append({
             "id":             f"{item['city']}_{item['state']}_alert".replace(" ", "_"),
             "city":           item["city"],
@@ -526,20 +538,24 @@ async def get_critical_alerts(
             "severity":       risk,
             "title":          f"{item['city']} flood alert",
             "message":        (
-                f"{item.get('river_name', 'River')} at "
-                f"{item['capacity_percent']:.0f}% of danger level — {risk.lower()} risk."
+                f"{item.get('river_name', 'River')} is "
+                + (f"{abs(above_dl):.2f}m ABOVE danger level" if above_dl and above_dl > 0
+                   else f"within {abs(above_dl):.2f}m of danger level" if above_dl
+                   else f"at {item['capacity_percent']:.0f}% of danger level")
+                + f" \u2014 {risk.lower()} risk."
             ),
-            "river_name":     item.get("river_name", ""),
-            "district":       item.get("district"),
-            "current_level":  item["current_level"],
-            "danger_level":   item["danger_level"],
-            "hfl_m":          item.get("hfl_m"),
-            "above_below_danger_m": item.get("above_below_danger_m"),
-            "change_24h_m":   item.get("change_24h_m"),
-            "trend":          item.get("trend"),
-            "data_source":    item.get("data_source", "UNKNOWN"),
-            "timestamp":      now_iso,
-            "resolved":       False,
+            "river_name":           item.get("river_name", ""),
+            "district":             item.get("district"),
+            "current_level":        item["current_level"],
+            "danger_level":         item["danger_level"],
+            "hfl_m":                item.get("hfl_m"),
+            "above_below_danger_m": above_dl,
+            "change_24h_m":         item.get("change_24h_m"),
+            "trend":                item.get("trend"),
+            "capacity_percent":     item["capacity_percent"],
+            "data_source":          item.get("data_source", "UNKNOWN"),
+            "timestamp":            now_iso,
+            "resolved":             False,
             "recommendation": (
                 "Immediate evacuation. Contact NDRF."
                 if risk == "CRITICAL" else
