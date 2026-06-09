@@ -22,7 +22,7 @@ class AppConfig {
   /// Override at build time: --dart-define=EQUINOX_BH_BASE_URL=https://...
   static const String baseUrl = String.fromEnvironment(
     'EQUINOX_BH_BASE_URL',
-    defaultValue: 'https://equinox-bh.onrender.com',
+    defaultValue: 'https://android-flood-app-production.up.railway.app',
   );
 
   static const String backupUrl = String.fromEnvironment(
@@ -80,7 +80,8 @@ class AppConfig {
   static String get weatherForecastEndpoint  => epWeatherForecast;
 
   // ── Timeouts & intervals ──────────────────────────────────────────────
-  static const Duration coldStartTimeout = Duration(seconds: 45);
+  // Railway has no cold start — reduced from 45s to 10s
+  static const Duration coldStartTimeout = Duration(seconds: 10);
   static const Duration healthTimeout    = Duration(seconds: 10);
   static Duration get requestTimeout     => const Duration(seconds: 15);
   static Duration get realtimeInterval   => const Duration(minutes: 5);
