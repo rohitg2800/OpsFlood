@@ -39,6 +39,7 @@ import 'screens/map_screen.dart';
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
+import 'providers/locale_provider.dart';
 import 'services/data_fetch_engine.dart';
 
 final FlutterLocalNotificationsPlugin _localNotifications =
@@ -87,20 +88,13 @@ class FloodWatchApp extends ConsumerWidget {
 
   static ThemeData _themeFor(AppThemeMode mode) {
     switch (mode) {
-      case AppThemeMode.light:
-        return RiverColors.lightTheme();
-      case AppThemeMode.dark:
-        return RiverColors.darkTheme();
-      case AppThemeMode.sunset:
-        return RiverColors.sunsetTheme();
-      case AppThemeMode.ocean:
-        return RiverColors.oceanTheme();
-      case AppThemeMode.roboticDark:
-        return const RoboticTheme(isDark: true).toThemeData();
-      case AppThemeMode.roboticLight:
-        return const RoboticTheme(isDark: false).toThemeData();
-      case AppThemeMode.system:
-        return RiverColors.darkTheme();
+      case AppThemeMode.light:        return RiverColors.lightTheme();
+      case AppThemeMode.dark:         return RiverColors.darkTheme();
+      case AppThemeMode.sunset:       return RiverColors.sunsetTheme();
+      case AppThemeMode.ocean:        return RiverColors.oceanTheme();
+      case AppThemeMode.roboticDark:  return const RoboticTheme(isDark: true).toThemeData();
+      case AppThemeMode.roboticLight: return const RoboticTheme(isDark: false).toThemeData();
+      case AppThemeMode.system:       return RiverColors.darkTheme();
     }
   }
 
@@ -108,6 +102,8 @@ class FloodWatchApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final mode          = ref.watch(themeModeProvider);
     final themeNotifier = ref.read(themeModeProvider.notifier);
+    // ★ Watch locale provider — rebuilds MaterialApp on language change
+    final locale        = ref.watch(localeProvider);
 
     final ThemeData lightSlot;
     final ThemeData darkSlot;
@@ -122,11 +118,13 @@ class FloodWatchApp extends ConsumerWidget {
     }
 
     return MaterialApp(
-      title:                  'FloodWatch',
+      title:                      'FloodWatch',
       debugShowCheckedModeBanner: false,
-      theme:                  lightSlot,
-      darkTheme:              darkSlot,
-      themeMode:              themeNotifier.flutterMode,
+      theme:                      lightSlot,
+      darkTheme:                  darkSlot,
+      themeMode:                  themeNotifier.flutterMode,
+      // ★ Locale wired here — changing localeProvider rebuilds full app
+      locale:                     locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -137,20 +135,14 @@ class FloodWatchApp extends ConsumerWidget {
         Locale('en'),
         Locale('hi'),
       ],
-      // ★ Splash → MainShell (with persistent bottom nav)
       initialRoute: SplashScreen.route,
       onGenerateRoute: (settings) {
         switch (settings.name) {
           case SplashScreen.route:
             return _fade(const SplashScreen());
-
-          // ★ Both HomeScreen and shell route land on the same shell
           case HomeScreen.route:
           case MainShell.route:
             return _fade(const MainShell());
-
-          // Individual screens still accessible as full-screen routes
-          // (e.g. pushed from city detail or deep links)
           case DashboardScreen.route:
             return _fade(const DashboardScreen());
           case AlertsScreen.route:
