@@ -2,9 +2,9 @@
 // Riverpod 3.x compatible — uses Notifier + NotifierProvider
 library;
 
-import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
+
+import '../services/backend_api_service.dart';
 
 // ── State model ──────────────────────────────────────────────────────────────
 class NewsItem {
@@ -58,8 +58,6 @@ class NewsFeedState {
 
 // ── Notifier ─────────────────────────────────────────────────────────────────
 class NewsFeedNotifier extends Notifier<NewsFeedState> {
-  static const _backendBase = 'https://opsflood-backend.onrender.com';
-
   @override
   NewsFeedState build() {
     Future.microtask(fetch);
@@ -72,21 +70,9 @@ class NewsFeedNotifier extends Notifier<NewsFeedState> {
   Future<void> fetch() async {
     state = state.copyWith(isLoading: true);
     try {
-      final res = await http
-          .get(Uri.parse('$_backendBase/api/news?state=bihar'))
-          .timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) {
-        final List<dynamic> raw = jsonDecode(res.body) as List<dynamic>;
-        final items = raw
-            .map((e) => NewsItem.fromJson(e as Map<String, dynamic>))
-            .toList();
-        state = NewsFeedState(items: items);
-      } else {
-        state = NewsFeedState(
-          items: _fallback(),
-          error: 'Backend returned ${res.statusCode}',
-        );
-      }
+      final raw   = await BackendApiService.instance.fetchNews(state: 'bihar');
+      final items = raw.map(NewsItem.fromJson).toList();
+      state = NewsFeedState(items: items.isNotEmpty ? items : _fallback());
     } catch (e) {
       state = NewsFeedState(items: _fallback(), error: e.toString());
     }

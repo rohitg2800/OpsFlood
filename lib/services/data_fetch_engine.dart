@@ -1,18 +1,16 @@
-// lib/services/data_fetch_engine.dart  v2.2
+// lib/services/data_fetch_engine.dart  v3.0 — backend-only
 //
-// v2.1 → v2.2 changes:
-//   Forecast Step 6: WRD-covered stations now use ws.forecast24h (bulletin-
-//   accurate 24h predicted level from FMISC/CWC model) instead of the
-//   GloFAS rate-of-rise heuristic. The heuristic is retained as fallback
-//   for GLOFAS/SEED stations not covered by WRD bulletin.
+// v2.2 → v3.0 changes:
+//   ALL direct external HTTP calls (GloFAS flood-api, Open-Meteo rainfall,
+//   CWC FFS multi-URL race) are now routed through BackendApiService.
+//   The Flutter app makes ZERO direct calls to any third-party API.
 //
-//   Logic:
-//     source == 'WRD_LIVE' && ws.forecast24h != null
-//       → forecastLevel24h = ws.forecast24h (clamped to hfl)
-//         forecastLevel48h / 72h = heuristic from that anchor (not bulletin)
-//     otherwise
-//       → all three = heuristic from current level
+//   Endpoint mapping:
+//     Old: https://flood-api.open-meteo.com/v1/flood   → /api/glofas
+//     Old: https://api.open-meteo.com/v1/forecast      → /api/rainfall
+//     Old: CWC FFS multi-URL race                      → /api/cwc-stations
 //
+//   Forecast Step 6 (WRD bulletin forecast24h) is unchanged from v2.2.
 library;
 
 import 'dart:async';
@@ -20,10 +18,10 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import '../data/bihar_rivers.dart';
 import '../models/river_station.dart';
+import 'backend_api_service.dart';
 import 'wrd_bihar_service.dart';
 import 'fcm_broadcast_service.dart';
 
@@ -268,22 +266,28 @@ class DataFetchEngine {
   }
   static final instance = DataFetchEngine._();
 
-  static const _baseInterval   = Duration(seconds: 45);
-  static const _cwcTimeout     = Duration(seconds: 4);
-  static const _httpTimeout    = Duration(seconds: 8);
-  static const _fcmStaleness   = Duration(minutes: 3);
-  static const _maxBackoffMin  = Duration(minutes: 5);
-  static const _openMeteoBatch = 8;
+  static const _baseInterval  = Duration(seconds: 45);
+  static const _fcmStaleness  = Duration(minutes: 3);
+  static const _maxBackoffMin = Duration(minutes: 5);
 
-  static const _cwcCodes = <String, String>{
-    'Birpur (CWC)':  'KOSI-BIRPUR',
-    'Basua':         'KOSI-BASUA',
-    'Kursela':       'KOSI-KURSELA',
-    'Dumariaghat':   'GANDAK-DUMARIAGHAT',
-    'Hajipur':       'GANDAK-HAJIPUR',
-    'Gandhighat':    'GANGA-GANDHIGHAT',
-    'Bhagalpur':     'GANGA-BHAGALPUR',
-    'Sripalpur':     'PUNPUN-SRIPALPUR',
+  // CWC station codes to query from the backend
+  static const _cwcCodes = <String>[
+    'KOSI-BIRPUR', 'KOSI-BASUA', 'KOSI-KURSELA',
+    'GANDAK-DUMARIAGHAT', 'GANDAK-HAJIPUR',
+    'GANGA-GANDHIGHAT', 'GANGA-BHAGALPUR',
+    'PUNPUN-SRIPALPUR',
+  ];
+
+  // Map backend CWC code → gauge station name (for merging into station map)
+  static const _cwcCodeToStation = <String, String>{
+    'KOSI-BIRPUR':        'Birpur (CWC)',
+    'KOSI-BASUA':         'Basua',
+    'KOSI-KURSELA':       'Kursela',
+    'GANDAK-DUMARIAGHAT': 'Dumariaghat',
+    'GANDAK-HAJIPUR':     'Hajipur',
+    'GANGA-GANDHIGHAT':   'Gandhighat',
+    'GANGA-BHAGALPUR':    'Bhagalpur',
+    'PUNPUN-SRIPALPUR':   'Sripalpur',
   };
 
   final _ctrl = StreamController<DataFetchSnapshot>.broadcast();
@@ -297,8 +301,6 @@ class DataFetchEngine {
   int      _errorStreak = 0;
 
   final Map<String, List<_LevelSample>> _history = {};
-
-  // v2.2: track forecast24h values from WRD scrape so Step 6 can use them
   final Map<String, double> _wrdForecast24h = {};
 
   void start() {
@@ -347,6 +349,7 @@ class DataFetchEngine {
     _log('fetch cycle start');
     final sources = <SourceStatus>[];
     final now     = DateTime.now();
+    final api     = BackendApiService.instance;
 
     // ── Step 1: Seed ──────────────────────────────────────────────────────────
     final Map<String, StationReading> stations = {};
@@ -377,10 +380,10 @@ class DataFetchEngine {
         name: 'SEED', healthy: true,
         stationCount: stations.length, isFromSeed: true));
 
-    // ── Step 2: WRD Bihar ─────────────────────────────────────────────────────
+    // ── Step 2: WRD Bihar (via BackendApiService) ─────────────────────────────
     final wrdStart = DateTime.now();
     int wrdCount   = 0;
-    _wrdForecast24h.clear();  // reset before each cycle
+    _wrdForecast24h.clear();
     try {
       final wrdList = await WrdBiharService.instance.fetch();
       for (final ws in wrdList) {
@@ -400,7 +403,6 @@ class DataFetchEngine {
           isLive:       live,
           fetchedAt:    now,
         );
-        // v2.2: stash bulletin forecast24h keyed by normalised station name
         if (ws.forecast24h != null && ws.forecast24h! > 0) {
           _wrdForecast24h[key] = ws.forecast24h!;
         }
@@ -423,107 +425,94 @@ class DataFetchEngine {
       _log('WRD Bihar failed: $e');
     }
 
-    // ── Step 3: CWC multi-URL race ────────────────────────────────────────────
-    final cwcStart  = DateTime.now();
-    int   cwcCount  = 0;
-    final cwcFutures = _cwcCodes.entries.map((e) =>
-        _fetchCwcStationRaced(e.value)
-            .then<MapEntry<String, double?>?>(
-                (lvl) => MapEntry(e.key, lvl))
-            .catchError((_) => null),
-    ).toList();
-    final cwcResults = await Future.wait(cwcFutures);
-    for (final r in cwcResults) {
-      if (r == null || r.value == null) continue;
-      final base = _findBase(stations, r.key, '');
-      if (base == null) continue;
-      final cl  = r.value!;
-      final key = _normaliseKey(r.key);
-      stations[key] = base.copyWith(
-        currentLevel: cl,
-        riskLabel: StationReading._deriveRisk(cl, base.warningLevel, base.dangerLevel),
-        source:    'CWC_FFS',
-        isLive:    true,
-        fetchedAt: now,
-      );
-      cwcCount++;
+    // ── Step 3: CWC stations (via backend /api/cwc-stations) ─────────────────
+    final cwcStart = DateTime.now();
+    int   cwcCount = 0;
+    try {
+      final cwcRows = await api.fetchCwcStations(codes: _cwcCodes);
+      for (final r in cwcRows) {
+        final code    = r['code'] as String? ?? '';
+        final lvl     = (r['level'] as num?)?.toDouble();
+        if (lvl == null) continue;
+        final sName   = _cwcCodeToStation[code];
+        if (sName == null) continue;
+        final base    = _findBase(stations, sName, '');
+        if (base == null) continue;
+        final key     = _normaliseKey(sName);
+        stations[key] = base.copyWith(
+          currentLevel: lvl,
+          riskLabel: StationReading._deriveRisk(lvl, base.warningLevel, base.dangerLevel),
+          source:    'CWC_FFS',
+          isLive:    true,
+          fetchedAt: now,
+        );
+        cwcCount++;
+      }
+      sources.add(SourceStatus(
+        name:          'CWC_FFS',
+        healthy:       cwcCount > 0,
+        latencyMs:     DateTime.now().difference(cwcStart).inMilliseconds,
+        stationCount:  cwcCount,
+        lastSuccessAt: cwcCount > 0 ? now : null,
+      ));
+    } catch (e) {
+      // Backend /api/cwc-stations may not exist yet — non-fatal
+      sources.add(SourceStatus(
+        name:         'CWC_FFS',
+        healthy:      false,
+        latencyMs:    DateTime.now().difference(cwcStart).inMilliseconds,
+        errorMessage: e.toString(),
+      ));
+      _log('CWC backend fetch failed (non-fatal): $e');
     }
-    sources.add(SourceStatus(
-      name:          'CWC_FFS',
-      healthy:       cwcCount > 0,
-      latencyMs:     DateTime.now().difference(cwcStart).inMilliseconds,
-      stationCount:  cwcCount,
-      lastSuccessAt: cwcCount > 0 ? now : null,
-    ));
 
-    // ── Step 4: GloFAS + Open-Meteo ───────────────────────────────────────────
+    // ── Step 4: GloFAS + Open-Meteo rainfall (via backend) ───────────────────
     final stList = stations.values.toList();
+    final lats   = stList.map((s) => s.lat).toList();
+    final lons   = stList.map((s) => s.lon).toList();
+    final keys   = stList.map((s) => s.stationName.toLowerCase().trim()).toList();
+
     final Map<int, double> dischargeByIdx = {};
     final Map<int, double> meanByIdx      = {};
     final Map<int, double> rainByIdx      = {};
 
     final glofasStart = DateTime.now();
     try {
-      final lats = stList.map((s) => s.lat.toString()).join(',');
-      final lons = stList.map((s) => s.lon.toString()).join(',');
-      final res  = await http.get(Uri.parse(
-        'https://flood-api.open-meteo.com/v1/flood'
-        '?latitude=$lats&longitude=$lons'
-        '&daily=river_discharge,river_discharge_mean'
-        '&forecast_days=3&models=seamless_v4',
-      )).timeout(_httpTimeout);
-      if (res.statusCode == 200) {
-        final body  = jsonDecode(res.body);
-        final items = body is List ? body : [body];
-        for (int i = 0; i < items.length && i < stList.length; i++) {
-          final daily = items[i]['daily'] as Map<String, dynamic>?;
-          final dis   = _extractDoubles(daily?['river_discharge']);
-          final mean  = _extractDoubles(daily?['river_discharge_mean']);
-          if (dis.isNotEmpty)  dischargeByIdx[i] = dis[0];
-          if (mean.isNotEmpty) meanByIdx[i]      = mean[0];
-        }
+      final rows = await api.fetchGloFAS(lats: lats, lons: lons, cityKeys: keys);
+      for (int i = 0; i < rows.length && i < stList.length; i++) {
+        final dis  = (rows[i]['discharge']      as num?)?.toDouble();
+        final mean = (rows[i]['discharge_mean'] as num?)?.toDouble();
+        if (dis  != null) dischargeByIdx[i] = dis;
+        if (mean != null) meanByIdx[i]      = mean;
       }
       sources.add(SourceStatus(
-        name: 'GLOFAS', healthy: dischargeByIdx.isNotEmpty,
+        name:         'GLOFAS',
+        healthy:      dischargeByIdx.isNotEmpty,
         latencyMs:    DateTime.now().difference(glofasStart).inMilliseconds,
-        stationCount: dischargeByIdx.length, lastSuccessAt: now,
+        stationCount: dischargeByIdx.length,
+        lastSuccessAt: now,
       ));
     } catch (e) {
       sources.add(SourceStatus(
-          name: 'GLOFAS', healthy: false,
-          latencyMs:    DateTime.now().difference(glofasStart).inMilliseconds,
-          errorMessage: e.toString()));
-      _log('GloFAS failed: $e');
+        name:         'GLOFAS',
+        healthy:      false,
+        latencyMs:    DateTime.now().difference(glofasStart).inMilliseconds,
+        errorMessage: e.toString(),
+      ));
+      _log('GloFAS (backend) failed: $e');
     }
 
-    // Open-Meteo rainfall batched
-    for (int bStart = 0; bStart < stList.length; bStart += _openMeteoBatch) {
-      final bEnd  = math.min(bStart + _openMeteoBatch, stList.length);
-      final batch = stList.sublist(bStart, bEnd);
-      final bLats = batch.map((s) => s.lat.toString()).join(',');
-      final bLons = batch.map((s) => s.lon.toString()).join(',');
-      try {
-        final res = await http.get(Uri.parse(
-          'https://api.open-meteo.com/v1/forecast'
-          '?latitude=$bLats&longitude=$bLons'
-          '&daily=precipitation_sum'
-          '&forecast_days=1&timezone=Asia%2FKolkata',
-        )).timeout(_httpTimeout);
-        if (res.statusCode == 200) {
-          final body  = jsonDecode(res.body);
-          final items = body is List ? body : [body];
-          for (int i = 0; i < items.length && i < batch.length; i++) {
-            final daily = items[i]['daily'] as Map<String, dynamic>?;
-            final vals  = _extractDoubles(daily?['precipitation_sum']);
-            if (vals.isNotEmpty) rainByIdx[bStart + i] = vals[0];
-          }
-        }
-      } catch (e) {
-        _log('Open-Meteo batch[$bStart..${bEnd-1}] failed: $e');
+    try {
+      final rows = await api.fetchRainfall(lats: lats, lons: lons, cityKeys: keys);
+      for (int i = 0; i < rows.length && i < stList.length; i++) {
+        final rain = (rows[i]['rainfall24h'] as num?)?.toDouble();
+        if (rain != null) rainByIdx[i] = rain;
       }
+    } catch (e) {
+      _log('Rainfall (backend) failed: $e');
     }
 
-    // Merge GloFAS + rain into SEED-only stations (FIX #7: HFL clamp retained)
+    // Merge GloFAS + rain into SEED-only stations
     for (int i = 0; i < stList.length; i++) {
       final s    = stList[i];
       final key  = _normaliseKey(s.stationName);
@@ -566,10 +555,6 @@ class DataFetchEngine {
     }
 
     // ── Step 6: 24/48/72h forecast ────────────────────────────────────────────
-    //
-    // v2.2 change: WRD_LIVE stations use bulletin forecast24h for the 24h slot.
-    // 48h and 72h still use heuristic anchored from the bulletin 24h value.
-    // GLOFAS/SEED stations: all three slots use heuristic from current level.
     final finalList = withRoR.map((s) {
       if (!s.isLive) return s;
       final key      = _normaliseKey(s.stationName);
@@ -578,12 +563,9 @@ class DataFetchEngine {
           ? (s.rainfall24hMm! / 50.0).clamp(0.0, 1.5) : 0.3;
       final rise     = ror * rainMod;
 
-      // Bulletin 24h forecast available for this station?
       final bulletinF24 = _wrdForecast24h[key];
       if (bulletinF24 != null && s.source == 'WRD_LIVE') {
-        // Use bulletin for 24h; extrapolate 48/72 from that anchor.
-        // If ror is near-zero use simple linear from bulletin value.
-        final f24 = bulletinF24.clamp(0.0, s.hfl);
+        final f24   = bulletinF24.clamp(0.0, s.hfl);
         final delta = rise > 0 ? rise : (f24 - s.currentLevel) / 24.0;
         return s.copyWith(
           forecastLevel24h: f24,
@@ -592,7 +574,6 @@ class DataFetchEngine {
         );
       }
 
-      // Fallback: full heuristic (GloFAS / SEED / WRD_DISK)
       return s.copyWith(
         forecastLevel24h: (s.currentLevel + rise * 24).clamp(0.0, s.hfl),
         forecastLevel48h: (s.currentLevel + rise * 48).clamp(0.0, s.hfl),
@@ -613,50 +594,6 @@ class DataFetchEngine {
     _log('cycle done: ${finalList.length} stations, '
         '${finalList.where((s) => s.isLive).length} live, '
         '${_wrdForecast24h.length} bulletin-24h forecasts');
-  }
-
-  Future<double?> _fetchCwcStationRaced(String code) async {
-    final urls = [
-      'https://beams.fmiscwrdbihar.gov.in/ffs/api/station/$code',
-      'https://indiawris.gov.in/wris/#/riverMonitoring?station=$code',
-      'https://ffs.india-water.gov.in/ffs/api/station/$code',
-      'https://ffs.india-water.gov.in/ffs/pages/getFloodData.php?station=$code',
-    ];
-    final futures = urls.map((url) async {
-      try {
-        final res = await http.get(
-          Uri.parse(url),
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/2.2'},
-        ).timeout(_cwcTimeout);
-        if (res.statusCode != 200) return null;
-        return _extractLevel(jsonDecode(res.body));
-      } catch (_) {
-        return null;
-      }
-    }).toList();
-    final results = await Future.wait(futures);
-    for (final r in results) {
-      if (r != null) return r;
-    }
-    return null;
-  }
-
-  double? _extractLevel(dynamic j) {
-    if (j is Map) {
-      for (final k in ['level','water_level','gauge','value','currentLevel',
-                       'wl','WaterLevel','current_level']) {
-        if (j[k] != null) {
-          final v = j[k];
-          if (v is double) return v;
-          if (v is int)    return v.toDouble();
-          return double.tryParse(v.toString());
-        }
-      }
-      if (j['data']    != null) return _extractLevel(j['data']);
-      if (j['station'] != null) return _extractLevel(j['station']);
-    }
-    if (j is List && j.isNotEmpty) return _extractLevel(j.first);
-    return null;
   }
 
   StationReading? _findBase(
@@ -689,17 +626,6 @@ class DataFetchEngine {
 
   static String _normaliseKey(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ' ').trim();
-
-  List<double> _extractDoubles(dynamic raw) {
-    if (raw is List) {
-      return raw.map<double?>((v) {
-        if (v is double) return v;
-        if (v is int)    return v.toDouble();
-        return double.tryParse(v.toString());
-      }).whereType<double>().toList();
-    }
-    return [];
-  }
 
   static DataFetchSnapshot _buildSeedSnapshot() {
     final now   = DateTime.now();

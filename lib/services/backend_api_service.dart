@@ -1,10 +1,10 @@
 // lib/services/backend_api_service.dart
 //
-// OpsFlood — Single backend HTTP client (v1.0)
+// OpsFlood — Single backend HTTP client (v2.0)
 //
 // ALL external data (BeFIQR/WRD scraping, GloFAS river discharge,
-// Open-Meteo rainfall) is fetched from our own backend server.
-// The Flutter app NEVER calls BeFIQR, GloFAS or Open-Meteo directly.
+// Open-Meteo rainfall, news feed) is fetched from our own backend server.
+// The Flutter app NEVER calls BeFIQR, GloFAS, Open-Meteo, or news APIs directly.
 //
 // Backend base URL is set via the compile-time dart-define:
 //   --dart-define=BACKEND_URL=https://your-backend.com
@@ -119,6 +119,55 @@ class BackendApiService {
       return body.whereType<Map<String, dynamic>>().toList();
     }
     throw FormatException('rainfall: unexpected response shape');
+  }
+
+  // ── /api/news?state=... ───────────────────────────────────────────────────
+  // Returns a list of news/alert items:
+  // [
+  //   {
+  //     "title": "...",
+  //     "source": "IMD",
+  //     "severity": "ORANGE",
+  //     "url": "...",
+  //     "published_at": "2026-06-09T...",
+  //     "summary": "..."
+  //   }, ...
+  // ]
+  Future<List<Map<String, dynamic>>> fetchNews({required String state}) async {
+    final uri = Uri.parse('$_kBackendBase/api/news'
+        '?state=${Uri.encodeComponent(state)}');
+    _log('GET $uri');
+    final res = await http.get(uri).timeout(_kConnectTimeout);
+    _assertOk(res, 'news');
+    final body = jsonDecode(res.body);
+    if (body is List) {
+      return body.whereType<Map<String, dynamic>>().toList();
+    }
+    if (body is Map && body['items'] is List) {
+      return (body['items'] as List).whereType<Map<String, dynamic>>().toList();
+    }
+    throw FormatException('news: unexpected response shape');
+  }
+
+  // ── /api/cwc-stations?codes=... ──────────────────────────────────────────
+  // Returns a list of CWC station readings keyed by station code:
+  // [
+  //   { "code": "KOSI-BIRPUR", "level": 74.82, "fetchedAt": "..." }, ...
+  // ]
+  Future<List<Map<String, dynamic>>> fetchCwcStations({
+    required List<String> codes,
+  }) async {
+    if (codes.isEmpty) return [];
+    final uri = Uri.parse('$_kBackendBase/api/cwc-stations'
+        '?codes=${codes.join(',')}');
+    _log('GET $uri');
+    final res = await http.get(uri).timeout(_kConnectTimeout);
+    _assertOk(res, 'cwc-stations');
+    final body = jsonDecode(res.body);
+    if (body is List) {
+      return body.whereType<Map<String, dynamic>>().toList();
+    }
+    throw FormatException('cwc-stations: unexpected response shape');
   }
 
   // ── /health ───────────────────────────────────────────────────────────────
