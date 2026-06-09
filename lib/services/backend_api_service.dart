@@ -1,6 +1,6 @@
 // lib/services/backend_api_service.dart
 //
-// OpsFlood — Single backend HTTP client (v2.0)
+// OpsFlood — Single backend HTTP client (v2.1)
 //
 // ALL external data (BeFIQR/WRD scraping, GloFAS river discharge,
 // Open-Meteo rainfall, news feed) is fetched from our own backend server.
@@ -33,25 +33,14 @@ class BackendApiService {
   String get baseUrl => _kBackendBase;
 
   // ── /api/live-levels?state=Bihar ─────────────────────────────────────────
-  // Returns a list of station objects:
-  // [
-  //   {
-  //     "city": "Gandhighat",
-  //     "river": "Ganga",
-  //     "district": "Patna",
-  //     "currentLevel": 45.23,
-  //     "dangerLevel": 48.60,
-  //     "warningLevel": 47.50,
-  //     "prevLevel": 44.91,
-  //     "diff24h": 0.32,
-  //     "belowDanger": 3.37,
-  //     "forecast24h": 46.10,
-  //     "trend": "↑",
-  //     "riskLabel": "MODERATE",
-  //     "source": "WRD_BIHAR_LIVE",
-  //     "fetchedAt": "2026-06-09T10:00:00Z"
-  //   }, ...
-  // ]
+  // Backend returns a wrapped envelope:
+  // {
+  //   "status": "success",
+  //   "data": [ { "city": ..., "current_level": ..., ... }, ... ],
+  //   "total": N,
+  //   ...
+  // }
+  // Legacy shapes also accepted: bare List, or { "stations": [...] }.
   Future<List<Map<String, dynamic>>> fetchLiveLevels(String state) async {
     final uri = Uri.parse('$_kBackendBase/api/live-levels'
         '?state=${Uri.encodeComponent(state)}');
@@ -62,11 +51,19 @@ class BackendApiService {
     if (body is List) {
       return body.whereType<Map<String, dynamic>>().toList();
     }
-    // Backend may wrap in { "stations": [...] }
-    if (body is Map && body['stations'] is List) {
-      return (body['stations'] as List)
-          .whereType<Map<String, dynamic>>()
-          .toList();
+    if (body is Map) {
+      // Primary envelope used by /api/live-levels: { "data": [...] }
+      if (body['data'] is List) {
+        return (body['data'] as List)
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      }
+      // Legacy envelope: { "stations": [...] }
+      if (body['stations'] is List) {
+        return (body['stations'] as List)
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      }
     }
     throw FormatException('live-levels: unexpected response shape');
   }

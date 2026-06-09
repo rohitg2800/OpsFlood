@@ -1,6 +1,6 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v7.0 — backend-only)
+// OpsFlood — WRD Bihar Service (v7.1 — backend-only)
 //
 // All BeFIQR HTML scraping has been moved to the Python backend.
 // This service is now a thin wrapper that:
@@ -13,6 +13,10 @@
 //   • Direct BeFIQR scrape + allOrigins proxy fallback
 //   • CWC forecast merge
 //   • Risk label computation (CRITICAL / HIGH / MODERATE / LOW)
+//
+// v7.1 fix: WrdStation.fromJson now accepts both snake_case keys returned
+// by /api/live-levels (current_level, danger_level, river_name, etc.) AND
+// the legacy camelCase keys stored in disk cache from earlier app versions.
 library;
 
 import 'dart:convert';
@@ -130,22 +134,52 @@ class WrdStation {
     'fetchedAt':    fetchedAt.toIso8601String(),
   };
 
-  factory WrdStation.fromJson(Map<String, dynamic> j) => WrdStation(
-    river:        j['river']        as String? ?? '',
-    site:         j['site']         as String? ?? j['city'] as String? ?? '',
-    district:     j['district']     as String? ?? '',
-    hfl:          (j['hfl']         as num?)?.toDouble(),
-    dangerLevel:  (j['dangerLevel'] as num?)?.toDouble(),
-    warningLevel: (j['warningLevel']as num?)?.toDouble(),
-    prevLevel:    (j['prevLevel']   as num?)?.toDouble(),
-    currentLevel: (j['currentLevel']as num?)?.toDouble(),
-    diff24h:      (j['diff24h']     as num?)?.toDouble(),
-    belowDanger:  (j['belowDanger'] as num?)?.toDouble(),
-    trend:        j['trend']        as String?,
-    forecast24h:  (j['forecast24h'] as num?)?.toDouble(),
-    source:       j['source']       as String? ?? 'WRD_BIHAR_BACKEND',
-    fetchedAt:    DateTime.tryParse(j['fetchedAt'] as String? ?? '') ?? DateTime.now(),
-  );
+  // Accepts both snake_case keys from the live backend response AND
+  // camelCase keys persisted to disk by earlier app versions.
+  factory WrdStation.fromJson(Map<String, dynamic> j) {
+    // Helper: try multiple key names, return first non-null num as double
+    double? _d(List<String> keys) {
+      for (final k in keys) {
+        final v = j[k];
+        if (v is num) return v.toDouble();
+      }
+      return null;
+    }
+    String _s(List<String> keys, String fallback) {
+      for (final k in keys) {
+        final v = j[k];
+        if (v is String && v.isNotEmpty) return v;
+      }
+      return fallback;
+    }
+
+    // above_below_danger_m is signed (negative = below DL).
+    // belowDanger is stored as a positive margin, so we negate it.
+    final aboveDl = _d(['above_below_danger_m']);
+    final belowDanger = aboveDl != null
+        ? -aboveDl          // e.g. above_dl=-3.2 → belowDanger=3.2
+        : _d(['belowDanger']);
+
+    return WrdStation(
+      river:        _s(['river_name', 'river'], ''),
+      site:         _s(['city', 'station', 'site'], ''),
+      district:     _s(['district'], ''),
+      hfl:          _d(['hfl_m', 'hfl']),
+      dangerLevel:  _d(['danger_level', 'dangerLevel']),
+      warningLevel: _d(['warning_level', 'warningLevel']),
+      prevLevel:    _d(['prevLevel']),
+      currentLevel: _d(['current_level', 'currentLevel']),
+      diff24h:      _d(['change_24h_m', 'diff24h']),
+      belowDanger:  belowDanger,
+      trend:        j['trend'] as String?,
+      forecast24h:  _d(['forecast24h']),
+      source:       _s(['data_source', 'source'], 'WRD_BIHAR_BACKEND'),
+      fetchedAt:    DateTime.tryParse(
+                      j['timestamp'] as String? ??
+                      j['fetchedAt'] as String? ?? '') ??
+                    DateTime.now(),
+    );
+  }
 
   @override
   String toString() =>
@@ -302,7 +336,6 @@ class WrdBiharService {
     for (final s in stations) {
       map[s.site.toLowerCase().trim()]     = s;
       map[s.district.toLowerCase().trim()] = s;
-      // Also index by city field if present (backend may use 'city' key)
       final cityKey = s.site.toLowerCase().trim();
       if (cityKey.isNotEmpty) map[cityKey] = s;
     }

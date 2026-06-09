@@ -197,11 +197,15 @@ class _NavBar extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // FIX: easeOutBack overshoots past zero → negative
+                      // BoxConstraints crash. Use easeOutBack only when
+                      // activating (expanding); use easeOut when deactivating
+                      // (collapsing to zero) so the tween never goes negative.
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutBack,
-                        width: isActive ? 36 : 0,
-                        height: isActive ? 3 : 0,
+                        curve: isActive ? Curves.easeOutBack : Curves.easeOut,
+                        width: isActive ? 36.0 : 0.0,
+                        height: isActive ? 3.0 : 0.0,
                         margin: const EdgeInsets.only(bottom: 3),
                         decoration: BoxDecoration(
                           color: t.accent,
@@ -215,28 +219,45 @@ class _NavBar extends StatelessWidget {
                             duration: const Duration(milliseconds: 180),
                             child: Icon(
                               isActive ? item.activeIcon : item.icon,
-                              key: ValueKey('nav_${i}_$isActive'),
-                              size: 22,
+                              key: ValueKey(isActive),
                               color: isActive ? t.accent : t.textSecondary,
+                              size: 22,
                             ),
                           ),
                           if (showBadge)
                             Positioned(
-                              top: -4,
-                              right: -6,
-                              child: _Badge(count: criticalCount),
+                              right: -4,
+                              top: -3,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFEF4444),
+                                  shape: BoxShape.circle,
+                                ),
+                                constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                                child: Text(
+                                  criticalCount > 9 ? '9+' : '$criticalCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                             ),
                         ],
                       ),
                       const SizedBox(height: 3),
-                      AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 180),
+                      Text(
+                        item.label,
                         style: TextStyle(
-                          color: isActive ? t.accent : t.textSecondary,
                           fontSize: 10,
-                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                          color: isActive ? t.accent : t.textSecondary,
                         ),
-                        child: Text(item.label),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -250,48 +271,9 @@ class _NavBar extends StatelessWidget {
   }
 }
 
-class _Badge extends StatelessWidget {
-  final int count;
-  const _Badge({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    final label = count > 9 ? '9+' : '$count';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEF4444),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFEF4444).withValues(alpha: 0.5),
-            blurRadius: 6,
-          ),
-        ],
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 9,
-          fontWeight: FontWeight.w800,
-          height: 1,
-        ),
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
-}
-
 class _NavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
-  const _NavItem({
-    required this.icon,
-    required this.activeIcon,
-    required this.label,
-  });
+  const _NavItem({required this.icon, required this.activeIcon, required this.label});
 }
