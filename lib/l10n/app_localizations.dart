@@ -36,7 +36,6 @@ abstract class AppLocalizations {
     Locale('hi'),
   ];
 
-  // ── Existing keys ────────────────────────────────────────────────────────
   String get appTitle;
   String get tabHome;
   String get tabMonitors;
@@ -111,8 +110,6 @@ abstract class AppLocalizations {
   String get buildingTrend;
   String get comingSoon;
   String get monitors;
-
-  // ── New keys (Bihar panel + Map + Predict screen) ─────────────────────────
   String get biharLiveData;
   String get gloFasDischarge;
   String get rainfall24h;
@@ -148,6 +145,27 @@ abstract class AppLocalizations {
   String get hindi;
   String get appLanguage;
   String get restartRequired;
+  String get tabNews;
+  String get newsFeedTitle;
+  String get imdAlertsTitle;
+  String get ndmaAdvisoriesTitle;
+  String get officialSources;
+  String get noActiveImdAlerts;
+  String get noActiveNdmaAdvisories;
+  String get imdFloodForecasting;
+  String get ndmaAdvisoriesLink;
+  String get cwcFloodBulletin;
+  String get onboardingSkip;
+  String get onboardingNext;
+  String get onboardingGetStarted;
+  String get onboardingTitle1;
+  String get onboardingSubtitle1;
+  String get onboardingTitle2;
+  String get onboardingSubtitle2;
+  String get onboardingTitle3;
+  String get onboardingSubtitle3;
+  String get onboardingTitle4;
+  String get onboardingSubtitle4;
 }
 
 class _AppLocalizationsDelegate
@@ -169,8 +187,10 @@ class _AppLocalizationsDelegate
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
   switch (locale.languageCode) {
-    case 'en': return AppLocalizationsEn();
-    case 'hi': return AppLocalizationsHi();
+    case 'en':
+      return AppLocalizationsEn();
+    case 'hi':
+      return AppLocalizationsHi();
   }
   throw FlutterError(
       'AppLocalizations.delegate failed to load unsupported locale "$locale".');

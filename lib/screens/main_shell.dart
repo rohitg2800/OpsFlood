@@ -1,28 +1,11 @@
 // lib/screens/main_shell.dart
-// OpsFlood — MainShell v3
-//
-// Tab layout:
-//   0  Dashboard
-//   1  Map  (Bihar River Map)
-//   2  Alerts  ← red badge when CRITICAL count > 0
-//   3  News    ← NewsFeedScreen (was previously unwired)
-//   4  Predict
-//   5  Settings
-//
-// SOS:
-//   A persistent red SOS FAB sits above the nav bar via Scaffold.floatingActionButton.
-//   It is always visible except when the SOS screen itself is active (tab check N/A
-//   since SOS is pushed as a named route, not a tab).
-//
-// Badge:
-//   criticalAlertCountProvider (Riverpod) derives the count from biharLiveProvider.
-//   The badge shows a red dot with count on the Alerts tab icon.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/context_l10n.dart';
 import '../providers/alerts_badge_provider.dart';
 import '../theme/river_theme.dart';
 import 'dashboard_screen.dart';
@@ -33,7 +16,6 @@ import 'predict_screen.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 
-// ── Tab index provider ────────────────────────────────────────────────────────
 final shellTabProvider = StateProvider<int>((ref) => 0);
 
 class MainShell extends ConsumerWidget {
@@ -56,9 +38,9 @@ class MainShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final currentIndex   = ref.watch(shellTabProvider);
-    final criticalCount  = ref.watch(criticalAlertCountProvider);
-    final t              = RiverColors.of(context);
+    final currentIndex = ref.watch(shellTabProvider);
+    final criticalCount = ref.watch(criticalAlertCountProvider);
+    final t = RiverColors.of(context);
 
     return PopScope(
       canPop: currentIndex == 0,
@@ -66,16 +48,11 @@ class MainShell extends ConsumerWidget {
         if (!didPop) ref.read(shellTabProvider.notifier).state = 0;
       },
       child: Scaffold(
-        body: IndexedStack(
-          index: currentIndex,
-          children: _screens,
-        ),
-        // ★ Persistent SOS FAB
+        body: IndexedStack(index: currentIndex, children: _screens),
         floatingActionButton: _SosFab(t: t),
-        floatingActionButtonLocation:
-            FloatingActionButtonLocation.endFloat,
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         bottomNavigationBar: _NavBar(
-          currentIndex:  currentIndex,
+          currentIndex: currentIndex,
           criticalCount: criticalCount,
           onTap: (i) {
             HapticFeedback.selectionClick();
@@ -87,8 +64,6 @@ class MainShell extends ConsumerWidget {
   }
 }
 
-// ── Persistent SOS FAB ────────────────────────────────────────────────────────
-
 class _SosFab extends StatefulWidget {
   final RiverColors t;
   const _SosFab({required this.t});
@@ -97,20 +72,20 @@ class _SosFab extends StatefulWidget {
   State<_SosFab> createState() => _SosFabState();
 }
 
-class _SosFabState extends State<_SosFab>
-    with SingleTickerProviderStateMixin {
+class _SosFabState extends State<_SosFab> with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
-  late final Animation<double>    _scale;
+  late final Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
     _pulse = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
     _scale = Tween<double>(begin: 0.94, end: 1.06).animate(
-        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut));
+      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+    );
   }
 
   @override
@@ -121,13 +96,9 @@ class _SosFabState extends State<_SosFab>
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.t;
     return AnimatedBuilder(
       animation: _scale,
-      builder: (_, child) => Transform.scale(
-        scale: _scale.value,
-        child: child,
-      ),
+      builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
       child: GestureDetector(
         onTap: () {
           HapticFeedback.heavyImpact();
@@ -164,8 +135,6 @@ class _SosFabState extends State<_SosFab>
   }
 }
 
-// ── Custom bottom nav bar ─────────────────────────────────────────────────────
-
 class _NavBar extends StatelessWidget {
   final int currentIndex;
   final int criticalCount;
@@ -177,21 +146,20 @@ class _NavBar extends StatelessWidget {
     required this.onTap,
   });
 
-  // Tab 2 = Alerts (index where badge lives)
   static const _kAlertsIndex = 2;
-
-  static const _items = [
-    _NavItem(icon: Icons.dashboard_outlined,     activeIcon: Icons.dashboard_rounded,         label: 'Home'),
-    _NavItem(icon: Icons.map_outlined,            activeIcon: Icons.map_rounded,                label: 'Map'),
-    _NavItem(icon: Icons.notifications_outlined,  activeIcon: Icons.notifications_rounded,     label: 'Alerts'),
-    _NavItem(icon: Icons.feed_outlined,           activeIcon: Icons.feed_rounded,               label: 'News'),
-    _NavItem(icon: Icons.psychology_outlined,     activeIcon: Icons.psychology_rounded,         label: 'Predict'),
-    _NavItem(icon: Icons.settings_outlined,       activeIcon: Icons.settings_rounded,           label: 'Settings'),
-  ];
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
+    final s = context.l10n;
+    final items = [
+      _NavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard_rounded, label: s.tabHome),
+      _NavItem(icon: Icons.map_outlined, activeIcon: Icons.map_rounded, label: s.tabMap),
+      _NavItem(icon: Icons.notifications_outlined, activeIcon: Icons.notifications_rounded, label: s.tabAlerts),
+      _NavItem(icon: Icons.feed_outlined, activeIcon: Icons.feed_rounded, label: s.tabNews),
+      _NavItem(icon: Icons.psychology_outlined, activeIcon: Icons.psychology_rounded, label: s.tabPredict),
+      _NavItem(icon: Icons.settings_outlined, activeIcon: Icons.settings_rounded, label: s.tabSettings),
+    ];
 
     return Container(
       decoration: BoxDecoration(
@@ -211,11 +179,10 @@ class _NavBar extends StatelessWidget {
           height: 62,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(_items.length, (i) {
-              final item     = _items[i];
+            children: List.generate(items.length, (i) {
+              final item = items[i];
               final isActive = i == currentIndex;
-              final showBadge =
-                  i == _kAlertsIndex && criticalCount > 0;
+              final showBadge = i == _kAlertsIndex && criticalCount > 0;
 
               return Expanded(
                 child: GestureDetector(
@@ -224,19 +191,17 @@ class _NavBar extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Active pill
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 220),
                         curve: Curves.easeOutBack,
-                        width:  isActive ? 36 : 0,
-                        height: isActive ? 3  : 0,
+                        width: isActive ? 36 : 0,
+                        height: isActive ? 3 : 0,
                         margin: const EdgeInsets.only(bottom: 3),
                         decoration: BoxDecoration(
                           color: t.accent,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      // Icon + badge stack
                       Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -246,32 +211,24 @@ class _NavBar extends StatelessWidget {
                               isActive ? item.activeIcon : item.icon,
                               key: ValueKey('nav_${i}_$isActive'),
                               size: 22,
-                              color:
-                                  isActive ? t.accent : t.textSecondary,
+                              color: isActive ? t.accent : t.textSecondary,
                             ),
                           ),
-                          // ★ Red badge
                           if (showBadge)
                             Positioned(
                               top: -4,
                               right: -6,
-                              child: _Badge(
-                                  count: criticalCount, t: t),
+                              child: _Badge(count: criticalCount),
                             ),
                         ],
                       ),
                       const SizedBox(height: 3),
-                      // Label
                       AnimatedDefaultTextStyle(
                         duration: const Duration(milliseconds: 180),
                         style: TextStyle(
-                          color: isActive
-                              ? t.accent
-                              : t.textSecondary,
+                          color: isActive ? t.accent : t.textSecondary,
                           fontSize: 10,
-                          fontWeight: isActive
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
                         ),
                         child: Text(item.label),
                       ),
@@ -287,12 +244,9 @@ class _NavBar extends StatelessWidget {
   }
 }
 
-// ── Red badge widget ──────────────────────────────────────────────────────────
-
 class _Badge extends StatelessWidget {
-  final int         count;
-  final RiverColors t;
-  const _Badge({required this.count, required this.t});
+  final int count;
+  const _Badge({required this.count});
 
   @override
   Widget build(BuildContext context) {
@@ -325,12 +279,10 @@ class _Badge extends StatelessWidget {
   }
 }
 
-// ── Data class ────────────────────────────────────────────────────────────────
-
 class _NavItem {
   final IconData icon;
   final IconData activeIcon;
-  final String   label;
+  final String label;
   const _NavItem({
     required this.icon,
     required this.activeIcon,

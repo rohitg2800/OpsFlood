@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../l10n/context_l10n.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 
@@ -14,8 +15,9 @@ class NewsFeedScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final service = ref.watch(realTimeProvider);
     final t = RiverColors.of(context);
+    final s = context.l10n;
 
-    final alerts    = service.imdAlerts;
+    final alerts = service.imdAlerts;
     final advisories = service.ndmaAdvisories;
 
     return Scaffold(
@@ -23,8 +25,8 @@ class NewsFeedScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: AppPalette.abyss0,
         title: Text(
-          'Flood News & Advisories',
-          style: TextStyle(
+          s.newsFeedTitle,
+          style: const TextStyle(
             color: AppPalette.cyan,
             fontWeight: FontWeight.bold,
           ),
@@ -34,40 +36,33 @@ class NewsFeedScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── IMD Alerts ──────────────────────────────────────────────────
-          _SectionHeader(label: 'IMD ALERTS', color: AppPalette.cyan),
+          _SectionHeader(label: s.imdAlertsTitle, color: AppPalette.cyan),
           if (alerts.isEmpty)
-            _EmptyCard(message: 'No active IMD alerts', color: AppPalette.cyan)
+            _EmptyCard(message: s.noActiveImdAlerts, color: AppPalette.cyan)
           else
             ...alerts.map((a) => _AlertCard(item: a, color: AppPalette.warning, t: t)),
-
           const SizedBox(height: 20),
-
-          // ── NDMA Advisories ─────────────────────────────────────────────
-          _SectionHeader(label: 'NDMA ADVISORIES', color: AppPalette.gold),
+          _SectionHeader(label: s.ndmaAdvisoriesTitle, color: AppPalette.gold),
           if (advisories.isEmpty)
-            _EmptyCard(message: 'No active NDMA advisories', color: AppPalette.gold)
+            _EmptyCard(message: s.noActiveNdmaAdvisories, color: AppPalette.gold)
           else
             ...advisories.map((a) => _AlertCard(item: a, color: AppPalette.gold, t: t)),
-
           const SizedBox(height: 20),
-
-          // ── Quick Links ─────────────────────────────────────────────────
-          _SectionHeader(label: 'OFFICIAL SOURCES', color: AppPalette.textGrey),
+          _SectionHeader(label: s.officialSources, color: AppPalette.textGrey),
           _LinkCard(
-            title: 'IMD Flood Forecasting',
+            title: s.imdFloodForecasting,
             url: 'https://ffs.imd.gov.in',
             color: AppPalette.cyan,
             t: t,
           ),
           _LinkCard(
-            title: 'NDMA Advisories',
+            title: s.ndmaAdvisoriesLink,
             url: 'https://ndma.gov.in',
             color: AppPalette.gold,
             t: t,
           ),
           _LinkCard(
-            title: 'CWC Flood Bulletin',
+            title: s.cwcFloodBulletin,
             url: 'https://cwc.gov.in',
             color: AppPalette.safe,
             t: t,
@@ -117,7 +112,7 @@ class _EmptyCard extends StatelessWidget {
       ),
       child: Text(
         message,
-        style: TextStyle(color: AppPalette.textGrey, fontSize: 13),
+        style: const TextStyle(color: AppPalette.textGrey, fontSize: 13),
       ),
     );
   }
@@ -131,9 +126,9 @@ class _AlertCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title   = item is Map ? item['title']   ?? item['heading'] ?? 'Alert' : item.toString();
-    final desc    = item is Map ? item['summary']  ?? item['description'] ?? '' : '';
-    final dateStr = item is Map ? item['date']     ?? item['issued_at'] ?? '' : '';
+    final title = item is Map ? item['title'] ?? item['heading'] ?? 'Alert' : item.toString();
+    final desc = item is Map ? item['summary'] ?? item['description'] ?? '' : '';
+    final dateStr = item is Map ? item['date'] ?? item['issued_at'] ?? '' : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -148,7 +143,7 @@ class _AlertCard extends StatelessWidget {
         children: [
           Text(
             title.toString(),
-            style: TextStyle(
+            style: const TextStyle(
               color: AppPalette.textWhite,
               fontWeight: FontWeight.w700,
               fontSize: 13,
@@ -158,14 +153,14 @@ class _AlertCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               desc.toString(),
-              style: TextStyle(color: AppPalette.textGrey, fontSize: 12),
+              style: const TextStyle(color: AppPalette.textGrey, fontSize: 12),
             ),
           ],
           if (dateStr.toString().isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               dateStr.toString(),
-              style: TextStyle(color: AppPalette.textGrey, fontSize: 11),
+              style: const TextStyle(color: AppPalette.textGrey, fontSize: 11),
             ),
           ],
         ],
@@ -190,7 +185,9 @@ class _LinkCard extends StatelessWidget {
     return GestureDetector(
       onTap: () async {
         final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) launchUrl(uri);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -207,7 +204,7 @@ class _LinkCard extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(
+                style: const TextStyle(
                   color: AppPalette.textWhite,
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
@@ -216,7 +213,7 @@ class _LinkCard extends StatelessWidget {
             ),
             Text(
               url,
-              style: TextStyle(color: AppPalette.textGrey, fontSize: 11),
+              style: const TextStyle(color: AppPalette.textGrey, fontSize: 11),
             ),
           ],
         ),
