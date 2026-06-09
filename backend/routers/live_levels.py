@@ -6,6 +6,12 @@ Data priority order:
   1. WRD Bihar BeFIQR (31 real gauge stations with HFL + DL) — Bihar only
   2. GloFAS Open-Meteo cache (real river discharge) — all other states
   3. STATE_SEVERITY_MATRIX fallback — states with no live data
+
+Risk thresholds (Bihar ASL gauges, aligned with WRD Bihar definitions):
+  CRITICAL  — above_dl >= 0       (at or above danger level)
+  HIGH      — above_dl in [-3, 0) (within WRD WARNING zone, <3 m below DL)
+  MODERATE  — above_dl in [-6,-3) (approaching, 3–6 m below DL)
+  LOW       — above_dl < -6       (well below danger level)
 """
 
 from fastapi import APIRouter
@@ -61,35 +67,47 @@ def _risk_from_capacity(cap: float) -> str:
     if cap >= 70:  return "MODERATE"
     return "LOW"
 
+
 def _risk_from_discharge(discharge: float, danger_q: float, warning_q: float) -> str:
     if danger_q > 0 and discharge >= danger_q:         return "CRITICAL"
     if warning_q > 0 and discharge >= warning_q:       return "HIGH"
     if warning_q > 0 and discharge >= warning_q * 0.7: return "MODERATE"
     return "LOW"
 
+
 def _risk_from_above_dl(above_dl: Optional[float], wrd_status: str) -> str:
     """
-    Primary: use above_below_danger_m (positive = above DL = flooding).
-    Secondary: fall back to wrd_status label.
+    Converts signed above_below_danger_m to OpsFlood risk level.
+
+    Aligned with WRD Bihar status boundaries:
+      WRD CRITICAL/DANGER  = at or above DL    → CRITICAL
+      WRD WARNING          = within 3 m of DL  → HIGH
+      (approaching)        = 3–6 m below DL   → MODERATE
+      WRD NORMAL           = > 6 m below DL    → LOW
+
+    Falls back to wrd_status string if above_dl is None.
     """
     if above_dl is not None:
-        if above_dl > 0:    return "CRITICAL"   # above danger level
-        if above_dl > -1.0: return "HIGH"       # within 1 m of DL
-        if above_dl > -3.0: return "MODERATE"   # within 3 m of DL
-        return "LOW"
-    # fallback to WRD label
+        if above_dl >= 0:   return "CRITICAL"   # at or above danger level
+        if above_dl >= -3.0: return "HIGH"      # WRD WARNING zone: within 3 m
+        if above_dl >= -6.0: return "MODERATE"  # approaching: 3–6 m below DL
+        return "LOW"                             # WRD NORMAL: > 6 m below DL
+
+    # Fallback when current_level is unknown (scrape gap)
     return {
         "CRITICAL": "CRITICAL",
         "DANGER":   "HIGH",
-        "WARNING":  "MODERATE",
+        "WARNING":  "HIGH",
         "NORMAL":   "LOW",
         "UNKNOWN":  "LOW",
     }.get((wrd_status or "").upper(), "LOW")
+
 
 def _capacity_from_discharge(discharge: float, danger_q: float) -> float:
     if danger_q <= 0:
         return 50.0
     return min(round(discharge / danger_q * 100.0, 1), 130.0)
+
 
 def _capacity_from_asl_levels(
     current_m: Optional[float],
@@ -99,36 +117,35 @@ def _capacity_from_asl_levels(
 ) -> float:
     """
     Bihar gauges are in absolute metres above sea level (ASL).
-    We cannot use (current - safe) / (danger - safe) because
-    'safe' is meaningless in ASL space.
+    capacity_percent uses a +-10 m operational window around DL:
+      100% = river exactly at danger level
+      >100% = river above danger level (flooding)
+       0%  = river 10 m below danger level (dry season low)
 
-    Instead we use above_below_danger_m directly:
-      above_dl >= 0  → >= 100 % (above danger)
-      above_dl == -DL_span → 0 % (at safe low-water)
-
-    We define the span as danger_m - (danger_m - 10)  = 10 m window
-    below danger as a reasonable operational range for Bihar rivers.
-    If HFL is available we can use (danger - hfl_low) as span.
+    Thresholds align with _risk_from_above_dl:
+      >= 100%  CRITICAL  (above_dl >= 0)
+      >= 70%   HIGH      (above_dl in [-3, 0))
+      >= 40%   MODERATE  (above_dl in [-6, -3))
+      <  40%   LOW       (above_dl < -6)
     """
     if above_dl is not None:
-        # Positive = above DL; cap at 130 %
-        span = 10.0  # 10-metre window below danger level
-        pct  = 100.0 + (above_dl / span * 100.0) if above_dl >= 0 \
-               else 100.0 + (above_dl / span * 100.0)
+        span = 10.0  # operational window: 10 m below DL = 0%, at DL = 100%
+        pct  = 100.0 + (above_dl / span * 100.0)
         return round(min(max(pct, 0.0), 130.0), 1)
 
     if current_m is not None and danger_m > 0:
-        # Direct ratio (may over/underestimate for ASL values but acceptable)
-        span = 10.0
+        span  = 10.0
         above = current_m - danger_m
         pct   = 100.0 + (above / span * 100.0)
         return round(min(max(pct, 0.0), 130.0), 1)
 
     return 50.0
 
+
 def _status_from_risk(risk: str) -> str:
     return {"CRITICAL": "RISING", "HIGH": "RISING",
             "MODERATE": "STABLE", "LOW": "STABLE"}.get(risk, "STABLE")
+
 
 def _alert_from_risk(risk: str) -> str:
     return {"CRITICAL": "\U0001f6a8", "HIGH": "\u26a0\ufe0f",
@@ -232,11 +249,6 @@ def _normalise_state_key(s: str) -> str:
 def _build_levels_from_wrd_bihar(
     wrd_stations: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """
-    All WRD Bihar BeFIQR stations use absolute metres above sea level (ASL).
-    Risk and capacity are derived from above_below_danger_m (signed distance
-    from danger level), NOT from current_level / danger_level ratio.
-    """
     now_iso = current_timestamp_iso()
     result: List[Dict[str, Any]] = []
 
@@ -246,12 +258,12 @@ def _build_levels_from_wrd_bihar(
         district   = str(s.get("district") or "Bihar").strip()
         lat        = s.get("lat", 25.8)
         lon        = s.get("lon", 85.4)
-        current_m  = s.get("current_level_m")       # ASL metres, may be None
-        danger_m   = s.get("danger_level_m") or 0.0  # ASL metres
-        hfl_m      = s.get("hfl_m")                  # ASL metres
-        above_dl   = s.get("above_below_danger_m")   # +ve = above DL (flooding!)
+        current_m  = s.get("current_level_m")
+        danger_m   = s.get("danger_level_m") or 0.0
+        hfl_m      = s.get("hfl_m")
+        above_dl   = s.get("above_below_danger_m")  # signed: negative=below DL
         change_24h = s.get("change_24h_m")
-        trend      = s.get("trend", "\u2014")
+        trend      = s.get("trend", "—")
         wrd_status = s.get("status", "UNKNOWN")
         source_raw = s.get("source", "WRD_BIHAR_BEFIQR")
         last_update= s.get("last_update", now_iso)
@@ -259,17 +271,12 @@ def _build_levels_from_wrd_bihar(
         if not city:
             continue
 
-        # ---- Risk: driven by signed distance from danger level ----
         risk     = _risk_from_above_dl(above_dl, wrd_status)
-
-        # ---- Capacity: 100% = at DL, >100% = above DL, uses 10m window ----
         capacity = _capacity_from_asl_levels(current_m, danger_m, hfl_m, above_dl)
-
         status   = _status_from_risk(risk)
         alert    = _alert_from_risk(risk)
 
-        # ---- Safe / warning expressed in ASL space for display ----
-        # Use danger_m - 10 as "safe" and danger_m - 3 as "warning" in ASL
+        # Safe/warning in ASL space: danger-10 and danger-3
         safe_display    = round(danger_m - 10.0, 2) if danger_m > 10 else 0.0
         warning_display = round(danger_m - 3.0,  2) if danger_m > 3  else danger_m
 
@@ -291,7 +298,6 @@ def _build_levels_from_wrd_bihar(
             "lon":                  lon,
             "data_source":          "WRD_BIHAR_BEFIQR" if "FALLBACK" not in source_raw else "WRD_BIHAR_FALLBACK",
             "timestamp":            last_update,
-            # Extended Bihar-specific fields
             "hfl_m":                hfl_m,
             "district":             district,
             "above_below_danger_m": above_dl,
@@ -439,7 +445,6 @@ def _build_all_levels() -> List[Dict[str, Any]]:
     covered: set = set()
     all_levels: List[Dict[str, Any]] = []
 
-    # 1. WRD Bihar
     wrd_stations = _get_wrd_bihar_stations()
     if wrd_stations:
         bihar_levels = _build_levels_from_wrd_bihar(wrd_stations)
@@ -449,7 +454,6 @@ def _build_all_levels() -> List[Dict[str, Any]]:
     else:
         print("[live_levels] \u26a0\ufe0f  WRD Bihar cache empty")
 
-    # 2. GloFAS (skip Bihar)
     glofas_cache = _get_glofas_cache()
     if glofas_cache:
         glofas_levels, glofas_covered = _build_levels_from_glofas(glofas_cache, exclude_state_keys=covered)
@@ -459,7 +463,6 @@ def _build_all_levels() -> List[Dict[str, Any]]:
     else:
         print("[live_levels] \u26a0\ufe0f  GloFAS cache empty")
 
-    # 3. Matrix fallback
     matrix_levels = _build_levels_from_matrix(exclude_state_keys=covered)
     all_levels.extend(matrix_levels)
     print(f"[live_levels] Matrix fallback: {len(matrix_levels)} states")
@@ -542,7 +545,7 @@ async def get_critical_alerts(
                 + (f"{abs(above_dl):.2f}m ABOVE danger level" if above_dl and above_dl > 0
                    else f"within {abs(above_dl):.2f}m of danger level" if above_dl
                    else f"at {item['capacity_percent']:.0f}% of danger level")
-                + f" \u2014 {risk.lower()} risk."
+                + f" — {risk.lower()} risk."
             ),
             "river_name":           item.get("river_name", ""),
             "district":             item.get("district"),
