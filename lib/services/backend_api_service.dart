@@ -8,7 +8,7 @@
 //
 // Backend base URL is set via the compile-time dart-define:
 //   --dart-define=BACKEND_URL=https://your-backend.com
-// Falls back to the constant below for local dev.
+// Falls back to the constant below for local dev / production builds.
 
 library;
 
@@ -19,7 +19,7 @@ import 'package:http/http.dart' as http;
 // ── Backend URL ──────────────────────────────────────────────────────────────
 const String _kBackendBase = String.fromEnvironment(
   'BACKEND_URL',
-  defaultValue: 'https://opsflood-backend.onrender.com',
+  defaultValue: 'https://android-flood-app-production.up.railway.app',
 );
 
 // ── Timeouts ─────────────────────────────────────────────────────────────────
