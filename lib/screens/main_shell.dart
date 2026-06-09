@@ -16,7 +16,13 @@ import 'predict_screen.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 
-final shellTabProvider = StateProvider<int>((ref) => 0);
+// Riverpod v3: StateProvider removed — use Notifier instead
+class ShellTabNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+}
+
+final shellTabProvider = NotifierProvider<ShellTabNotifier, int>(ShellTabNotifier.new);
 
 class MainShell extends ConsumerWidget {
   static const String route = '/shell';
