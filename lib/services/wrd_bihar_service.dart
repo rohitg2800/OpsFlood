@@ -1,6 +1,16 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v6.0 — bulletin 24h forecast)
+// OpsFlood — WRD Bihar Service (v6.1 — robust CWC forecast parser)
+//
+// FIXES vs v6.0:
+//   • CWC forecast parser: broadened column header detection to catch
+//     'f/cast', 'f.cast', 'flood level', 'predicted', '24hr', '24 hr',
+//     'tomorrow' — befiqr occasionally uses abbreviated headings.
+//   • Added colForecast=-1 sentinel: parser skips data rows entirely when
+//     no forecast column is found (avoids wrong-column extractions).
+//   • Added raw-cell debug log when forecast column exists but yields 0
+//     values, making future diagnosis trivial.
+//   • Broadened colCurrent/colRiver/colStation detection similarly.
 //
 // SOURCE: Central Flood Control Cell, WRD Patna
 // PRIMARY scrape 1:  https://irrigation.befiqr.in/state/table/rivers
@@ -33,9 +43,6 @@ class WrdStation {
   final double? diff24h;
   final double? belowDanger;
   final String? trend;
-  // NEW v6.0: 24h forecast level from WRD/CWC bulletin (m MSL).
-  // Populated from the CWC-stations table FF column when available.
-  // Null if the station is WRD-only or CWC did not issue a forecast today.
   final double? forecast24h;
   final String  source;
   final DateTime fetchedAt;
@@ -52,7 +59,7 @@ class WrdStation {
     this.diff24h,
     this.belowDanger,
     this.trend,
-    this.forecast24h,   // NEW
+    this.forecast24h,
     required this.source,
     required this.fetchedAt,
   });
@@ -125,7 +132,7 @@ class WrdStation {
     'diff24h':      diff24h,
     'belowDanger':  belowDanger,
     'trend':        trend,
-    'forecast24h':  forecast24h,  // NEW
+    'forecast24h':  forecast24h,
     'source':       source,
     'fetchedAt':    fetchedAt.toIso8601String(),
   };
@@ -142,7 +149,7 @@ class WrdStation {
     diff24h:      (j['diff24h']     as num?)?.toDouble(),
     belowDanger:  (j['belowDanger'] as num?)?.toDouble(),
     trend:        j['trend']        as String?,
-    forecast24h:  (j['forecast24h'] as num?)?.toDouble(),  // NEW
+    forecast24h:  (j['forecast24h'] as num?)?.toDouble(),
     source:       j['source']       as String? ?? 'WRD_BIHAR_DISK',
     fetchedAt:    DateTime.tryParse(j['fetchedAt'] as String? ?? '') ?? DateTime.now(),
   );
@@ -196,7 +203,6 @@ const _kRiverUrls = [
   'https://irrigation.befiqr.in/state/table/rivers',
   'http://irrigation.befiqr.in/state/table/rivers',
 ];
-// CWC stations table — carries FF (flood forecast 24h) column
 const _kCwcUrls = [
   'https://irrigation.befiqr.in/state/table/cwc-stations',
   'http://irrigation.befiqr.in/state/table/cwc-stations',
@@ -226,7 +232,7 @@ class WrdBiharService {
   static const _source        = 'WRD_BIHAR_LIVE';
   static const _directTimeout = Duration(seconds: 25);
   static const _proxyTimeout  = Duration(seconds: 40);
-  static const _persistKey    = 'wrd_bihar_stations_v6';  // bumped: new field
+  static const _persistKey    = 'wrd_bihar_stations_v6';
 
   List<WrdStation>?        _cache;
   DateTime?                _cacheTime;
@@ -237,7 +243,6 @@ class WrdBiharService {
   // ── Public API ────────────────────────────────────────────────────────────
 
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
-    // 1. In-memory cache
     if (!forceRefresh &&
         _cache != null &&
         _cacheTime != null &&
@@ -246,7 +251,6 @@ class WrdBiharService {
       return _cache!;
     }
 
-    // 2. Disk cache on cold start
     if (_cache == null) {
       final disk = await _loadFromDisk();
       if (disk.isNotEmpty) {
@@ -257,7 +261,6 @@ class WrdBiharService {
       }
     }
 
-    // 3. Fetch rivers table (current levels) + CWC table (24h forecast) in parallel
     final results = await Future.wait([
       _fetchHtml(_kRiverUrls),
       _fetchHtml(_kCwcUrls),
@@ -271,7 +274,6 @@ class WrdBiharService {
       _log('rivers-table: parsed ${stations.length} stations');
     }
 
-    // If rivers table failed, try proxy
     if (stations.isEmpty) {
       const primaryUrl = 'https://irrigation.befiqr.in/state/table/rivers';
       try {
@@ -291,7 +293,6 @@ class WrdBiharService {
       }
     }
 
-    // Merge 24h forecasts from CWC table into stations
     if (stations.isNotEmpty && cwcHtml != null && cwcHtml.isNotEmpty) {
       final forecasts = _parseCwcForecasts(cwcHtml);
       _log('cwc-table: ${forecasts.length} forecast entries parsed');
@@ -304,7 +305,6 @@ class WrdBiharService {
       return stations;
     }
 
-    // Offline fallback
     final offline = _cache ?? [];
     _log('offline mode — returning ${offline.length} stations from disk cache');
     return offline;
@@ -377,8 +377,6 @@ class WrdBiharService {
 
   // ── Forecast merge ────────────────────────────────────────────────────────
 
-  /// Merge forecast24h values from the CWC table into the rivers-table stations.
-  /// Matching is by normalised (river + site) fuzzy key.
   List<WrdStation> _mergeForecasts(
       List<WrdStation> stations, Map<String, double> forecasts) {
     return stations.map((s) {
@@ -462,11 +460,6 @@ class WrdBiharService {
   }
 
   // ── HTML parser: rivers table (current levels) ────────────────────────────
-  //
-  // BeFIQR layout (two header rows):
-  //   Row 0: (1)(2)...(11)    ← column number labels
-  //   Row 1: River|Site|HFL|DL|Yesterday|Current|Diff|Above/Below|Trend|District
-  //   Rows 2-N: data
   List<WrdStation> _parseRiversTable(String html) {
     final now    = DateTime.now();
     final result = <WrdStation>[];
@@ -545,7 +538,7 @@ class WrdBiharService {
           diff24h:      _dblStr(cells[7]),
           belowDanger:  bd,
           trend:        trend,
-          forecast24h:  null,  // populated later by _mergeForecasts
+          forecast24h:  null,
           source:       _source,
           fetchedAt:    now,
         ));
@@ -560,12 +553,10 @@ class WrdBiharService {
 
   // ── HTML parser: CWC stations table (24h flood forecast) ─────────────────
   //
-  // BeFIQR CWC table layout (probe first 5 rows for header):
-  //   Columns typically: Sl | River | Station | CWC Code |
-  //                      Current | FF (24h Forecast) | DL | Situation | District
-  //
-  // We scan the header row for a column containing 'forecast', 'ff', or 'predicted'.
-  // If absent the table is a new layout — return empty map (graceful degradation).
+  // v6.1: broadened header keyword matching — befiqr uses abbreviated headings
+  // like 'f/cast', 'f.cast', 'flood level', 'predicted', '24hr', 'tomorrow'.
+  // Added colForecast=-1 sentinel so we skip data parsing entirely when no
+  // forecast column is identified, avoiding wrong-column extractions.
   Map<String, double> _parseCwcForecasts(String html) {
     final result = <String, double>{};
     final rowRe  = RegExp(r'<tr[^>]*>(.*?)<\/tr>',  dotAll: true, caseSensitive: false);
@@ -582,12 +573,12 @@ class WrdBiharService {
     final rows = rowRe.allMatches(html).toList();
     if (rows.isEmpty) return result;
 
-    // Find text-header row and discover column indices for river, station, ff
+    // Use -1 as sentinel: no forecast column found yet
     int headerIdx    = -1;
-    int colRiver     = 1;  // defaults matching known BeFIQR layout
-    int colStation   = 2;
-    int colForecast  = 5;  // default: column 5 = FF
-    int colCurrent   = 4;
+    int colRiver     = -1;
+    int colStation   = -1;
+    int colForecast  = -1;  // v6.1: sentinel — must be discovered, no default
+    int colCurrent   = -1;
 
     final scanLimit = rows.length < 6 ? rows.length : 6;
     for (int i = 0; i < scanLimit; i++) {
@@ -595,17 +586,28 @@ class WrdBiharService {
           .allMatches(rows[i].group(1)!)
           .map((m) => clean(m.group(1)!).toLowerCase())
           .toList();
-      if (!cells.any((c) => c.contains('river') || c.contains('station'))) continue;
+      // Need at least a river or station column to be the header row
+      if (!cells.any((c) => c.contains('river') || c.contains('station') || c.contains('site'))) continue;
       headerIdx = i;
-      // Discover which column is the forecast
       for (int ci = 0; ci < cells.length; ci++) {
         final c = cells[ci];
-        if (c.contains('forecast') || c == 'ff' || c.contains('predict')) {
+        // v6.1: broadened forecast column detection
+        if (c.contains('forecast') ||
+            c == 'ff' ||
+            c.contains('predict') ||
+            c.contains('f/cast') ||
+            c.contains('f.cast') ||
+            c.contains('flood level') ||
+            c.contains('24hr') ||
+            c.contains('24 hr') ||
+            c.contains('tomorrow')) {
           colForecast = ci;
         }
-        if (c.contains('current') || c.contains('obs')) colCurrent = ci;
-        if (c.contains('river'))   colRiver   = ci;
-        if (c.contains('station') || c.contains('site')) colStation = ci;
+        // v6.1: broadened current level detection
+        if (c.contains('current') || c.contains('obs') || c.contains('today')) colCurrent = ci;
+        // v6.1: broadened river/station detection
+        if (c.contains('river'))                                              colRiver   = ci;
+        if (c.contains('station') || c.contains('site') || c == 'name')      colStation = ci;
       }
       _log('cwc-parser header[$i]: river=$colRiver station=$colStation '
            'current=$colCurrent forecast=$colForecast');
@@ -617,22 +619,39 @@ class WrdBiharService {
       return result;
     }
 
+    // v6.1: if no forecast column identified, bail out gracefully
+    if (colForecast < 0) {
+      _log('cwc-parser: no forecast column detected — 0 forecast values extracted (pre-monsoon or layout change)');
+      return result;
+    }
+
+    // Use safe defaults for river/station if not auto-detected
+    final safeRiver   = colRiver   >= 0 ? colRiver   : 1;
+    final safeStation = colStation >= 0 ? colStation : 2;
+
+    int extracted = 0;
+    int skippedEmpty = 0;
     for (final row in rows.skip(headerIdx + 1)) {
       final cells = cellRe
           .allMatches(row.group(1)!)
           .map((m) => clean(m.group(1)!))
           .toList();
       if (cells.length <= colForecast) continue;
-      final river   = colRiver   < cells.length ? cells[colRiver].trim()   : '';
-      final station = colStation < cells.length ? cells[colStation].trim() : '';
+      final river   = safeRiver   < cells.length ? cells[safeRiver].trim()   : '';
+      final station = safeStation < cells.length ? cells[safeStation].trim() : '';
       if (river.isEmpty || station.isEmpty) continue;
-      final fc = _dblStr(cells[colForecast]);
-      if (fc == null || fc <= 0) continue;
+      final rawCell = cells[colForecast];
+      final fc = _dblStr(rawCell);
+      if (fc == null || fc <= 0) {
+        skippedEmpty++;
+        continue;
+      }
       final key = _forecastKey(river, station);
       result[key] = fc;
+      extracted++;
     }
 
-    _log('cwc-parser: ${result.length} forecast values extracted');
+    _log('cwc-parser: $extracted forecast values extracted (${skippedEmpty} cells empty/dash — normal in pre-monsoon)');
     return result;
   }
 

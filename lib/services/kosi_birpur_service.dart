@@ -1,10 +1,10 @@
-// lib/services/kosi_birpur_service.dart  v3.1
+// lib/services/kosi_birpur_service.dart  v3.2
 //
-// FIXES vs v3.0:
-//   • WRIS redirect loop: india-water.gov.in returns 3xx that re-appends the
-//     path prefix on every hop → 'wriswriswriswrisWRIS/API/...'. Fixed by
-//     using an IOClient with followRedirects:false and handling the single
-//     legitimate redirect manually.
+// FIXES vs v3.1:
+//   • Bumped _tryFromCwcService timeout 6s→12s (BefiqrCwcService.fetchStations
+//     has its own 15s race; the old 6s outer timeout killed it prematurely).
+//   • Bumped overall _raceTimeout 7s→13s so slow gov servers (BEAMS, FFS)
+//     have a realistic chance to respond before SEED fallback.
 //
 library;
 
@@ -91,7 +91,7 @@ http.Client _noRedirectClient() {
 /// If the server sends a redirect loop (same host + same path prefix appearing
 /// twice), aborts and returns the original response.
 Future<http.Response> _getNoLoop(String url,
-    {Map<String, String>? headers, Duration timeout = const Duration(seconds: 6)}) async {
+    {Map<String, String>? headers, Duration timeout = const Duration(seconds: 10)}) async {
   final client = _noRedirectClient();
   try {
     final req     = http.Request('GET', Uri.parse(url));
@@ -99,7 +99,7 @@ Future<http.Response> _getNoLoop(String url,
     final stream  = await client.send(req).timeout(timeout);
     var resp       = await http.Response.fromStream(stream);
 
-    // Follow at most ONE redirect — but only if the Location header doesn’t
+    // Follow at most ONE redirect — but only if the Location header doesn't
     // reintroduce the current path as a prefix (the WRIS loop pattern).
     if (resp.statusCode >= 300 && resp.statusCode < 400) {
       final loc = resp.headers['location'];
@@ -128,7 +128,8 @@ Future<http.Response> _getNoLoop(String url,
 // ── KosiBirpurService ───────────────────────────────────────────────────────
 
 class KosiBirpurService {
-  static const _raceTimeout = Duration(seconds: 7);
+  // v3.2: bumped from 7s → 13s so BEAMS / FFS gov servers have a fair chance
+  static const _raceTimeout = Duration(seconds: 13);
   final BefiqrCwcService _cwcSvc = BefiqrCwcService();
 
   /// Returns the best available live reading for Kosi @ Birpur.
@@ -175,8 +176,8 @@ class KosiBirpurService {
       try {
         final resp = await http.get(
           Uri.parse(url),
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
-        ).timeout(const Duration(seconds: 5));
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.2'},
+        ).timeout(const Duration(seconds: 10));
         if (resp.statusCode == 200) {
           final body  = jsonDecode(resp.body);
           final items = body is List ? body
@@ -204,9 +205,11 @@ class KosiBirpurService {
   }
 
   // ── Source B: BefiqrCwcService ─────────────────────────────────────────────
+  // v3.2: bumped timeout 6s→12s (BefiqrCwcService has a 15s internal race;
+  //       the old 6s outer limit cancelled it before any source could respond).
   Future<KosiBirpurReading?> _tryFromCwcService() async {
     try {
-      final stations = await _cwcSvc.fetchStations().timeout(const Duration(seconds: 6));
+      final stations = await _cwcSvc.fetchStations().timeout(const Duration(seconds: 12));
       final birpur   = stations.where((s) =>
           !s.isFromSeed &&
           s.river.toLowerCase().contains('kosi') &&
@@ -242,8 +245,8 @@ class KosiBirpurService {
       try {
         final resp = await _getNoLoop(
           u,
-          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
-          timeout: const Duration(seconds: 6),
+          headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.2'},
+          timeout: const Duration(seconds: 10),
         );
         if (resp.statusCode == 200) {
           final body = jsonDecode(resp.body);
@@ -293,10 +296,10 @@ class KosiBirpurService {
           'Content-Type': 'application/json',
           'Accept':       'application/json',
           'Referer':      'https://ffs.india-water.gov.in/',
-          'User-Agent':   'Mozilla/5.0 (OpsFlood/3.1)',
+          'User-Agent':   'Mozilla/5.0 (OpsFlood/3.2)',
         },
         body: jsonEncode({'station_id': 'BR-1', 'river': 'KOSI', 'state': 'BIHAR'}),
-      ).timeout(const Duration(seconds: 6));
+      ).timeout(const Duration(seconds: 10));
       if (resp.statusCode == 200) {
         final body  = jsonDecode(resp.body) as Map<String, dynamic>;
         final data  = body['data'] as Map<String, dynamic>? ?? body;

@@ -1,6 +1,11 @@
-// lib/services/befiqr_cwc_service.dart  v3.0
+// lib/services/befiqr_cwc_service.dart  v3.1
 //
 // Live CWC + WRD Bihar station data — 5-source parallel scraper
+//
+// FIXES vs v3.0:
+//   • All individual source timeouts bumped 6s→12s (BEAMS/FFS/befiqr are
+//     slow government servers; 6s was too aggressive).
+//   • Race timeout bumped 8s→15s to match the extended per-source window.
 //
 // SOURCE PRIORITY — all fired in parallel, first non-empty list wins:
 //
@@ -20,8 +25,8 @@
 //  E. irrigation.befiqr.in HTML mirror
 //     Legacy fallback, kept for redundancy.
 //
-// Total worst-case wait: 8s (race timeout) not 24s (old sequential).
-// Seed returned only when all 5 sources return empty within 8s.
+// Total worst-case wait: 15s (race timeout) not 24s (old sequential).
+// Seed returned only when all 5 sources return empty within 15s.
 //
 // DATUM: All levels stored in CWC AMSL metres.
 //   BEAMS reports WRD local datum; offset table below converts to AMSL.
@@ -140,7 +145,6 @@ class CwcStation {
 
 List<CwcStation> get _seedStations {
   final now = DateTime.now();
-  // isFromSeed: true flags these as stale — UI shows muted style
   CwcStation s(String river, String site, double level, double danger,
       {double? warning}) =>
       CwcStation(
@@ -194,7 +198,6 @@ class BefiqrCwcService {
   static const _befiqrUrl   = 'https://irrigation.befiqr.in/state/table/cwc-stations';
 
   // CWC Open Data API — resource ID for Bihar flood gauge stations
-  // https://data.gov.in/resource/cwc-flood-gauge-stations-bihar
   static const _cwcApiUrl   =
       'https://api.data.gov.in/resource/6176b6b7-77a1-4bf7-bc37-a2e4a67f3e4d'
       '?api-key=579b464db66ec23bdd000001cdd3946e44ce4aebb209dbe7b49b3c55'
@@ -209,11 +212,12 @@ class BefiqrCwcService {
       'https://emergency.copernicus.eu/CEMS-fis/api/v1/stations'
       '?country=IN&state=Bihar&format=json';
 
-  static const _raceTimeout = Duration(seconds: 8);
+  // v3.1: bumped from 8s → 15s
+  static const _raceTimeout = Duration(seconds: 15);
 
   /// Fetch all Bihar CWC stations.
   /// Fires 5 sources in parallel — first non-empty list wins.
-  /// Never throws — falls back to seed if all fail within 8s.
+  /// Never throws — falls back to seed if all fail within 15s.
   Future<List<CwcStation>> fetchStations() async {
     final futures = <Future<List<CwcStation>>>[
       _tryCwcOpenData(),    // A — stable REST JSON
@@ -256,16 +260,12 @@ class BefiqrCwcService {
   }
 
   // ── Source A: CWC Open Data REST API ───────────────────────────────────────
-  // data.gov.in CWC flood gauge stations resource
-  // Returns JSON with records array — each record has station_name,
-  // river_name, current_level, danger_level, warning_level, state.
-
   Future<List<CwcStation>> _tryCwcOpenData() async {
     try {
       final resp = await http.get(
         Uri.parse(_cwcApiUrl),
-        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
-      ).timeout(const Duration(seconds: 6));
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
+      ).timeout(const Duration(seconds: 12));
 
       if (resp.statusCode == 200) {
         final body  = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -302,17 +302,16 @@ class BefiqrCwcService {
   }
 
   // ── Source B: BEAMS Bihar HTML ──────────────────────────────────────────────
-
   Future<List<CwcStation>> _fetchBeams() async {
     try {
       final resp = await http.get(
         Uri.parse(_beamsUrl),
         headers: {
           'Accept':          'text/html,application/xhtml+xml',
-          'User-Agent':      'Mozilla/5.0 (OpsFlood/3.0)',
+          'User-Agent':      'Mozilla/5.0 (OpsFlood/3.1)',
           'Accept-Language': 'en-IN,en;q=0.9',
         },
-      ).timeout(const Duration(seconds: 6));   // reduced from 12s
+      ).timeout(const Duration(seconds: 12));   // v3.1: bumped 6s→12s
 
       if (resp.statusCode == 200) {
         final stations = _parseBeamsHtml(resp.body);
@@ -328,15 +327,12 @@ class BefiqrCwcService {
   }
 
   // ── Source C: CWC Bihar Bulletin JSON ────────────────────────────────────
-  // CWC publishes a daily Bihar flood bulletin at a stable JSON endpoint.
-  // Format: { stations: [ { river, site, current_level, danger_level ... } ] }
-
   Future<List<CwcStation>> _tryCwcBulletin() async {
     try {
       final resp = await http.get(
         Uri.parse(_cwcBulletinUrl),
-        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
-      ).timeout(const Duration(seconds: 6));
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
+      ).timeout(const Duration(seconds: 12));   // v3.1: bumped 6s→12s
 
       if (resp.statusCode == 200) {
         final body     = jsonDecode(resp.body);
@@ -373,15 +369,12 @@ class BefiqrCwcService {
   }
 
   // ── Source D: GloFAS CEMS Bihar stations ──────────────────────────────────
-  // EU Copernicus Emergency Management Service. Never geoblocked.
-  // Provides forecast river levels for major Bihar gauges every 6h.
-
   Future<List<CwcStation>> _tryGloFAS() async {
     try {
       final resp = await http.get(
         Uri.parse(_glofasUrl),
-        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.0'},
-      ).timeout(const Duration(seconds: 6));
+        headers: {'Accept': 'application/json', 'User-Agent': 'OpsFlood/3.1'},
+      ).timeout(const Duration(seconds: 12));   // v3.1: bumped 6s→12s
 
       if (resp.statusCode == 200) {
         final body = jsonDecode(resp.body);
@@ -392,7 +385,6 @@ class BefiqrCwcService {
         final now      = DateTime.now();
         final stations = <CwcStation>[];
         for (final feat in list) {
-          // GeoJSON format: { properties: { river, name, dis_m3_s, ... } }
           final props  = feat['properties'] as Map<String, dynamic>? ?? feat;
           final level  = _parseDbl(props['water_level'] ?? props['level_m']);
           final danger = _parseDbl(props['danger_level'] ?? props['threshold_m']);
@@ -423,13 +415,12 @@ class BefiqrCwcService {
   }
 
   // ── Source E: befiqr HTML mirror (legacy) ───────────────────────────────
-
   Future<List<CwcStation>> _tryBefiqr() async {
     try {
       final resp = await http.get(
         Uri.parse(_befiqrUrl),
         headers: {'Accept': 'text/html,application/xhtml+xml'},
-      ).timeout(const Duration(seconds: 6));
+      ).timeout(const Duration(seconds: 12));   // v3.1: bumped 6s→12s
       if (resp.statusCode == 200) {
         final stations = parseHtmlTable(resp.body);
         if (stations.isNotEmpty) {

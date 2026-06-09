@@ -1,9 +1,6 @@
 # backend/routers/dependencies.py
 """
 Shared helpers, imports, and singleton instances for all OpsFlood routers.
-
-All routers import from here so that global objects (operational_store,
-ScheduledIngestionService, pipeline instances) are created exactly once.
 """
 
 import os
@@ -26,7 +23,6 @@ from sklearn.ensemble import RandomForestClassifier
 # ============= ENV BOOTSTRAP =============
 
 def refresh_backend_env(override: bool = False):
-    """Load environment variables from multiple .env files."""
     env_paths = [
         Path(".") / ".env",
         Path(".") / ".env.local",
@@ -45,6 +41,61 @@ refresh_backend_env()
 
 def _is_package_context() -> bool:
     return _importlib_util.find_spec("backend") is not None
+
+
+# ============= REPO / DIR CONSTANTS =============
+
+# REPO_DIR: root of the repository (3 levels up from this file)
+REPO_DIR: str = str(Path(__file__).resolve().parent.parent.parent)
+
+# BASE_DIR: backend package directory (2 levels up from this file)
+BASE_DIR: str = str(Path(__file__).resolve().parent.parent)
+
+
+# ============= ARTIFACT CONSTANTS =============
+
+FLOOD_ARTIFACT_KEYWORDS: tuple = (
+    "flood",
+    "scaler",
+    "feature",
+    "indo",
+    "model",
+)
+
+INDOFLOODS_STATE_KEYS: tuple = (
+    "assam",
+    "bihar",
+    "west bengal",
+    "odisha",
+    "uttar pradesh",
+    "andhra pradesh",
+    "kerala",
+    "gujarat",
+    "rajasthan",
+    "madhya pradesh",
+    "maharashtra",
+    "punjab",
+    "haryana",
+    "himachal pradesh",
+    "uttarakhand",
+    "jharkhand",
+    "chhattisgarh",
+    "manipur",
+    "meghalaya",
+    "nagaland",
+    "tripura",
+    "arunachal pradesh",
+    "sikkim",
+    "mizoram",
+)
+
+
+# ============= WEATHER CONSTANTS =============
+
+# India Standard Time: UTC+5:30 = 19800 seconds
+WEATHER_TIMEZONE_OFFSET: int = 19800
+WEATHER_TIMEZONE_NAME: str = "Asia/Kolkata"
+WEATHER_CACHE_TTL_SECONDS: int = 600
 
 
 # ============= CONDITIONAL IMPORTS =============
@@ -71,10 +122,6 @@ operational_store = PostgresOperationalStore()
 operational_store.initialize()
 
 
-# ============= CONSTANTS =============
-WEATHER_CACHE_TTL_SECONDS = 600
-
-
 # ============= ENV HELPERS =============
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -87,12 +134,10 @@ def env_flag(name: str, default: bool = False) -> bool:
 
 
 def get_source_policy_mode() -> str:
-    """Get source policy mode from environment."""
     return os.getenv("SOURCE_POLICY_MODE", "open_data_context").strip().lower()
 
 
 def live_cwc_enabled() -> bool:
-    """Whether live CWC telemetry is allowed in-app."""
     return env_flag("ALLOW_LIVE_CWC", default=True)
 
 
@@ -113,8 +158,7 @@ def get_model_artifact_root() -> str:
     root = os.getenv("MODEL_ARTIFACT_ROOT", "").strip()
     if root:
         return root
-    # Default: backend/artifacts/models
-    base = Path(__file__).resolve().parent.parent  # backend/
+    base = Path(__file__).resolve().parent.parent
     return str(base / "artifacts" / "models")
 
 
@@ -134,34 +178,21 @@ def repo_relative_path(path: str) -> str:
 
 
 def resolve_model_artifact_path(path_name: str) -> str:
-    """
-    Resolve a model artifact path to an absolute path.
-    Supports:
-      - Absolute paths
-      - Paths relative to the backend/ directory
-      - Paths relative to the repo root
-    """
     p = Path(path_name)
     if p.is_absolute():
         return str(p)
-    # Try relative to backend/
     backend_p = Path(__file__).resolve().parent.parent / p
     if backend_p.exists():
         return str(backend_p)
-    # Try relative to repo root
     repo_p = Path(__file__).resolve().parent.parent.parent / p
     if repo_p.exists():
         return str(repo_p)
-    # Fall back to backend-relative (even if not found)
     return str(backend_p)
 
 
 def default_model_artifact_paths() -> Tuple[str, str]:
-    """Return (model_path, scaler_path) for the default bundle."""
     root = get_model_artifact_root()
-    model_path = os.path.join(root, "flood_model.pkl")
-    scaler_path = os.path.join(root, "scaler.pkl")
-    return model_path, scaler_path
+    return os.path.join(root, "flood_model.pkl"), os.path.join(root, "scaler.pkl")
 
 
 def frontend_dist_ready() -> bool:
@@ -188,7 +219,6 @@ def normalize_weather_lookup(value: str) -> str:
 
 
 def normalize_origin_url(value: str) -> str:
-    """Strip trailing slashes and lowercase the URL."""
     return value.strip().rstrip("/").lower()
 
 
@@ -208,26 +238,28 @@ def _weather_cache_key(path: str, params: Dict[str, Any]) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-_weather_cache: Dict[str, Any] = {}
+# Public dict — weather.py imports WEATHER_CACHE directly
+WEATHER_CACHE: Dict[str, Any] = {}
+_weather_cache = WEATHER_CACHE  # internal alias points to same dict
 
 
 def get_cached_weather_response(
     path: str, params: Dict[str, Any], max_age: int = WEATHER_CACHE_TTL_SECONDS
 ) -> Any | None:
     key = _weather_cache_key(path, params)
-    entry = _weather_cache.get(key)
+    entry = WEATHER_CACHE.get(key)
     if entry is None:
         return None
     age = (datetime.datetime.utcnow() - entry["ts"]).total_seconds()
     if age > max_age:
-        del _weather_cache[key]
+        del WEATHER_CACHE[key]
         return None
     return entry["data"]
 
 
 def store_weather_response(path: str, params: Dict[str, Any], data: Any):
     key = _weather_cache_key(path, params)
-    _weather_cache[key] = {"ts": datetime.datetime.utcnow(), "data": data}
+    WEATHER_CACHE[key] = {"ts": datetime.datetime.utcnow(), "data": data}
 
 
 # ============= CORS ORIGINS =============
@@ -275,7 +307,7 @@ def write_audit_log(
             }
         )
     except Exception as exc:
-        print(f"⚠️ Audit log write failed (non-fatal): {exc}")
+        print(f"\u26a0\ufe0f Audit log write failed (non-fatal): {exc}")
 
 
 # ============= TELEMETRY HELPERS =============
@@ -287,7 +319,6 @@ def persist_telemetry_record(
     telemetry: Dict[str, Any],
     route: str,
 ) -> int | None:
-    """Persist telemetry snapshot to storage."""
     node_count = len(telemetry.get("data", [])) if isinstance(telemetry.get("data"), list) else 0
     try:
         snapshot_id = operational_store.save_telemetry_snapshot(
@@ -303,9 +334,8 @@ def persist_telemetry_record(
             }
         )
     except Exception as exc:
-        print(f"⚠️ Telemetry persistence failed: {exc}")
+        print(f"\u26a0\ufe0f Telemetry persistence failed: {exc}")
         snapshot_id = None
-
     write_audit_log(
         event_type="telemetry.snapshot",
         route=route,
@@ -340,20 +370,6 @@ def get_pipeline_features(
     state_name: str | None = None,
     station_name: str | None = None,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Read the most recent OperationalDataPipeline feature row for this
-    (state, station) pair from:
-
-        data/features/weather_water/weather_water_features_latest.csv
-
-    Returns a dict with column names as keys, or None if not available.
-
-    Key columns returned (when present):
-      river_level_m   → Peak_Flood_Level_m
-      rainfall_1h_mm  → T1d (scaled)
-      rainfall_24h_mm
-      ...
-    """
     try:
         import pandas as pd
         csv_path = backend_relative_path(
@@ -364,33 +380,20 @@ def get_pipeline_features(
         df = pd.read_csv(csv_path)
         if df.empty:
             return None
-
-        # Filter by state if present
         if state_name:
-            col = next(
-                (c for c in df.columns if c.lower() in ("state", "state_name")),
-                None,
-            )
+            col = next((c for c in df.columns if c.lower() in ("state", "state_name")), None)
             if col:
                 mask = df[col].str.lower() == state_name.lower()
                 if mask.any():
                     df = df[mask]
-
-        # Filter by station if present
         if station_name:
-            col = next(
-                (c for c in df.columns if c.lower() in ("station", "station_name", "city", "city_name")),
-                None,
-            )
+            col = next((c for c in df.columns if c.lower() in ("station", "station_name", "city", "city_name")), None)
             if col:
                 mask = df[col].str.lower() == station_name.lower()
                 if mask.any():
                     df = df[mask]
-
         import math
-        # Take the most recent row
         row = df.iloc[-1].to_dict()
-        # Strip NaN values
         return {k: v for k, v in row.items() if not (isinstance(v, float) and math.isnan(v))}
     except Exception as exc:
         print(f"[WARN] get_pipeline_features failed: {exc}")
@@ -398,7 +401,6 @@ def get_pipeline_features(
 
 
 def get_pipeline_manifest() -> Optional[Dict[str, Any]]:
-    """Read the pipeline run manifest (JSON) if present."""
     try:
         manifest_path = backend_relative_path(
             "data/features/weather_water/pipeline_manifest.json"
@@ -416,46 +418,31 @@ def pipeline_autofill_predict_input(
     state_name: str | None = None,
     station_name: str | None = None,
 ) -> Dict[str, Any]:
-    """
-    Auto-fill sentinel default values in input_dict from the pipeline feature CSV.
-
-    Sentinel defaults that get replaced:
-      Peak_Flood_Level_m  == 8.5   → replaced with river_level_m
-      T1d                 == 10.0  → replaced with scaled rainfall_1h_mm
-
-    Manual overrides from the Flutter UI or API caller are always respected.
-    """
     out = copy.deepcopy(input_dict)
     features = get_pipeline_features(state_name, station_name)
     meta = {"applied": False, "source": "none", "fields_replaced": []}
-
     if not features:
         out["_pipeline_autofill"] = meta
         return out
-
     def _f(key: str) -> Optional[float]:
         v = features.get(key)
         try:
             return float(v) if v is not None else None
         except (TypeError, ValueError):
             return None
-
     river_level = _f("river_level_m")
     if river_level is not None and river_level > 0 and float(out.get("Peak_Flood_Level_m", 8.5)) == 8.5:
         out["Peak_Flood_Level_m"] = round(river_level, 3)
         meta["fields_replaced"].append("Peak_Flood_Level_m")
         meta["applied"] = True
         meta["source"] = "pipeline_csv"
-
     rainfall_1h = _f("rainfall_1h_mm")
     if rainfall_1h is not None and float(out.get("T1d", 10.0)) == 10.0:
-        # Scale 1h reading to approximate 24h by × 12 (conservative midday factor)
         t1d_estimate = round(min(rainfall_1h * 12.0, 400.0), 2)
         out["T1d"] = t1d_estimate
         meta["fields_replaced"].append("T1d")
         meta["applied"] = True
         meta["source"] = "pipeline_csv"
-
     out["_pipeline_autofill"] = meta
     return out
 
@@ -465,7 +452,6 @@ def pipeline_autofill_predict_input(
 def get_source_policy_payload() -> Dict[str, Any]:
     mode = get_source_policy_mode()
     allow_live_cwc = live_cwc_enabled()
-
     if mode == "live_cwc":
         return {
             "mode": "live_cwc",
@@ -484,12 +470,11 @@ def get_source_policy_payload() -> Dict[str, Any]:
             "prediction_data_source": "Fallback Manual Context",
             "description": "Manual input only. No live data sources.",
         }
-    # Default: open_data_context
     return {
         "mode": "open_data_context",
         "label": "Open Data Context",
         "allow_live_cwc_in_app": allow_live_cwc,
         "allow_live_cwc_in_monitoring": True,
         "prediction_data_source": "Live CWC Detection + Manual Input" if allow_live_cwc else "Official View Only + Manual Input",
-        "description": "Use open/publicly reusable datasets as the legal default. Live CWC telemetry is enabled for automatic operational monitoring.",
+        "description": "Use open/publicly reusable datasets as the legal default.",
     }
