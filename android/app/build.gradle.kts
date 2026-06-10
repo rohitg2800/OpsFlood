@@ -15,20 +15,15 @@ if (localPropertiesFile.exists()) {
 }
 
 // ── Keystore signing ────────────────────────────────────────────
-// Place your keystore at android/keystore.jks and set these 4 lines
-// in android/keystore.properties (DO NOT commit that file):
-//   storeFile=keystore.jks
-//   storePassword=YOUR_STORE_PASSWORD
-//   keyAlias=YOUR_KEY_ALIAS
-//   keyPassword=YOUR_KEY_PASSWORD
-//
-// If keystore.properties is missing (e.g. CI without secrets), the build
-// falls back to the debug keystore so it still compiles.
+// Place keystore at android/keystore.jks and set 4 keys in
+// android/keystore.properties (do NOT commit that file):
+//   storeFile=keystore.jks  storePassword=...  keyAlias=...  keyPassword=...
+// Falls back to debug keystore if the file is missing.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val useReleaseKeystore = keystorePropertiesFile.exists()
 
 android {
-    namespace = "com.rohitg.floodwatch"
+    namespace = "com.equinox.flood"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -49,20 +44,20 @@ android {
         keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
         signingConfigs {
             create("release") {
-                keyAlias     = keystoreProperties["keyAlias"]     as String
-                keyPassword  = keystoreProperties["keyPassword"]  as String
-                storeFile    = file(keystoreProperties["storeFile"] as String)
+                keyAlias      = keystoreProperties["keyAlias"]      as String
+                keyPassword   = keystoreProperties["keyPassword"]   as String
+                storeFile     = file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
             }
         }
     }
 
     defaultConfig {
-        applicationId = "com.rohitg.floodwatch"
-        minSdk    = flutter.minSdkVersion
+        applicationId = "com.equinox.flood"
+        minSdk    = 21
         targetSdk = flutter.targetSdkVersion
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode   = 2
+        versionName   = "1.1.0"
         multiDexEnabled = true
     }
 
@@ -84,6 +79,9 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("androidx.multidex:multidex:2.0.1")
 }
 
 flutter {
