@@ -1,0 +1,138 @@
+// firestore.rules
+// OpsFlood — Module 15: Firestore Security Rules
+//
+// Deploy with:  firebase deploy --only firestore:rules
+//
+// Collections:
+//  /stations/{id}        — CWC/WRD gauge readings (read: public, write: admin)
+//  /alerts/{id}          — generated flood alerts  (read: public, write: admin)
+//  /crowd_reports/{id}   — citizen reports         (read: public, write: auth)
+//  /users/{uid}          — user profile + prefs    (read/write: own user only)
+//  /fcm_tokens/{uid}     — FCM device tokens       (read: admin, write: own)
+//  /news/{id}            — curated news items      (read: public, write: admin)
+//  /evacuation_routes/{id} — routes data           (read: public, write: admin)
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --------------------------------------------------------
+    // Helper functions
+    // --------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+             .data.get('role', '') == 'admin';
+    }
+
+    function isValidReport() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['district','type','severity','description',
+                               'lat','lng','createdAt','verified','upvotes'])
+        && d.description is string
+        && d.description.size() <= 500
+        && d.severity in ['low','medium','high','critical']
+        && d.type in ['road_flooded','house_inundated','bridge_danger',
+                       'rescue_needed','other']
+        && d.lat is number
+        && d.lng is number
+        && d.verified == false        // citizens cannot self-verify
+        && d.upvotes  == 0;           // upvotes start at 0
+    }
+
+    function isValidUserProfile() {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['role'])  // users cannot set their own role
+        && (d.get('email','') is string)
+        && (d.get('displayName','') is string);
+    }
+
+    // --------------------------------------------------------
+    // /stations/{id}
+    // --------------------------------------------------------
+    match /stations/{stationId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // /alerts/{id}
+    // --------------------------------------------------------
+    match /alerts/{alertId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // /crowd_reports/{id}
+    // --------------------------------------------------------
+    match /crowd_reports/{reportId} {
+      // Anyone can read the feed
+      allow read: if true;
+
+      // Authenticated users can create valid reports
+      allow create: if isAuthenticated()
+        && isValidReport()
+        && request.resource.data.userId == request.auth.uid;
+
+      // Owner can update only description/photoUrl; admin can update anything
+      allow update: if isAdmin()
+        || (isOwner(resource.data.userId)
+            && request.resource.data.diff(resource.data)
+                .affectedKeys().hasOnly(['description','photoUrl']));
+
+      // Only admin can delete
+      allow delete: if isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // /users/{uid}
+    // --------------------------------------------------------
+    match /users/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && isValidUserProfile();
+      allow update: if isOwner(uid) && isValidUserProfile();
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // /fcm_tokens/{uid}
+    // --------------------------------------------------------
+    match /fcm_tokens/{uid} {
+      allow read:   if isAdmin();
+      allow write:  if isOwner(uid);
+    }
+
+    // --------------------------------------------------------
+    // /news/{id}
+    // --------------------------------------------------------
+    match /news/{newsId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // /evacuation_routes/{id}
+    // --------------------------------------------------------
+    match /evacuation_routes/{routeId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // --------------------------------------------------------
+    // Deny everything else by default
+    // --------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
