@@ -1,61 +1,59 @@
-# Flutter wrapper
--keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.** { *; }
--keep class io.flutter.util.** { *; }
--keep class io.flutter.view.** { *; }
+# OpsFlood — ProGuard / R8 rules
+# Module 9: Release Hardening
+# ============================================================
+
+# ── Flutter engine
 -keep class io.flutter.** { *; }
--keep class io.flutter.plugins.** { *; }
+-keep class io.flutter.embedding.** { *; }
+-dontwarn io.flutter.**
 
-# ── Google Play Core (referenced by Flutter but not used in non-Play builds) ──
--dontwarn com.google.android.play.core.splitcompat.SplitCompatApplication
--dontwarn com.google.android.play.core.splitinstall.SplitInstallException
--dontwarn com.google.android.play.core.splitinstall.SplitInstallManager
--dontwarn com.google.android.play.core.splitinstall.SplitInstallManagerFactory
--dontwarn com.google.android.play.core.splitinstall.SplitInstallRequest$Builder
--dontwarn com.google.android.play.core.splitinstall.SplitInstallRequest
--dontwarn com.google.android.play.core.splitinstall.SplitInstallSessionState
--dontwarn com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
--dontwarn com.google.android.play.core.tasks.OnFailureListener
--dontwarn com.google.android.play.core.tasks.OnSuccessListener
--dontwarn com.google.android.play.core.tasks.Task
-
-# ── WorkManager — prevent R8 stripping generated Room/WorkManager impl ──────
--keep class androidx.work.** { *; }
--keep class androidx.work.impl.** { *; }
--keep class androidx.work.impl.WorkDatabase_Impl { *; }
--keepclassmembers class * extends androidx.work.Worker { *; }
--keepclassmembers class * extends androidx.work.ListenableWorker {
-    public <init>(android.content.Context, androidx.work.WorkerParameters);
-}
-
-# ── androidx.startup / InitializationProvider ───────────────────────────────
--keep class androidx.startup.** { *; }
--keep class * implements androidx.startup.Initializer { *; }
--keepnames class androidx.startup.InitializationProvider
-
-# ── Room database generated implementations ──────────────────────────────────
--keep class * extends androidx.room.RoomDatabase { *; }
--keep @androidx.room.Database class * { *; }
--keepclassmembers @androidx.room.Dao interface * { *; }
-
-# ── Firebase ─────────────────────────────────────────────────────────────────
+# ── Firebase
 -keep class com.google.firebase.** { *; }
 -keep class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
 
-# ── Kotlin coroutines ────────────────────────────────────────────────────────
--keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
--keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
--keepclassmembernames class kotlinx.** {
-    volatile <fields>;
-}
+# ── Firebase Messaging (FCM)
+-keep class com.google.firebase.messaging.** { *; }
 
-# ── Serialization ────────────────────────────────────────────────────────────
--keepattributes *Annotation*, InnerClasses
--dontnote kotlinx.serialization.AnnotationsKt
--keepclassmembers class kotlinx.serialization.json.** {
-    *** Companion;
-}
+# ── Hive
+-keep class com.hivedb.** { *; }
+-keep @com.hive.annotations.HiveType class * { *; }
+-keep @com.hive.annotations.HiveField class * { *; }
 
-# ── Reflection attributes ────────────────────────────────────────────────────
+# ── Kotlin coroutines / stdlib
+-keep class kotlin.** { *; }
+-dontwarn kotlin.**
+-keepclassmembers class kotlinx.** { *; }
+
+# ── OkHttp / Retrofit (used by dio under the hood on Android)
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
+# ── Dio
+-keep class com.dio.** { *; }
+
+# ── pdf / printing plugin (dart:ffi JNI bridge)
+-keep class com.zynsoft.** { *; }
+-keep class com.pdf.** { *; }
+
+# ── flutter_local_notifications
+-keep class com.dexterous.** { *; }
+
+# ── Riverpod (pure Dart — no Java classes, but keep annotations)
+-keepattributes *Annotation*
+
+# ── Prevent stripping of native crash reporter
+-keepattributes SourceFile,LineNumberTable
+-keep public class * extends java.lang.Exception
+
+# ── Gzip / JSON serialisation
+-keep class org.json.** { *; }
+
+# ── Generic
 -keepattributes Signature
 -keepattributes Exceptions
+-keepattributes InnerClasses
+-keepattributes EnclosingMethod

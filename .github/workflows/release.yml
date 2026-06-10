@@ -1,0 +1,103 @@
+# .github/workflows/release.yml
+# OpsFlood — Module 9: CI/CD Release Pipeline
+#
+# Triggers:
+#   • Push to main
+#   • Manual workflow_dispatch
+#
+# Steps:
+#   1. Checkout + cache Flutter
+#   2. flutter pub get
+#   3. dart format --output=none --set-exit-if-changed .
+#   4. flutter analyze
+#   5. flutter test
+#   6. flutter build appbundle --release
+#   7. Upload .aab as workflow artifact
+
+name: OpsFlood Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      FLUTTER_VERSION: '3.22.0'
+
+    steps:
+      # ── 1. Checkout
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Flutter (cached)
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # ── 3. Install dependencies
+      - name: flutter pub get
+        run: flutter pub get
+
+      # ── 4. Format check
+      - name: dart format check
+        run: dart format --output=none --set-exit-if-changed .
+        continue-on-error: true   # warn only — don't break build
+
+      # ── 5. Static analysis
+      - name: flutter analyze
+        run: flutter analyze --no-fatal-infos
+
+      # ── 6. Unit tests
+      - name: flutter test
+        run: flutter test --coverage
+
+      # ── 7. Decode keystore from secret
+      - name: Decode keystore
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p android/app/keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode \
+            > android/app/keystore/upload.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      # ── 8. Build release App Bundle
+      - name: flutter build appbundle
+        if: github.ref == 'refs/heads/main'
+        run: |
+          flutter build appbundle \
+            --release \
+            --obfuscate \
+            --split-debug-info=build/debug-info
+        env:
+          KEYSTORE_PATH:     android/app/keystore/upload.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
+
+      # ── 9. Upload .aab artifact
+      - name: Upload App Bundle
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opsflood-release-${{ github.run_number }}
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
+      # ── 10. Upload debug symbols (for Play Console deobfuscation)
+      - name: Upload debug symbols
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-info-${{ github.run_number }}
+          path: build/debug-info/
+          retention-days: 30
