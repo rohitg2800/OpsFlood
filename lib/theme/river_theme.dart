@@ -36,7 +36,6 @@ class AppPalette {
   static const light2      = Color(0xFFFFE999);
   static const lightStroke = Color(0xFFE8C84A);
 
-  // Old name aliases
   static const navy0      = abyss0;
   static const navy1      = abyss1;
   static const navy2      = abyss2;
@@ -177,10 +176,12 @@ class RiverColors extends ThemeExtension<RiverColors> {
   final Color navInactive;
   final Color scaffoldBg;
 
+  /// Alias used by screens that reference t.bgBase (maps to cardBg).
+  Color get bgBase => cardBg;
+
   static RiverColors of(BuildContext context) =>
       Theme.of(context).extension<RiverColors>() ?? _golden;
 
-  // ── DARK (warm gold on deep abyss) ────────────────────────────────────────
   static const RiverColors _golden = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
@@ -204,7 +205,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.abyss1,
   );
 
-  // ── LIGHT (warm cream-gold) ───────────────────────────────────────────────
   static const RiverColors _light = RiverColors(
     riverNormal:    Color(0xFF00897B),
     riverWarning:   AppPalette.warning,
@@ -228,7 +228,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     Color(0xFFFFF8E7),
   );
 
-  // ── SUNSET (deep rose-orange) ─────────────────────────────────────────────
   static const RiverColors _sunset = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   Color(0xFFFFAA00),
@@ -252,7 +251,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
     scaffoldBg:     AppPalette.sunset1,
   );
 
-  // ── OCEAN (deep teal-navy) ────────────────────────────────────────────────
   static const RiverColors _ocean = RiverColors(
     riverNormal:    AppPalette.safe,
     riverWarning:   AppPalette.warning,
@@ -281,7 +279,7 @@ class RiverColors extends ThemeExtension<RiverColors> {
       case 'light':  return _light;
       case 'sunset': return _sunset;
       case 'ocean':  return _ocean;
-      default:       return _golden;  // dark + system
+      default:       return _golden;
     }
   }
 
@@ -343,7 +341,6 @@ class RiverColors extends ThemeExtension<RiverColors> {
     );
   }
 
-  // ── Theme builders ────────────────────────────────────────────────────────
   static ThemeData lightTheme()  => _buildTheme(brightness: Brightness.light,  ext: _light);
   static ThemeData darkTheme()   => _buildTheme(brightness: Brightness.dark,   ext: _golden);
   static ThemeData sunsetTheme() => _buildTheme(brightness: Brightness.dark,   ext: _sunset);
@@ -378,69 +375,39 @@ class RiverColors extends ThemeExtension<RiverColors> {
       extensions:              <ThemeExtension<dynamic>>[ext],
       fontFamily:              'Roboto',
       textTheme: TextTheme(
-        displayLarge: TextStyle(
-          fontWeight: FontWeight.w900, letterSpacing: -1.5,
-          color: ext.textPrimary,
-        ),
-        displaySmall: TextStyle(
-          fontWeight: FontWeight.w800, letterSpacing: -1.0,
-          color: ext.textPrimary,
-        ),
-        titleLarge: TextStyle(
-          fontWeight: FontWeight.w700, letterSpacing: -0.5,
-          color: ext.textPrimary,
-        ),
-        titleMedium: TextStyle(
-          fontWeight: FontWeight.w600, letterSpacing: -0.2,
-          color: ext.textPrimary,
-        ),
-        bodyMedium: TextStyle(
-          fontWeight: FontWeight.w400,
-          color: ext.textSecondary,
-        ),
-        labelSmall: TextStyle(
-          fontWeight: FontWeight.w600, letterSpacing: 1.0,
-          color: ext.textSecondary,
-        ),
+        displayLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.5, color: ext.textPrimary),
+        displaySmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -1.0, color: ext.textPrimary),
+        titleLarge:   TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5, color: ext.textPrimary),
+        titleMedium:  TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.2, color: ext.textPrimary),
+        bodyMedium:   TextStyle(fontWeight: FontWeight.w400, color: ext.textSecondary),
+        labelSmall:   TextStyle(fontWeight: FontWeight.w600, letterSpacing: 1.0,  color: ext.textSecondary),
       ),
       cardTheme: CardThemeData(
-        color:     card,
-        elevation: 0,
+        color: card, elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(22),
           side: BorderSide(color: stroke, width: 1),
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor:  ext.navBg,
-        foregroundColor:  ext.textPrimary,
-        elevation:        0,
-        centerTitle:      false,
-        surfaceTintColor: Colors.transparent,
-        titleTextStyle: TextStyle(
-          color: ext.textPrimary, fontSize: 20,
-          fontWeight: FontWeight.w800, letterSpacing: -0.5,
-        ),
+        backgroundColor: ext.navBg, foregroundColor: ext.textPrimary,
+        elevation: 0, centerTitle: false, surfaceTintColor: Colors.transparent,
+        titleTextStyle: TextStyle(color: ext.textPrimary, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.5),
         iconTheme: IconThemeData(color: accent),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: ext.navBg,
         indicatorColor:  ext.accentGlow,
-        height:          64,
+        height: 64,
         iconTheme: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: ext.navActive, size: 24);
-          }
+          if (states.contains(WidgetState.selected)) return IconThemeData(color: ext.navActive, size: 24);
           return IconThemeData(color: ext.navInactive, size: 22);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return TextStyle(
-              color: ext.navActive, fontSize: 10,
-              fontWeight: FontWeight.w700, letterSpacing: 0.3);
+            return TextStyle(color: ext.navActive, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.3);
           }
-          return TextStyle(
-            color: ext.navInactive, fontSize: 10, letterSpacing: 0.2);
+          return TextStyle(color: ext.navInactive, fontSize: 10, letterSpacing: 0.2);
         }),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -462,35 +429,19 @@ class RiverColors extends ThemeExtension<RiverColors> {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: ext.chipBg,
-        labelStyle: TextStyle(
-          fontSize: 12, fontWeight: FontWeight.w600,
-          color: ext.textPrimary,
-        ),
+        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ext.textPrimary),
         side: BorderSide(color: stroke, width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        color:            accent,
-        linearTrackColor: ext.cardBgElevated,
+        color: accent, linearTrackColor: ext.cardBgElevated,
       ),
-      dividerTheme: DividerThemeData(
-        color: stroke, space: 1, thickness: 1,
-      ),
+      dividerTheme: DividerThemeData(color: stroke, space: 1, thickness: 1),
       inputDecorationTheme: InputDecorationTheme(
-        filled:    true,
-        fillColor: card,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: stroke),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: stroke),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: accent, width: 2),
-        ),
+        filled: true, fillColor: card,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: stroke)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: stroke)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: accent, width: 2)),
         hintStyle: TextStyle(color: ext.textSecondary),
         labelStyle: TextStyle(color: accent),
       ),
