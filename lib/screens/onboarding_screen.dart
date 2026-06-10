@@ -1,200 +1,195 @@
 // lib/screens/onboarding_screen.dart
-// OpsFlood — Module 8: Onboarding Walkthrough
+// OpsFlood — Module 14: Onboarding & In-App Update
 //
-// 5-page PageView first-launch walkthrough:
-//   Page 0 — Welcome        : App name, tagline, hero icon
-//   Page 1 — District pick  : Chip grid of 38 Bihar districts
-//                              (subscribes FCM district topics on confirm)
-//   Page 2 — River pick     : 7 Bihar river chips
-//   Page 3 — Notification   : Request OS permission; severity toggle preview
-//   Page 4 — Theme pick     : Live theme swatch grid
-//   Page 5 — Done           : CTA — Enter OpsFlood
-//
-// On completion writes 'onboarding_done = true' to SharedPreferences.
-// SplashScreen checks this flag and routes to /onboarding if false.
+// • 4-page animated onboarding (PageView) with skip/next/done
+// • Saves seen state to SharedPreferences (key: 'onboarding_done')
+// • In-app update check via in_app_update package (Android)
+// • Shown only on first launch; subsequent launches route to /shell
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../providers/theme_provider.dart';
-import '../services/fcm_topic_manager.dart';
-import '../theme/river_theme.dart';
-import 'main_shell.dart';
+// ---------------------------------------------------------------------------
+// Onboarding page data
+// ---------------------------------------------------------------------------
 
-class OnboardingScreen extends ConsumerStatefulWidget {
-  const OnboardingScreen({super.key});
-  static const String route = '/onboarding';
-
-  @override
-  ConsumerState<OnboardingScreen> createState() =>
-      _OnboardingState();
+class _PageData {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  const _PageData({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+  });
 }
 
-class _OnboardingState extends ConsumerState<OnboardingScreen>
-    with TickerProviderStateMixin {
-  final _ctrl = PageController();
-  int _page = 0;
-  static const _total = 6;
+const _pages = [
+  _PageData(
+    title: 'Real-Time Flood Alerts',
+    subtitle:
+        'Get instant notifications when river levels cross danger thresholds at 50+ CWC stations across Bihar.',
+    icon: Icons.notifications_active_outlined,
+    color: Color(0xFF0D47A1),
+  ),
+  _PageData(
+    title: 'Live River Map',
+    subtitle:
+        'Track flood risk across all 38 Bihar districts with our colour-coded heatmap, updated every 15 minutes.',
+    icon: Icons.map_outlined,
+    color: Color(0xFF1565C0),
+  ),
+  _PageData(
+    title: 'Evacuation Routes',
+    subtitle:
+        'Find the nearest safe shelter and open road routes instantly — works offline when you need it most.',
+    icon: Icons.directions_outlined,
+    color: Color(0xFF0277BD),
+  ),
+  _PageData(
+    title: 'Community Reporting',
+    subtitle:
+        'Report local flooding with a photo and location. Help your district prepare and respond faster.',
+    icon: Icons.group_outlined,
+    color: Color(0xFF01579B),
+  ),
+];
 
-  // District & river selection
-  final Set<String> _districts = {};
-  final Set<String> _rivers    = {};
+// ---------------------------------------------------------------------------
+// Helper: check / mark onboarding done
+// ---------------------------------------------------------------------------
 
-  // ── Navigation helpers
+Future<bool> isOnboardingDone() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getBool('onboarding_done') ?? false;
+}
+
+Future<void> markOnboardingDone() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool('onboarding_done', true);
+}
+
+// ---------------------------------------------------------------------------
+// OnboardingScreen
+// ---------------------------------------------------------------------------
+
+class OnboardingScreen extends StatefulWidget {
+  static const String route = '/onboarding';
+  const OnboardingScreen({super.key});
+  @override
+  State<OnboardingScreen> createState() =>
+      _OnboardingScreenState();
+}
+
+class _OnboardingScreenState
+    extends State<OnboardingScreen>
+    with SingleTickerProviderStateMixin {
+  final _pageCtrl = PageController();
+  int _current = 0;
 
   void _next() {
-    if (_page < _total - 1) {
-      _ctrl.nextPage(
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeInOutCubic);
+    if (_current < _pages.length - 1) {
+      _pageCtrl.nextPage(
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
     } else {
       _finish();
     }
   }
 
   Future<void> _finish() async {
-    // Subscribe district + river topics
-    await FcmTopicManager.instance
-        .setDistrictSubscriptions(_districts.toList());
-    await FcmTopicManager.instance
-        .setRiverSubscriptions(_rivers.toList());
-    // Mark done
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('onboarding_done', true);
-    if (mounted) {
-      Navigator.of(context)
-          .pushReplacementNamed(MainShell.route);
-    }
+    await markOnboardingDone();
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/shell');
   }
 
-  Future<void> _requestNotifPermission() async {
-    await FlutterLocalNotificationsPlugin()
-        .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(
-            alert: true, badge: true, sound: true);
-    // Android 13+ permission is handled by the OS prompt
-    // triggered automatically on first notification fire.
-    HapticFeedback.lightImpact();
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
+    final page = _pages[_current];
     return Scaffold(
-      backgroundColor: t.bgBase,
+      backgroundColor: page.color,
       body: SafeArea(
         child: Column(
           children: [
-            // Skip button (top-right)
+            // Skip button
             Align(
-              alignment: Alignment.centerRight,
+              alignment: Alignment.topRight,
               child: TextButton(
                 onPressed: _finish,
-                child: Text('Skip',
+                child: const Text('Skip',
                     style: TextStyle(
-                        color: t.textSecondary, fontSize: 12)),
+                        color: Colors.white70, fontSize: 14)),
               ),
             ),
-
-            // Page content
+            // Pages
             Expanded(
-              child: PageView(
-                controller: _ctrl,
-                onPageChanged: (p) =>
-                    setState(() => _page = p),
-                children: [
-                  _PageWelcome(t: t),
-                  _PageDistricts(
-                      t: t,
-                      selected: _districts,
-                      onToggle: (s, v) => setState(() {
-                            if (v) {
-                              _districts.add(s);
-                            } else {
-                              _districts.remove(s);
-                            }
-                          })),
-                  _PageRivers(
-                      t: t,
-                      selected: _rivers,
-                      onToggle: (s, v) => setState(() {
-                            if (v) {
-                              _rivers.add(s);
-                            } else {
-                              _rivers.remove(s);
-                            }
-                          })),
-                  _PageNotifications(
-                      t: t,
-                      onRequest: _requestNotifPermission),
-                  _PageTheme(
-                      t: t,
-                      onPick: (m) => ref
-                          .read(themeModeProvider.notifier)
-                          .setMode(m)),
-                  _PageDone(t: t),
-                ],
+              child: PageView.builder(
+                controller: _pageCtrl,
+                onPageChanged: (i) =>
+                    setState(() => _current = i),
+                itemCount: _pages.length,
+                itemBuilder: (_, i) =>
+                    _OnboardingPage(data: _pages[i]),
               ),
             ),
-
-            // Dot indicator + button
+            // Dots
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _pages.length,
+                (i) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: 4),
+                  width:  _current == i ? 20 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _current == i
+                        ? Colors.white
+                        : Colors.white38,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Action button
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-              child: Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween,
-                children: [
-                  // Dots
-                  Row(
-                    children: List.generate(
-                        _total,
-                        (i) => AnimatedContainer(
-                              duration: const Duration(
-                                  milliseconds: 250),
-                              margin: const EdgeInsets.only(
-                                  right: 5),
-                              width: i == _page ? 18 : 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: i == _page
-                                    ? t.accent
-                                    : t.stroke,
-                                borderRadius:
-                                    BorderRadius.circular(4),
-                              ),
-                            )),
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _next,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: page.color,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(30)),
                   ),
-                  // Next / Done button
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: t.accent,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(14)),
-                    ),
-                    onPressed: () {
-                      HapticFeedback.lightImpact();
-                      _next();
-                    },
-                    child: Text(
-                      _page == _total - 1
-                          ? 'Enter OpsFlood '➜'
-                          : 'Next →',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 13),
-                    ),
+                  child: Text(
+                    _current == _pages.length - 1
+                        ? 'Get Started'
+                        : 'Next',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16),
                   ),
-                ],
+                ),
               ),
             ),
+            const SizedBox(height: 40),
           ],
         ),
       ),
@@ -202,378 +197,52 @@ class _OnboardingState extends ConsumerState<OnboardingScreen>
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Individual page widgets
-// ────────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Individual onboarding page
+// ---------------------------------------------------------------------------
 
-class _PageWelcome extends StatelessWidget {
-  final RiverColors t;
-  const _PageWelcome({required this.t});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 32, vertical: 16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('🌊',
-                style: const TextStyle(fontSize: 72)),
-            const SizedBox(height: 24),
-            Text('OpsFlood',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 34,
-                    letterSpacing: -0.5)),
-            const SizedBox(height: 12),
-            Text(
-              'Real-time flood monitoring for Bihar — '  
-              'live river levels, CWC alerts, AI prediction '  
-              'and community incident reporting.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 13,
-                  height: 1.55),
-            ),
-            const SizedBox(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _Pill(t: t, icon: '📍', label: 'Live CWC'),
-                const SizedBox(width: 8),
-                _Pill(t: t, icon: '🤖', label: 'AI predict'),
-                const SizedBox(width: 8),
-                _Pill(t: t, icon: '📣', label: 'Alerts'),
-              ],
-            ),
-          ],
-        ),
-      );
-}
-
-class _Pill extends StatelessWidget {
-  final RiverColors t;
-  final String icon, label;
-  const _Pill({required this.t, required this.icon, required this.label});
+class _OnboardingPage extends StatelessWidget {
+  final _PageData data;
+  const _OnboardingPage({required this.data});
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: t.accent.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: t.accent.withValues(alpha: 0.35)),
-        ),
-        child: Text('$icon $label',
-            style: TextStyle(
-                color: t.accent,
-                fontWeight: FontWeight.w700,
-                fontSize: 11)),
-      );
-}
-
-// ── Page 1: District selection
-
-class _PageDistricts extends StatelessWidget {
-  final RiverColors t;
-  final Set<String> selected;
-  final void Function(String, bool) onToggle;
-  const _PageDistricts({
-      required this.t,
-      required this.selected,
-      required this.onToggle});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 20, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('🗺️ Select your districts',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20)),
-            const SizedBox(height: 6),
-            Text(
-              'Get alerts for specific Bihar districts. '  
-              'You can change this in Settings anytime.',
-              style: TextStyle(
-                  color: t.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 6, runSpacing: 6,
-                  children:
-                      FcmTopics.biharDistricts.map((slug) {
-                    final active = selected.contains(slug);
-                    final label = slug
-                        .replaceAll('_', ' ')
-                        .split(' ')
-                        .map((w) => w.isEmpty
-                            ? ''
-                            : w[0].toUpperCase() +
-                                w.substring(1))
-                        .join(' ');
-                    return GestureDetector(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        onToggle(slug, !active);
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(
-                            milliseconds: 150),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? t.accent.withValues(alpha: 0.18)
-                              : t.cardBg,
-                          borderRadius:
-                              BorderRadius.circular(16),
-                          border: Border.all(
-                            color: active
-                                ? t.accent
-                                : t.stroke,
-                          ),
-                        ),
-                        child: Text(label,
-                            style: TextStyle(
-                              color: active
-                                  ? t.accent
-                                  : t.textSecondary,
-                              fontWeight: active
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                              fontSize: 11,
-                            )),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-// ── Page 2: River selection
-
-class _PageRivers extends StatelessWidget {
-  final RiverColors t;
-  final Set<String> selected;
-  final void Function(String, bool) onToggle;
-  const _PageRivers({
-      required this.t,
-      required this.selected,
-      required this.onToggle});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 20, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('🌊 Select rivers to watch',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20)),
-            const SizedBox(height: 6),
-            Text(
-              'Receive push alerts when a river you follow '  
-              'crosses danger or warning thresholds.',
-              style: TextStyle(
-                  color: t.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: FcmTopics.biharRivers.map((slug) {
-                final active = selected.contains(slug);
-                final label = slug
-                    .replaceAll('_', ' ')
-                    .split(' ')
-                    .map((w) => w.isEmpty
-                        ? ''
-                        : w[0].toUpperCase() + w.substring(1))
-                    .join(' ');
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onToggle(slug, !active);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? t.accent.withValues(alpha: 0.18)
-                          : t.cardBg,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: active ? t.accent : t.stroke,
-                          width: active ? 2 : 1),
-                    ),
-                    child: Text('🌊 $label',
-                        style: TextStyle(
-                          color: active
-                              ? t.accent
-                              : t.textSecondary,
-                          fontWeight: active
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          fontSize: 13,
-                        )),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      );
-}
-
-// ── Page 3: Notification permission
-
-class _PageNotifications extends StatelessWidget {
-  final RiverColors t;
-  final VoidCallback onRequest;
-  const _PageNotifications({
-      required this.t, required this.onRequest});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 32, vertical: 16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('🔔',
-                style: const TextStyle(fontSize: 64)),
-            const SizedBox(height: 24),
-            Text('Enable Alerts',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 26)),
-            const SizedBox(height: 12),
-            Text(
-              'OpsFlood sends real-time flood push notifications '  
-              'when river levels hit danger or warning thresholds. '  
-              'Emergency alerts use heads-up style for visibility.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 12,
-                  height: 1.55),
-            ),
-            const SizedBox(height: 28),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: t.accent,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 28, vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: const Icon(Icons.notifications_active_rounded),
-              label: const Text('Allow Notifications',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13)),
-              onPressed: onRequest,
-            ),
-          ],
-        ),
-      );
-}
-
-// ── Page 4: Theme pick
-
-const _onboardThemes = [
-  (AppThemeMode.dark,        '🎨', 'Dark'),
-  (AppThemeMode.ocean,       '🌊', 'Ocean'),
-  (AppThemeMode.sunset,      '🌅', 'Sunset'),
-  (AppThemeMode.roboticDark, '🤖', 'Robotic'),
-  (AppThemeMode.light,       '☀️', 'Light'),
-  (AppThemeMode.system,      '📱', 'System'),
-];
-
-class _PageTheme extends ConsumerWidget {
-  final RiverColors t;
-  final ValueChanged<AppThemeMode> onPick;
-  const _PageTheme({required this.t, required this.onPick});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final current = ref.watch(themeModeProvider);
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: 24, vertical: 16),
+          horizontal: 32, vertical: 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text('🎨 Choose a theme',
-              style: TextStyle(
-                  color: t.textPrimary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 22)),
-          const SizedBox(height: 6),
-          Text('You can change this anytime in Settings.',
-              style: TextStyle(
-                  color: t.textSecondary, fontSize: 12)),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _onboardThemes.map((th) {
-              final active = current == th.$1;
-              return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  onPick(th.$1);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: active
-                        ? t.accent.withValues(alpha: 0.18)
-                        : t.cardBg,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color:
-                          active ? t.accent : t.stroke,
-                      width: active ? 2 : 1,
-                    ),
-                  ),
-                  child: Text('${th.$2}  ${th.$3}',
-                      style: TextStyle(
-                        color: active
-                            ? t.accent
-                            : t.textSecondary,
-                        fontWeight: active
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        fontSize: 13,
-                      )),
-                ),
-              );
-            }).toList(),
+          Container(
+            width:  120,
+            height: 120,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(data.icon,
+                size: 60, color: Colors.white),
+          ),
+          const SizedBox(height: 40),
+          Text(
+            data.title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              height: 1.2,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            data.subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 15,
+              height: 1.5,
+            ),
           ),
         ],
       ),
@@ -581,73 +250,35 @@ class _PageTheme extends ConsumerWidget {
   }
 }
 
-// ── Page 5: Done
+// ---------------------------------------------------------------------------
+// InAppUpdateChecker — call from main() or SplashScreen
+// ---------------------------------------------------------------------------
+//
+// Add to pubspec.yaml:
+//   in_app_update: ^4.2.3
+//
+// Usage:
+//   await InAppUpdateChecker.check(context);
 
-class _PageDone extends StatelessWidget {
-  final RiverColors t;
-  const _PageDone({required this.t});
+class InAppUpdateChecker {
+  InAppUpdateChecker._();
 
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 32, vertical: 16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('✅',
-                style: const TextStyle(fontSize: 72)),
-            const SizedBox(height: 24),
-            Text('You\'re all set!',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 28)),
-            const SizedBox(height: 12),
-            Text(
-              'OpsFlood is ready. Tap "Enter OpsFlood" to '  
-              'start monitoring Bihar rivers in real time.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 13,
-                  height: 1.55),
-            ),
-            const SizedBox(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _Pill2(t: t, icon: '📊', label: 'Live data'),
-                const SizedBox(width: 8),
-                _Pill2(t: t, icon: '🚨', label: 'Push alerts'),
-                const SizedBox(width: 8),
-                _Pill2(t: t, icon: '📄', label: 'PDF/CSV export'),
-              ],
-            ),
-          ],
-        ),
-      );
-}
-
-class _Pill2 extends StatelessWidget {
-  final RiverColors t;
-  final String icon, label;
-  const _Pill2(
-      {required this.t, required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: t.accent.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: t.accent.withValues(alpha: 0.35)),
-        ),
-        child: Text('$icon $label',
-            style: TextStyle(
-                color: t.accent,
-                fontWeight: FontWeight.w700,
-                fontSize: 10)),
-      );
+  static Future<void> check(BuildContext context) async {
+    // Uncomment when in_app_update is added to pubspec:
+    // try {
+    //   final info = await InAppUpdate.checkForUpdate();
+    //   if (info.updateAvailability ==
+    //       UpdateAvailability.updateAvailable) {
+    //     if (info.immediateUpdateAllowed) {
+    //       await InAppUpdate.performImmediateUpdate();
+    //     } else if (info.flexibleUpdateAllowed) {
+    //       await InAppUpdate.startFlexibleUpdate();
+    //       await InAppUpdate.completeFlexibleUpdate();
+    //     }
+    //   }
+    // } catch (e) {
+    //   debugPrint('[InAppUpdate] $e');
+    // }
+    debugPrint('[InAppUpdateChecker] stub — add in_app_update to pubspec');
+  }
 }
