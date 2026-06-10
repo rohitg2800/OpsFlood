@@ -1,6 +1,7 @@
 // lib/screens/main_shell.dart
 library;
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,15 +34,14 @@ final shellTabProvider =
     NotifierProvider<ShellTabNotifier, int>(ShellTabNotifier.new);
 
 // ---------------------------------------------------------------------------
-// Admin role helper
-// (replace body with real Firebase Auth check)
+// Admin role helper — checks Firebase Auth current user email
+// Admin emails must end with @opsflood.gov.in
 // ---------------------------------------------------------------------------
 
 bool _isAdmin(BuildContext context) {
-  // TODO: swap for FirebaseAuth.instance.currentUser?.email check
-  // return FirebaseAuth.instance.currentUser?.email
-  //     ?.endsWith('@opsflood.gov.in') ?? false;
-  return false; // safe default for all users in prod
+  return FirebaseAuth.instance.currentUser?.email
+          ?.endsWith('@opsflood.gov.in') ??
+      false;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,8 +64,8 @@ class MainShell extends ConsumerWidget {
     AlertsScreen(),           // 2
     NewsFeedScreen(),         // 3
     PredictScreen(),          // 4
-    ComparisonScreen(),       // 5  ← NEW
-    SettingsScreen(),         // 6  (was 5)
+    ComparisonScreen(),       // 5
+    SettingsScreen(),         // 6
   ];
 
   @override
@@ -81,7 +81,6 @@ class MainShell extends ConsumerWidget {
         if (!didPop) ref.read(shellTabProvider.notifier).state = 0;
       },
       child: Scaffold(
-        // ── Drawer (Admin Dashboard + quick-links) ──────────────────────────
         drawer: _AppDrawer(isAdmin: admin),
         body: IndexedStack(index: currentIndex, children: _screens),
         floatingActionButton: _SosFab(t: t),
@@ -110,12 +109,10 @@ class _AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // Header
           DrawerHeader(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -148,7 +145,7 @@ class _AppDrawer extends StatelessWidget {
             ),
           ),
 
-          // ── Quick links ────────────────────────────────────────────────
+          // ── Quick links
           const _DrawerSection(title: 'Quick Actions'),
 
           ListTile(
@@ -170,8 +167,7 @@ class _AppDrawer extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) =>
-                        const IncidentReportScreen()),
+                    builder: (_) => const IncidentReportScreen()),
               );
             },
           ),
@@ -192,7 +188,7 @@ class _AppDrawer extends StatelessWidget {
 
           const Divider(),
 
-          // ── Admin section (role-gated) ──────────────────────────────────
+          // ── Admin section (role-gated)
           if (isAdmin) ...[
             const _DrawerSection(title: 'Admin'),
             ListTile(
@@ -206,26 +202,23 @@ class _AppDrawer extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) =>
-                          const AdminDashboardScreen()),
+                      builder: (_) => const AdminDashboardScreen()),
                 );
               },
             ),
             const Divider(),
           ],
 
-          // ── App info ────────────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('About OpsFlood'),
             onTap: () {
               Navigator.pop(context);
               showAboutDialog(
-                context:     context,
+                context: context,
                 applicationName: 'OpsFlood',
                 applicationVersion: '1.0.0',
-                applicationLegalese:
-                    '© 2026 OpsFlood. Bihar Flood Monitor.',
+                applicationLegalese: '© 2026 OpsFlood. Bihar Flood Monitor.',
               );
             },
           ),
@@ -255,7 +248,7 @@ class _DrawerSection extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// SOS FAB (unchanged)
+// SOS FAB
 // ---------------------------------------------------------------------------
 
 class _SosFab extends StatefulWidget {
@@ -275,7 +268,7 @@ class _SosFabState extends State<_SosFab>
   void initState() {
     super.initState();
     _pulse = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     _scale = Tween<double>(begin: 0.94, end: 1.06).animate(
@@ -308,7 +301,7 @@ class _SosFabState extends State<_SosFab>
             color: const Color(0xFFEF4444),
             boxShadow: [
               BoxShadow(
-                color:      const Color(0xFFEF4444).withValues(alpha: 0.55),
+                color: const Color(0xFFEF4444).withValues(alpha: 0.55),
                 blurRadius: 16,
                 spreadRadius: 2,
               ),
@@ -318,9 +311,9 @@ class _SosFabState extends State<_SosFab>
             child: Text(
               'SOS',
               style: TextStyle(
-                color:       Colors.white,
-                fontWeight:  FontWeight.w900,
-                fontSize:    13,
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
                 letterSpacing: 0.5,
               ),
             ),
@@ -332,7 +325,7 @@ class _SosFabState extends State<_SosFab>
 }
 
 // ---------------------------------------------------------------------------
-// Bottom nav bar — now 7 items
+// Bottom nav bar — 7 items
 // ---------------------------------------------------------------------------
 
 class _NavBar extends StatelessWidget {
@@ -346,20 +339,20 @@ class _NavBar extends StatelessWidget {
     required this.onTap,
   });
 
-  static const _kAlertsIndex = 2; // unchanged
+  static const _kAlertsIndex = 2;
 
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
     final s = context.l10n;
     final items = [
-      _NavItem(icon: Icons.dashboard_outlined,      activeIcon: Icons.dashboard_rounded,      label: s.tabHome),
-      _NavItem(icon: Icons.map_outlined,             activeIcon: Icons.map_rounded,             label: s.tabMap),
-      _NavItem(icon: Icons.notifications_outlined,   activeIcon: Icons.notifications_rounded,   label: s.tabAlerts),
-      _NavItem(icon: Icons.feed_outlined,            activeIcon: Icons.feed_rounded,            label: s.tabNews),
-      _NavItem(icon: Icons.psychology_outlined,      activeIcon: Icons.psychology_rounded,      label: s.tabPredict),
-      _NavItem(icon: Icons.compare_arrows_outlined,  activeIcon: Icons.compare_arrows,          label: 'Compare'),  // NEW
-      _NavItem(icon: Icons.settings_outlined,        activeIcon: Icons.settings_rounded,        label: s.tabSettings),
+      _NavItem(icon: Icons.dashboard_outlined,     activeIcon: Icons.dashboard_rounded,     label: s.tabHome),
+      _NavItem(icon: Icons.map_outlined,            activeIcon: Icons.map_rounded,            label: s.tabMap),
+      _NavItem(icon: Icons.notifications_outlined,  activeIcon: Icons.notifications_rounded,  label: s.tabAlerts),
+      _NavItem(icon: Icons.feed_outlined,           activeIcon: Icons.feed_rounded,           label: s.tabNews),
+      _NavItem(icon: Icons.psychology_outlined,     activeIcon: Icons.psychology_rounded,     label: s.tabPredict),
+      _NavItem(icon: Icons.compare_arrows_outlined, activeIcon: Icons.compare_arrows,         label: 'Compare'),
+      _NavItem(icon: Icons.settings_outlined,       activeIcon: Icons.settings_rounded,       label: s.tabSettings),
     ];
 
     return Container(
@@ -368,9 +361,9 @@ class _NavBar extends StatelessWidget {
         border: Border(top: BorderSide(color: t.stroke, width: 0.5)),
         boxShadow: [
           BoxShadow(
-            color:      Colors.black.withValues(alpha: 0.25),
+            color: Colors.black.withValues(alpha: 0.25),
             blurRadius: 20,
-            offset:     const Offset(0, -4),
+            offset: const Offset(0, -4),
           ),
         ],
       ),
@@ -381,10 +374,9 @@ class _NavBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(items.length, (i) {
-              final item     = items[i];
-              final isActive = i == currentIndex;
-              final showBadge =
-                  i == _kAlertsIndex && criticalCount > 0;
+              final item      = items[i];
+              final isActive  = i == currentIndex;
+              final showBadge = i == _kAlertsIndex && criticalCount > 0;
 
               return Expanded(
                 child: GestureDetector(
