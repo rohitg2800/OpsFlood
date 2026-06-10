@@ -56,8 +56,11 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.6
 
+  # Sharing — Phase 4 (WhatsApp / share-sheet alert sharing)
+  share_plus: ^9.0.0
+
   # ── Phase 2 ─────────────────────────────────────────────────────────────────
-  # GPS — “Am I in danger?” proximity banner
+  # GPS — nearby station detection
   geolocator: ^13.0.4
 
   # ── Phase 3 ─────────────────────────────────────────────────────────────────
@@ -92,14 +95,6 @@ flutter:
     - assets/fonts/   # JetBrains Mono — required by ThemeRegistry terminal skins
 
   fonts:
-    # ──────────────────────────────────────────────────────────────
-    # JetBrains Mono — used for all monospaced numbers in ThemeRegistry
-    # (monoLg / monoMd / monoSm tokens on both Deep-Space & Tactical-Ops skins)
-    #
-    # Download with the helper script:  scripts/download_fonts.sh
-    # Or manually from: https://www.jetbrains.com/lp/mono/
-    # Place .ttf files at: assets/fonts/
-    # ──────────────────────────────────────────────────────────────
     - family: JetBrainsMono
       fonts:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
@@ -110,8 +105,6 @@ flutter:
           weight: 600
         - asset: assets/fonts/JetBrainsMono-Bold.ttf
           weight: 700
-
-
     - family: JetBrainsMono
       fonts:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
