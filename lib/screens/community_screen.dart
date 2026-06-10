@@ -1,22 +1,7 @@
 // lib/screens/community_screen.dart
 // OpsFlood — Module 5: Community & Offline
 //
-// CommunityScreen
-// ─────────────────────────────────────────────────────────────────────────
-// Ground-truth community incident feed + incident submission.
-//
-// Features:
-//   • Scrollable incident feed from local Hive box
-//   • Bilingual (EN + HI) incident type chips for filtering
-//   • Submit-incident FAB → bottom-sheet form with:
-//       - IncidentType selector (chips)
-//       - Description text field (EN or HI)
-//       - GPS auto-tag (uses LocationService)
-//       - Image attach button (placeholder — image_picker hookup)
-//       - Offline-first: saves to Hive immediately, syncs later
-//   • Upvote counter on each card
-//   • Offline badge on unsynced incidents
-//   • Pull-to-refresh triggers backend sync attempt
+// CommunityScreen  (v2 — adds static route constant)
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,15 +18,15 @@ const _kBoxName = 'community_incidents';
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
 
+  static const String route = '/community';   // ← added for main.dart router
+
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
 }
 
 class _CommunityScreenState extends State<CommunityScreen> {
-  IncidentType? _filterType; // null = show all
+  IncidentType? _filterType;
   bool _syncing = false;
-
-  // ── Build ────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -70,16 +55,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 16),
               child: SizedBox(
-                width: 18,
-                height: 18,
+                width: 18, height: 18,
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: t.accent),
               ),
             )
           else
             IconButton(
-              icon:
-                  Icon(Icons.cloud_sync_rounded, color: t.textSecondary),
+              icon: Icon(Icons.cloud_sync_rounded,
+                  color: t.textSecondary),
               onPressed: _syncWithBackend,
               tooltip: 'Sync with server',
             ),
@@ -87,31 +71,25 @@ class _CommunityScreenState extends State<CommunityScreen> {
       ),
       body: Column(
         children: [
-          _TypeFilterBar(t: t, selected: _filterType, onSelect: (v) {
-            setState(() => _filterType = v);
-          }),
-          Expanded(child: _IncidentFeed(t: t, filterType: _filterType)),
+          _TypeFilterBar(
+              t: t,
+              selected: _filterType,
+              onSelect: (v) => setState(() => _filterType = v)),
+          Expanded(
+              child: _IncidentFeed(t: t, filterType: _filterType)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: t.accent,
         icon: const Icon(Icons.add_location_alt_rounded,
             color: Colors.black),
-        label: Text(
-          'Report',
-          style: const TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        label: const Text('Report',
+            style: TextStyle(
+                color: Colors.black, fontWeight: FontWeight.w800)),
         onPressed: () => _showSubmitSheet(context, t),
       ),
     );
   }
-
-  // ── Type filter bar ──────────────────────────────────────────────────
-
-  // ── Submit sheet ─────────────────────────────────────────────────────
 
   void _showSubmitSheet(BuildContext ctx, RiverColors t) {
     HapticFeedback.mediumImpact();
@@ -123,11 +101,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
-  // ── Backend sync ─────────────────────────────────────────────────────
-
   Future<void> _syncWithBackend() async {
     setState(() => _syncing = true);
-    await Future.delayed(const Duration(seconds: 2)); // placeholder
+    await Future.delayed(const Duration(seconds: 2));
     if (mounted) setState(() => _syncing = false);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -142,8 +118,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
 // ── Type filter bar ──────────────────────────────────────────────────────
 
 class _TypeFilterBar extends StatelessWidget {
-  final RiverColors      t;
-  final IncidentType?    selected;
+  final RiverColors t;
+  final IncidentType? selected;
   final ValueChanged<IncidentType?> onSelect;
   const _TypeFilterBar(
       {required this.t, required this.selected, required this.onSelect});
@@ -154,17 +130,18 @@ class _TypeFilterBar extends StatelessWidget {
       height: 48,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
           _chip(null, '🗂 All', context),
-          ...IncidentType.values.map(
-              (type) => _chip(type, '${type.emoji} ${type.label}', context)),
+          ...IncidentType.values
+              .map((t) => _chip(t, '${t.emoji} ${t.label}', context)),
         ],
       ),
     );
   }
 
-  Widget _chip(IncidentType? type, String label, BuildContext context) {
+  Widget _chip(IncidentType? type, String label, BuildContext ctx) {
     final active = selected == type;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -203,10 +180,9 @@ class _TypeFilterBar extends StatelessWidget {
 // ── Incident feed ────────────────────────────────────────────────────────
 
 class _IncidentFeed extends StatelessWidget {
-  final RiverColors   t;
+  final RiverColors t;
   final IncidentType? filterType;
-  const _IncidentFeed(
-      {required this.t, required this.filterType});
+  const _IncidentFeed({required this.t, required this.filterType});
 
   @override
   Widget build(BuildContext context) {
@@ -225,15 +201,14 @@ class _IncidentFeed extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.people_outline_rounded,
-                    size: 52, color: t.textSecondary.withValues(alpha: 0.4)),
+                    size: 52,
+                    color: t.textSecondary.withValues(alpha: 0.4)),
                 const SizedBox(height: 12),
                 Text(
                   'No reports yet.\nBe the first to report a ground situation.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: 13,
-                  ),
+                      color: t.textSecondary, fontSize: 13),
                 ),
               ],
             ),
@@ -242,11 +217,11 @@ class _IncidentFeed extends StatelessWidget {
         return RefreshIndicator(
           color: t.accent,
           backgroundColor: t.cardBg,
-          onRefresh: () async {
-            await Future.delayed(const Duration(seconds: 1));
-          },
+          onRefresh: () async =>
+              Future.delayed(const Duration(seconds: 1)),
           child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
+            padding:
+                const EdgeInsets.fromLTRB(12, 4, 12, 100),
             itemCount: items.length,
             itemBuilder: (_, i) =>
                 _IncidentCard(incident: items[i], t: t),
@@ -269,7 +244,6 @@ class _IncidentCard extends StatelessWidget {
     final inc  = incident;
     final age  = _age(inc.reportedAt);
     final sync = inc.synced;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -281,7 +255,6 @@ class _IncidentCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row
           Row(
             children: [
               Text(inc.type.emoji,
@@ -302,7 +275,8 @@ class _IncidentCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: AppPalette.warning.withValues(alpha: 0.15),
+                    color: AppPalette.warning
+                        .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                         color: AppPalette.warning
@@ -320,7 +294,6 @@ class _IncidentCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          // Description
           Text(
             inc.description,
             style: TextStyle(
@@ -332,7 +305,6 @@ class _IncidentCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 10),
-          // Footer
           Row(
             children: [
               Icon(Icons.location_on_rounded,
@@ -342,21 +314,18 @@ class _IncidentCard extends StatelessWidget {
                 child: Text(
                   inc.locationLabel ?? inc.district,
                   style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: 10,
-                  ),
+                      color: t.textSecondary, fontSize: 10),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 age,
                 style: TextStyle(
-                  color: t.textSecondary.withValues(alpha: 0.6),
-                  fontSize: 10,
-                ),
+                    color:
+                        t.textSecondary.withValues(alpha: 0.6),
+                    fontSize: 10),
               ),
               const SizedBox(width: 12),
-              // Upvote button
               GestureDetector(
                 onTap: () {
                   inc.upvotes++;
@@ -388,19 +357,18 @@ class _IncidentCard extends StatelessWidget {
 
   static String _age(DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1)  return 'Just now';
-    if (diff.inHours   < 1)  return '${diff.inMinutes}m ago';
-    if (diff.inDays    < 1)  return '${diff.inHours}h ago';
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours   < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays    < 1) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
 }
 
-// ── Submit-incident bottom sheet ─────────────────────────────────────────
+// ── Submit sheet ───────────────────────────────────────────────────────────
 
 class _SubmitIncidentSheet extends StatefulWidget {
   final RiverColors t;
   const _SubmitIncidentSheet({required this.t});
-
   @override
   State<_SubmitIncidentSheet> createState() =>
       _SubmitIncidentSheetState();
@@ -411,7 +379,7 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
   final _descCtrl = TextEditingController();
   double? _lat;
   double? _lon;
-  String  _locationLabel = 'Fetching location…';
+  String  _locationLabel   = 'Fetching location…';
   bool    _loadingLocation = true;
   bool    _submitting      = false;
 
@@ -444,7 +412,7 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _locationLabel = 'Location unavailable';
+          _locationLabel   = 'Location unavailable';
           _loadingLocation = false;
         });
       }
@@ -454,8 +422,8 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
   Future<void> _submit() async {
     if (_descCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            const Text('Please describe the incident before submitting.'),
+        content: const Text(
+            'Please describe the incident before submitting.'),
         backgroundColor: widget.t.cardBg,
         behavior: SnackBarBehavior.floating,
       ));
@@ -468,7 +436,7 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
       description:   _descCtrl.text.trim(),
       lat:           _lat ?? 0,
       lon:           _lon ?? 0,
-      district:      'Unknown', // TODO: reverse geocode
+      district:      'Unknown',
       reportedAt:    DateTime.now(),
       synced:        false,
       locationLabel: _locationLabel,
@@ -504,11 +472,9 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Handle
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 40, height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: t.stroke,
@@ -516,24 +482,15 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                   ),
                 ),
               ),
-              Text(
-                'Report a Flood Incident',
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                ),
-              ),
-              Text(
-                'बाढ़ की घटना रिपोर्ट करें',
-                style: TextStyle(
-                  color: t.textSecondary,
-                  fontSize: 11,
-                ),
-              ),
+              Text('Report a Flood Incident',
+                  style: TextStyle(
+                      color: t.textPrimary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16)),
+              Text('बाढ़ की घटना रिपोर्ट करें',
+                  style: TextStyle(
+                      color: t.textSecondary, fontSize: 11)),
               const SizedBox(height: 16),
-
-              // Type chips
               Text('Incident Type',
                   style: TextStyle(
                       color: t.textSecondary,
@@ -555,7 +512,8 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                         color: active
                             ? t.accent.withValues(alpha: 0.18)
                             : t.cardBgElevated,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius:
+                            BorderRadius.circular(20),
                         border: Border.all(
                           color: active
                               ? t.accent.withValues(alpha: 0.70)
@@ -579,8 +537,6 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                 }).toList(),
               ),
               const SizedBox(height: 16),
-
-              // Description field
               Text('Description  /  विवरण',
                   style: TextStyle(
                       color: t.textSecondary,
@@ -596,7 +552,8 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                   hintText:
                       'Describe what you see… (English or Hindi)',
                   hintStyle: TextStyle(
-                      color: t.textSecondary.withValues(alpha: 0.5),
+                      color:
+                          t.textSecondary.withValues(alpha: 0.5),
                       fontSize: 12),
                   filled: true,
                   fillColor: t.cardBgElevated,
@@ -610,14 +567,12 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                        color: t.accent, width: 1.5),
+                    borderSide:
+                        BorderSide(color: t.accent, width: 1.5),
                   ),
                 ),
               ),
               const SizedBox(height: 14),
-
-              // Location row
               Row(
                 children: [
                   Icon(Icons.location_on_rounded,
@@ -626,8 +581,7 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                   Expanded(
                     child: _loadingLocation
                         ? SizedBox(
-                            height: 14,
-                            width: 14,
+                            height: 14, width: 14,
                             child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
                                 color: t.accent),
@@ -635,25 +589,24 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                         : Text(
                             _locationLabel,
                             style: TextStyle(
-                              color: t.textSecondary,
-                              fontSize: 11,
-                            ),
+                                color: t.textSecondary,
+                                fontSize: 11),
                           ),
                   ),
                   TextButton(
-                    onPressed: _loadingLocation ? null : _fetchLocation,
+                    onPressed:
+                        _loadingLocation ? null : _fetchLocation,
                     child: Text('Refresh',
                         style: TextStyle(
                             color: t.accent, fontSize: 11)),
                   ),
                 ],
               ),
-
-              // Image attach placeholder
               const SizedBox(height: 12),
               GestureDetector(
                 onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(
                     content: const Text(
                         'Image attachment coming in Module 6'),
                     backgroundColor: t.cardBg,
@@ -662,13 +615,12 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                 },
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 14),
                   decoration: BoxDecoration(
                     color: t.cardBgElevated,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: t.stroke,
-                        style: BorderStyle.solid),
+                    border: Border.all(color: t.stroke),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -684,26 +636,23 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 20),
-
-              // Submit button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
                     foregroundColor: Colors.black,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                        borderRadius:
+                            BorderRadius.circular(14)),
                   ),
                   onPressed: _submitting ? null : _submit,
                   child: _submitting
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
+                      ? const SizedBox(
+                          width: 18, height: 18,
                           child: CircularProgressIndicator(
                               strokeWidth: 2,
                               color: Colors.black),
@@ -711,9 +660,8 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
                       : const Text(
                           'Submit Report',
                           style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 14,
-                          ),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14),
                         ),
                 ),
               ),
