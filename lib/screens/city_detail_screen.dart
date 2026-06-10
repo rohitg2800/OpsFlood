@@ -1,13 +1,12 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v6  (Bihar live data wired)
+// EQUINOX-BH — CityDetailScreen v7  (Phase 4: AlertShareButton wired)
 //
-// v6 changes on top of v5:
-//   • Imports biharCityProvider / biharCityLoadingProvider
-//   • Adds _BiharDataCard between hero gauge and 24-hr trend
-//   • _BiharDataCard shows: GloFAS discharge (vs mean), 24h rainfall,
-//     24h level diff, 24h forecast, trend arrow, WRD source + fetchedAt
-//   • _onRefresh now also refreshes biharLiveProvider
-//   • _sectionCount bumped 6 → 7 for the new section
+// v7 changes on top of v6:
+//   • Imports AlertShareButton widget
+//   • Replaces clipboard-only FloatingActionButton with AlertShareButton(iconOnly:true)
+//     in the AppBar trailing actions row
+//   • Adds AlertShareButton (full mode) in the action row at section 6
+//   • Removes old _share() clipboard method (replaced by service)
 library;
 
 import 'dart:async';
@@ -24,6 +23,7 @@ import '../providers/bihar_city_provider.dart';
 import '../providers/bihar_live_provider.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
+import '../widgets/alert_share_button.dart';   // ← Phase 4
 import '../widgets/sparkline_chart.dart';
 
 class CityDetailScreen extends ConsumerStatefulWidget {
@@ -100,29 +100,6 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
     }
   }
 
-  void _share(BuildContext context, FloodData data) {
-    final t = RiverColors.of(context);
-    final text =
-        'OpsFlood · ${widget.cityName}\n'
-        'Level: ${data.currentLevel.toStringAsFixed(2)} m · '
-        'Risk: ${data.riskLevel}\n'
-        'W ${data.warningLevel.toStringAsFixed(1)} m  '
-        'D ${data.dangerLevel.toStringAsFixed(1)} m\n'
-        'Updated: ${DateFormat("dd MMM HH:mm").format(data.lastUpdated.toLocal())}';
-    Clipboard.setData(ClipboardData(text: text));
-    HapticFeedback.selectionClick();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Copied city summary to clipboard'),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: t.cardBg,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   Widget _section(int idx, Widget child) => FadeTransition(
         opacity: _sectionFades[idx],
         child: SlideTransition(
@@ -150,16 +127,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
-      floatingActionButton: data != null
-          ? FloatingActionButton.small(
-              heroTag: 'share_${widget.cityName}',
-              backgroundColor: t.cardBg,
-              foregroundColor: t.accent,
-              tooltip: 'Copy city summary',
-              onPressed: () => _share(context, data),
-              child: const Icon(Icons.share_rounded, size: 17),
-            )
-          : null,
+      // ── Phase 4: FAB removed; share now in AppBar actions & section row ──
       body: Container(
         color: t.scaffoldBg,
         child: SafeArea(
@@ -172,7 +140,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                   parent: BouncingScrollPhysics()),
               slivers: [
 
-                // ── App Bar ────────────────────────────────────────────────────
+                // ── App Bar ──────────────────────────────────────────────────
                 SliverAppBar(
                   backgroundColor: Colors.transparent,
                   surfaceTintColor: Colors.transparent,
@@ -204,6 +172,17 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                     ],
                   ),
                   actions: [
+                    // ── Phase 4: share icon in AppBar ──────────────────────
+                    if (data != null)
+                      AlertShareButton(
+                        district:     data.state,
+                        riverName:    data.riverName ?? 'River',
+                        stationName:  widget.cityName,
+                        currentLevel: data.currentLevel,
+                        dangerLevel:  data.dangerLevel,
+                        severity:     data.riskLevel,
+                        iconOnly:     true,
+                      ),
                     if (_refreshing)
                       Padding(
                         padding: const EdgeInsets.only(right: 14),
@@ -223,19 +202,19 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                   ],
                 ),
 
-                // ── threshold banner ─────────────────────────────────────────────
+                // ── threshold banner ────────────────────────────────────────
                 if (data != null)
                   SliverToBoxAdapter(
                     child: _ThresholdBanner(data: data),
                   ),
 
-                // ── no-data skeleton ────────────────────────────────────────────
+                // ── no-data skeleton ──────────────────────────────────────
                 if (data == null)
                   SliverFillRemaining(
                     child: _SkeletonView(cityName: widget.cityName),
                   )
 
-                // ── loaded body ────────────────────────────────────────────────
+                // ── loaded body ──────────────────────────────────────────
                 else
                   SliverPadding(
                     padding:
@@ -243,11 +222,11 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
 
-                        // 0 ─ Hero gauge (CWC / WRD merged level)
+                        // 0 ─ Hero gauge
                         _section(0, _GaugeHeroCard(data: data)),
                         const SizedBox(height: 12),
 
-                        // 1 ─ Bihar live panel (GloFAS + rainfall + WRD detail)
+                        // 1 ─ Bihar live panel
                         _section(
                           1,
                           _BiharDataCard(
@@ -315,7 +294,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                         ),
                         const SizedBox(height: 12),
 
-                        // 6 ─ Predict + Map CTAs
+                        // 6 ─ Predict + Map CTAs + Share button
                         _section(
                           6,
                           Row(
@@ -328,6 +307,17 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                               ),
                               const SizedBox(width: 10),
                               _MapChip(cityName: widget.cityName),
+                              const SizedBox(width: 10),
+                              // ── Phase 4: full share button ──────────────
+                              AlertShareButton(
+                                district:     data.state,
+                                riverName:    data.riverName ?? 'River',
+                                stationName:  widget.cityName,
+                                currentLevel: data.currentLevel,
+                                dangerLevel:  data.dangerLevel,
+                                severity:     data.riskLevel,
+                                iconOnly:     false,
+                              ),
                             ],
                           ),
                         ),
@@ -344,17 +334,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ★ _BiharDataCard  (NEW)
-//
-// Shows three data layers from biharLiveProvider for this specific city:
-//   Row 1: GloFAS discharge vs long-run mean (with delta badge)
-//   Row 2: WRD 24h level diff  |  24h forecast level
-//   Row 3: 24h rainfall  |  trend arrow  |  source + fetched-at
-//
-// Gracefully degrades:
-//   • biharLoading=true  → shimmer skeleton
-//   • station=null       → muted "no Bihar data" chip
-//   • individual nulls   → individual "—" placeholders
+// ★ _BiharDataCard
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _BiharDataCard extends StatelessWidget {
@@ -372,7 +352,6 @@ class _BiharDataCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
 
-    // ─ loading skeleton ────────────────────────────────────────────────
     if (isLoading) {
       return Container(
         height: 90,
@@ -391,7 +370,6 @@ class _BiharDataCard extends StatelessWidget {
       );
     }
 
-    // ─ no Bihar data for this city ──────────────────────────────────
     if (station == null) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -417,13 +395,10 @@ class _BiharDataCard extends StatelessWidget {
 
     final s = station!;
 
-    // Discharge delta colour
     Color dischargeColor = AppPalette.safe;
     String dischargeDelta = '';
     if (s.discharge != null && s.dischargeMean != null) {
-      final pct = ((s.discharge! - s.dischargeMean!) /
-              s.dischargeMean! *
-              100);
+      final pct = ((s.discharge! - s.dischargeMean!) / s.dischargeMean! * 100);
       if (pct > 20) {
         dischargeColor = pct > 50 ? AppPalette.danger : AppPalette.warning;
       }
@@ -432,7 +407,6 @@ class _BiharDataCard extends StatelessWidget {
           : '${pct.toStringAsFixed(0)}% vs mean';
     }
 
-    // 24h diff colour
     Color diffColor = AppPalette.safe;
     if (s.diff24h != null) {
       if (s.diff24h! > 0.5)      diffColor = AppPalette.danger;
@@ -440,7 +414,6 @@ class _BiharDataCard extends StatelessWidget {
       else if (s.diff24h! < 0)   diffColor = AppPalette.safe;
     }
 
-    // Trend icon
     IconData trendIcon;
     Color    trendColor;
     switch (s.trend.toUpperCase()) {
@@ -474,11 +447,9 @@ class _BiharDataCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─ Header ─────────────────────────────────────────────────────
           Row(
             children: [
-              const Icon(Icons.water_drop_rounded,
-                  color: AppPalette.cyan, size: 14),
+              const Icon(Icons.water_drop_rounded, color: AppPalette.cyan, size: 14),
               const SizedBox(width: 6),
               Text(
                 'Bihar WRD + GloFAS + Rainfall',
@@ -489,75 +460,55 @@ class _BiharDataCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              // Source chip
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: AppPalette.cyan.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: AppPalette.cyan.withValues(alpha: 0.25)),
+                  border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
                 ),
                 child: Text(
                   s.source,
                   style: const TextStyle(
-                      color: AppPalette.cyan,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700),
+                      color: AppPalette.cyan, fontSize: 9, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
-          // ─ Row 1: GloFAS discharge ──────────────────────────────────
           Row(
             children: [
               Expanded(
                 child: _DataCell(
                   label: 'GloFAS Discharge',
-                  value: s.discharge != null
-                      ? '${_fmt(s.discharge!)} m³/s'
-                      : '—',
-                  sub: s.dischargeMean != null
-                      ? 'Mean: ${_fmt(s.dischargeMean!)} m³/s'
-                      : null,
+                  value: s.discharge != null ? '${_fmt(s.discharge!)} m³/s' : '—',
+                  sub: s.dischargeMean != null ? 'Mean: ${_fmt(s.dischargeMean!)} m³/s' : null,
                   icon: Icons.water_rounded,
                   valueColor: dischargeColor,
                   t: t,
                 ),
               ),
-              if (dischargeDelta.isNotEmpty) ...
-                [
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: dischargeColor.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: dischargeColor.withValues(alpha: 0.30)),
-                    ),
-                    child: Text(
-                      dischargeDelta,
-                      style: TextStyle(
-                          color: dischargeColor,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700),
-                    ),
+              if (dischargeDelta.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: dischargeColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: dischargeColor.withValues(alpha: 0.30)),
                   ),
-                ],
+                  child: Text(
+                    dischargeDelta,
+                    style: TextStyle(
+                        color: dischargeColor, fontSize: 11, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
             ],
           ),
-
           const SizedBox(height: 10),
           Divider(height: 1, color: t.stroke),
           const SizedBox(height: 10),
-
-          // ─ Row 2: 24h level diff + forecast ──────────────────────────
           Row(
             children: [
               Expanded(
@@ -575,9 +526,7 @@ class _BiharDataCard extends StatelessWidget {
               Expanded(
                 child: _DataCell(
                   label: '24h Forecast',
-                  value: s.forecast24h != null
-                      ? '${s.forecast24h!.toStringAsFixed(2)} m'
-                      : '—',
+                  value: s.forecast24h != null ? '${s.forecast24h!.toStringAsFixed(2)} m' : '—',
                   icon: Icons.update_rounded,
                   valueColor: t.textPrimary,
                   t: t,
@@ -586,28 +535,21 @@ class _BiharDataCard extends StatelessWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 10),
           Divider(height: 1, color: t.stroke),
           const SizedBox(height: 10),
-
-          // ─ Row 3: Rainfall + trend + fetched-at ──────────────────────
           Row(
             children: [
-              // Rainfall
               Expanded(
                 child: _DataCell(
                   label: '24h Rainfall',
-                  value: s.rainfall24h != null
-                      ? '${s.rainfall24h!.toStringAsFixed(1)} mm'
-                      : '—',
+                  value: s.rainfall24h != null ? '${s.rainfall24h!.toStringAsFixed(1)} mm' : '—',
                   icon: Icons.grain_rounded,
                   valueColor: Colors.lightBlue,
                   t: t,
                 ),
               ),
               Container(width: 1, height: 36, color: t.stroke),
-              // Trend
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -616,9 +558,7 @@ class _BiharDataCard extends StatelessWidget {
                     children: [
                       Text('Trend',
                           style: TextStyle(
-                              color: t.textSecondary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600)),
+                              color: t.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 3),
                       Row(
                         children: [
@@ -627,9 +567,7 @@ class _BiharDataCard extends StatelessWidget {
                           Text(
                             s.trend.isEmpty ? '—' : s.trend,
                             style: TextStyle(
-                                color: trendColor,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13),
+                                color: trendColor, fontWeight: FontWeight.w800, fontSize: 13),
                           ),
                         ],
                       ),
@@ -637,14 +575,8 @@ class _BiharDataCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Fetched-at
               if (s.fetchedAt.isNotEmpty)
-                Text(
-                  s.fetchedAt,
-                  style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 9),
-                ),
+                Text(s.fetchedAt, style: TextStyle(color: t.textSecondary, fontSize: 9)),
             ],
           ),
         ],
@@ -658,7 +590,6 @@ class _BiharDataCard extends StatelessWidget {
   }
 }
 
-// Simple two-line data cell used inside _BiharDataCard
 class _DataCell extends StatelessWidget {
   final String label;
   final String value;
@@ -681,19 +612,14 @@ class _DataCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        left:  centered ? 12 : 0,
-        right: centered ? 12 : 0,
-      ),
+      padding: EdgeInsets.only(left: centered ? 12 : 0, right: centered ? 12 : 0),
       child: Column(
-        crossAxisAlignment: centered
-            ? CrossAxisAlignment.center
-            : CrossAxisAlignment.start,
+        crossAxisAlignment:
+            centered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: centered
-                ? MainAxisAlignment.center
-                : MainAxisAlignment.start,
+            mainAxisAlignment:
+                centered ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
               Icon(icon, size: 11, color: t.textSecondary),
               const SizedBox(width: 4),
@@ -707,20 +633,17 @@ class _DataCell extends StatelessWidget {
           const SizedBox(height: 3),
           Text(value,
               style: TextStyle(
-                  color: valueColor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14)),
+                  color: valueColor, fontWeight: FontWeight.w800, fontSize: 14)),
           if (sub != null)
             Text(sub!,
-                style: TextStyle(
-                    color: t.textSecondary, fontSize: 10)),
+                style: TextStyle(color: t.textSecondary, fontSize: 10)),
         ],
       ),
     );
   }
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 Color _riskColor(String r) {
   switch (r.toUpperCase()) {
@@ -741,7 +664,7 @@ Color _imdColor(String s) {
   }
 }
 
-// ── Threshold Banner ───────────────────────────────────────────────────────────────────
+// ── Threshold Banner ─────────────────────────────────────────────────────────
 
 class _ThresholdBanner extends StatelessWidget {
   final FloodData data;
@@ -790,7 +713,7 @@ class _ThresholdBanner extends StatelessWidget {
   }
 }
 
-// ── Skeleton loading view ────────────────────────────────────────────────────────
+// ── Skeleton loading view ────────────────────────────────────────────────────
 
 class _SkeletonView extends StatefulWidget {
   final String cityName;
@@ -871,7 +794,7 @@ class _SkeletonViewState extends State<_SkeletonView>
       );
 }
 
-// ── Gauge Hero Card ───────────────────────────────────────────────────────────────────
+// ── Gauge Hero Card ──────────────────────────────────────────────────────────
 
 class _GaugeHeroCard extends StatelessWidget {
   final FloodData data;
@@ -1070,7 +993,7 @@ class _StatChip extends StatelessWidget {
   }
 }
 
-// ── 24-hr Trend Card ────────────────────────────────────────────────────────────────
+// ── 24-hr Trend Card ─────────────────────────────────────────────────────────
 
 class _TrendCard extends StatelessWidget {
   final List<RiverLevelSnapshot> trend;
@@ -1147,7 +1070,7 @@ class _TrendCard extends StatelessWidget {
   }
 }
 
-// ── IMD Alert Tile ──────────────────────────────────────────────────────────────────────
+// ── IMD Alert Tile ──────────────────────────────────────────────────────────
 
 class _ImdAlertTile extends StatelessWidget {
   final dynamic alert;
@@ -1212,7 +1135,7 @@ class _ImdAlertTile extends StatelessWidget {
       );
 }
 
-// ── NDMA Advisory Tile ───────────────────────────────────────────────────────────────────
+// ── NDMA Advisory Tile ───────────────────────────────────────────────────────
 
 class _NdmaAdvisoryTile extends StatelessWidget {
   final dynamic adv;
@@ -1260,7 +1183,7 @@ class _NdmaAdvisoryTile extends StatelessWidget {
   }
 }
 
-// ── Collapsible Emergency Contacts ──────────────────────────────────────────────────
+// ── Collapsible Emergency Contacts ──────────────────────────────────────────
 
 class _CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
@@ -1385,7 +1308,7 @@ class _CollapsibleContacts extends StatelessWidget {
   }
 }
 
-// ── Predict CTA ────────────────────────────────────────────────────────────────────────
+// ── Predict CTA ──────────────────────────────────────────────────────────────
 
 class _PredictCta extends StatelessWidget {
   final String cityName;
@@ -1438,7 +1361,7 @@ class _PredictCta extends StatelessWidget {
   }
 }
 
-// ── Map Chip CTA ───────────────────────────────────────────────────────────────────────
+// ── Map Chip CTA ─────────────────────────────────────────────────────────────
 
 class _MapChip extends StatelessWidget {
   final String cityName;
@@ -1478,7 +1401,7 @@ class _MapChip extends StatelessWidget {
   }
 }
 
-// ── Section Label ──────────────────────────────────────────────────────────────────────────
+// ── Section Label ─────────────────────────────────────────────────────────────
 
 class _SectionLabel extends StatelessWidget {
   final String text;
