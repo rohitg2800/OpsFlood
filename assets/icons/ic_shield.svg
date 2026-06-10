@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Shield — used for safety / NDMA advisory context -->
+  <path d="M12 2 L20 5.5 L20 11 C20 15.97 16.5 20.5 12 22 C7.5 20.5 4 15.97 4 11 L4 5.5 Z"
+        stroke="#a5d6a7" stroke-width="1.8" fill="#a5d6a7" fill-opacity="0.15"/>
+  <!-- Checkmark inside -->
+  <path d="M8.5 12 L11 14.5 L15.5 9.5" stroke="#a5d6a7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

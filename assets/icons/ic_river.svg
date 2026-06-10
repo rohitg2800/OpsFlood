@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Stylized flowing river: three undulating lines -->
+  <path d="M2 8 Q6 6 10 8 Q14 10 18 8 Q21 6.5 22 7" stroke="#00e5ff" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M2 12 Q6 10 10 12 Q14 14 18 12 Q21 10.5 22 11" stroke="#00e5ff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.75"/>
+  <path d="M2 16 Q6 14 10 16 Q14 18 18 16 Q21 14.5 22 15" stroke="#00e5ff" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.5"/>
+  <!-- source drop -->
+  <path d="M4 4 Q4 2 6 2 Q8 2 8 4 Q8 6 6 7 Q4 6 4 4Z" fill="#00e5ff" opacity="0.8"/>
+</svg>

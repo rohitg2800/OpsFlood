@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Large stylized wave — used for flood/surge events -->
+  <path d="M1 17 C3 14 5 11 8 12 C11 13 11 16 14 16 C17 16 18 12 21 10 L23 8"
+        stroke="#00e5ff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <!-- Crest foam dots -->
+  <circle cx="8"  cy="11.5" r="1" fill="#00e5ff" opacity="0.7"/>
+  <circle cx="14" cy="15.5" r="1" fill="#00e5ff" opacity="0.7"/>
+  <!-- Water fill suggestion -->
+  <path d="M1 17 C3 14 5 11 8 12 C11 13 11 16 14 16 C17 16 18 12 21 10 L23 8 L23 24 L1 24 Z"
+        fill="#00e5ff" fill-opacity="0.10"/>
+</svg>

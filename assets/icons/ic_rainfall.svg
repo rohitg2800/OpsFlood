@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Cloud body -->
+  <path d="M6 13 A4 4 0 0 1 7 5.1 A5 5 0 0 1 17 6 A3.5 3.5 0 0 1 18 13 Z"
+        fill="#90caf9" stroke="#42a5f5" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Raindrops: three angled lines -->
+  <line x1="8"  y1="15" x2="6.5"  y2="19" stroke="#42a5f5" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="12" y1="15" x2="10.5" y2="19" stroke="#42a5f5" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="16" y1="15" x2="14.5" y2="19" stroke="#42a5f5" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

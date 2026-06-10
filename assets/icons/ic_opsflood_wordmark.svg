@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
+  <!-- Wave glyph on left -->
+  <path d="M4 32 C7 26 10 20 15 22 C20 24 20 30 26 30 C32 30 34 22 40 18"
+        stroke="#00e5ff" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M4 32 C7 26 10 20 15 22 C20 24 20 30 26 30 C32 30 34 22 40 18 L40 48 L4 48 Z"
+        fill="#00e5ff" fill-opacity="0.08"/>
+  <!-- OPS text -->
+  <text x="48" y="34" font-family="JetBrainsMono, monospace" font-weight="700" font-size="22"
+        fill="#00e5ff" letter-spacing="1">OPS</text>
+  <!-- FLOOD text -->
+  <text x="100" y="34" font-family="JetBrainsMono, monospace" font-weight="700" font-size="22"
+        fill="#ffffff" letter-spacing="1">FLOOD</text>
+  <!-- Tagline -->
+  <text x="48" y="44" font-family="JetBrainsMono, monospace" font-weight="400" font-size="8"
+        fill="#00e5ff" opacity="0.7" letter-spacing="2">BIHAR FLOOD INTELLIGENCE</text>
+</svg>

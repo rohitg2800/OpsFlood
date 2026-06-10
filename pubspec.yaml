@@ -59,6 +59,10 @@ dependencies:
   # Sharing — Phase 4 (WhatsApp / share-sheet alert sharing)
   share_plus: ^9.0.0
 
+  # ── Module 2: Branding & Icons ───────────────────────────────────────────────
+  # SVG rendering for icon set and app logo
+  flutter_svg: ^2.0.10
+
   # ── Phase 2 ─────────────────────────────────────────────────────────────────
   # GPS — nearby station detection
   geolocator: ^13.0.4
@@ -76,6 +80,8 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  # ── Module 2: branded native splash ─────────────────────────────────────────
+  flutter_native_splash: ^2.4.1
 
 flutter_launcher_icons:
   android: true
@@ -85,6 +91,22 @@ flutter_launcher_icons:
   adaptive_icon_background: "#0d1b2a"
   adaptive_icon_foreground: assets/icon/opsflood_icon.png
 
+flutter_native_splash:
+  color: "#0d1b2a"
+  color_dark: "#0d1b2a"
+  image: assets/splash/opsflood_splash_logo.png
+  image_dark: assets/splash/opsflood_splash_logo.png
+  android: true
+  ios: true
+  web: false
+  android_12:
+    color: "#0d1b2a"
+    color_dark: "#0d1b2a"
+    image: assets/splash/opsflood_splash_logo.png
+    image_dark: assets/splash/opsflood_splash_logo.png
+    icon_background_color: "#0d1b2a"
+    icon_background_color_dark: "#0d1b2a"
+
 flutter:
   uses-material-design: true
   generate: true
@@ -92,7 +114,9 @@ flutter:
   assets:
     - .env
     - assets/icon/
-    - assets/fonts/   # JetBrains Mono — required by ThemeRegistry terminal skins
+    - assets/fonts/
+    - assets/icons/        # Module 2 SVG icon set
+    - assets/splash/       # Module 2 splash logo
 
   fonts:
     - family: JetBrainsMono
