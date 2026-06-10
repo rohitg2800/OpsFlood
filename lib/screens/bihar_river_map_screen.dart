@@ -1,24 +1,22 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v3
+// OpsFlood — BiharRiverMapScreen v4  (Module 3: Maps & Visualization)
 //
-// Bug fixes vs v2:
-//   1. _norm() key matching — strips parens/dashes/underscores, collapses
-//      spaces, then 3-pass resolve: exact → partial → same-river fuzzy.
-//      Covers 'Birpur (CWC)', 'Dheng Bridge', 'Gangpur Siswan', etc.
-//   2. Tile cycling fixed — retinaMode is false for OSM (no {r} placeholder).
-//      3 styles: Voyager (default/day) → CARTO Dark → OSM.
-//   3. _StationSheet shows full live payload: level, warning, danger, HFL,
-//      margin, 24h change, forecast, trend, GloFAS, rainfall, source, time.
-//      Static-only mode shows a clean "no live data" banner.
-//   4. _PulsingRing uses AnimationController.repeat(reverse:true) — true
-//      heartbeat. Marker uses Stack (not Column) so ring never overflows.
-//      Critical pins show ⚠ icon + red label. Marker height bumped to 72.
+// v4 changes on top of v3:
+//   • 6 base tile styles: Voyager, Dark, OSM, Satellite (Esri ArcGIS),
+//     Terrain (OpenTopoMap), Hybrid (Esri imagery + labels)
+//   • OpenWeatherMap precipitation overlay tile layer
+//   • Precipitation opacity slider (0.0 – 1.0)
+//   • Collapsible layer control panel (tile grid + precip toggle + slider)
+//   • Rainfall badge on station pins when 24h rainfall > 10 mm
+//   • Legend updated with rainfall badge entry
+//   • All v3 logic preserved verbatim (normaliser, 3-pass resolver, sheet, etc.)
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -27,31 +25,111 @@ import '../providers/bihar_live_provider.dart';
 import '../theme/river_theme.dart';
 import 'city_detail_screen.dart';
 
-// ── Tile sets ────────────────────────────────────────────────────────────────
-enum _TileStyle { voyager, dark, osm }
+// ── Tile styles ────────────────────────────────────────────────────────────
 
-const _voyagerUrl =
-    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-const _darkUrl =
-    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const _osmUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const _cartoSubdomains = ['a', 'b', 'c', 'd'];
+enum _TileStyle { voyager, dark, osm, satellite, terrain, hybrid }
 
-// ── Bihar centroid ───────────────────────────────────────────────────────────
+extension _TileStyleInfo on _TileStyle {
+  String get label {
+    switch (this) {
+      case _TileStyle.voyager:   return 'Day';
+      case _TileStyle.dark:      return 'Dark';
+      case _TileStyle.osm:       return 'OSM';
+      case _TileStyle.satellite: return 'Satellite';
+      case _TileStyle.terrain:   return 'Terrain';
+      case _TileStyle.hybrid:    return 'Hybrid';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case _TileStyle.voyager:   return Icons.wb_sunny_rounded;
+      case _TileStyle.dark:      return Icons.dark_mode_rounded;
+      case _TileStyle.osm:       return Icons.map_outlined;
+      case _TileStyle.satellite: return Icons.satellite_alt_rounded;
+      case _TileStyle.terrain:   return Icons.terrain_rounded;
+      case _TileStyle.hybrid:    return Icons.layers_rounded;
+    }
+  }
+
+  String get urlTemplate {
+    switch (this) {
+      case _TileStyle.voyager:
+        return 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+      case _TileStyle.dark:
+        return 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+      case _TileStyle.osm:
+        return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+      case _TileStyle.satellite:
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      case _TileStyle.terrain:
+        return 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      case _TileStyle.hybrid:
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    }
+  }
+
+  List<String> get subdomains {
+    switch (this) {
+      case _TileStyle.voyager:
+      case _TileStyle.dark:
+        return ['a', 'b', 'c', 'd'];
+      case _TileStyle.terrain:
+        return ['a', 'b', 'c'];
+      default:
+        return [];
+    }
+  }
+
+  bool get retinaMode {
+    switch (this) {
+      case _TileStyle.voyager:
+      case _TileStyle.dark:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Hybrid mode needs an extra label layer on top of Esri satellite.
+  bool get needsLabelLayer => this == _TileStyle.hybrid;
+
+  String get attribution {
+    switch (this) {
+      case _TileStyle.satellite:
+      case _TileStyle.hybrid:
+        return '© Esri';
+      case _TileStyle.terrain:
+        return '© OpenTopoMap contributors';
+      default:
+        return '© OpenStreetMap / CARTO';
+    }
+  }
+}
+
+// ── OWM precipitation tile URL builder ──────────────────────────────────
+
+String _owmPrecipUrl() {
+  final key = dotenv.maybeGet('OWM_APPID') ?? '';
+  if (key.isEmpty) return '';
+  return 'https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=$key';
+}
+
+// ── Bihar centroid ─────────────────────────────────────────────────────
+
 const _biharCenter = LatLng(25.78, 85.82);
 const _initialZoom = 7.4;
 
-// ── Key normaliser ───────────────────────────────────────────────────────────
-// 'Birpur (CWC)'  → 'birpur cwc'
-// 'Dheng Bridge'  → 'dheng bridge'
-// 'Gangpur Siswan'→ 'gangpur siswan'
+// ── Key normaliser (preserved from v3) ─────────────────────────────────
+
 String _norm(String s) => s
     .toLowerCase()
     .replaceAll(RegExp(r'[()_\-]'), ' ')
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
-// ── Risk colour helper ───────────────────────────────────────────────────────
+// ── Risk colour helper ────────────────────────────────────────────────
+
 Color _riskColour(String risk, RiverColors t) {
   switch (risk.toUpperCase()) {
     case 'CRITICAL':
@@ -65,7 +143,8 @@ Color _riskColour(String risk, RiverColors t) {
   }
 }
 
-// ── Main screen ──────────────────────────────────────────────────────────────
+// ── Main screen ─────────────────────────────────────────────────────────
+
 class BiharRiverMapScreen extends ConsumerStatefulWidget {
   static const String route = '/bihar_river_map';
   const BiharRiverMapScreen({super.key});
@@ -75,12 +154,17 @@ class BiharRiverMapScreen extends ConsumerStatefulWidget {
       _BiharRiverMapScreenState();
 }
 
-class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
+class _BiharRiverMapScreenState
+    extends ConsumerState<BiharRiverMapScreen> {
   final _mapCtrl = MapController();
-  String?    _filterRiver;
-  _TileStyle _tileStyle = _TileStyle.voyager;
 
-  // Cached live index — rebuilt only when provider data object changes
+  String?    _filterRiver;
+  _TileStyle _tileStyle     = _TileStyle.voyager;
+  bool       _showPrecip    = false;
+  double     _precipOpacity = 0.65;
+  bool       _layerPanelOpen = false;
+
+  // Cached live index
   ({Map<String, BiharStationData> byKey, List<BiharStationData> all})?
       _cachedIndex;
   Object? _lastData;
@@ -88,7 +172,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   static final _rivers =
       kBiharGauges.map((g) => g.river).toSet().toList()..sort();
 
-  // ── Live index builder ───────────────────────────────────────────────────
+  // ── Index builder (preserved from v3) ────────────────────────────────
   ({Map<String, BiharStationData> byKey, List<BiharStationData> all})
       _buildLiveIndex(List<BiharStationData> stations) {
     final byKey = <String, BiharStationData>{};
@@ -98,7 +182,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
     return (byKey: byKey, all: stations);
   }
 
-  // ── 3-pass resolver ──────────────────────────────────────────────────────
+  // ── 3-pass resolver (preserved from v3) ──────────────────────────────
   BiharStationData? _resolve(
     BiharGauge gauge,
     Map<String, BiharStationData> byKey,
@@ -106,33 +190,22 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   ) {
     final normStation = _norm(gauge.station);
     final normRiver   = _norm(gauge.river);
-
-    // Pass 1 — exact normalised key
-    final direct = byKey[normStation];
+    final direct      = byKey[normStation];
     if (direct != null) return direct;
-
-    // Pass 2 — partial: gauge first token appears inside a key that also
-    //          contains the river's first token
     final stationFirst = normStation.split(' ').first;
     final riverFirst   = normRiver.split(' ').first;
     for (final entry in byKey.entries) {
       if (entry.key.contains(stationFirst) &&
-          entry.key.contains(riverFirst)) {
-        return entry.value;
-      }
+          entry.key.contains(riverFirst)) return entry.value;
     }
-
-    // Pass 3 — same-river fuzzy: any station on the same river whose
-    //          city key contains the first token of the gauge station name
     for (final st in all) {
       if (_norm(st.river) != normRiver) continue;
       if (_norm(st.city).contains(stationFirst)) return st;
     }
-
     return null;
   }
 
-  // ── Bottom sheet ─────────────────────────────────────────────────────────
+  // ── Bottom sheet (preserved from v3) ────────────────────────────────
   void _showStationSheet(
     BuildContext context,
     BiharGauge gauge,
@@ -152,7 +225,6 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
     final t          = RiverColors.of(context);
     final biharState = ref.watch(biharLiveProvider);
 
-    // Rebuild index only when provider data actually changes
     final rawData = biharState.valueOrNull;
     if (rawData != _lastData) {
       _lastData    = rawData;
@@ -169,67 +241,72 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
         ? kBiharGauges
         : kBiharGauges.where((g) => g.river == _filterRiver).toList();
 
-    // Tile config — OSM must NOT use retinaMode (no {r} in its URL template)
-    final String       urlTemplate;
-    final List<String> subdomains;
-    final bool         retina;
-    switch (_tileStyle) {
-      case _TileStyle.voyager:
-        urlTemplate = _voyagerUrl;
-        subdomains  = _cartoSubdomains;
-        retina      = true;
-        break;
-      case _TileStyle.dark:
-        urlTemplate = _darkUrl;
-        subdomains  = _cartoSubdomains;
-        retina      = true;
-        break;
-      case _TileStyle.osm:
-        urlTemplate = _osmUrl;
-        subdomains  = const [];
-        retina      = false;
-        break;
-    }
+    final owmUrl = _owmPrecipUrl();
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
       body: Stack(
         children: [
 
-          // ───────────────────────── MAP ───────────────────────────────────
+          // ──────────────────── MAP ───────────────────────────
           FlutterMap(
             mapController: _mapCtrl,
             options: const MapOptions(
               initialCenter: _biharCenter,
               initialZoom:   _initialZoom,
-              minZoom: 6.0,
-              maxZoom: 14.0,
+              minZoom: 5.0,
+              maxZoom: 16.0,
               interactionOptions: InteractionOptions(
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
             ),
             children: [
+              // ─ Base tile layer ─────────────────────────────────────
               TileLayer(
-                urlTemplate:          urlTemplate,
-                subdomains:           subdomains,
+                urlTemplate:          _tileStyle.urlTemplate,
+                subdomains:           _tileStyle.subdomains,
                 userAgentPackageName: 'com.rohitg.floodwatch',
-                retinaMode:           retina,
+                retinaMode:           _tileStyle.retinaMode,
               ),
+
+              // ─ Hybrid: Esri road labels overlay ────────────────────
+              if (_tileStyle.needsLabelLayer)
+                TileLayer(
+                  urlTemplate:
+                      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                  userAgentPackageName: 'com.rohitg.floodwatch',
+                ),
+
+              // ─ OWM precipitation overlay ────────────────────────
+              if (_showPrecip && owmUrl.isNotEmpty)
+                TileLayer(
+                  urlTemplate:          owmUrl,
+                  userAgentPackageName: 'com.rohitg.floodwatch',
+                  opacity:              _precipOpacity,
+                  backgroundColor:      Colors.transparent,
+                ),
+
+              // ─ Station markers ──────────────────────────────────
               MarkerLayer(
                 markers: gauges.map((gauge) {
                   final live = _resolve(
                       gauge, liveIndex.byKey, liveIndex.all);
-                  final risk = live?.riskLabel ?? 'NORMAL';
+                  final risk     = live?.riskLabel ?? 'NORMAL';
+                  final rainfall = live?.rainfall24h;
                   return Marker(
                     point:  LatLng(gauge.lat, gauge.lon),
-                    width:  48,
-                    height: 72, // tall enough: Stack ring(36) + label(18) + gap
+                    width:  52,
+                    height: 80,
                     child: GestureDetector(
                       onTap: () {
                         HapticFeedback.selectionClick();
                         _showStationSheet(context, gauge, live, t);
                       },
-                      child: _StationPin(risk: risk, live: live != null),
+                      child: _StationPin(
+                        risk:     risk,
+                        live:     live != null,
+                        rainfall: rainfall,
+                      ),
                     ),
                   );
                 }).toList(),
@@ -237,7 +314,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ],
           ),
 
-          // ──────────────────── TOP BAR ────────────────────────────────────
+          // ───────────────── TOP BAR ─────────────────────────────
           Positioned(
             top: 0, left: 0, right: 0,
             child: SafeArea(
@@ -260,7 +337,8 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.map_rounded, color: t.accent, size: 18),
+                        Icon(Icons.map_rounded,
+                            color: t.accent, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -274,45 +352,41 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                         ),
                         _LiveBadge(count: liveIndex.all.length),
                         const SizedBox(width: 8),
-                        // Tile style cycle button
+                        // ─ Layers toggle button ────────────────────
                         GestureDetector(
-                          onTap: () => setState(() {
-                            _tileStyle = _TileStyle.values[
-                                (_tileStyle.index + 1) %
-                                    _TileStyle.values.length];
-                          }),
+                          onTap: () => setState(
+                              () => _layerPanelOpen = !_layerPanelOpen),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: t.cardBgElevated,
+                              color: _layerPanelOpen
+                                  ? t.accent.withValues(alpha: 0.15)
+                                  : t.cardBgElevated,
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: t.stroke),
+                              border: Border.all(
+                                color: _layerPanelOpen
+                                    ? t.accent
+                                    : t.stroke,
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  switch (_tileStyle) {
-                                    _TileStyle.voyager =>
-                                      Icons.wb_sunny_rounded,
-                                    _TileStyle.dark =>
-                                      Icons.dark_mode_rounded,
-                                    _TileStyle.osm =>
-                                      Icons.map_outlined,
-                                  },
-                                  color: t.textSecondary,
+                                  Icons.layers_rounded,
+                                  color: _layerPanelOpen
+                                      ? t.accent
+                                      : t.textSecondary,
                                   size: 14,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  switch (_tileStyle) {
-                                    _TileStyle.voyager => 'Day',
-                                    _TileStyle.dark    => 'Dark',
-                                    _TileStyle.osm     => 'OSM',
-                                  },
+                                  'Layers',
                                   style: TextStyle(
-                                    color: t.textSecondary,
+                                    color: _layerPanelOpen
+                                        ? t.accent
+                                        : t.textSecondary,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -324,7 +398,30 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                       ],
                     ),
                   ),
-                  // River filter chips
+
+                  // ─ Collapsible layer control panel ─────────────────
+                  AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 220),
+                    crossFadeState: _layerPanelOpen
+                        ? CrossFadeState.showFirst
+                        : CrossFadeState.showSecond,
+                    firstChild: _LayerPanel(
+                      t:             t,
+                      tileStyle:     _tileStyle,
+                      showPrecip:    _showPrecip,
+                      precipOpacity: _precipOpacity,
+                      owmKeySet:     owmUrl.isNotEmpty,
+                      onTileChanged: (s) =>
+                          setState(() => _tileStyle = s),
+                      onPrecipToggle: () =>
+                          setState(() => _showPrecip = !_showPrecip),
+                      onOpacityChanged: (v) =>
+                          setState(() => _precipOpacity = v),
+                    ),
+                    secondChild: const SizedBox.shrink(),
+                  ),
+
+                  // ─ River filter chips (preserved from v3) ───────────
                   SizedBox(
                     height: 40,
                     child: ListView(
@@ -336,8 +433,8 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                           label: 'All',
                           active: _filterRiver == null,
                           t: t,
-                          onTap: () =>
-                              setState(() => _filterRiver = null),
+                          onTap: () => setState(
+                              () => _filterRiver = null),
                         ),
                         ...(_rivers.map((r) => _FilterChip(
                               label: r,
@@ -355,11 +452,24 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
             ),
           ),
 
-          // ─────────────────── LEGEND (bottom-left) ───────────────────────
+          // ─────────────── LEGEND (bottom-left) ───────────────────
           Positioned(
             bottom: 100,
             left: 12,
-            child: _Legend(t: t),
+            child: _Legend(t: t, showPrecip: _showPrecip),
+          ),
+
+          // ────────────── ATTRIBUTION (bottom-right) ──────────────
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: Text(
+              _tileStyle.attribution,
+              style: TextStyle(
+                color: t.textSecondary.withValues(alpha: 0.7),
+                fontSize: 8,
+              ),
+            ),
           ),
         ],
       ),
@@ -408,17 +518,254 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   }
 }
 
-// ── Station pin ──────────────────────────────────────────────────────────────
-// Stack layout: pulsing ring sits BEHIND the dot — no Column height overflow.
-class _StationPin extends StatelessWidget {
-  final String risk;
-  final bool   live;
-  const _StationPin({required this.risk, required this.live});
+// ── Layer control panel ────────────────────────────────────────────────────
+
+class _LayerPanel extends StatelessWidget {
+  final RiverColors t;
+  final _TileStyle  tileStyle;
+  final bool        showPrecip;
+  final double      precipOpacity;
+  final bool        owmKeySet;
+  final ValueChanged<_TileStyle> onTileChanged;
+  final VoidCallback             onPrecipToggle;
+  final ValueChanged<double>     onOpacityChanged;
+
+  const _LayerPanel({
+    required this.t,
+    required this.tileStyle,
+    required this.showPrecip,
+    required this.precipOpacity,
+    required this.owmKeySet,
+    required this.onTileChanged,
+    required this.onPrecipToggle,
+    required this.onOpacityChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isCritical = risk == 'CRITICAL' || risk == 'DANGER';
-    final isWarning  = risk == 'WARNING'  || risk == 'HIGH';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.cardBg.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.stroke),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ─ Base map grid ─────────────────────────────────────────
+          Text(
+            'BASE MAP',
+            style: TextStyle(
+              color: t.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: _TileStyle.values.map((style) {
+              final active = tileStyle == style;
+              return GestureDetector(
+                onTap: () => onTileChanged(style),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? t.accent.withValues(alpha: 0.18)
+                        : t.cardBgElevated,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: active ? t.accent : t.stroke,
+                      width: active ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        style.icon,
+                        size: 12,
+                        color: active ? t.accent : t.textSecondary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        style.label,
+                        style: TextStyle(
+                          color: active ? t.accent : t.textSecondary,
+                          fontSize: 11,
+                          fontWeight: active
+                              ? FontWeight.w800
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+
+          const SizedBox(height: 12),
+          Divider(height: 1, color: t.stroke),
+          const SizedBox(height: 10),
+
+          // ─ Precipitation overlay ────────────────────────────────
+          Text(
+            'OVERLAYS',
+            style: TextStyle(
+              color: t.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              GestureDetector(
+                onTap: owmKeySet ? onPrecipToggle : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: showPrecip
+                        ? Colors.lightBlue.withValues(alpha: 0.18)
+                        : t.cardBgElevated,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: showPrecip
+                          ? Colors.lightBlue
+                          : t.stroke,
+                      width: showPrecip ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.grain_rounded,
+                        size: 12,
+                        color: showPrecip
+                            ? Colors.lightBlue
+                            : t.textSecondary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Precipitation',
+                        style: TextStyle(
+                          color: showPrecip
+                              ? Colors.lightBlue
+                              : t.textSecondary,
+                          fontSize: 11,
+                          fontWeight: showPrecip
+                              ? FontWeight.w800
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      if (!owmKeySet) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.lock_outline_rounded,
+                          size: 10,
+                          color: t.textSecondary,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              if (!owmKeySet)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text(
+                    'Add OWM_APPID to .env',
+                    style: TextStyle(
+                        color: t.textSecondary, fontSize: 9),
+                  ),
+                ),
+            ],
+          ),
+
+          // ─ Opacity slider (only when precip is on) ────────────────
+          if (showPrecip && owmKeySet) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text(
+                  'Opacity',
+                  style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600),
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 3,
+                      thumbRadius: 7,
+                      activeTrackColor: Colors.lightBlue,
+                      inactiveTrackColor:
+                          Colors.lightBlue.withValues(alpha: 0.2),
+                      thumbColor: Colors.lightBlue,
+                      overlayColor:
+                          Colors.lightBlue.withValues(alpha: 0.15),
+                    ),
+                    child: Slider(
+                      value: precipOpacity,
+                      min: 0.1,
+                      max: 1.0,
+                      divisions: 9,
+                      onChanged: onOpacityChanged,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${(precipOpacity * 100).toInt()}%',
+                  style: TextStyle(
+                      color: Colors.lightBlue,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Station pin v2 (rainfall badge added) ───────────────────────────────
+
+class _StationPin extends StatelessWidget {
+  final String  risk;
+  final bool    live;
+  final double? rainfall;
+  const _StationPin({
+    required this.risk,
+    required this.live,
+    this.rainfall,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isCritical   = risk == 'CRITICAL' || risk == 'DANGER';
+    final isWarning    = risk == 'WARNING'  || risk == 'HIGH';
+    final hasRainfall  = rainfall != null && rainfall! > 10;
 
     final Color dotColor;
     if (isCritical)     dotColor = AppPalette.critical;
@@ -429,14 +776,26 @@ class _StationPin extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Fixed-size Stack: ring(34×34) behind dot(18×18)
         SizedBox(
-          width: 36,
-          height: 36,
+          width: 40,
+          height: 40,
           child: Stack(
             alignment: Alignment.center,
             children: [
               if (isCritical) const _PulsingRing(),
+              // Rainfall outer ring (blue)
+              if (hasRainfall && !isCritical)
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.lightBlue.withValues(alpha: 0.55),
+                      width: 2,
+                    ),
+                  ),
+                ),
               Container(
                 width: 18,
                 height: 18,
@@ -459,7 +818,6 @@ class _StationPin extends StatelessWidget {
             ],
           ),
         ),
-        // Compact label for critical / warning pins
         if (isCritical || isWarning)
           Container(
             padding:
@@ -479,16 +837,35 @@ class _StationPin extends StatelessWidget {
                 letterSpacing: 0.3,
               ),
             ),
+          )
+        else if (hasRainfall)
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.lightBlue.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                  color: Colors.lightBlue.withValues(alpha: 0.50)),
+            ),
+            child: Text(
+              '💧 ${rainfall!.toStringAsFixed(0)}mm',
+              style: const TextStyle(
+                color: Colors.lightBlue,
+                fontSize: 7,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
       ],
     );
   }
 }
 
-// ── Pulsing ring — continuous heartbeat via AnimationController.repeat() ─────
+// ── Pulsing ring (preserved from v3) ────────────────────────────────────
+
 class _PulsingRing extends StatefulWidget {
   const _PulsingRing();
-
   @override
   State<_PulsingRing> createState() => _PulsingRingState();
 }
@@ -505,7 +882,7 @@ class _PulsingRingState extends State<_PulsingRing>
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true); // ← true continuous heartbeat
+    )..repeat(reverse: true);
     _scale = Tween<double>(begin: 0.65, end: 1.0).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
     );
@@ -532,7 +909,8 @@ class _PulsingRingState extends State<_PulsingRing>
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: AppPalette.critical.withValues(alpha: _opacity.value),
+              color:
+                  AppPalette.critical.withValues(alpha: _opacity.value),
               width: 2.5,
             ),
           ),
@@ -542,7 +920,8 @@ class _PulsingRingState extends State<_PulsingRing>
   }
 }
 
-// ── Station bottom sheet ─────────────────────────────────────────────────────
+// ── Station bottom sheet (preserved from v3) ───────────────────────────
+
 class _StationSheet extends StatelessWidget {
   final BiharGauge        gauge;
   final BiharStationData? live;
@@ -556,7 +935,6 @@ class _StationSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasLive = live != null;
-
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
       decoration: BoxDecoration(
@@ -576,8 +954,6 @@ class _StationSheet extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
-            // Handle
             Center(
               child: Container(
                 width: 40, height: 4,
@@ -588,8 +964,6 @@ class _StationSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Header
             Row(
               children: [
                 Expanded(
@@ -621,9 +995,7 @@ class _StationSheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-
             if (!hasLive) ...[
-              // ── No live data banner ──────────────────────────────────
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -659,8 +1031,6 @@ class _StationSheet extends StatelessWidget {
               const SizedBox(height: 12),
               _sourceRow(),
             ],
-
-            // Open detail CTA
             const SizedBox(height: 16),
             GestureDetector(
               onTap: () {
@@ -699,13 +1069,11 @@ class _StationSheet extends StatelessWidget {
     );
   }
 
-  // ── Current level + margin ───────────────────────────────────────────────
   Widget _liveSection(BuildContext context) {
     final s   = live!;
     final rc  = _riskColour(s.riskLabel, t);
     final cur = s.currentLevel;
     final dan = gauge.dangerLevel;
-
     String margin     = '—';
     Color  marginColor = AppPalette.safe;
     if (cur != null) {
@@ -718,7 +1086,6 @@ class _StationSheet extends StatelessWidget {
         marginColor = diff < 0.5 ? AppPalette.warning : AppPalette.safe;
       }
     }
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -773,7 +1140,6 @@ class _StationSheet extends StatelessWidget {
     );
   }
 
-  // ── Static thresholds (always shown) ────────────────────────────────────
   Widget _thresholdsSection() {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -806,8 +1172,7 @@ class _StationSheet extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label,
-              style:
-                  TextStyle(color: t.textSecondary, fontSize: 12)),
+              style: TextStyle(color: t.textSecondary, fontSize: 12)),
           Text(value,
               style: TextStyle(
                   color: color,
@@ -816,10 +1181,8 @@ class _StationSheet extends StatelessWidget {
         ],
       );
 
-  // ── 24h change + forecast + trend ───────────────────────────────────────
   Widget _changeSection() {
     final s = live!;
-
     Color  diffColor = t.textPrimary;
     String diffStr   = '—';
     if (s.diff24h != null) {
@@ -827,27 +1190,23 @@ class _StationSheet extends StatelessWidget {
       diffStr  = '${d >= 0 ? '+' : ''}${d.toStringAsFixed(2)} m';
       diffColor = d > 0.2
           ? AppPalette.danger
-          : d < 0
-              ? AppPalette.safe
-              : AppPalette.warning;
+          : d < 0 ? AppPalette.safe : AppPalette.warning;
     }
-
     final IconData trendIcon;
     final Color    trendColor;
     switch (s.trend.toUpperCase()) {
       case 'RISING':
-        trendIcon  = Icons.trending_up_rounded;
+        trendIcon = Icons.trending_up_rounded;
         trendColor = AppPalette.danger;
         break;
       case 'FALLING':
-        trendIcon  = Icons.trending_down_rounded;
+        trendIcon = Icons.trending_down_rounded;
         trendColor = AppPalette.safe;
         break;
       default:
-        trendIcon  = Icons.trending_flat_rounded;
+        trendIcon = Icons.trending_flat_rounded;
         trendColor = AppPalette.warning;
     }
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -880,8 +1239,7 @@ class _StationSheet extends StatelessWidget {
           Container(width: 1, height: 36, color: t.stroke),
           Expanded(
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -914,16 +1272,14 @@ class _StationSheet extends StatelessWidget {
     );
   }
 
-  // ── GloFAS + Rainfall (hidden if both null) ──────────────────────────────
   Widget _riverSection() {
     final s           = live!;
     final hasGloFAS   = s.discharge != null;
     final hasRainfall = s.rainfall24h != null;
     if (!hasGloFAS && !hasRainfall) return const SizedBox.shrink();
-
-    String dischargeStr  = '—';
+    String dischargeStr   = '—';
     Color  dischargeColor = AppPalette.safe;
-    String deltaBadge    = '';
+    String deltaBadge     = '';
     if (hasGloFAS) {
       dischargeStr = _fmtQ(s.discharge!);
       if (s.dischargeMean != null && s.dischargeMean! > 0) {
@@ -934,12 +1290,9 @@ class _StationSheet extends StatelessWidget {
             : '${pct.toStringAsFixed(0)}%';
         dischargeColor = pct > 50
             ? AppPalette.critical
-            : pct > 20
-                ? AppPalette.warning
-                : AppPalette.safe;
+            : pct > 20 ? AppPalette.warning : AppPalette.safe;
       }
     }
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1008,8 +1361,7 @@ class _StationSheet extends StatelessWidget {
               child: _miniCell(
                 icon: Icons.grain_rounded,
                 label: '24h Rainfall',
-                value:
-                    '${s.rainfall24h!.toStringAsFixed(1)} mm',
+                value: '${s.rainfall24h!.toStringAsFixed(1)} mm',
                 valueColor: Colors.lightBlue,
                 centered: hasGloFAS,
               ),
@@ -1020,7 +1372,6 @@ class _StationSheet extends StatelessWidget {
     );
   }
 
-  // ── Source + timestamp ───────────────────────────────────────────────────
   Widget _sourceRow() {
     final s = live!;
     return Row(
@@ -1041,7 +1392,6 @@ class _StationSheet extends StatelessWidget {
     );
   }
 
-  // ── Shared mini data cell ────────────────────────────────────────────────
   Widget _miniCell({
     required IconData icon,
     required String   label,
@@ -1102,11 +1452,11 @@ class _StationSheet extends StatelessWidget {
       : v.toStringAsFixed(0);
 }
 
-// ── Live badge ───────────────────────────────────────────────────────────────
+// ── Live badge (preserved from v3) ──────────────────────────────────────
+
 class _LiveBadge extends StatelessWidget {
   final int count;
   const _LiveBadge({required this.count});
-
   @override
   Widget build(BuildContext context) {
     final t       = RiverColors.of(context);
@@ -1124,10 +1474,10 @@ class _LiveBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 6, height: 6,
-            decoration:
-                BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
+              width: 6,
+              height: 6,
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 5),
           Text(
             hasData ? 'LIVE · $count' : 'NO DATA',
@@ -1143,7 +1493,8 @@ class _LiveBadge extends StatelessWidget {
   }
 }
 
-// ── Filter chip ──────────────────────────────────────────────────────────────
+// ── Filter chip (preserved from v3) ───────────────────────────────────
+
 class _FilterChip extends StatelessWidget {
   final String      label;
   final bool        active;
@@ -1155,7 +1506,6 @@ class _FilterChip extends StatelessWidget {
     required this.t,
     required this.onTap,
   });
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -1188,10 +1538,12 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-// ── Legend ───────────────────────────────────────────────────────────────────
+// ── Legend (updated: rainfall entry added) ─────────────────────────────
+
 class _Legend extends StatelessWidget {
   final RiverColors t;
-  const _Legend({required this.t});
+  final bool        showPrecip;
+  const _Legend({required this.t, required this.showPrecip});
 
   @override
   Widget build(BuildContext context) {
@@ -1208,22 +1560,53 @@ class _Legend extends StatelessWidget {
               blurRadius: 8),
         ],
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _LegendDot(
               color: AppPalette.critical,
               label: 'Critical / Danger'),
-          SizedBox(height: 5),
+          const SizedBox(height: 5),
           _LegendDot(
               color: AppPalette.warning,
               label: 'Warning / High'),
-          SizedBox(height: 5),
+          const SizedBox(height: 5),
           _LegendDot(
-              color: AppPalette.safe, label: 'Normal (live)'),
-          SizedBox(height: 5),
+              color: AppPalette.safe,
+              label: 'Normal (live)'),
+          const SizedBox(height: 5),
           _LegendDot(
-              color: AppPalette.textGrey, label: 'No data'),
+              color: AppPalette.textGrey,
+              label: 'No data'),
+          const SizedBox(height: 5),
+          _LegendDot(
+              color: Colors.lightBlue,
+              label: 'High rainfall >10mm'),
+          if (showPrecip) ...[
+            const SizedBox(height: 5),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 14, height: 8,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Colors.blue, Colors.cyan],
+                    ),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Precipitation overlay',
+                  style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1234,7 +1617,6 @@ class _LegendDot extends StatelessWidget {
   final Color  color;
   final String label;
   const _LegendDot({required this.color, required this.label});
-
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
