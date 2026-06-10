@@ -1,6 +1,5 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-// Written by hand as a stub because hive_generator was removed.
-// Run: dart run build_runner build  to regenerate if model changes.
+// Hand-written stub — regenerate with: dart run build_runner build
 
 part of 'community_incident.dart';
 
@@ -19,7 +18,7 @@ class IncidentTypeAdapter extends TypeAdapter<IncidentType> {
       case 1:  return IncidentType.embankmentBreach;
       case 2:  return IncidentType.roadBlocked;
       case 3:  return IncidentType.waterlogging;
-      case 4:  return IncidentType.evacuation;
+      case 4:  return IncidentType.evacuationNeeded;
       case 5:  return IncidentType.rescueNeeded;
       case 6:  return IncidentType.infrastructureDamage;
       case 7:  return IncidentType.other;
@@ -30,14 +29,14 @@ class IncidentTypeAdapter extends TypeAdapter<IncidentType> {
   @override
   void write(BinaryWriter writer, IncidentType obj) {
     switch (obj) {
-      case IncidentType.flooding:              writer.writeByte(0); break;
-      case IncidentType.embankmentBreach:      writer.writeByte(1); break;
-      case IncidentType.roadBlocked:           writer.writeByte(2); break;
-      case IncidentType.waterlogging:          writer.writeByte(3); break;
-      case IncidentType.evacuation:            writer.writeByte(4); break;
-      case IncidentType.rescueNeeded:          writer.writeByte(5); break;
-      case IncidentType.infrastructureDamage:  writer.writeByte(6); break;
-      case IncidentType.other:                 writer.writeByte(7); break;
+      case IncidentType.flooding:             writer.writeByte(0); break;
+      case IncidentType.embankmentBreach:     writer.writeByte(1); break;
+      case IncidentType.roadBlocked:          writer.writeByte(2); break;
+      case IncidentType.waterlogging:         writer.writeByte(3); break;
+      case IncidentType.evacuationNeeded:     writer.writeByte(4); break;
+      case IncidentType.rescueNeeded:         writer.writeByte(5); break;
+      case IncidentType.infrastructureDamage: writer.writeByte(6); break;
+      case IncidentType.other:                writer.writeByte(7); break;
     }
   }
 
@@ -63,18 +62,18 @@ class CommunityIncidentAdapter extends TypeAdapter<CommunityIncident> {
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
     return CommunityIncident(
-      id:           fields[0]  as String,
-      type:         fields[1]  as IncidentType,
-      title:        fields[2]  as String,
-      description:  fields[3]  as String,
-      latitude:     fields[4]  as double,
-      longitude:    fields[5]  as double,
-      district:     fields[6]  as String,
-      reportedAt:   fields[7]  as DateTime,
-      reporterName: fields[8]  as String,
-      imageUrls:    (fields[9]  as List).cast<String>(),
-      isVerified:   fields[10] as bool,
-      upvotes:      fields[11] as int,
+      id:          fields[0]  as String,
+      type:        fields[1]  as IncidentType,
+      headline:    fields[2]  as String,
+      description: fields[3]  as String,
+      lat:         fields[4]  as double,
+      lng:         fields[5]  as double,
+      district:    fields[6]  as String,
+      reportedAt:  fields[7]  as DateTime,
+      submittedBy: fields[8]  as String,
+      photoUrls:   (fields[9]  as List).cast<String>(),
+      verified:    fields[10] as bool,
+      upvotes:     fields[11] as int,
     );
   }
 
@@ -84,15 +83,15 @@ class CommunityIncidentAdapter extends TypeAdapter<CommunityIncident> {
       ..writeByte(12)
       ..writeByte(0)  ..write(obj.id)
       ..writeByte(1)  ..write(obj.type)
-      ..writeByte(2)  ..write(obj.title)
+      ..writeByte(2)  ..write(obj.headline)
       ..writeByte(3)  ..write(obj.description)
-      ..writeByte(4)  ..write(obj.latitude)
-      ..writeByte(5)  ..write(obj.longitude)
+      ..writeByte(4)  ..write(obj.lat)
+      ..writeByte(5)  ..write(obj.lng)
       ..writeByte(6)  ..write(obj.district)
       ..writeByte(7)  ..write(obj.reportedAt)
-      ..writeByte(8)  ..write(obj.reporterName)
-      ..writeByte(9)  ..write(obj.imageUrls)
-      ..writeByte(10) ..write(obj.isVerified)
+      ..writeByte(8)  ..write(obj.submittedBy)
+      ..writeByte(9)  ..write(obj.photoUrls)
+      ..writeByte(10) ..write(obj.verified)
       ..writeByte(11) ..write(obj.upvotes);
   }
 
