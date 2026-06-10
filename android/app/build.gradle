@@ -1,25 +1,14 @@
 // android/app/build.gradle
-// OpsFlood — Module 9: Release build config
-
-def localProperties = new Properties()
-def localPropertiesFile = rootProject.file('local.properties')
-if (localPropertiesFile.exists()) {
-    localPropertiesFile.withReader('UTF-8') { reader ->
-        localProperties.load(reader)
-    }
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
 }
 
-def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '1'
-def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
-def flutterSdkPath    = localProperties.getProperty('flutter.sdk')
-assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-
-apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
-apply from: "$flutterSdkPath/packages/flutter_tools/gradle/flutter.gradle"
-
 android {
-    compileSdkVersion 34
+    namespace "com.equinox.flood"
+    compileSdk flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
     compileOptions {
@@ -32,40 +21,19 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.opsflood.app"
-        minSdkVersion    21
-        targetSdkVersion 34
-        versionCode      flutterVersionCode.toInteger()
-        versionName      flutterVersionName
-        multiDexEnabled  true
-
-        // Only ship arm64 + x86_64 in release to halve APK size
-        ndk {
-            abiFilters 'arm64-v8a', 'x86_64'
-        }
-    }
-
-    signingConfigs {
-        release {
-            // Read from env vars set in CI (GitHub Actions secret)
-            storeFile     file(System.getenv('KEYSTORE_PATH')    ?: 'keystore/upload.jks')
-            storePassword System.getenv('KEYSTORE_PASSWORD')     ?: ''
-            keyAlias      System.getenv('KEY_ALIAS')             ?: 'upload'
-            keyPassword   System.getenv('KEY_PASSWORD')          ?: ''
-        }
+        applicationId "com.equinox.flood"
+        minSdk 21
+        targetSdk flutter.targetSdkVersion
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+        multiDexEnabled true
     }
 
     buildTypes {
-        debug {
-            applicationIdSuffix '.debug'
-            versionNameSuffix '-debug'
-        }
         release {
-            signingConfig         signingConfigs.release
-            minifyEnabled         true
-            shrinkResources       true
-            proguardFiles         getDefaultProguardFile('proguard-android-optimize.txt'),
-                                  'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
         }
     }
 }
@@ -75,6 +43,7 @@ flutter {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation platform('com.google.firebase:firebase-bom:33.0.0')
+    implementation 'com.google.firebase:firebase-analytics'
     implementation 'androidx.multidex:multidex:2.0.1'
 }
