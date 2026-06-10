@@ -1,170 +1,73 @@
 {
   "@@locale": "hi",
+  "@@last_modified": "2026-06-10",
 
-  "appTitle": "ओप्सफ्लड",
-  "@appTitle": { "description": "App name" },
+  "appTitle": "ओपीएस फ्लड",
+  "@appTitle": { "description": "Application title" },
 
-  "dashboard": "डैशबोर्ड",
-  "@dashboard": { "description": "Bottom nav: Dashboard" },
+  "tabHome": "घर",
+  "@tabHome": { "description": "Bottom nav Home tab label" },
 
-  "map": "मैप",
-  "@map": { "description": "Bottom nav: Map" },
+  "tabMap": "नक्शा",
+  "@tabMap": { "description": "Bottom nav Map tab label" },
 
-  "alerts": "अलर्ट",
-  "@alerts": { "description": "Bottom nav: Alerts" },
+  "tabAlerts": "अलर्ट",
+  "@tabAlerts": { "description": "Bottom nav Alerts tab label" },
 
-  "community": "समुदाय",
-  "@community": { "description": "Bottom nav: Community" },
+  "tabNews": "समाचार",
+  "@tabNews": { "description": "Bottom nav News tab label" },
 
-  "settings": "सेटिंग्स",
-  "@settings": { "description": "Bottom nav: Settings" },
+  "tabPredict": "भविष्य",
+  "@tabPredict": { "description": "Bottom nav Predict tab label" },
 
-  "liveStations": "लाइव स्टेशन",
-  "@liveStations": { "description": "Live stations header" },
+  "tabSettings": "सेटिंग",
+  "@tabSettings": { "description": "Bottom nav Settings tab label" },
+
+  "settingsTitle": "सेटिंग्स",
+  "@settingsTitle": { "description": "Settings screen title" },
+
+  "notificationsTitle": "सूचनाएँ",
+  "@notificationsTitle": { "description": "Notifications section title" },
+
+  "alertsTitle": "अलर्ट",
+  "@alertsTitle": { "description": "Alerts screen title" },
+
+  "alertSeverityEmergency": "आपातकाल",
+  "alertSeverityDanger": "खतरा",
+  "alertSeverityWarning": "चेतावनी",
+  "alertSeverityNormal": "सामान्य",
 
   "riverLevel": "नदी स्तर",
   "@riverLevel": { "description": "River level label" },
 
-  "dangerLevel": "خतरे का स्तर",
-  "@dangerLevel": { "description": "Danger level label" },
-
+  "dangerLevel": "खतरनाक स्तर",
   "warningLevel": "चेतावनी स्तर",
-  "@warningLevel": { "description": "Warning level label" },
+  "currentLevel": "वर्तमान स्तर",
+  "lastUpdated": "अंतिम अपडेट",
+  "loading": "लोड हो रहा है...",
+  "errorLoading": "डेटा लोड नहीं हो सका",
+  "retry": "पुनः प्रयास करें",
+  "noData": "कोई डेटा उपलब्ध नहीं",
 
-  "normalLevel": "सामान्य स्तर",
-  "@normalLevel": { "description": "Normal level label" },
+  "sosTitle": "आपातकालीन सहायता",
+  "sosCallPolice": "पुलिस (100)",
+  "sosCallAmbulance": "एंबुलेंस (108)",
+  "sosCallNdrf": "एनडीआरएफ (1078)",
+  "sosShareLocation": "अपनी स्थिति साझा करें",
 
-  "emergency": "आपातकाल",
-  "@emergency": { "description": "Emergency severity" },
-
-  "danger": "خतरा",
-  "@danger": { "description": "Danger severity" },
-
-  "warning": "चेतावनी",
-  "@warning": { "description": "Warning severity" },
-
-  "normal": "सामान्य",
-  "@normal": { "description": "Normal severity" },
-
-  "lastUpdated": "अंतिम अपडेट: {time}",
-  "@lastUpdated": {
-    "description": "Last updated timestamp",
-    "placeholders": {
-      "time": { "type": "String" }
-    }
-  },
-
-  "fetchingData": "डेटा लोडहो रहा है...",
-  "@fetchingData": { "description": "Loading indicator text" },
-
-  "noAlertsTitle": "कोई अलर्ट नहीं",
-  "@noAlertsTitle": { "description": "Empty alerts state title" },
-
-  "noAlertsSubtitle": "सभी नदी स्तर सामान्य सीमा के अंदर हैं।",
-  "@noAlertsSubtitle": { "description": "Empty alerts state subtitle" },
-
-  "exportData": "डेटा एक्सपोर्ट करें",
-  "@exportData": { "description": "Export screen title" },
-
-  "exportPdf": "PDF निर्यात करें",
-  "@exportPdf": { "description": "Export as PDF button" },
-
-  "exportCsv": "CSV निर्यात करें",
-  "@exportCsv": { "description": "Export as CSV button" },
-
-  "notificationSettings": "सूचना सेटिंग्स",
-  "@notificationSettings": { "description": "Notification settings screen title" },
-
-  "appearance": "दिखावट",
-  "@appearance": { "description": "Settings section: Appearance" },
+  "dashboardTitle": "डैशबोर्ड",
+  "liveStations": "लाइव स्टेशन",
+  "activeAlerts": "सक्रिय अलर्ट",
+  "predictionTitle": "बाढ़ भविष्यवाणी",
+  "mapTitle": "नदी नक्शा",
+  "compareTitle": "स्टेशन तुलना",
+  "exportTitle": "डेटा निर्यात करें",
+  "reportIncident": "घटना रिपोर्ट करें",
+  "evacuationRoutes": "निकासी मार्ग",
+  "offlineBannerMsg": "ऑफ़लाइन — संग्रहीत डेटा दिखा रहा है",
 
   "language": "भाषा",
-  "@language": { "description": "Settings section: Language" },
-
-  "about": "हमारे बारे में",
-  "@about": { "description": "Settings section: About" },
-
-  "version": "वर्षन",
-  "@version": { "description": "App version label" },
-
-  "clearCache": "कैश साफ़ करें",
-  "@clearCache": { "description": "Clear cache button" },
-
-  "clearAllData": "सभी डेटा हटाएं",
-  "@clearAllData": { "description": "Danger zone: clear all data" },
-
-  "confirm": "पुष्टि करें",
-  "@confirm": { "description": "Confirm dialog button" },
-
-  "cancel": "रद्द करें",
-  "@cancel": { "description": "Cancel button" },
-
-  "retry": "पुनः प्रयास करें",
-  "@retry": { "description": "Retry button" },
-
-  "search": "खोजें",
-  "@search": { "description": "Search field hint" },
-
-  "river": "नदी",
-  "@river": { "description": "River label" },
-
-  "district": "जिला",
-  "@district": { "description": "District label" },
-
-  "station": "स्टेशन",
-  "@station": { "description": "Station label" },
-
-  "prediction": "भविष्यवाणी",
-  "@prediction": { "description": "AI prediction label" },
-
-  "reportIncident": "घटना रिपोर्ट करें",
-  "@reportIncident": { "description": "Community: report incident button" },
-
-  "incidentReported": "घटना रिपोर्ट की गई",
-  "@incidentReported": { "description": "Success toast after reporting" },
-
-  "sosTitle": "आपातकालीन सेवाएं",
-  "@sosTitle": { "description": "SOS screen title" },
-
-  "callNdrf": "NDRF को कॉल करें",
-  "@callNdrf": { "description": "SOS: call NDRF helpline" },
-
-  "callSdrf": "SDRF को कॉल करें",
-  "@callSdrf": { "description": "SOS: call SDRF helpline" },
-
-  "shareLocation": "अपना स्थान साझा करें",
-  "@shareLocation": { "description": "SOS: share location button" },
-
-  "welcomeTitle": "ओप्सफ्लड में आपका स्वागत है",
-  "@welcomeTitle": { "description": "Onboarding welcome title" },
-
-  "welcomeSubtitle": "बिहार के लिए रीलटाइम बाढ़ निगरानी — लाइव नदी स्तर, CWC अलर्ट और AI भविष्यवाणी।",
-  "@welcomeSubtitle": { "description": "Onboarding welcome subtitle" },
-
-  "selectDistricts": "अपने जिले चुनें",
-  "@selectDistricts": { "description": "Onboarding district selection title" },
-
-  "selectRivers": "नदियां चुनें",
-  "@selectRivers": { "description": "Onboarding river selection title" },
-
-  "enableAlerts": "अलर्ट चालू करें",
-  "@enableAlerts": { "description": "Onboarding notifications page title" },
-
-  "allowNotifications": "सूचनाएं अनुमति दें",
-  "@allowNotifications": { "description": "Notification permission button" },
-
-  "chooseTheme": "थीम चुनें",
-  "@chooseTheme": { "description": "Onboarding theme page title" },
-
-  "allSet": "सब तैयार है!",
-  "@allSet": { "description": "Onboarding done page title" },
-
-  "enterApp": "ओप्सफ्लड में प्रवेश करें ➜",
-  "@enterApp": { "description": "Onboarding final CTA button" },
-
-  "next": "आगे →",
-  "@next": { "description": "Next button label" },
-
-  "skip": "छोड़ें",
-  "@skip": { "description": "Skip onboarding button" }
+  "languageEnglish": "अंग्रेज़ी",
+  "languageHindi": "हिंदी",
+  "languageBengali": "बंगाली"
 }

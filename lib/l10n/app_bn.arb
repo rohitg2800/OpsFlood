@@ -1,0 +1,73 @@
+{
+  "@@locale": "bn",
+  "@@last_modified": "2026-06-10",
+
+  "appTitle": "ওপিএস ফ্লাড",
+  "@appTitle": { "description": "Application title" },
+
+  "tabHome": "হোম",
+  "@tabHome": { "description": "Bottom nav Home tab label" },
+
+  "tabMap": "ম্যাপ",
+  "@tabMap": { "description": "Bottom nav Map tab label" },
+
+  "tabAlerts": "সতর্কতা",
+  "@tabAlerts": { "description": "Bottom nav Alerts tab label" },
+
+  "tabNews": "সন্দেশ",
+  "@tabNews": { "description": "Bottom nav News tab label" },
+
+  "tabPredict": "পূর্বাভাস",
+  "@tabPredict": { "description": "Bottom nav Predict tab label" },
+
+  "tabSettings": "সেটিংস",
+  "@tabSettings": { "description": "Bottom nav Settings tab label" },
+
+  "settingsTitle": "সেটিংস",
+  "@settingsTitle": { "description": "Settings screen title" },
+
+  "notificationsTitle": "বিজ্ঞপ্তি",
+  "@notificationsTitle": { "description": "Notifications section title" },
+
+  "alertsTitle": "সতর্কতা",
+  "@alertsTitle": { "description": "Alerts screen title" },
+
+  "alertSeverityEmergency": "জরুরি",
+  "alertSeverityDanger": "বিপদ",
+  "alertSeverityWarning": "সতর্কতা",
+  "alertSeverityNormal": "সাধারণ",
+
+  "riverLevel": "নদীর স্তর",
+  "@riverLevel": { "description": "River level label" },
+
+  "dangerLevel": "বিপদ স্তর",
+  "warningLevel": "সতর্কতা স্তর",
+  "currentLevel": "বর্তমান স্তর",
+  "lastUpdated": "শেষ আপডেট",
+  "loading": "লোড হচ্ছে...",
+  "errorLoading": "ডেটা লোড হয়নি",
+  "retry": "পুনরায় চেষ্টা করুন",
+  "noData": "কোনো ডেটা নেই",
+
+  "sosTitle": "জরুরি সহায়তা",
+  "sosCallPolice": "পুলিশ (100)",
+  "sosCallAmbulance": "স্বাস্থ্য (108)",
+  "sosCallNdrf": "এনডিআরএফ (1078)",
+  "sosShareLocation": "আমার নিরাপদ স্থান শেয়ার করুন",
+
+  "dashboardTitle": "ড্যাশবোর্ড",
+  "liveStations": "লাইভ স্টেশন",
+  "activeAlerts": "সক্রিয় সতর্কতা",
+  "predictionTitle": "বন্যা পূর্বাভাস",
+  "mapTitle": "নদীর ম্যাপ",
+  "compareTitle": "স্টেশন তুলনা",
+  "exportTitle": "ডেটা রপ্তানি করুন",
+  "reportIncident": "ঘটনা রিপোর্ট করুন",
+  "evacuationRoutes": "সরিয়ে যাওয়ার রাস্তা",
+  "offlineBannerMsg": "অফলাইন — সংরক্ষিত ডেটা দেখানো হচ্ছে",
+
+  "language": "ভাষা",
+  "languageEnglish": "ইংরেজি",
+  "languageHindi": "হিন্দি",
+  "languageBengali": "বাংলা"
+}
