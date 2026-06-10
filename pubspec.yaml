@@ -16,7 +16,8 @@ dependencies:
 
   # Networking & parsing
   http: ^1.2.0
-  xml: ^7.0.1
+  # xml 6.x required by pdf ^3.10.8 (pdf pins xml ^6.3.0 and never lifted it)
+  xml: ^6.3.0
 
   # State management
   flutter_riverpod: ^3.3.1
@@ -57,7 +58,7 @@ dependencies:
   # Icons
   cupertino_icons: ^1.0.6
 
-  # Sharing — upgraded to ^10.1.0 to satisfy web ^1.0.0 (required by geolocator ^13)
+  # Sharing — ^10.1.0 satisfies web ^1.0.0 required by geolocator ^13
   share_plus: ^10.1.0
 
   # ── Module 2: Branding & Icons ───────────────────────────────────────────────
@@ -81,10 +82,7 @@ dependencies:
   # GPS — nearby station detection
   geolocator: ^13.0.4
 
-  # Crowd reports photo upload + community reports
-  # firebase_storage already listed above
-
-  # timeago for crowd report timestamps
+  # Crowd report timestamps
   timeago: ^3.7.0
 
   # AI flood background monitoring service
