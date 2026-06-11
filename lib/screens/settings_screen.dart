@@ -9,6 +9,11 @@
 //   5. About        — version, changelog, licences
 //   6. Advanced     — cache clear, data reset
 //   7. Danger Zone  — clear all local data
+//
+// FIX: _card() previously used Container(color: ...) wrapping ListTiles.
+// Flutter asserts that ListTile ink splashes must paint on a Material ancestor.
+// A Container with color creates a DecoratedBox that hides those splashes.
+// Fix: replace Container with Material(color: ..., shape: RoundedRectangleBorder).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -224,16 +229,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  // ── Helpers
+  // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  Widget _card(RiverColors t, List<Widget> children) =>
-      Container(
-        margin: const EdgeInsets.only(bottom: 4),
-        decoration: BoxDecoration(
-          color: t.cardBg,
+  /// Wraps [children] in a Material so ListTile ink splashes are visible.
+  /// Previously used Container(color:…) which created a DecoratedBox that
+  /// hid splashes and triggered Flutter's assertion.
+  Widget _card(RiverColors t, List<Widget> children) => Material(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.stroke),
+          side: BorderSide(color: t.stroke),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       );
 
@@ -271,7 +279,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('Clear all data?',
             style: TextStyle(color: t.textPrimary)),
         content: Text(
-            'This will delete all cached stations, incidents, '  
+            'This will delete all cached stations, incidents, '
             'and preferences. App will restart.',
             style: TextStyle(
                 color: t.textSecondary, fontSize: 12)),
@@ -334,25 +342,20 @@ class _ThemeGrid extends StatelessWidget {
                     : t.cardBg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: active
-                      ? t.accent
-                      : t.stroke,
+                  color: active ? t.accent : t.stroke,
                   width: active ? 2 : 1,
                 ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Colour swatch
                   Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
                       color: th.$4,
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: active
-                              ? t.accent
-                              : t.stroke),
+                          color: active ? t.accent : t.stroke),
                     ),
                     child: Center(
                         child: Text(th.$2,
@@ -364,9 +367,7 @@ class _ThemeGrid extends StatelessWidget {
                     th.$3,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: active
-                          ? t.accent
-                          : t.textSecondary,
+                      color: active ? t.accent : t.textSecondary,
                       fontWeight: active
                           ? FontWeight.w700
                           : FontWeight.w500,
@@ -393,13 +394,14 @@ class _LanguageTile extends StatelessWidget {
       required this.onPick});
 
   @override
-  Widget build(BuildContext context) =>
-      Container(
-        decoration: BoxDecoration(
-          color: t.cardBg,
+  Widget build(BuildContext context) => Material(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.stroke),
+          side: BorderSide(color: t.stroke),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           children: [
             _LangRow(
@@ -465,14 +467,14 @@ class _RefreshTile extends StatelessWidget {
       required this.onChanged});
 
   @override
-  Widget build(BuildContext context) =>
-      Container(
-        margin: const EdgeInsets.only(top: 4),
-        decoration: BoxDecoration(
-          color: t.cardBg,
+  Widget build(BuildContext context) => Material(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.stroke),
+          side: BorderSide(color: t.stroke),
         ),
+        clipBehavior: Clip.antiAlias,
         child: ListTile(
           leading: Icon(Icons.refresh_rounded,
               color: t.accent, size: 18),
@@ -554,14 +556,14 @@ class _NavTile extends StatelessWidget {
       required this.onTap});
 
   @override
-  Widget build(BuildContext context) =>
-      Container(
-        margin: const EdgeInsets.only(bottom: 4),
-        decoration: BoxDecoration(
-          color: t.cardBg,
+  Widget build(BuildContext context) => Material(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.stroke),
+          side: BorderSide(color: t.stroke),
         ),
+        clipBehavior: Clip.antiAlias,
         child: ListTile(
           leading: Icon(icon, color: t.accent, size: 18),
           title: Text(label,

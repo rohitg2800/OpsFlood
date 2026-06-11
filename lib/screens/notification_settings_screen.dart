@@ -2,6 +2,11 @@
 // OpsFlood — Module 7: Push Notifications & FCM Topics
 // v1.1 M5 fix: SwitchListTile does not have a `leading` param in Flutter 3.x.
 //              Move the emoji into the title Row instead.
+//
+// FIX: _card() and _SeverityRow previously used Container(color:…) wrapping
+// SwitchListTile/ListTile. Flutter asserts ink splashes must paint on a
+// Material ancestor — a Container with color creates a DecoratedBox that hides
+// them. Fix: replace Container with Material(color:…, shape:…, clipBehavior:…).
 library;
 
 import 'package:flutter/material.dart';
@@ -239,13 +244,18 @@ class _NotificationSettingsState
                 fontWeight: FontWeight.w900, fontSize: 14)),
       ]);
 
-  Widget _card(RiverColors t, List<Widget> children) => Container(
-    decoration: BoxDecoration(
+  /// Material replaces Container so ListTile/SwitchListTile ink splashes
+  /// paint on the correct ancestor and Flutter's assertion is satisfied.
+  Widget _card(RiverColors t, List<Widget> children) => Material(
         color: t.cardBg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.stroke)),
-    child: Column(children: children),
-  );
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: t.stroke),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(children: children),
+      );
 }
 
 // ── Severity row ─────────────────────────────────────────────────────────────
@@ -272,29 +282,33 @@ class _SeverityRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = _sevMeta[sev]!;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-          color: t.cardBg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: t.stroke)),
-      // M5 FIX: SwitchListTile has no `leading` param in Flutter 3.x.
-      // Move the emoji Text into the title Row instead.
-      child: SwitchListTile(
-        activeColor: meta.$3,
-        value: enabled,
-        title: Row(children: [
-          Text(meta.$1, style: const TextStyle(fontSize: 20)),
-          const SizedBox(width: 10),
-          Text(
-            meta.$2,
-            style: TextStyle(color: t.textPrimary,
-                fontWeight: FontWeight.w700, fontSize: 13),
-          ),
-        ]),
-        subtitle: Text(_subtitle(sev),
-            style: TextStyle(color: t.textSecondary, fontSize: 10)),
-        onChanged: onChanged,
+    // Material instead of Container so SwitchListTile ink splash is visible.
+    return Material(
+      color: t.cardBg,
+      borderRadius: BorderRadius.circular(12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: t.stroke),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: SwitchListTile(
+          activeColor: meta.$3,
+          value: enabled,
+          title: Row(children: [
+            Text(meta.$1, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 10),
+            Text(
+              meta.$2,
+              style: TextStyle(color: t.textPrimary,
+                  fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+          ]),
+          subtitle: Text(_subtitle(sev),
+              style: TextStyle(color: t.textSecondary, fontSize: 10)),
+          onChanged: onChanged,
+        ),
       ),
     );
   }
