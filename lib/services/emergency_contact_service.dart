@@ -138,12 +138,17 @@ class EmergencyContactService {
   }
 
   /// Convenience: look up contacts by gauging-station name.
-  /// Falls back to all global contacts when the station is unmapped.
+  /// Returns district contacts + globals when mapped.
+  /// Falls back to ALL global contacts (district == null) when unmapped,
+  /// so the card is never empty.
   Future<List<EmergencyContact>> getContactsForStation(
       String stationName) async {
     final district = _stationDistrict[stationName];
-    if (district == null) return getSOSContacts();
-    return getContactsByDistrict(district);
+    if (district != null) return getContactsByDistrict(district);
+    // Unmapped station — return every contact that has no district filter
+    // (i.e. national / Bihar-wide contacts).  Never returns empty list.
+    final all = await getAllContacts();
+    return all.where((c) => c.district == null).toList();
   }
 
   /// Resolves a station name to its district string (null if unmapped).
@@ -168,6 +173,7 @@ class EmergencyContactService {
 
   // ---------------------------------------------------------------------------
   // Fallback (used only when the JSON asset cannot be loaded)
+  // Always has at least the national SOS numbers so the card is never blank.
   // ---------------------------------------------------------------------------
   static final List<EmergencyContact> _fallbackContacts = [
     const EmergencyContact(
@@ -200,6 +206,31 @@ class EmergencyContactService {
       phone: '1070',
       category: 'SDRF Bihar',
       isSOS: true,
+    ),
+    const EmergencyContact(
+      id: 'dm_supaul',
+      name: 'District Magistrate – Supaul',
+      phone: '06473-222201',
+      category: 'District Administration',
+      district: 'Supaul',
+      isSOS: true,
+    ),
+    const EmergencyContact(
+      id: 'sdrf_supaul',
+      name: 'SDRF Control Room – Supaul',
+      phone: '06473-222100',
+      category: 'SDRF Bihar',
+      district: 'Supaul',
+      isSOS: true,
+    ),
+    const EmergencyContact(
+      id: 'kosi_birpur_control',
+      name: 'Kosi Barrage Control Room – Birpur',
+      phone: '06473-240201',
+      category: 'Barrage',
+      district: 'Supaul',
+      isSOS: true,
+      description: 'Kosi Barrage discharge & gate operations',
     ),
     const EmergencyContact(
       id: 'ndrf_patna',
