@@ -1,10 +1,19 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — PredictScreen v6.1
+// OpsFlood — PredictScreen v7
 //
-// Fix from v6:
-//   • RiverStation has no 'discharge' field.
-//     All references replaced: discharge → flowRate  (double? flowRate)
-//     rainfall   → rainfallLastHour  (double? rainfallLastHour)
+// Full data-wiring fix:
+//   • didChangeDependencies prefill now DEFERRED: waits until
+//     mergedStationsProvider is non-empty (addPostFrameCallback loop).
+//   • _findStations uses ref.read (snapshot) at predict-time, always safe
+//     because the build() already ref.watch()es mergedStationsProvider.
+//   • Rainfall pre-fill now uses FloodData.effectiveRainfallMm from
+//     liveLevelsProvider (city match), falling back to station.rainfallLastHour.
+//   • flowRate pre-fill uses RiverStation.flowRate || FloodData.flowRate.
+//   • Table shows ALL available RiverStation + FloodData fields per station:
+//     district, imdSeverity, imdRainfallMm, effectiveRainfallMm, flowRate,
+//     trend, liveStatus, capacityPercent.
+//   • No more blank table: stations are always re-searched at _predict() time
+//     after data is confirmed loaded.
 library;
 
 import 'dart:convert';
@@ -16,12 +25,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
-import '../l10n/context_l10n.dart';
 import '../models/flood_data.dart';
 import '../models/river_station.dart';
 import '../providers/flood_providers.dart';
 import '../providers/real_time_river_provider.dart';
 import '../theme/river_theme.dart';
+
+// ─── combined payload passed to the table ────────────────────────────────────
+class _StationPayload {
+  final RiverStation rs;
+  final FloodData?   fd; // nullable: matched FloodData from liveLevelsProvider
+  const _StationPayload(this.rs, this.fd);
+}
 
 class PredictScreen extends ConsumerStatefulWidget {
   const PredictScreen({super.key});
@@ -46,9 +61,9 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   bool _didPrefill   = false;
   bool _didAutoFetch = false;
 
-  _PredictResult?      _result;
-  String?              _error;
-  List<RiverStation>?  _matchedStations;
+  _PredictResult?        _result;
+  String?                _error;
+  List<_StationPayload>? _payloads; // table data
 
   late final AnimationController _resultAnim;
   late final Animation<double>   _resultFade;
@@ -72,7 +87,24 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     super.didChangeDependencies();
     if (_didPrefill) return;
     _didPrefill = true;
+    _schedulePrefill();
+  }
 
+  /// Deferred prefill: keeps re-scheduling until stations are loaded.
+  void _schedulePrefill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final stations = ref.read(mergedStationsProvider);
+      if (stations.isEmpty) {
+        // Data not ready yet — try again next frame
+        _schedulePrefill();
+        return;
+      }
+      _doPrefill();
+    });
+  }
+
+  void _doPrefill() {
     String? argCity;
     double? argLevel;
     final args = ModalRoute.of(context)?.settings.arguments;
@@ -81,79 +113,123 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       final lv = args['river_level'];
       if (lv != null) argLevel = double.tryParse(lv.toString());
     }
-
-    final providerCity = ref.read(selectedCityProvider);
-    final city = argCity ?? providerCity;
-
+    final city = argCity ?? ref.read(selectedCityProvider);
     if (city != null && city.isNotEmpty) {
       _fillFromCity(city, overrideLevel: argLevel);
     }
   }
 
-  // ── 5-tier fuzzy match against RiverStation list ──────────────────────────
+  // ── 5-tier fuzzy match ───────────────────────────────────────────────
   List<RiverStation> _findStations(String query) {
-    if (query.isEmpty) return [];
+    if (query.trim().isEmpty) return [];
     final q   = query.toLowerCase().trim();
     final all = ref.read(mergedStationsProvider);
 
-    // 1. station name contains query
-    var hits = all.where((s) => s.station.toLowerCase().contains(q)).toList();
+    List<RiverStation> hits;
+
+    // 1. exact station name contains query
+    hits = all.where((s) => s.station.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
     // 2. city field contains query
     hits = all.where((s) => s.city.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
-    // 3. river field contains query
+    // 3. river name contains query
     hits = all.where((s) => s.river.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
-    // 4. any word-token of query appears in station name
-    final tokens = q.split(RegExp(r'\s+'));
+    // 4. any word-token (≥3 chars) appears in station or city
+    final tokens = q.split(RegExp(r'\s+'))
+        .where((t) => t.length >= 3).toList();
     hits = all.where((s) {
-      final sLow = s.station.toLowerCase();
-      return tokens.any((t) => t.length > 2 && sLow.contains(t));
+      final low = '${s.station} ${s.city}'.toLowerCase();
+      return tokens.any((t) => low.contains(t));
     }).toList();
     if (hits.isNotEmpty) return hits;
 
     // 5. FloodData city fallback
-    final liveF = ref.read(liveLevelsProvider);
-    return liveF
-        .where((d) => d.city.toLowerCase().contains(q))
-        .map((d) => all.firstWhere(
-              (s) => s.station.toLowerCase() == d.city.toLowerCase(),
-              orElse: () => RiverStation(
-                city:        d.city,
-                state:       d.state,
-                river:       d.riverName ?? '',
-                station:     d.city,
-                current:     d.currentLevel,
-                warning:     d.warningLevel,
-                danger:      d.dangerLevel,
-                hfl:         d.dangerLevel + 1.5,
-                dataSource:  d.status,
-                lastUpdated: '',
-                isLive:      false,
-              ),
-            ))
-        .toList();
+    final fdList = ref.read(liveLevelsProvider);
+    final fdHits = fdList.where((d) => d.city.toLowerCase().contains(q));
+    hits = fdHits.expand((d) {
+      final match = all.where(
+          (s) => s.station.toLowerCase() == d.city.toLowerCase());
+      if (match.isNotEmpty) return match;
+      // Build a synthetic RiverStation from FloodData
+      return [
+        RiverStation(
+          city:             d.city,
+          state:            d.state,
+          river:            d.riverName ?? '',
+          station:          d.city,
+          current:          d.currentLevel,
+          warning:          d.warningLevel,
+          danger:           d.dangerLevel,
+          hfl:              d.dangerLevel + 1.5,
+          flowRate:         d.flowRate,
+          dataSource:       d.status,
+          lastUpdated:
+              '${d.lastUpdated.hour.toString().padLeft(2,'0')}:'
+              '${d.lastUpdated.minute.toString().padLeft(2,'0')}',
+          isLive:           d.status == 'LIVE',
+        ),
+      ];
+    }).toList();
+    return hits;
   }
 
+  /// Build combined payloads (RiverStation + matched FloodData) for the table.
+  List<_StationPayload> _buildPayloads(List<RiverStation> stations) {
+    final fdList = ref.read(liveLevelsProvider);
+    return stations.map((rs) {
+      final fd = fdList.firstWhereOrNull(
+          (d) => d.city.toLowerCase() == rs.station.toLowerCase() ||
+                 d.city.toLowerCase() == rs.city.toLowerCase());
+      return _StationPayload(rs, fd);
+    }).toList();
+  }
+
+  // ── Pre-fill form fields from best matched station ───────────────────────
   void _fillFromCity(String city, {double? overrideLevel}) {
     final stations = _findStations(city);
     final first    = stations.isNotEmpty ? stations.first : null;
 
-    final level    = overrideLevel ?? first?.current ?? 0.0;
-    // flowRate → pre-fill Discharge field if available
-    final flowStr  = first != null && (first.flowRate ?? 0) > 0
-        ? first.flowRate!.toStringAsFixed(0)
-        : '';
+    final level = overrideLevel ?? first?.current ?? 0.0;
+
+    // Rainfall: prefer FloodData.effectiveRainfallMm, then rainfallLastHour
+    double? rainfallVal;
+    if (first != null) {
+      final fdList = ref.read(liveLevelsProvider);
+      final fd = fdList.firstWhereOrNull(
+          (d) => d.city.toLowerCase() == first.station.toLowerCase() ||
+                 d.city.toLowerCase() == first.city.toLowerCase());
+      rainfallVal = (fd?.effectiveRainfallMm ?? 0) > 0
+          ? fd!.effectiveRainfallMm
+          : ((first.rainfallLastHour ?? 0) > 0
+              ? first.rainfallLastHour
+              : null);
+    }
+
+    // Flow rate
+    double? flowVal;
+    if (first != null) {
+      flowVal = (first.flowRate ?? 0) > 0 ? first.flowRate : null;
+      if (flowVal == null) {
+        final fdList = ref.read(liveLevelsProvider);
+        final fd = fdList.firstWhereOrNull(
+            (d) => d.city.toLowerCase() == first.station.toLowerCase() ||
+                   d.city.toLowerCase() == first.city.toLowerCase());
+        if ((fd?.flowRate ?? 0) > 0) flowVal = fd!.flowRate;
+      }
+    }
 
     setState(() {
       _cityCtrl.text      = city;
       _peakLevelCtrl.text = level > 0 ? level.toStringAsFixed(2) : '';
-      _rainfallCtrl.text  = ''; // rainfallLastHour is 1-hr value, not 7d
-      _dischargeCtrl.text = flowStr;
+      _rainfallCtrl.text  =
+          rainfallVal != null ? rainfallVal.toStringAsFixed(1) : '';
+      _dischargeCtrl.text =
+          flowVal != null ? flowVal.toStringAsFixed(0) : '';
       _autoFilled         = level > 0;
     });
 
@@ -176,18 +252,20 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     super.dispose();
   }
 
+  // ── Predict ─────────────────────────────────────────────────────────
   Future<void> _predict() async {
     if (!_formKey.currentState!.validate()) return;
     HapticFeedback.mediumImpact();
 
     final city     = _cityCtrl.text.trim();
     final stations = _findStations(city);
+    final payloads = _buildPayloads(stations);
 
     setState(() {
-      _loading         = true;
-      _result          = null;
-      _error           = null;
-      _matchedStations = stations.isNotEmpty ? stations : null;
+      _loading  = true;
+      _result   = null;
+      _error    = null;
+      _payloads = payloads.isNotEmpty ? payloads : null;
     });
     _resultAnim.reset();
 
@@ -210,13 +288,14 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
         final body  = jsonDecode(res.body) as Map<String, dynamic>;
         final level = (body['risk_level'] ?? body['riskLevel'] ?? 'UNKNOWN')
             .toString().toUpperCase();
-        final prob  = body['probability'] as double? ??
+        final prob = body['probability'] as double? ??
             (body['confidence'] as num?)?.toDouble();
         setState(() {
           _result = _PredictResult(riskLevel: level, confidence: prob);
         });
       } else {
-        setState(() => _error = 'Backend HTTP ${res.statusCode}: ${res.body}');
+        setState(() =>
+            _error = 'Backend HTTP ${res.statusCode}: ${res.body}');
       }
     } catch (e) {
       setState(() => _error = e.toString());
@@ -237,10 +316,13 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     }
   }
 
+  // ── Build ───────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    ref.watch(mergedStationsProvider); // reactive refresh
+    // Watch so widget rebuilds when live data arrives → table refreshes
+    ref.watch(mergedStationsProvider);
+    ref.watch(liveLevelsProvider);
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -272,29 +354,33 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                         autoFilled: _autoFilled,
                         t:          t,
                         onClear: () => setState(() {
-                          _autoFilled      = false;
-                          _didAutoFetch    = false;
+                          _autoFilled   = false;
+                          _didAutoFetch = false;
                           _cityCtrl.clear();
                           _peakLevelCtrl.clear();
                           _rainfallCtrl.clear();
                           _dischargeCtrl.clear();
-                          _result          = null;
-                          _error           = null;
-                          _matchedStations = null;
+                          _result   = null;
+                          _error    = null;
+                          _payloads = null;
                         }),
                       ),
                       const SizedBox(height: 12),
 
                       _DarkField(
-                        ctrl: _peakLevelCtrl, label: 'River Level (m)',
-                        hint: 'e.g. 12.50', icon: Icons.water_rounded,
+                        ctrl: _peakLevelCtrl,
+                        label: 'River Level (m)',
+                        hint: 'e.g. 12.50',
+                        icon: Icons.water_rounded,
                         numeric: true, t: t,
                       ),
                       const SizedBox(height: 12),
 
                       _DarkField(
-                        ctrl: _rainfallCtrl, label: 'Rainfall 7d (mm)',
-                        hint: 'e.g. 450', icon: Icons.grain_rounded,
+                        ctrl: _rainfallCtrl,
+                        label: 'Rainfall 7d (mm)',
+                        hint: 'e.g. 450',
+                        icon: Icons.grain_rounded,
                         numeric: true, t: t,
                       ),
                       const SizedBox(height: 12),
@@ -302,15 +388,17 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       _DarkField(
                         ctrl: _dischargeCtrl,
                         label: 'Discharge m³/s (optional)',
-                        hint: 'e.g. 8500', icon: Icons.waves_rounded,
+                        hint: 'e.g. 8500',
+                        icon: Icons.waves_rounded,
                         numeric: true, required: false, t: t,
                       ),
                       const SizedBox(height: 24),
 
-                      _GlowButton(loading: _loading, onTap: _predict, t: t),
+                      _GlowButton(
+                          loading: _loading, onTap: _predict, t: t),
                       const SizedBox(height: 20),
 
-                      // ─ ML result / error
+                      // ML result / error
                       if (_result != null || _error != null)
                         FadeTransition(
                           opacity: _resultFade,
@@ -322,24 +410,21 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                           ),
                         ),
 
-                      // ─ Live station table
+                      // Live station table
                       if ((_result != null || _error != null) &&
-                          _matchedStations != null &&
-                          _matchedStations!.isNotEmpty) ...[
+                          _payloads != null &&
+                          _payloads!.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         FadeTransition(
                           opacity: _resultFade,
                           child: _LiveStationTable(
-                            stations: _matchedStations!,
-                            t:        t,
-                          ),
+                              payloads: _payloads!, t: t),
                         ),
                       ],
 
-                      // ─ No-match notice
+                      // No-match notice
                       if ((_result != null || _error != null) &&
-                          (_matchedStations == null ||
-                              _matchedStations!.isEmpty) &&
+                          (_payloads == null || _payloads!.isEmpty) &&
                           _cityCtrl.text.trim().isNotEmpty) ...[
                         const SizedBox(height: 12),
                         FadeTransition(
@@ -368,9 +453,9 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LiveStationTable extends StatelessWidget {
-  final List<RiverStation> stations;
-  final RiverColors        t;
-  const _LiveStationTable({required this.stations, required this.t});
+  final List<_StationPayload> payloads;
+  final RiverColors t;
+  const _LiveStationTable({required this.payloads, required this.t});
 
   @override
   Widget build(BuildContext context) {
@@ -384,8 +469,9 @@ class _LiveStationTable extends StatelessWidget {
               Icon(Icons.sensors_rounded, color: t.accent, size: 14),
               const SizedBox(width: 6),
               Text(
-                'LIVE STATION DATA  •  ${stations.length} GAUGE'
-                '${stations.length > 1 ? "S" : ""} MATCHED',
+                'LIVE STATION DATA  •  '
+                '${payloads.length} GAUGE'
+                '${payloads.length > 1 ? "S" : ""} MATCHED',
                 style: TextStyle(
                     color: t.accent,
                     fontSize: 10,
@@ -395,27 +481,28 @@ class _LiveStationTable extends StatelessWidget {
             ],
           ),
         ),
-        ...stations.map((s) => _StationCard(s: s, t: t)),
+        ...payloads.map((p) => _StationCard(payload: p, t: t)),
       ],
     );
   }
 }
 
 class _StationCard extends StatelessWidget {
-  final RiverStation s;
-  final RiverColors  t;
-  const _StationCard({required this.s, required this.t});
+  final _StationPayload payload;
+  final RiverColors     t;
+  const _StationCard({required this.payload, required this.t});
 
   @override
   Widget build(BuildContext context) {
+    final s  = payload.rs;
+    final fd = payload.fd;
+
     Color levelColor() {
       if (s.danger > 0 && s.current >= s.danger)   return AppPalette.critical;
       if (s.warning > 0 && s.current >= s.warning) return AppPalette.warning;
       return AppPalette.safe;
     }
-
-    Color capColor() {
-      final pct = s.danger > 0 ? (s.current / s.danger * 100) : 0.0;
+    Color capColor(double pct) {
       if (pct >= 100) return AppPalette.critical;
       if (pct >= 80)  return AppPalette.warning;
       return AppPalette.safe;
@@ -429,35 +516,56 @@ class _StationCard extends StatelessWidget {
                 ? AppPalette.warning
                 : AppPalette.safe;
 
-    final capacityPct =
-        s.danger > 0 ? (s.current / s.danger * 100).clamp(0.0, 200.0) : 0.0;
+    final capacityPct = s.danger > 0
+        ? (s.current / s.danger * 100).clamp(0.0, 200.0)
+        : (fd?.capacityPercent ?? 0.0);
 
-    final rows = [
-      _Row('River',         s.river.isNotEmpty ? s.river : '—',    null),
-      _Row('State',         s.state.isNotEmpty ? s.state : '—',    null),
-      _Row('Current Level', '${s.current.toStringAsFixed(2)} m',   levelColor()),
+    // Rainfall: prefer FloodData effective, else imd, else rainfallLastHour
+    final rainfall = (fd?.effectiveRainfallMm ?? 0) > 0
+        ? fd!.effectiveRainfallMm
+        : (fd?.imdRainfallMm ?? 0) > 0
+            ? fd!.imdRainfallMm!
+            : (s.rainfallLastHour ?? 0) > 0
+                ? s.rainfallLastHour!
+                : null;
+
+    // Flow rate: prefer FloodData.flowRate, else RiverStation.flowRate
+    final flow = (fd?.flowRate ?? 0) > 0
+        ? fd!.flowRate!
+        : (s.flowRate ?? 0) > 0
+            ? s.flowRate!
+            : null;
+
+    // Build row list
+    final rows = <_Row>[
+      _Row('River',         s.river.isNotEmpty ? s.river : (fd?.riverName ?? '—'), null),
+      if (fd?.district != null && fd!.district.isNotEmpty)
+        _Row('District',    fd.district, null),
+      _Row('State',         s.state.isNotEmpty ? s.state : (fd?.state ?? '—'), null),
+      _Row('Current Level', '${s.current.toStringAsFixed(2)} m', levelColor()),
       _Row('Warning Level', s.warning > 0
-          ? '${s.warning.toStringAsFixed(2)} m' : '—',            AppPalette.warning),
+          ? '${s.warning.toStringAsFixed(2)} m' : '—', AppPalette.warning),
       _Row('Danger Level',  s.danger > 0
-          ? '${s.danger.toStringAsFixed(2)} m'  : '—',            AppPalette.danger),
+          ? '${s.danger.toStringAsFixed(2)} m'  : '—', AppPalette.danger),
       _Row('HFL',           s.hfl > 0
-          ? '${s.hfl.toStringAsFixed(2)} m'     : '—',            null),
-      _Row('Capacity',      s.danger > 0
-          ? '${capacityPct.toStringAsFixed(1)} %' : '—',          capColor()),
-      // flowRate replaces old 'discharge'
-      if (s.flowRate != null && (s.flowRate ?? 0) > 0)
-        _Row('Flow Rate',
-            '${s.flowRate!.toStringAsFixed(0)} m³/s',             null),
-      // rainfallLastHour if present
-      if (s.rainfallLastHour != null && (s.rainfallLastHour ?? 0) > 0)
-        _Row('Rainfall (1h)',
-            '${s.rainfallLastHour!.toStringAsFixed(1)} mm',        null),
+          ? '${s.hfl.toStringAsFixed(2)} m'     : '—', null),
+      _Row('Capacity',      capacityPct > 0
+          ? '${capacityPct.toStringAsFixed(1)} %' : '—',
+          capacityPct > 0 ? capColor(capacityPct) : null),
+      if (rainfall != null)
+        _Row('Rainfall',    '${rainfall.toStringAsFixed(1)} mm', null),
+      if (flow != null)
+        _Row('Flow Rate',   '${flow.toStringAsFixed(0)} m³/s',  null),
       if (s.trend != null && s.trend!.isNotEmpty)
-        _Row('Trend', s.trend!,                                     null),
-      _Row('Status',        s.dangerClass.name.toUpperCase(),       dangerClassColor),
-      _Row('Data Source',   s.dataSource ?? '—',                   null),
+        _Row('Trend',       s.trend!.toUpperCase(), null),
+      if (fd?.imdSeverity != null && fd!.imdSeverity!.isNotEmpty)
+        _Row('IMD Severity', fd.imdSeverity!, null),
+      _Row('Risk Level',    fd?.riskLevel ?? s.riskLabel, dangerClassColor),
+      _Row('Status',        s.liveStatus ?? fd?.status ?? s.dangerClass.name.toUpperCase(),
+          dangerClassColor),
+      _Row('Data Source',   s.dataSource ?? fd?.status ?? '—', null),
       _Row('Last Updated',  s.lastUpdated?.isNotEmpty == true
-          ? s.lastUpdated! : '—',                                  null),
+          ? s.lastUpdated! : '—', null),
       _Row('Live',          s.isLive ? 'YES' : 'ESTIMATED',
           s.isLive ? AppPalette.safe : AppPalette.warning),
     ];
@@ -487,7 +595,8 @@ class _StationCard extends StatelessWidget {
                   const BorderRadius.vertical(top: Radius.circular(16)),
               border: Border(
                   bottom: BorderSide(
-                      color: t.stroke.withValues(alpha: 0.4), width: 0.5)),
+                      color: t.stroke.withValues(alpha: 0.4),
+                      width: 0.5)),
             ),
             child: Row(
               children: [
@@ -513,32 +622,35 @@ class _StationCard extends StatelessWidget {
                             fontWeight: FontWeight.w700),
                       ),
                       if (s.city.isNotEmpty && s.city != s.station)
-                        Text(
-                          s.city,
-                          style: TextStyle(
-                              color: t.textSecondary, fontSize: 10),
-                        ),
+                        Text(s.city,
+                            style: TextStyle(
+                                color: t.textSecondary,
+                                fontSize: 10)),
                     ],
                   ),
                 ),
+                // LIVE / EST badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: (s.isLive ? AppPalette.safe : AppPalette.warning)
-                        .withValues(alpha: 0.15),
+                    color:
+                        (s.isLive ? AppPalette.safe : AppPalette.warning)
+                            .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color: (s.isLive
-                                ? AppPalette.safe
-                                : AppPalette.warning)
-                            .withValues(alpha: 0.35)),
+                        color:
+                            (s.isLive
+                                    ? AppPalette.safe
+                                    : AppPalette.warning)
+                                .withValues(alpha: 0.35)),
                   ),
                   child: Text(
                     s.isLive ? 'LIVE' : 'EST',
                     style: TextStyle(
-                        color:
-                            s.isLive ? AppPalette.safe : AppPalette.warning,
+                        color: s.isLive
+                            ? AppPalette.safe
+                            : AppPalette.warning,
                         fontSize: 8,
                         fontWeight: FontWeight.w900),
                   ),
@@ -547,8 +659,8 @@ class _StationCard extends StatelessWidget {
             ),
           ),
 
-          // Level progress bar
-          if (s.danger > 0) ...[
+          // Progress bar
+          if (s.danger > 0 || capacityPct > 0) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
               child: Row(
@@ -563,18 +675,21 @@ class _StationCard extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
-                          value: (capacityPct / 100).clamp(0.0, 1.0),
+                          value:
+                              (capacityPct / 100).clamp(0.0, 1.0),
                           minHeight: 6,
                           backgroundColor:
                               t.stroke.withValues(alpha: 0.3),
-                          valueColor:
-                              AlwaysStoppedAnimation(levelColor()),
+                          valueColor: AlwaysStoppedAnimation(
+                              levelColor()),
                         ),
                       ),
                     ),
                   ),
                   Text(
-                    '${s.danger.toStringAsFixed(1)} m',
+                    s.danger > 0
+                        ? '${s.danger.toStringAsFixed(1)} m'
+                        : '100 %',
                     style: TextStyle(
                         color: AppPalette.danger, fontSize: 9),
                   ),
@@ -608,7 +723,7 @@ class _StationCard extends StatelessWidget {
               child: Row(
                 children: [
                   SizedBox(
-                    width: 100,
+                    width: 104,
                     child: Text(
                       row.label,
                       style: TextStyle(
@@ -647,7 +762,7 @@ class _Row {
   const _Row(this.label, this.value, this.valueColor);
 }
 
-// ── No station notice ──
+// ── No-station notice ──
 
 class _NoStationNotice extends StatelessWidget {
   final String city;
@@ -671,7 +786,7 @@ class _NoStationNotice extends StatelessWidget {
           Expanded(
             child: Text(
               'No live gauge found for “$city”. '
-              'Live data table will appear once a matching station is available.',
+              'Live data table will appear once a matching station is loaded.',
               style: TextStyle(
                   color: t.textSecondary, fontSize: 11, height: 1.5),
             ),
@@ -683,7 +798,7 @@ class _NoStationNotice extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _AutoFetchBanner
+// UI helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AutoFetchBanner extends StatelessWidget {
@@ -724,10 +839,6 @@ class _AutoFetchBanner extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _CityField
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _CityField extends StatefulWidget {
   final TextEditingController ctrl;
   final bool autoFilled;
@@ -752,7 +863,9 @@ class _CityFieldState extends State<_CityField> {
     final t = widget.t;
     final borderColor = widget.autoFilled
         ? t.accent.withValues(alpha: 0.55)
-        : _focused ? t.accent.withValues(alpha: 0.7) : t.stroke;
+        : _focused
+            ? t.accent.withValues(alpha: 0.7)
+            : t.stroke;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -783,9 +896,10 @@ class _CityFieldState extends State<_CityField> {
               fontSize: 14),
           decoration: InputDecoration(
             labelText: 'City / Station',
-            hintText:  'e.g. Patna',
-            labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
-            hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
+            hintText: 'e.g. Patna',
+            labelStyle:
+                TextStyle(color: t.textSecondary, fontSize: 12),
+            hintStyle: TextStyle(color: t.stroke, fontSize: 13),
             prefixIcon: Icon(Icons.location_on_rounded,
                 color: t.textSecondary, size: 18),
             suffixIcon: widget.autoFilled
@@ -800,7 +914,8 @@ class _CityFieldState extends State<_CityField> {
                           color: t.accent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                              color: t.accent.withValues(alpha: 0.40)),
+                              color:
+                                  t.accent.withValues(alpha: 0.40)),
                         ),
                         child: Text('LIVE',
                             style: TextStyle(
@@ -832,10 +947,6 @@ class _CityFieldState extends State<_CityField> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _Header
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _Header extends StatelessWidget {
   final RiverColors t;
   const _Header({required this.t});
@@ -860,7 +971,8 @@ class _Header extends StatelessWidget {
               border: Border.all(
                   color: t.accent.withValues(alpha: 0.28), width: 1.5),
             ),
-            child: Icon(Icons.psychology_rounded, color: t.accent, size: 22),
+            child:
+                Icon(Icons.psychology_rounded, color: t.accent, size: 22),
           ),
           const SizedBox(width: 12),
           Column(
@@ -940,7 +1052,8 @@ class _DarkFieldState extends State<_DarkField> {
   @override
   Widget build(BuildContext context) {
     final t           = widget.t;
-    final borderColor = _focused ? t.accent.withValues(alpha: 0.7) : t.stroke;
+    final borderColor =
+        _focused ? t.accent.withValues(alpha: 0.7) : t.stroke;
 
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
@@ -949,7 +1062,8 @@ class _DarkFieldState extends State<_DarkField> {
         decoration: BoxDecoration(
           color: t.cardBg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor, width: _focused ? 1.5 : 1),
+          border:
+              Border.all(color: borderColor, width: _focused ? 1.5 : 1),
           boxShadow: _focused
               ? [
                   BoxShadow(
@@ -972,9 +1086,11 @@ class _DarkFieldState extends State<_DarkField> {
           decoration: InputDecoration(
             labelText: widget.label,
             hintText:  widget.hint,
-            labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
-            hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
-            prefixIcon: Icon(widget.icon, color: t.textSecondary, size: 18),
+            labelStyle:
+                TextStyle(color: t.textSecondary, fontSize: 12),
+            hintStyle: TextStyle(color: t.stroke, fontSize: 13),
+            prefixIcon: Icon(widget.icon,
+                color: t.textSecondary, size: 18),
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 14),
@@ -1163,8 +1279,8 @@ class _ResultCard extends StatelessWidget {
                     children: [
                       CustomPaint(
                         size: const Size(54, 54),
-                        painter:
-                            _RingPainter(value: pct / 100, color: col),
+                        painter: _RingPainter(
+                            value: pct / 100, color: col),
                       ),
                       Text(
                         '${pct.toStringAsFixed(0)}%',
@@ -1214,7 +1330,8 @@ class _RingPainter extends CustomPainter {
     final cx   = size.width  / 2;
     final cy   = size.height / 2;
     final r    = (size.width - 6) / 2;
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
+    final rect =
+        Rect.fromCircle(center: Offset(cx, cy), radius: r);
     canvas.drawArc(rect, -math.pi / 2, math.pi * 2, false,
         Paint()
           ..color       = color.withValues(alpha: 0.15)
@@ -1291,7 +1408,7 @@ class _TipBox extends StatelessWidget {
             child: Text(
               autoFilled
                   ? 'Fields auto-filled from live station data. '
-                    'Tap × on the city field to switch to a different city.'
+                    'Tap × to switch to a different city.'
                   : 'Tip: Tap a city on the Dashboard to auto-fill all '
                     'fields and run the prediction instantly.',
               style: TextStyle(
@@ -1301,5 +1418,15 @@ class _TipBox extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ── Iterable extension ──
+extension _IterableExtension<T> on Iterable<T> {
+  T? firstWhereOrNull(bool Function(T) test) {
+    for (final e in this) {
+      if (test(e)) return e;
+    }
+    return null;
   }
 }
