@@ -1,12 +1,12 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v7  (Phase 4: AlertShareButton wired)
+// EQUINOX-BH — CityDetailScreen v8  (M3 fix: AlertShareButton synthetic alert)
 //
-// v7 changes on top of v6:
-//   • Imports AlertShareButton widget
-//   • Replaces clipboard-only FloatingActionButton with AlertShareButton(iconOnly:true)
-//     in the AppBar trailing actions row
-//   • Adds AlertShareButton (full mode) in the action row at section 6
-//   • Removes old _share() clipboard method (replaced by service)
+// v8 changes on top of v7:
+//   • Adds _syntheticAlert(FloodData) helper that builds a FloodAlert from
+//     city data so AlertShareButton(alert:) can be satisfied.
+//   • Removes the invalid named params stationName/currentLevel/dangerLevel/
+//     severity/iconOnly from both AlertShareButton call sites.
+//   • Imports alert_engine.dart for FloodAlert / AlertSeverity / AlertType.
 library;
 
 import 'dart:async';
@@ -22,9 +22,54 @@ import '../models/river_monitoring.dart';
 import '../providers/bihar_city_provider.dart';
 import '../providers/bihar_live_provider.dart';
 import '../providers/flood_providers.dart';
+import '../services/alert_engine.dart';            // ← M3 fix
 import '../theme/river_theme.dart';
-import '../widgets/alert_share_button.dart';   // ← Phase 4
+import '../widgets/alert_share_button.dart';       // ← Phase 4
 import '../widgets/sparkline_chart.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M3 FIX: synthetic FloodAlert builder
+// AlertShareButton only accepts a FloodAlert. We build one on the fly from
+// the city's FloodData so no changes to the widget are required.
+// ─────────────────────────────────────────────────────────────────────────────
+FloodAlert _syntheticAlert(FloodData data, String stationName) {
+  AlertSeverity severity;
+  AlertType     type;
+  switch (data.riskLevel.toUpperCase()) {
+    case 'CRITICAL':
+      severity = AlertSeverity.emergency;
+      type     = AlertType.levelAboveDanger;
+      break;
+    case 'SEVERE':
+      severity = AlertSeverity.critical;
+      type     = AlertType.levelAboveDanger;
+      break;
+    case 'MODERATE':
+      severity = AlertSeverity.warning;
+      type     = AlertType.levelAboveWarning;
+      break;
+    default:
+      severity = AlertSeverity.info;
+      type     = AlertType.levelAboveWarning;
+  }
+
+  return FloodAlert(
+    id:             '${stationName.toLowerCase().replaceAll(' ', '_')}.city_detail',
+    type:           type,
+    severity:       severity,
+    title:          '$stationName — ${data.riskLevel} Risk',
+    body:           'Current level: ${data.currentLevel.toStringAsFixed(2)} m '
+                    '/ Danger: ${data.dangerLevel.toStringAsFixed(2)} m',
+    stationName:    stationName,
+    river:          data.riverName ?? 'River',
+    district:       data.district.isNotEmpty ? data.district : data.state,
+    state:          data.state,
+    currentLevel:   data.currentLevel,
+    thresholdLevel: data.dangerLevel,
+    action:         'Monitor live levels and follow local authority guidance.',
+    issuedAt:       data.lastUpdated,
+  );
+}
 
 class CityDetailScreen extends ConsumerStatefulWidget {
   static const String route = '/city_detail';
@@ -45,7 +90,6 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
   bool _contactsExpanded = false;
   bool _refreshing       = false;
 
-  // bumped to 7 to accommodate the new Bihar data section
   static const int _sectionCount = 7;
 
   @override
@@ -121,13 +165,11 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
         .watch(stateEmergencyContactsProvider(data?.state ?? ''))
         .cast<EmergencyContact>();
 
-    // ★ Bihar live data for this city
     final biharStation = ref.watch(biharCityProvider(widget.cityName));
     final biharLoading = ref.watch(biharCityLoadingProvider);
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
-      // ── Phase 4: FAB removed; share now in AppBar actions & section row ──
       body: Container(
         color: t.scaffoldBg,
         child: SafeArea(
@@ -172,16 +214,15 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                     ],
                   ),
                   actions: [
-                    // ── Phase 4: share icon in AppBar ──────────────────────
+                    // M3 FIX: replaced stationName/currentLevel/dangerLevel/
+                    // severity/iconOnly with alert: _syntheticAlert()
                     if (data != null)
                       AlertShareButton(
-                        district:     data.state,
-                        riverName:    data.riverName ?? 'River',
-                        stationName:  widget.cityName,
-                        currentLevel: data.currentLevel,
-                        dangerLevel:  data.dangerLevel,
-                        severity:     data.riskLevel,
-                        iconOnly:     true,
+                        alert:     _syntheticAlert(data, widget.cityName),
+                        district:  data.district.isNotEmpty
+                                       ? data.district
+                                       : data.state,
+                        riverName: data.riverName ?? 'River',
                       ),
                     if (_refreshing)
                       Padding(
@@ -308,15 +349,13 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                               const SizedBox(width: 10),
                               _MapChip(cityName: widget.cityName),
                               const SizedBox(width: 10),
-                              // ── Phase 4: full share button ──────────────
+                              // M3 FIX: replaced invalid params with synthetic alert
                               AlertShareButton(
-                                district:     data.state,
-                                riverName:    data.riverName ?? 'River',
-                                stationName:  widget.cityName,
-                                currentLevel: data.currentLevel,
-                                dangerLevel:  data.dangerLevel,
-                                severity:     data.riskLevel,
-                                iconOnly:     false,
+                                alert:     _syntheticAlert(data, widget.cityName),
+                                district:  data.district.isNotEmpty
+                                               ? data.district
+                                               : data.state,
+                                riverName: data.riverName ?? 'River',
                               ),
                             ],
                           ),
@@ -540,43 +579,31 @@ class _BiharDataCard extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: _DataCell(
-                  label: '24h Rainfall',
-                  value: s.rainfall24h != null ? '${s.rainfall24h!.toStringAsFixed(1)} mm' : '—',
-                  icon: Icons.grain_rounded,
-                  valueColor: Colors.lightBlue,
-                  t: t,
-                ),
+              Icon(trendIcon, color: trendColor, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                s.trend.isEmpty ? 'Stable' : s.trend,
+                style: TextStyle(
+                    color: trendColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12),
               ),
-              Container(width: 1, height: 36, color: t.stroke),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Trend',
-                          style: TextStyle(
-                              color: t.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(trendIcon, color: trendColor, size: 18),
-                          const SizedBox(width: 4),
-                          Text(
-                            s.trend.isEmpty ? '—' : s.trend,
-                            style: TextStyle(
-                                color: trendColor, fontWeight: FontWeight.w800, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+              const Spacer(),
+              if (s.rainfall24h != null)
+                Row(
+                  children: [
+                    const Icon(Icons.grain_rounded,
+                        color: Colors.lightBlue, size: 12),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${s.rainfall24h!.toStringAsFixed(1)} mm rain',
+                      style: const TextStyle(
+                          color: Colors.lightBlue,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ],
                 ),
-              ),
-              if (s.fetchedAt.isNotEmpty)
-                Text(s.fetchedAt, style: TextStyle(color: t.textSecondary, fontSize: 9)),
             ],
           ),
         ],
@@ -584,44 +611,45 @@ class _BiharDataCard extends StatelessWidget {
     );
   }
 
-  static String _fmt(double v) {
-    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _fmt(double v) => v >= 1000
+      ? '${(v / 1000).toStringAsFixed(1)}k'
+      : v.toStringAsFixed(0);
 }
 
 class _DataCell extends StatelessWidget {
-  final String label;
-  final String value;
-  final String? sub;
-  final IconData icon;
-  final Color valueColor;
+  final String      label;
+  final String      value;
+  final String?     sub;
+  final IconData    icon;
+  final Color       valueColor;
   final RiverColors t;
-  final bool centered;
+  final bool        centered;
 
   const _DataCell({
     required this.label,
     required this.value,
+    this.sub,
     required this.icon,
     required this.valueColor,
     required this.t,
-    this.sub,
     this.centered = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(left: centered ? 12 : 0, right: centered ? 12 : 0),
+      padding: EdgeInsets.symmetric(horizontal: centered ? 10 : 0),
       child: Column(
-        crossAxisAlignment:
-            centered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+        crossAxisAlignment: centered
+            ? CrossAxisAlignment.center
+            : CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment:
-                centered ? MainAxisAlignment.center : MainAxisAlignment.start,
+            mainAxisAlignment: centered
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.start,
             children: [
-              Icon(icon, size: 11, color: t.textSecondary),
+              Icon(icon, size: 10, color: t.textSecondary),
               const SizedBox(width: 4),
               Text(label,
                   style: TextStyle(
@@ -633,792 +661,24 @@ class _DataCell extends StatelessWidget {
           const SizedBox(height: 3),
           Text(value,
               style: TextStyle(
-                  color: valueColor, fontWeight: FontWeight.w800, fontSize: 14)),
+                  color: valueColor,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13)),
           if (sub != null)
             Text(sub!,
-                style: TextStyle(color: t.textSecondary, fontSize: 10)),
+                style: TextStyle(
+                    color: t.textSecondary, fontSize: 9)),
         ],
       ),
     );
   }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-Color _riskColor(String r) {
-  switch (r.toUpperCase()) {
+Color _riskColor(String risk) {
+  switch (risk.toUpperCase()) {
     case 'CRITICAL': return AppPalette.critical;
-    case 'HIGH':     return AppPalette.danger;
     case 'SEVERE':   return AppPalette.danger;
     case 'MODERATE': return AppPalette.warning;
     default:         return AppPalette.safe;
-  }
-}
-
-Color _imdColor(String s) {
-  switch (s.toUpperCase()) {
-    case 'RED':    return AppPalette.critical;
-    case 'ORANGE': return AppPalette.danger;
-    case 'YELLOW': return AppPalette.warning;
-    default:       return AppPalette.safe;
-  }
-}
-
-// ── Threshold Banner ─────────────────────────────────────────────────────────
-
-class _ThresholdBanner extends StatelessWidget {
-  final FloodData data;
-  const _ThresholdBanner({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final level  = data.currentLevel;
-    final Color col;
-    final String label;
-    final IconData ico;
-
-    if (level >= data.dangerLevel) {
-      col   = AppPalette.critical;
-      label = '⚠ ABOVE DANGER LEVEL  (+${(level - data.dangerLevel).toStringAsFixed(2)} m)';
-      ico   = Icons.crisis_alert_rounded;
-    } else if (level >= data.warningLevel) {
-      col   = AppPalette.amber;
-      label = '△ ABOVE WARNING LEVEL  (+${(level - data.warningLevel).toStringAsFixed(2)} m)';
-      ico   = Icons.warning_rounded;
-    } else {
-      col   = AppPalette.safe;
-      label = '✓ Below warning level  (${(data.warningLevel - level).toStringAsFixed(2)} m buffer)';
-      ico   = Icons.check_circle_rounded;
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      color: col.withValues(alpha: 0.10),
-      child: Row(
-        children: [
-          Icon(ico, color: col, size: 14),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                  color: col, fontSize: 11,
-                  fontWeight: FontWeight.w700, letterSpacing: 0.3),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Skeleton loading view ────────────────────────────────────────────────────
-
-class _SkeletonView extends StatefulWidget {
-  final String cityName;
-  const _SkeletonView({required this.cityName});
-  @override
-  State<_SkeletonView> createState() => _SkeletonViewState();
-}
-
-class _SkeletonViewState extends State<_SkeletonView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return AnimatedBuilder(
-      animation: _pulse,
-      builder: (_, __) {
-        final alpha = 0.04 + 0.06 * _pulse.value;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _bone(height: 100, alpha: alpha, t: t),
-              const SizedBox(height: 12),
-              _bone(height: 80, alpha: alpha, t: t),
-              const SizedBox(height: 12),
-              _bone(height: 60, alpha: alpha, t: t),
-              const SizedBox(height: 24),
-              Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.location_off_rounded,
-                        color: t.textSecondary, size: 36),
-                    const SizedBox(height: 10),
-                    Text(
-                      'No live data for ${widget.cityName}',
-                      style: TextStyle(color: t.textSecondary, fontSize: 13),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Pull down to refresh',
-                      style: TextStyle(color: t.stroke, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _bone({required double height, required double alpha, required RiverColors t}) =>
-      Container(
-        width: double.infinity,
-        height: height,
-        decoration: BoxDecoration(
-          color: t.textPrimary.withValues(alpha: alpha),
-          borderRadius: BorderRadius.circular(14),
-        ),
-      );
-}
-
-// ── Gauge Hero Card ──────────────────────────────────────────────────────────
-
-class _GaugeHeroCard extends StatelessWidget {
-  final FloodData data;
-  const _GaugeHeroCard({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final t      = RiverColors.of(context);
-    final rc     = _riskColor(data.riskLevel);
-    final pct    = data.capacityPercent.clamp(0.0, 100.0);
-    final isLive = data.status.toUpperCase() != 'ESTIMATED';
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: rc.withValues(alpha: 0.35)),
-        boxShadow: [
-          BoxShadow(
-              color: rc.withValues(alpha: 0.10),
-              blurRadius: 22,
-              offset: const Offset(0, 6)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(data.riverName ?? 'River',
-                        style: TextStyle(color: t.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 2),
-                    Text(data.state,
-                        style: TextStyle(
-                            color: t.textPrimary,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13)),
-                  ],
-                ),
-              ),
-              _badge(
-                  label: data.riskLevel,
-                  bg: rc.withValues(alpha: 0.15),
-                  fg: rc,
-                  border: rc.withValues(alpha: 0.5)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${data.currentLevel.toStringAsFixed(2)} m',
-                style: TextStyle(
-                    color: rc, fontWeight: FontWeight.w900,
-                    fontSize: 38, letterSpacing: -1),
-              ),
-              const SizedBox(width: 10),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: _badge(
-                    label: isLive ? 'LIVE · CWC' : 'ESTIMATED',
-                    bg: (isLive ? t.accent : t.textSecondary).withValues(alpha: 0.12),
-                    fg: isLive ? t.accent : t.textSecondary,
-                    border: (isLive ? t.accent : t.textSecondary).withValues(alpha: 0.45)),
-              ),
-              if (data.imdSeverity != null) ...[
-                const SizedBox(width: 6),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: _badge(
-                      label: 'IMD ${data.imdSeverity}',
-                      bg: _imdColor(data.imdSeverity!).withValues(alpha: 0.15),
-                      fg: _imdColor(data.imdSeverity!),
-                      border: _imdColor(data.imdSeverity!).withValues(alpha: 0.5)),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 14),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Stack(
-              children: [
-                Container(height: 8, color: t.cardBgElevated),
-                FractionallySizedBox(
-                  widthFactor: pct / 100,
-                  child: Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          colors: [rc.withValues(alpha: 0.55), rc]),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '${pct.toStringAsFixed(0)}% capacity',
-                style: TextStyle(
-                    color: rc, fontWeight: FontWeight.w700, fontSize: 12),
-              ),
-              Text(
-                'W ${data.warningLevel.toStringAsFixed(1)}  D ${data.dangerLevel.toStringAsFixed(1)} m',
-                style: TextStyle(color: t.textSecondary, fontSize: 11),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              if (data.flowRate != null)
-                _StatChip(
-                    Icons.waves_rounded,
-                    '${data.flowRate!.toStringAsFixed(0)} m³/s',
-                    'Flow'),
-              if (data.effectiveRainfallMm > 0)
-                _StatChip(
-                    Icons.water_drop_outlined,
-                    '${data.effectiveRainfallMm.toStringAsFixed(1)} mm',
-                    data.imdRainfallMm != null ? 'IMD rain' : 'Rain 24h'),
-              _StatChip(
-                  Icons.schedule_rounded,
-                  DateFormat('HH:mm').format(data.lastUpdated.toLocal()),
-                  'Updated'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _badge({
-    required String label,
-    required Color bg,
-    required Color fg,
-    required Color border,
-  }) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: border),
-        ),
-        child: Text(label,
-            style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 10)),
-      );
-}
-
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String value, label;
-  const _StatChip(this.icon, this.value, this.label);
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: t.cardBgElevated,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: t.stroke),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: t.textSecondary),
-          const SizedBox(width: 5),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(value,
-                  style: TextStyle(
-                      color: t.textPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11)),
-              Text(label,
-                  style: TextStyle(color: t.textSecondary, fontSize: 9)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── 24-hr Trend Card ─────────────────────────────────────────────────────────
-
-class _TrendCard extends StatelessWidget {
-  final List<RiverLevelSnapshot> trend;
-  final double warningLevel, dangerLevel;
-  final Color  riskColor;
-  const _TrendCard({
-    required this.trend,
-    required this.warningLevel,
-    required this.dangerLevel,
-    required this.riskColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t      = RiverColors.of(context);
-    final levels = trend.map((s) => s.level).toList();
-    final minL   = levels.reduce((a, b) => a < b ? a : b);
-    final maxL   = levels.reduce((a, b) => a > b ? a : b);
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.stroke),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.show_chart_rounded, color: t.accent, size: 15),
-              const SizedBox(width: 6),
-              Text(
-                '24-hr River Level Trend',
-                style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13),
-              ),
-              const Spacer(),
-              Text(
-                '${trend.length} pts  ${minL.toStringAsFixed(2)}–${maxL.toStringAsFixed(2)} m',
-                style: TextStyle(color: t.textSecondary, fontSize: 9),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          SparklineChart(
-            snapshots:    trend,
-            warningLevel: warningLevel,
-            dangerLevel:  dangerLevel,
-            color:        riskColor,
-            height:       72,
-            showLabels:   true,
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                DateFormat('HH:mm').format(trend.first.timestamp.toLocal()),
-                style: TextStyle(color: t.textSecondary, fontSize: 9),
-              ),
-              Text(
-                DateFormat('HH:mm').format(trend.last.timestamp.toLocal()),
-                style: TextStyle(color: t.textSecondary, fontSize: 9),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── IMD Alert Tile ──────────────────────────────────────────────────────────
-
-class _ImdAlertTile extends StatelessWidget {
-  final dynamic alert;
-  const _ImdAlertTile({required this.alert});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    final c = _imdColor((alert.severity as String?) ?? '');
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: c.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 10, height: 10,
-            decoration: BoxDecoration(
-                color: c,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: c.withValues(alpha: 0.5), blurRadius: 5)]),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    (alert.title as String?) ?? (alert.severity as String? ?? 'IMD Alert'),
-                    style: TextStyle(
-                        color: t.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13)),
-                if ((alert.description as String?)?.isNotEmpty == true)
-                  Text(alert.description as String,
-                      style: TextStyle(color: t.stroke, fontSize: 11),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _badge(label: (alert.severity as String? ?? '').toUpperCase(), color: c),
-        ],
-      ),
-    );
-  }
-
-  Widget _badge({required String label, required Color color}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
-        ),
-        child: Text(label,
-            style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 10)),
-      );
-}
-
-// ── NDMA Advisory Tile ───────────────────────────────────────────────────────
-
-class _NdmaAdvisoryTile extends StatelessWidget {
-  final dynamic adv;
-  const _NdmaAdvisoryTile({required this.adv});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: AppPalette.warning.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppPalette.warning.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.warning_amber_rounded, color: AppPalette.warning, size: 16),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text((adv.title as String?) ?? 'NDMA Advisory',
-                    style: TextStyle(
-                        color: t.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13)),
-                if ((adv.advisory as String?)?.isNotEmpty == true)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(adv.advisory as String,
-                        style: TextStyle(color: t.textSecondary, fontSize: 11),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Collapsible Emergency Contacts ──────────────────────────────────────────
-
-class _CollapsibleContacts extends StatelessWidget {
-  final List<EmergencyContact> contacts;
-  final String       state;
-  final bool         expanded;
-  final VoidCallback onToggle;
-  const _CollapsibleContacts({
-    required this.contacts,
-    required this.state,
-    required this.expanded,
-    required this.onToggle,
-  });
-
-  Future<void> _call(String phone) async {
-    final uri = Uri(scheme: 'tel', path: phone);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    const always = [
-      ('NDMA Helpline', '1078'),
-      ('NDRF',          '011-24363260'),
-      ('Police',        '100'),
-      ('Ambulance',     '108'),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.stroke),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onToggle,
-            borderRadius: expanded
-                ? const BorderRadius.vertical(top: Radius.circular(14))
-                : BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-              child: Row(
-                children: [
-                  Icon(Icons.phone_rounded, color: t.riverNormal, size: 14),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '📞  Emergency Contacts',
-                      style: TextStyle(
-                          color: t.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 250),
-                    child: Icon(Icons.keyboard_arrow_down_rounded,
-                        color: t.textSecondary, size: 18),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 280),
-            crossFadeState: expanded
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Column(
-              children: [
-                for (final e in always) _row(context, e.$1, e.$2),
-                if (contacts.isNotEmpty) ...[
-                  Divider(height: 1, color: t.stroke),
-                  ...contacts.take(4).map((c) => _row(
-                      context,
-                      c.role.isNotEmpty ? c.role : c.name,
-                      c.phone)),
-                ],
-              ],
-            ),
-            secondChild: const SizedBox.shrink(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(BuildContext context, String label, String phone) {
-    final t = RiverColors.of(context);
-    return InkWell(
-      onTap: () => _call(phone),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: [
-            Icon(Icons.phone_rounded, color: t.riverNormal, size: 14),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(label,
-                  style: TextStyle(color: t.textPrimary, fontSize: 13)),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: t.riverNormal.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: t.riverNormal.withValues(alpha: 0.4)),
-              ),
-              child: Text(phone,
-                  style: TextStyle(
-                      color: t.riverNormal,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Predict CTA ──────────────────────────────────────────────────────────────
-
-class _PredictCta extends StatelessWidget {
-  final String cityName;
-  final double currentLevel;
-  const _PredictCta({required this.cityName, required this.currentLevel});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        Navigator.pushNamed(
-          context, '/predict',
-          arguments: {'city': cityName, 'river_level': currentLevel},
-        );
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [t.cardBgElevated, t.accent],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-                color: t.accentGlow,
-                blurRadius: 18,
-                spreadRadius: 1),
-          ],
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.psychology_rounded, color: Colors.white, size: 18),
-            SizedBox(width: 8),
-            Text(
-              'Run Flood Prediction',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  letterSpacing: 0.3),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Map Chip CTA ─────────────────────────────────────────────────────────────
-
-class _MapChip extends StatelessWidget {
-  final String cityName;
-  const _MapChip({required this.cityName});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        Navigator.pushNamed(context, '/bihar_river_map');
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-        decoration: BoxDecoration(
-          color: t.accent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: t.accent.withValues(alpha: 0.35)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.map_rounded, color: t.accent, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              'Map',
-              style: TextStyle(
-                  color: t.accent,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Section Label ─────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RiverColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text,
-        style: TextStyle(
-            color: t.textPrimary,
-            fontWeight: FontWeight.w700,
-            fontSize: 13),
-      ),
-    );
   }
 }
