@@ -2,6 +2,7 @@
 //
 // FloodData — one city's live flood snapshot.
 // v2: added `district` field for zila display on river cards.
+// v2.1: added latitude/longitude nullable alias getters for dashboard_screen.
 
 import 'dart:ui' show Color;
 
@@ -25,6 +26,10 @@ class FloodData {
   final double? flowRate;
   final DateTime lastUpdated;
 
+  // Optional geographic coordinates — populated from JSON when available.
+  final double? _lat;
+  final double? _lon;
+
   const FloodData({
     required this.city,
     this.district = '',
@@ -42,7 +47,16 @@ class FloodData {
     required this.effectiveRainfallMm,
     this.flowRate,
     required this.lastUpdated,
-  });
+    double? lat,
+    double? lon,
+  })  : _lat = lat,
+        _lon = lon;
+
+  /// Geographic latitude — null when not provided by the data source.
+  double? get latitude  => _lat;
+
+  /// Geographic longitude — null when not provided by the data source.
+  double? get longitude => _lon;
 
   int get priorityOrder {
     switch (riskLevel) {
@@ -110,6 +124,8 @@ class FloodData {
       lastUpdated:         j['last_updated'] != null
           ? DateTime.tryParse(j['last_updated'] as String) ?? DateTime.now()
           : DateTime.now(),
+      lat: dNull(j['lat'] ?? j['latitude']),
+      lon: dNull(j['lon'] ?? j['longitude']),
     );
   }
 
@@ -130,6 +146,8 @@ class FloodData {
     'rainfall_24h_mm':       effectiveRainfallMm,
     'flow_rate':             flowRate,
     'last_updated':          lastUpdated.toIso8601String(),
+    if (_lat != null) 'lat': _lat,
+    if (_lon != null) 'lon': _lon,
   };
 
   FloodData copyWith({
@@ -149,6 +167,8 @@ class FloodData {
     double?   effectiveRainfallMm,
     double?   flowRate,
     DateTime? lastUpdated,
+    double?   lat,
+    double?   lon,
   }) => FloodData(
     city:                city                ?? this.city,
     district:            district            ?? this.district,
@@ -166,6 +186,8 @@ class FloodData {
     effectiveRainfallMm: effectiveRainfallMm ?? this.effectiveRainfallMm,
     flowRate:            flowRate            ?? this.flowRate,
     lastUpdated:         lastUpdated         ?? this.lastUpdated,
+    lat:                 lat                 ?? _lat,
+    lon:                 lon                 ?? _lon,
   );
 
   @override

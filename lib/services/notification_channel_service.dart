@@ -60,6 +60,9 @@ class NotificationChannelService {
           ?.createNotificationChannel(details);
     }
   }
+
+  /// Alias kept for call-sites that use .init() instead of .createChannels()
+  Future<void> init() => createChannels();
 }
 
 class _ChannelDef {

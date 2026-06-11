@@ -1,4 +1,6 @@
 // lib/models/community_incident.dart
+// v2.1: added emoji/synced/locationLabel/lon alias getters;
+//       made upvotes mutable for in-place increment from UI.
 import 'package:hive/hive.dart';
 
 part 'community_incident.g.dart';
@@ -9,7 +11,7 @@ enum IncidentType {
   @HiveField(1) embankmentBreach,
   @HiveField(2) roadBlocked,
   @HiveField(3) waterlogging,
-  @HiveField(4) evacuationNeeded,   // was: evacuation -> now evacuationNeeded
+  @HiveField(4) evacuationNeeded,
   @HiveField(5) rescueNeeded,
   @HiveField(6) infrastructureDamage,
   @HiveField(7) other,
@@ -31,32 +33,39 @@ extension IncidentTypeLabel on IncidentType {
 
   String get icon {
     switch (this) {
-      case IncidentType.flooding:             return '🚨';
-      case IncidentType.embankmentBreach:     return '🚧';
-      case IncidentType.roadBlocked:          return '🚫';
-      case IncidentType.waterlogging:         return '💧';
-      case IncidentType.evacuationNeeded:     return '🏎️';
-      case IncidentType.rescueNeeded:         return '🚑';
-      case IncidentType.infrastructureDamage: return '🏗️';
-      case IncidentType.other:                return 'ℹ️';
+      case IncidentType.flooding:             return '\u{1F6A8}';  // 🚨
+      case IncidentType.embankmentBreach:     return '\u{1F6A7}';  // 🚧
+      case IncidentType.roadBlocked:          return '\u{1F6AB}';  // 🚫
+      case IncidentType.waterlogging:         return '\u{1F4A7}';  // 💧
+      case IncidentType.evacuationNeeded:     return '\u{1F3CE}\uFE0F'; // 🏎️
+      case IncidentType.rescueNeeded:         return '\u{1F691}';  // 🚑
+      case IncidentType.infrastructureDamage: return '\u{1F3D7}\uFE0F'; // 🏗️
+      case IncidentType.other:                return '\u2139\uFE0F'; // ℹ️
     }
   }
+
+  /// Alias so call-sites using .emoji work identically to .icon
+  String get emoji => icon;
 }
 
 @HiveType(typeId: 31)
 class CommunityIncident extends HiveObject {
   @HiveField(0)  final String       id;
   @HiveField(1)  final IncidentType  type;
-  @HiveField(2)  final String        headline;      // was: title
+  @HiveField(2)  final String        headline;
   @HiveField(3)  final String        description;
-  @HiveField(4)  final double        lat;           // was: latitude
-  @HiveField(5)  final double        lng;           // was: longitude
+  @HiveField(4)  final double        lat;
+  @HiveField(5)  final double        lng;
   @HiveField(6)  final String        district;
   @HiveField(7)  final DateTime      reportedAt;
-  @HiveField(8)  final String        submittedBy;   // was: reporterName
-  @HiveField(9)  final List<String>  photoUrls;     // was: imageUrls
-  @HiveField(10) final bool          verified;      // was: isVerified
-  @HiveField(11) final int           upvotes;
+  @HiveField(8)  final String        submittedBy;
+  @HiveField(9)  final List<String>  photoUrls;
+  @HiveField(10) final bool          verified;
+  // upvotes is intentionally non-final so UI can do inc.upvotes++; inc.save()
+  @HiveField(11) int                 upvotes;
+  // Optional fields written by community_screen submit sheet
+  @HiveField(12) final String?       locationLabel;
+  @HiveField(13) final bool          synced;
 
   CommunityIncident({
     required this.id,
@@ -67,16 +76,20 @@ class CommunityIncident extends HiveObject {
     required this.lng,
     required this.district,
     required this.reportedAt,
-    required this.submittedBy,
-    required this.photoUrls,
-    required this.verified,
-    required this.upvotes,
+    this.submittedBy  = 'anonymous',
+    this.photoUrls    = const [],
+    this.verified     = false,
+    this.upvotes      = 0,
+    this.locationLabel,
+    this.synced       = false,
   });
 
-  // Alias getters so existing call-sites keep working
+  // ── Backward-compat alias getters ──────────────────────────────────────
   String       get title        => headline;
   double       get latitude     => lat;
   double       get longitude    => lng;
+  /// lon alias used by community_screen.dart submit sheet
+  double       get lon          => lng;
   String       get reporterName => submittedBy;
   List<String> get imageUrls    => photoUrls;
   bool         get isVerified   => verified;
@@ -94,18 +107,22 @@ class CommunityIncident extends HiveObject {
     List<String>? photoUrls,
     bool?         verified,
     int?          upvotes,
+    String?       locationLabel,
+    bool?         synced,
   }) => CommunityIncident(
-    id:          id          ?? this.id,
-    type:        type        ?? this.type,
-    headline:    headline    ?? this.headline,
-    description: description ?? this.description,
-    lat:         lat         ?? this.lat,
-    lng:         lng         ?? this.lng,
-    district:    district    ?? this.district,
-    reportedAt:  reportedAt  ?? this.reportedAt,
-    submittedBy: submittedBy ?? this.submittedBy,
-    photoUrls:   photoUrls   ?? this.photoUrls,
-    verified:    verified    ?? this.verified,
-    upvotes:     upvotes     ?? this.upvotes,
+    id:            id            ?? this.id,
+    type:          type          ?? this.type,
+    headline:      headline      ?? this.headline,
+    description:   description   ?? this.description,
+    lat:           lat           ?? this.lat,
+    lng:           lng           ?? this.lng,
+    district:      district      ?? this.district,
+    reportedAt:    reportedAt    ?? this.reportedAt,
+    submittedBy:   submittedBy   ?? this.submittedBy,
+    photoUrls:     photoUrls     ?? this.photoUrls,
+    verified:      verified      ?? this.verified,
+    upvotes:       upvotes       ?? this.upvotes,
+    locationLabel: locationLabel ?? this.locationLabel,
+    synced:        synced        ?? this.synced,
   );
 }
