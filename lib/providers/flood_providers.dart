@@ -1,5 +1,5 @@
 // lib/providers/flood_providers.dart
-// v8 — Provider<RealTimeService> (ChangeNotifierProvider removed in Riverpod 2)
+// v9 — added selectedCityProvider for PredictScreen auto-fetch
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,17 +10,19 @@ import '../services/real_time_service.dart';
 import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// realTimeProvider
+// selectedCityProvider
 //
-// ChangeNotifierProvider was removed in flutter_riverpod 2.x.
-// We expose the RealTimeService singleton via a plain Provider.
-// RealTimeService is a ChangeNotifier singleton so the same instance is always
-// returned; call-sites use ref.watch(realTimeProvider) to get the object and
-// read its getters (.isLoading, .isWakingUp, .criticalCount, etc.).
-// To trigger rebuilds on notifyListeners, widgets should use
-// ref.watch(realTimeProvider) inside build() — this works because Provider
-// re-evaluates when the ref graph invalidates, which RealTimeService drives
-// via its onStateChanged callback into the merged station providers.
+// Holds the city name chosen on DashboardScreen / CityDetailScreen so that
+// PredictScreen can auto-fill and auto-run the prediction without any tap.
+// Set this before navigating to PredictScreen:
+//   ref.read(selectedCityProvider.notifier).state = city;
+//   Navigator.pushNamed(context, PredictScreen.route);
+// ─────────────────────────────────────────────────────────────────────────────
+
+final selectedCityProvider = StateProvider<String?>((ref) => null);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// realTimeProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
 final realTimeProvider = Provider<RealTimeService>(
