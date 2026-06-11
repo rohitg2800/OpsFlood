@@ -54,8 +54,6 @@ class WeatherCurrent {
     surfacePressure: (j['surface_pressure']       as num?)?.toDouble() ?? 0,
   );
 
-  // Build from wttr.in JSON response (fallback)
-  // wttr.in /v2.json format
   factory WeatherCurrent.fromWttrJson(Map<String, dynamic> j) {
     final cur = (j['current_condition'] as List?)?.first as Map<String, dynamic>? ?? {};
     return WeatherCurrent(
@@ -73,15 +71,14 @@ class WeatherCurrent {
     );
   }
 
-  // wttr.in weather codes → approximate WMO codes
   static int _wttrCode(int w) {
-    if (w == 113) return 0;   // sunny
-    if (w == 116) return 1;   // partly cloudy
-    if (w == 119 || w == 122) return 3; // overcast
-    if (w >= 176 && w <= 266) return 61; // rain
+    if (w == 113) return 0;
+    if (w == 116) return 1;
+    if (w == 119 || w == 122) return 3;
+    if (w >= 176 && w <= 266) return 61;
     if (w >= 293 && w <= 321) return 61;
-    if (w >= 353 && w <= 395) return 80; // showers
-    if (w >= 200 && w <= 232) return 95; // thunder
+    if (w >= 353 && w <= 395) return 80;
+    if (w >= 200 && w <= 232) return 95;
     return 1;
   }
 }
@@ -102,7 +99,6 @@ class WeatherDay {
     required this.weatherCode,
   });
 
-  // Build from wttr.in daily weather entry
   factory WeatherDay.fromWttrJson(Map<String, dynamic> d) {
     final hourly = (d['hourly'] as List?)?.cast<Map<String, dynamic>>().toList() ?? [];
     double totalRain = 0;
@@ -115,13 +111,13 @@ class WeatherDay {
       wCode = int.tryParse(h['weatherCode']?.toString() ?? '0') ?? 0;
     }
     return WeatherDay(
-      date:       d['date']?.toString() ?? '',
-      maxC:       double.tryParse(d['maxtempC']?.toString() ?? '0') ?? 0,
-      minC:       double.tryParse(d['mintempC']?.toString() ?? '0') ?? 0,
-      rainMm:     totalRain,
-      precipProb: 0, // wttr.in doesn't give probability directly
-      windMaxKph: maxWind,
-      uvIndex:    double.tryParse(d['uvIndex']?.toString() ?? '0') ?? 0,
+      date:        d['date']?.toString() ?? '',
+      maxC:        double.tryParse(d['maxtempC']?.toString() ?? '0') ?? 0,
+      minC:        double.tryParse(d['mintempC']?.toString() ?? '0') ?? 0,
+      rainMm:      totalRain,
+      precipProb:  0,
+      windMaxKph:  maxWind,
+      uvIndex:     double.tryParse(d['uvIndex']?.toString() ?? '0') ?? 0,
       weatherCode: WeatherCurrent._wttrCode(wCode),
     );
   }
@@ -170,8 +166,7 @@ class WeatherState {
 
   double get tempC        => current?.tempC    ?? 0;
   double get precipMm     => current?.precipMm ?? 0;
-  double get rainfall7dMm =>
-      forecast.fold(0.0, (s, d) => s + d.rainMm);
+  double get rainfall7dMm => forecast.fold(0.0, (s, d) => s + d.rainMm);
   double get rainfallIndex  => (rainfall7dMm / 3.5).clamp(0, 100);
   double get maxPrecipProb  =>
       forecast.isEmpty ? 0 : forecast.map((d) => d.precipProb).reduce(
@@ -286,12 +281,15 @@ class WeatherNotifier extends Notifier<WeatherState> {
         body['current'] as Map<String, dynamic>? ?? {});
     final daily = body['daily'] as Map<String, dynamic>? ?? {};
 
-    // ─── FIX: .toList() materialises each lazy cast view into a new mutable
-    //         List so that elementAtOrNull / null-coercion never touches the
-    //         internal unmodifiable JSON structure and throws.
+    // Materialise every list eagerly (.toList()) so we own a mutable copy —
+    // jsonDecode produces unmodifiable internal lists that throw on coercion.
+    // All numeric lists are mapped to their concrete types up-front so
+    // elementAtOrNull always returns the exact type WeatherDay needs.
     final dates = ((daily['time']                          as List?) ?? []).cast<String>().toList();
-    final maxT  = ((daily['temperature_2m_max']            as List?) ?? []).cast<num>().toList();
-    final minT  = ((daily['temperature_2m_min']            as List?) ?? []).cast<num>().toList();
+    // FIX: map to double immediately — cast<num>().toList() gives List<num>
+    // and elementAtOrNull returns num, which cannot be assigned to double.
+    final maxT  = ((daily['temperature_2m_max']            as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
+    final minT  = ((daily['temperature_2m_min']            as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
     final rains = ((daily['precipitation_sum']             as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
     final probs = ((daily['precipitation_probability_max'] as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
     final winds = ((daily['wind_speed_10m_max']            as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
@@ -300,12 +298,12 @@ class WeatherNotifier extends Notifier<WeatherState> {
 
     final forecast = List.generate(dates.length, (i) => WeatherDay(
       date:        dates[i],
-      maxC:        maxT.elementAtOrNull(i)  ?? 0,
-      minC:        minT.elementAtOrNull(i)  ?? 0,
-      rainMm:      rains.elementAtOrNull(i) ?? 0,
-      precipProb:  probs.elementAtOrNull(i) ?? 0,
-      windMaxKph:  winds.elementAtOrNull(i) ?? 0,
-      uvIndex:     uvs.elementAtOrNull(i)   ?? 0,
+      maxC:        maxT.elementAtOrNull(i)  ?? 0.0,
+      minC:        minT.elementAtOrNull(i)  ?? 0.0,
+      rainMm:      rains.elementAtOrNull(i) ?? 0.0,
+      precipProb:  probs.elementAtOrNull(i) ?? 0.0,
+      windMaxKph:  winds.elementAtOrNull(i) ?? 0.0,
+      uvIndex:     uvs.elementAtOrNull(i)   ?? 0.0,
       weatherCode: codes.elementAtOrNull(i) ?? 0,
     ));
 
@@ -316,10 +314,7 @@ class WeatherNotifier extends Notifier<WeatherState> {
   // ─ wttr.in fetch (fallback) ────────────────────────────────────────────
 
   Future<bool> _tryWttr(double lat, double lon) async {
-    // wttr.in accepts lat,lon directly and returns JSON v2
-    final uri = Uri.parse(
-      'https://wttr.in/$lat,$lon?format=j2',
-    );
+    final uri = Uri.parse('https://wttr.in/$lat,$lon?format=j2');
     if (kDebugMode) debugPrint('WeatherNotifier: trying wttr.in fallback');
     final res = await http.get(uri, headers: {'Accept': 'application/json'})
         .timeout(const Duration(seconds: 12));
@@ -414,17 +409,12 @@ class WeatherNotifier extends Notifier<WeatherState> {
     final lon = state.lon;
 
     try {
-      // 1️⃣ Try Open-Meteo (primary — richest data)
       if (await _tryOpenMeteo(lat, lon)) return;
-
-      // 2️⃣ Open-Meteo failed — try wttr.in (completely different service)
       if (await _tryWttr(lat, lon)) return;
-
     } catch (e) {
       if (kDebugMode) debugPrint('WeatherNotifier: unexpected error: $e');
     }
 
-    // Both sources failed — auto-retry after backoff
     state = state.copyWith(
       status:        WeatherStatus.error,
       error:         'Weather unavailable. Auto-retrying in 5 min…',

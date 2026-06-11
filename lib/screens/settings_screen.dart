@@ -1,19 +1,14 @@
 // lib/screens/settings_screen.dart
 // OpsFlood — Module 8: Settings Overhaul & Theme Engine
 //
-// Full Settings screen with 7 section groups:
-//   1. Appearance   — theme picker grid (6 themes), brightness
-//   2. Notifications — link to NotificationSettingsScreen (Module 7)
-//   3. Data & Export — link to ExportScreen (Module 6), refresh interval
-//   4. Language     — English / Hindi selector
-//   5. About        — version, changelog, licences
-//   6. Advanced     — cache clear, data reset
-//   7. Danger Zone  — clear all local data
+// FIX 1: _card() / _NavTile / _LanguageTile / _RefreshTile used Material with
+//         BOTH borderRadius AND shape set — Flutter asserts these are mutually
+//         exclusive. Removed the top-level borderRadius param; the radius is
+//         encoded only inside shape: RoundedRectangleBorder.
 //
-// FIX: _card() previously used Container(color: ...) wrapping ListTiles.
-// Flutter asserts that ListTile ink splashes must paint on a Material ancestor.
-// A Container with color creates a DecoratedBox that hides those splashes.
-// Fix: replace Container with Material(color: ..., shape: RoundedRectangleBorder).
+// FIX 2: weather_provider maxT/minT were List<num>, making elementAtOrNull
+//         return num — not assignable to double. Both lists are now mapped to
+//         double before List.generate (handled in weather_provider.dart).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -229,14 +224,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────────────
 
-  /// Wraps [children] in a Material so ListTile ink splashes are visible.
-  /// Previously used Container(color:…) which created a DecoratedBox that
-  /// hid splashes and triggered Flutter's assertion.
+  /// FIX: Material must NOT have both [borderRadius] and [shape] set —
+  /// Flutter asserts !(shape != null && borderRadius != null).
+  /// Solution: pass radius only through [shape]; omit top-level borderRadius.
   Widget _card(RiverColors t, List<Widget> children) => Material(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
+        // ❌ borderRadius: BorderRadius.circular(14),  ← removed; was the crash
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: t.stroke),
@@ -253,8 +248,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Cache cleared'),
-          backgroundColor:
-              RiverColors.of(context).accent,
+          backgroundColor: RiverColors.of(context).accent,
           duration: const Duration(seconds: 2),
         ),
       );
@@ -302,7 +296,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-// ── Theme picker grid ────────────────────────────────────────────────────────
+// ── Theme picker grid ──────────────────────────────────────────────────────────────────
 
 const _themes = [
   (AppThemeMode.dark,         '🎨',  'Dark',          Color(0xFF0D1B2A)),
@@ -382,7 +376,7 @@ class _ThemeGrid extends StatelessWidget {
       );
 }
 
-// ── Language tile ─────────────────────────────────────────────────────────────
+// ── Language tile ───────────────────────────────────────────────────────────────────
 
 class _LanguageTile extends StatelessWidget {
   final RiverColors t;
@@ -396,7 +390,7 @@ class _LanguageTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
+        // FIX: shape only, no borderRadius param — they are mutually exclusive
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: t.stroke),
@@ -455,7 +449,7 @@ class _LangRow extends StatelessWidget {
   }
 }
 
-// ── Refresh interval tile ──────────────────────────────────────────────────────
+// ── Refresh interval tile ───────────────────────────────────────────────────────────────
 
 class _RefreshTile extends StatelessWidget {
   final RiverColors t;
@@ -469,7 +463,7 @@ class _RefreshTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
+        // FIX: shape only, no borderRadius param
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: t.stroke),
@@ -507,7 +501,7 @@ class _RefreshTile extends StatelessWidget {
       );
 }
 
-// ── Reusable sub-widgets ────────────────────────────────────────────────────────
+// ── Reusable sub-widgets ──────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   final RiverColors t;
@@ -558,7 +552,7 @@ class _NavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
+        // FIX: shape only, no borderRadius param
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: t.stroke),
