@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_options.dart';
 import 'l10n/app_localizations.dart';
@@ -54,7 +55,6 @@ final FlutterLocalNotificationsPlugin _localNotifications =
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Guard: background isolate may already have Firebase initialised
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
@@ -65,17 +65,17 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── .env ──────────────────────────────────────────────────────────────────────
+  // ── .env ─────────────────────────────────────────────────────────────────
   await dotenv.load(fileName: '.env').catchError((_) {});
 
-  // ── Firebase (guard against duplicate-app on hot restart) ───────────────────
+  // ── Firebase ──────────────────────────────────────────────────────────────
   if (Firebase.apps.isEmpty) {
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
   }
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // ── Local notifications ───────────────────────────────────────────────────────
+  // ── Local notifications ───────────────────────────────────────────────────
   const androidSettings =
       AndroidInitializationSettings('@mipmap/ic_launcher');
   const iosSettings = DarwinInitializationSettings(
@@ -89,17 +89,23 @@ Future<void> main() async {
     onDidReceiveNotificationResponse: _onNotificationTap,
   );
 
-  // ── Module 7: Notification channels & FCM topics ────────────────────────────
+  // ── Module 7: Notification channels & FCM topics ─────────────────────────
   await NotificationChannelService.instance.init();
   await FcmTopicManager.instance.init();
 
-  // ── Hive (Module 5: Community & Offline) ──────────────────────────────────
+  // ── Hive ──────────────────────────────────────────────────────────────────
   await Hive.initFlutter();
-  Hive.registerAdapter(IncidentTypeAdapter());       // typeId: 30
-  Hive.registerAdapter(CommunityIncidentAdapter());  // typeId: 31
+  Hive.registerAdapter(IncidentTypeAdapter());
+  Hive.registerAdapter(CommunityIncidentAdapter());
   await Hive.openBox<CommunityIncident>('community_incidents');
 
-  // ── Orientation & status-bar ───────────────────────────────────────────────
+  // ── FIX: pre-load saved locale BEFORE runApp so localeProvider starts
+  //   with the correct Locale synchronously — no async race, no English flash,
+  //   no null AppLocalizations on the first frame. ───────────────────────────
+  final prefs = await SharedPreferences.getInstance();
+  final savedLangCode = prefs.getString('app_locale') ?? 'en';
+
+  // ── Orientation & status-bar ──────────────────────────────────────────────
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -111,17 +117,25 @@ Future<void> main() async {
     ),
   );
 
-  // ── Data engine ────────────────────────────────────────────────────────────────
+  // ── Data engine ───────────────────────────────────────────────────────────
   DataFetchEngine.instance.start();
 
-  // ── Module 7: Alert → Notification bridge ─────────────────────────────────
+  // ── Alert → Notification bridge ───────────────────────────────────────────
   final Stream<FloodAlert> alertStream = DataFetchEngine.instance.alertStream
       .map((snapshot) => AlertEngine.instance.evaluate(snapshot))
       .expand((alerts) => alerts);
-
   AlertNotificationBridge.instance.start(alertStream);
 
-  runApp(const ProviderScope(child: FloodWatchApp()));
+  runApp(
+    ProviderScope(
+      // Override localeProvider with the pre-loaded value so the first build
+      // already has the correct language — no async gap at all.
+      overrides: [
+        localeProvider.overrideWith(() => LocaleNotifier(savedLangCode)),
+      ],
+      child: const FloodWatchApp(),
+    ),
+  );
 }
 
 void _onNotificationTap(NotificationResponse response) {
@@ -179,6 +193,18 @@ class FloodWatchApp extends ConsumerWidget {
         Locale('en'),
         Locale('hi'),
       ],
+      // FIX: resolve device locales like Locale('hi','IN') → Locale('hi').
+      // Without this, Flutter can't match 'hi_IN' to supportedLocales and
+      // falls back to the first supported locale — always 'en' — making
+      // Hindi selection appear broken on Indian devices.
+      localeResolutionCallback: (deviceLocale, supportedLocales) {
+        if (deviceLocale == null) return const Locale('en');
+        // Exact match first
+        for (final sl in supportedLocales) {
+          if (sl.languageCode == deviceLocale.languageCode) return sl;
+        }
+        return const Locale('en');
+      },
       initialRoute: SplashScreen.route,
       onGenerateRoute: (settings) {
         switch (settings.name) {

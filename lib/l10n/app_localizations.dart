@@ -181,19 +181,20 @@ class _AppLocalizationsDelegate
   bool isSupported(Locale locale) =>
       <String>['en', 'hi'].contains(locale.languageCode);
 
-  // shouldReload must return true so that when MaterialApp.locale changes,
-  // Flutter re-invokes load() and rebuilds all localised widgets.
   @override
   bool shouldReload(_AppLocalizationsDelegate old) => true;
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
   switch (locale.languageCode) {
-    case 'en':
-      return AppLocalizationsEn();
     case 'hi':
       return AppLocalizationsHi();
+    case 'en':
+    default:
+      // FIX: fall back to English instead of throwing FlutterError.
+      // Previously any locale variant like 'hi_IN', 'en_US', or an
+      // unrecognised code caused a FlutterError, making
+      // AppLocalizations.of(context) return null on ALL screens.
+      return AppLocalizationsEn();
   }
-  throw FlutterError(
-      'AppLocalizations.delegate failed to load unsupported locale "$locale".');
 }
