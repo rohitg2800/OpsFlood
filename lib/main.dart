@@ -14,7 +14,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'firebase_options.dart';
 import 'l10n/app_localizations.dart';
 import 'models/flood_data.dart';
-import 'models/community_incident.dart';             // Module 5
+import 'models/community_incident.dart';
 import 'screens/splash_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/main_shell.dart';
@@ -32,17 +32,17 @@ import 'screens/state_matrix_screen.dart';
 import 'screens/model_info_screen.dart';
 import 'screens/bihar_river_map_screen.dart';
 import 'screens/cwc_station_detail_screen.dart';
-import 'screens/community_screen.dart';              // Module 5
+import 'screens/community_screen.dart';
 import 'screens/live_stations_screen.dart';
 import 'screens/news_feed_screen.dart';
 import 'screens/map_screen.dart';
-import 'screens/export_screen.dart';                 // Module 6
-import 'screens/notification_settings_screen.dart';  // Module 7
+import 'screens/export_screen.dart';
+import 'screens/notification_settings_screen.dart';
 import 'services/befiqr_cwc_service.dart';
-import 'services/notification_channel_service.dart'; // Module 7
-import 'services/fcm_topic_manager.dart';             // Module 7
-import 'services/alert_notification_bridge.dart';     // Module 7
-import 'services/alert_engine.dart';                  // M1 fix: needed to convert snapshots → FloodAlert stream
+import 'services/notification_channel_service.dart';
+import 'services/fcm_topic_manager.dart';
+import 'services/alert_notification_bridge.dart';
+import 'services/alert_engine.dart';
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
@@ -54,7 +54,11 @@ final FlutterLocalNotificationsPlugin _localNotifications =
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Guard: background isolate may already have Firebase initialised
+  if (Firebase.apps.isEmpty) {
+    await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform);
+  }
   debugPrint('[FCM BG] ${message.notification?.title}');
 }
 
@@ -64,8 +68,11 @@ Future<void> main() async {
   // ── .env ──────────────────────────────────────────────────────────────────────
   await dotenv.load(fileName: '.env').catchError((_) {});
 
-  // ── Firebase ──────────────────────────────────────────────────────────────────
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // ── Firebase (guard against duplicate-app on hot restart) ───────────────────
+  if (Firebase.apps.isEmpty) {
+    await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform);
+  }
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   // ── Local notifications ───────────────────────────────────────────────────────
@@ -108,12 +115,6 @@ Future<void> main() async {
   DataFetchEngine.instance.start();
 
   // ── Module 7: Alert → Notification bridge ─────────────────────────────────
-  //
-  // FIX (M1): DataFetchEngine.alertStream is Stream<DataFetchSnapshot>.
-  // AlertNotificationBridge.start() expects Stream<FloodAlert>.
-  // Solution: map each snapshot through AlertEngine.evaluate() and expand
-  // the resulting List<FloodAlert> into individual events.
-  //
   final Stream<FloodAlert> alertStream = DataFetchEngine.instance.alertStream
       .map((snapshot) => AlertEngine.instance.evaluate(snapshot))
       .expand((alerts) => alerts);
@@ -123,13 +124,10 @@ Future<void> main() async {
   runApp(const ProviderScope(child: FloodWatchApp()));
 }
 
-// ── Notification tap handler ─────────────────────────────────────────────────
 void _onNotificationTap(NotificationResponse response) {
   final payload = response.payload ?? '';
   debugPrint('[Notif] tapped: $payload');
 }
-
-// ── Root app ───────────────────────────────────────────────────────────────────
 
 class FloodWatchApp extends ConsumerWidget {
   const FloodWatchApp({super.key});
