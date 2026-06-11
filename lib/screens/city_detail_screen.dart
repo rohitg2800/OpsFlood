@@ -26,6 +26,7 @@ import '../services/alert_engine.dart';            // ← M3 fix
 import '../theme/river_theme.dart';
 import '../widgets/alert_share_button.dart';       // ← Phase 4
 import '../widgets/sparkline_chart.dart';
+import 'city_detail_screen_widgets.dart';          // ← FIX: widget classes live here
 
 // ─────────────────────────────────────────────────────────────────────────────
 // M3 FIX: synthetic FloodAlert builder
