@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'firebase_options.dart';
 import 'l10n/app_localizations.dart';
 import 'models/flood_data.dart';
 import 'models/community_incident.dart';             // Module 5
@@ -48,19 +49,12 @@ import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'services/data_fetch_engine.dart';
 
-// Module 4 — showAlertShareSheet is imported at widget level in any screen
-// that needs it. Example usage (alerts_screen.dart, city_detail_screen.dart):
-//
-//   import '../widgets/alert_share_sheet.dart';
-//   ...
-//   showAlertShareSheet(context, alert);   // call on long-press / share tap
-
 final FlutterLocalNotificationsPlugin _localNotifications =
     FlutterLocalNotificationsPlugin();
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint('[FCM BG] ${message.notification?.title}');
 }
 
@@ -71,7 +65,7 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env').catchError((_) {});
 
   // ── Firebase ──────────────────────────────────────────────────────────────────
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   // ── Local notifications ───────────────────────────────────────────────────────
