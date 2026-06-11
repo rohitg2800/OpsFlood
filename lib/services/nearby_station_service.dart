@@ -2,22 +2,14 @@
 // OpsFlood — Module 5: Community & Offline
 //
 // NearbyStationService
-// ─────────────────────────────────────────────────────────────────────────
 // Finds the N closest CWC/WRD gauge stations to the user's GPS location
 // using the Haversine formula.  Works entirely from the in-memory station
 // registry — no network call needed — making it suitable as a pure-offline
 // entry point.
-//
-// Usage:
-//   final svc    = NearbyStationService.instance;
-//   final nearby = await svc.findNearest(lat: 25.6, lon: 85.1, topN: 5);
-//   for (final ns in nearby) {
-//     print('${ns.station.name}  ${ns.distanceLabel}');
-//   }
 
 import 'dart:math' as math;
-import '../models/river_station.dart';   // RiverStation model
-import 'location_service.dart';          // LocationService (already exists)
+import 'package:geolocator/geolocator.dart';
+import '../models/river_station.dart';
 
 // ── NearbyStation result ────────────────────────────────────────────────
 
@@ -46,13 +38,11 @@ class NearbyStationService {
   NearbyStationService._();
   static final NearbyStationService instance = NearbyStationService._();
 
-  // ── Public API ──────────────────────────────────────────────────────
-
   /// Returns stations within [radiusKm] (default 50 km), sorted by
   /// ascending distance, capped at [topN] results.
   ///
   /// If [lat]/[lon] are not provided the method requests the device
-  /// location via [LocationService] (may throw if permissions denied).
+  /// location via Geolocator (may return null if permissions denied).
   Future<List<NearbyStation>> findNearest({
     double? lat,
     double? lon,
@@ -64,9 +54,18 @@ class NearbyStationService {
     double userLon = lon ?? 0;
 
     if (lat == null || lon == null) {
-      final pos = await LocationService.instance.getCurrentPosition();
-      userLat = pos.latitude;
-      userLon = pos.longitude;
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 10),
+          ),
+        );
+        userLat = pos.latitude;
+        userLon = pos.longitude;
+      } catch (_) {
+        return [];
+      }
     }
 
     final results = <NearbyStation>[];
@@ -106,11 +105,9 @@ class NearbyStationService {
 
   // ── Haversine ────────────────────────────────────────────────────────
 
-  /// Returns the great-circle distance in kilometres between two
-  /// WGS-84 coordinate pairs.
   static double _haversineKm(
       double lat1, double lon1, double lat2, double lon2) {
-    const r = 6371.0; // Earth radius km
+    const r = 6371.0;
     final dLat = _deg2rad(lat2 - lat1);
     final dLon = _deg2rad(lon2 - lon1);
     final a = math.sin(dLat / 2) * math.sin(dLat / 2) +

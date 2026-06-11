@@ -1,11 +1,8 @@
 // lib/models/river_station.dart
 // Extended model — carries both static CWC thresholds AND live API fields.
-// FIXED: export directive moved to top; copyWith now accepts warning/danger/hfl overrides.
+// v2: added lat/lon (nullable) and riskLabel getter for NearbyStationService
+//     and nearby_stations_section.dart.
 
-// ── Convenience extension on LiveRiverResult ──────────────────────────────────
-// These getters delegate to the embedded RiverStation so call-sites that
-// reference  result.currentLevel  and  result.trend  compile without change.
-// Import real_time_river_service.dart to get LiveRiverResult.
 export 'live_river_result_ext.dart';
 
 class RiverStation {
@@ -17,6 +14,10 @@ class RiverStation {
   final double warning;   // m – CWC warning level
   final double danger;    // m – CWC danger level
   final double hfl;       // m – highest flood level
+
+  // ── Geographic coordinates (null = not available) ──────────────────────
+  final double? lat;
+  final double? lon;
 
   // ── Live fields (null = not yet fetched) ────────────────────────────────
   final double?  rainfallLastHour;
@@ -36,6 +37,8 @@ class RiverStation {
     required this.warning,
     required this.danger,
     required this.hfl,
+    this.lat,
+    this.lon,
     this.rainfallLastHour,
     this.flowRate,
     this.trend,
@@ -52,15 +55,26 @@ class RiverStation {
     return DangerClass.normal;
   }
 
+  /// Human-readable risk label derived from dangerClass.
+  String get riskLabel {
+    switch (dangerClass) {
+      case DangerClass.extreme:     return 'CRITICAL';
+      case DangerClass.severe:      return 'SEVERE';
+      case DangerClass.aboveNormal: return 'WARNING';
+      case DangerClass.normal:      return 'NORMAL';
+    }
+  }
+
   double get progressPct => hfl > 0 ? (current / hfl).clamp(0.0, 1.0) : 0.0;
   int    get riskScore   => dangerClass.index;
 
-  // FIX: warning/danger/hfl are now overridable so live API thresholds apply.
   RiverStation copyWith({
     double?  current,
     double?  warning,
     double?  danger,
     double?  hfl,
+    double?  lat,
+    double?  lon,
     double?  rainfallLastHour,
     double?  flowRate,
     String?  trend,
@@ -77,6 +91,8 @@ class RiverStation {
     warning:          warning          ?? this.warning,
     danger:           danger           ?? this.danger,
     hfl:              hfl              ?? this.hfl,
+    lat:              lat              ?? this.lat,
+    lon:              lon              ?? this.lon,
     rainfallLastHour: rainfallLastHour ?? this.rainfallLastHour,
     flowRate:         flowRate         ?? this.flowRate,
     trend:            trend            ?? this.trend,
