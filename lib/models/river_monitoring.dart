@@ -48,3 +48,77 @@ class MultiLocationMonitoring {
   int get moderateCount    => locations.where((l) => l.riskLevel == 'MODERATE').length;
   bool get hasCritical     => criticalCount > 0;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ImdAlert — IMD weather alert for a state/district.
+// ─────────────────────────────────────────────────────────────────────────────
+class ImdAlert {
+  final String headline;
+  final String description;
+  final String severity;   // RED | ORANGE | YELLOW | GREEN
+  final String state;
+  final String district;
+  final DateTime? issuedAt;
+
+  const ImdAlert({
+    required this.headline,
+    this.description = '',
+    required this.severity,
+    this.state = '',
+    this.district = '',
+    this.issuedAt,
+  });
+
+  factory ImdAlert.fromJson(Map<String, dynamic> j) => ImdAlert(
+    headline:    (j['headline']    as String?) ?? '',
+    description: (j['description'] as String?) ?? '',
+    severity:    (j['severity']    as String?) ?? 'GREEN',
+    state:       (j['state']       as String?) ?? '',
+    district:    (j['district']    as String?) ?? '',
+    issuedAt:    j['issued_at'] != null
+        ? DateTime.tryParse(j['issued_at'] as String)
+        : null,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'headline':    headline,
+    'description': description,
+    'severity':    severity,
+    'state':       state,
+    'district':    district,
+    if (issuedAt != null) 'issued_at': issuedAt!.toIso8601String(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NdmaAdvisory — NDMA advisory for a state.
+// ─────────────────────────────────────────────────────────────────────────────
+class NdmaAdvisory {
+  final String title;
+  final String body;
+  final String state;
+  final DateTime? issuedAt;
+
+  const NdmaAdvisory({
+    required this.title,
+    this.body = '',
+    this.state = '',
+    this.issuedAt,
+  });
+
+  factory NdmaAdvisory.fromJson(Map<String, dynamic> j) => NdmaAdvisory(
+    title:    (j['title'] as String?) ?? '',
+    body:     (j['body']  as String?) ?? '',
+    state:    (j['state'] as String?) ?? '',
+    issuedAt: j['issued_at'] != null
+        ? DateTime.tryParse(j['issued_at'] as String)
+        : null,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'title':    title,
+    'body':     body,
+    'state':    state,
+    if (issuedAt != null) 'issued_at': issuedAt!.toIso8601String(),
+  };
+}
