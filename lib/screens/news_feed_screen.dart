@@ -1,4 +1,4 @@
-// lib/screens/news_feed_screen.dart  v2.0
+// lib/screens/news_feed_screen.dart  v2.1
 // Live flood-news feed — auto-refreshes every 60 s from 5 sources:
 //   IMD FFS · NDMA · CWC Bulletin · India-WRIS · PIB
 import 'package:flutter/material.dart';
@@ -15,9 +15,14 @@ class NewsFeedScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final newsAsync     = ref.watch(liveNewsProvider);
+    final newsAsync      = ref.watch(liveNewsProvider);
     final countdownAsync = ref.watch(newsCountdownProvider);
-    final countdown     = countdownAsync.valueOrNull ?? 60;
+    // Riverpod 3: use .when() — valueOrNull does not exist on AsyncValue
+    final countdown = countdownAsync.when(
+      data:    (v) => v,
+      loading: ()  => 60,
+      error:   (_, __) => 60,
+    );
 
     return Scaffold(
       backgroundColor: AppPalette.abyss0,
@@ -34,7 +39,6 @@ class NewsFeedScreen extends ConsumerWidget {
         ),
         iconTheme: const IconThemeData(color: AppPalette.gold),
         actions: [
-          // Manual refresh button
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: AppPalette.cyan),
             tooltip: 'Refresh now',
@@ -109,7 +113,6 @@ class _NewsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Group by source
     final grouped = <String, List<NewsItem>>{};
     for (final item in items) {
       grouped.putIfAbsent(item.source, () => []).add(item);
@@ -124,8 +127,8 @@ class _NewsList extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
       itemCount: orderedSources.length,
       itemBuilder: (context, i) {
-        final src       = orderedSources[i];
-        final srcItems  = grouped[src]!;
+        final src      = orderedSources[i];
+        final srcItems = grouped[src]!;
         return _SourceSection(source: src, items: srcItems);
       },
     );
@@ -191,10 +194,7 @@ class _SourceSection extends StatelessWidget {
               Expanded(
                 child: Text(
                   _headerLabel,
-                  style: const TextStyle(
-                    color: AppPalette.textGrey,
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: AppPalette.textGrey, fontSize: 11),
                 ),
               ),
               Text(
@@ -235,7 +235,7 @@ class _NewsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _severityColor;
+    final color   = _severityColor;
     final timeStr = _relativeTime(item.publishedAt);
 
     return GestureDetector(
@@ -258,7 +258,6 @@ class _NewsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row: severity badge + time
             Row(
               children: [
                 Container(
@@ -278,19 +277,16 @@ class _NewsCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  timeStr,
-                  style: const TextStyle(color: AppPalette.textGrey, fontSize: 10),
-                ),
+                Text(timeStr,
+                    style: const TextStyle(color: AppPalette.textGrey, fontSize: 10)),
                 if (item.url.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   Icon(Icons.open_in_new_rounded,
-                       color: AppPalette.textGrey.withValues(alpha: 0.6), size: 12),
+                      color: AppPalette.textGrey.withValues(alpha: 0.6), size: 12),
                 ],
               ],
             ),
             const SizedBox(height: 7),
-            // Title
             Text(
               item.title,
               style: const TextStyle(
@@ -300,7 +296,6 @@ class _NewsCard extends StatelessWidget {
                 height: 1.35,
               ),
             ),
-            // Summary
             if (item.summary.isNotEmpty) ...[
               const SizedBox(height: 5),
               Text(
@@ -308,10 +303,7 @@ class _NewsCard extends StatelessWidget {
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: AppPalette.textGrey,
-                  fontSize: 12,
-                  height: 1.4,
-                ),
+                    color: AppPalette.textGrey, fontSize: 12, height: 1.4),
               ),
             ],
           ],
@@ -322,9 +314,9 @@ class _NewsCard extends StatelessWidget {
 
   String _relativeTime(DateTime t) {
     final diff = DateTime.now().difference(t);
-    if (diff.inSeconds < 60)  return 'Just now';
-    if (diff.inMinutes < 60)  return '${diff.inMinutes}m ago';
-    if (diff.inHours   < 24)  return '${diff.inHours}h ago';
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours   < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
 }
