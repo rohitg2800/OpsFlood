@@ -7,10 +7,14 @@ import '../services/alert_share_service.dart';
 
 class AlertShareButton extends StatelessWidget {
   final FloodAlert alert;
-  // Optional district param accepted (but not required) so city_detail_screen
-  // can pass district: data.state without breaking the constructor.
-  final String? district;
-  const AlertShareButton({super.key, required this.alert, this.district});
+  final String?    district;   // optional — city_detail_screen passes district:
+  final String?    riverName;  // optional — city_detail_screen passes riverName:
+  const AlertShareButton({
+    super.key,
+    required this.alert,
+    this.district,
+    this.riverName,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +61,8 @@ class _ShareSheetState extends State<_ShareSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Share Alert', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text('Share Alert',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             ElevatedButton.icon(
               icon: const Icon(Icons.message),
