@@ -256,6 +256,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   reduceMotion: _reduceMotion,
                   onAlertsTap: _goAlerts,
                   onStationsTap: _goLiveStations,
+                  onSafeTap: _goLiveStations,
                 ),
               ),
 
@@ -1373,6 +1374,7 @@ class _KpiGrid extends StatelessWidget {
   final bool reduceMotion;
   final VoidCallback onAlertsTap;
   final VoidCallback onStationsTap;
+  final VoidCallback onSafeTap;
 
   const _KpiGrid({
     required this.t,
@@ -1383,6 +1385,7 @@ class _KpiGrid extends StatelessWidget {
     required this.reduceMotion,
     required this.onAlertsTap,
     required this.onStationsTap,
+    required this.onSafeTap,
   });
 
   @override
@@ -1396,7 +1399,7 @@ class _KpiGrid extends StatelessWidget {
                 .map((d) => d.capacityPercent)
                 .reduce((a, b) => a + b) /
             levels.length;
-    final normalCount = levels
+    final safeCount = levels
         .where((d) =>
             d.riskLevel.toUpperCase() == 'NORMAL' ||
             d.riskLevel.toUpperCase() == 'SAFE')
@@ -1426,11 +1429,11 @@ class _KpiGrid extends StatelessWidget {
           icon: Icons.water_rounded,
           onTap: onStationsTap),
       _KpiItem(
-          label: 'NORMAL',
-          value: '$normalCount',
+          label: 'SAFE',
+          value: '$safeCount',
           color: AppPalette.safe,
           icon: Icons.check_circle_rounded,
-          onTap: onStationsTap),
+          onTap: onSafeTap),
     ];
 
     return Padding(
