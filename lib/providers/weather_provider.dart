@@ -104,7 +104,7 @@ class WeatherDay {
 
   // Build from wttr.in daily weather entry
   factory WeatherDay.fromWttrJson(Map<String, dynamic> d) {
-    final hourly = (d['hourly'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final hourly = (d['hourly'] as List?)?.cast<Map<String, dynamic>>().toList() ?? [];
     double totalRain = 0;
     double maxWind   = 0;
     int    wCode     = 0;
@@ -119,7 +119,7 @@ class WeatherDay {
       maxC:       double.tryParse(d['maxtempC']?.toString() ?? '0') ?? 0,
       minC:       double.tryParse(d['mintempC']?.toString() ?? '0') ?? 0,
       rainMm:     totalRain,
-      precipProb: 0, // wttr.in doesn’t give probability directly
+      precipProb: 0, // wttr.in doesn't give probability directly
       windMaxKph: maxWind,
       uvIndex:    double.tryParse(d['uvIndex']?.toString() ?? '0') ?? 0,
       weatherCode: WeatherCurrent._wttrCode(wCode),
@@ -281,28 +281,32 @@ class WeatherNotifier extends Notifier<WeatherState> {
       if (kDebugMode) debugPrint('WeatherNotifier: Open-Meteo HTTP ${res.statusCode}');
       return false;
     }
-    final body    = jsonDecode(res.body) as Map<String, dynamic>;
-    final cur     = WeatherCurrent.fromJson(
+    final body  = jsonDecode(res.body) as Map<String, dynamic>;
+    final cur   = WeatherCurrent.fromJson(
         body['current'] as Map<String, dynamic>? ?? {});
-    final daily   = body['daily'] as Map<String, dynamic>? ?? {};
-    final dates   = (daily['time']                          as List?)?.cast<String>()  ?? [];
-    final maxT    = (daily['temperature_2m_max']            as List?)?.cast<num>()    ?? [];
-    final minT    = (daily['temperature_2m_min']            as List?)?.cast<num>()    ?? [];
-    final rains   = (daily['precipitation_sum']             as List?)?.cast<num?>()   ?? [];
-    final probs   = (daily['precipitation_probability_max'] as List?)?.cast<num?>()   ?? [];
-    final winds   = (daily['wind_speed_10m_max']            as List?)?.cast<num?>()   ?? [];
-    final uvs     = (daily['uv_index_max']                  as List?)?.cast<num?>()   ?? [];
-    final codes   = (daily['weathercode']                   as List?)?.cast<num?>()   ?? [];
+    final daily = body['daily'] as Map<String, dynamic>? ?? {};
+
+    // ─── FIX: .toList() materialises each lazy cast view into a new mutable
+    //         List so that elementAtOrNull / null-coercion never touches the
+    //         internal unmodifiable JSON structure and throws.
+    final dates = ((daily['time']                          as List?) ?? []).cast<String>().toList();
+    final maxT  = ((daily['temperature_2m_max']            as List?) ?? []).cast<num>().toList();
+    final minT  = ((daily['temperature_2m_min']            as List?) ?? []).cast<num>().toList();
+    final rains = ((daily['precipitation_sum']             as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
+    final probs = ((daily['precipitation_probability_max'] as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
+    final winds = ((daily['wind_speed_10m_max']            as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
+    final uvs   = ((daily['uv_index_max']                  as List?) ?? []).map((e) => (e as num?)?.toDouble() ?? 0.0).toList();
+    final codes = ((daily['weathercode']                   as List?) ?? []).map((e) => (e as num?)?.toInt()    ?? 0  ).toList();
 
     final forecast = List.generate(dates.length, (i) => WeatherDay(
       date:        dates[i],
-      maxC:        (maxT.elementAtOrNull(i)  ?? 0).toDouble(),
-      minC:        (minT.elementAtOrNull(i)  ?? 0).toDouble(),
-      rainMm:      (rains.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
-      precipProb:  (probs.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
-      windMaxKph:  (winds.elementAtOrNull(i) ?? 0).toDouble() ?? 0,
-      uvIndex:     (uvs.elementAtOrNull(i)   ?? 0).toDouble() ?? 0,
-      weatherCode: (codes.elementAtOrNull(i) ?? 0).toInt()   ?? 0,
+      maxC:        maxT.elementAtOrNull(i)  ?? 0,
+      minC:        minT.elementAtOrNull(i)  ?? 0,
+      rainMm:      rains.elementAtOrNull(i) ?? 0,
+      precipProb:  probs.elementAtOrNull(i) ?? 0,
+      windMaxKph:  winds.elementAtOrNull(i) ?? 0,
+      uvIndex:     uvs.elementAtOrNull(i)   ?? 0,
+      weatherCode: codes.elementAtOrNull(i) ?? 0,
     ));
 
     _applySuccess(lat, lon, cur, forecast);
@@ -325,7 +329,7 @@ class WeatherNotifier extends Notifier<WeatherState> {
     }
     final body     = jsonDecode(res.body) as Map<String, dynamic>;
     final cur      = WeatherCurrent.fromWttrJson(body);
-    final weather  = (body['weather'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final weather  = (body['weather'] as List?)?.cast<Map<String, dynamic>>().toList() ?? [];
     final forecast = weather.map(WeatherDay.fromWttrJson).toList();
     _applySuccess(lat, lon, cur, forecast);
     if (kDebugMode) debugPrint('WeatherNotifier: wttr.in success');
@@ -363,7 +367,7 @@ class WeatherNotifier extends Notifier<WeatherState> {
       final res = await http.get(uri).timeout(const Duration(seconds: 6));
       if (res.statusCode == 200) {
         final body    = jsonDecode(res.body) as Map<String, dynamic>;
-        final results = (body['results'] as List? ?? [])
+        final results = ((body['results'] as List?) ?? [])
             .cast<Map<String, dynamic>>()
             .map(CityResult.fromJson)
             .toList();
