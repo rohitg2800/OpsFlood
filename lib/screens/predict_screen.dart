@@ -1,12 +1,13 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — PredictScreen v4  (fix _FakeFlood type error)
+// OpsFlood — PredictScreen v5  (live data table after prediction)
 //
-// Fix from v3:
-//   • Removed _FakeFlood class — orElse now returns a zeroed FloodData
-//     so the return type is always FloodData (no more type mismatch).
-//   • Removed the broken `extension on dynamic` that was unused.
-//   • flowRate removed (not a FloodData field) — discharge left blank
-//     when city not found in live list.
+// New in v5:
+//   • After "Run Prediction" completes, a _LiveDataTable card appears below
+//     the result card, pulling the matched FloodData from liveLevelsProvider.
+//   • Shows: River Level, Warning, Danger, Capacity %, Rainfall 24h,
+//     Flow Rate, Risk Level, Status, Last Updated.
+//   • Row values are colour-coded by danger proximity.
+//   • Table auto-scrolls into view via a scroll controller.
 library;
 
 import 'dart:convert';
@@ -33,20 +34,22 @@ class PredictScreen extends ConsumerStatefulWidget {
 
 class _PredictScreenState extends ConsumerState<PredictScreen>
     with SingleTickerProviderStateMixin {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey      = GlobalKey<FormState>();
+  final _scrollCtrl   = ScrollController();
 
   final _cityCtrl      = TextEditingController();
   final _peakLevelCtrl = TextEditingController();
   final _rainfallCtrl  = TextEditingController();
   final _dischargeCtrl = TextEditingController();
 
-  bool _loading       = false;
-  bool _autoFilled    = false;
-  bool _didPrefill    = false;
-  bool _didAutoFetch  = false;
+  bool _loading      = false;
+  bool _autoFilled   = false;
+  bool _didPrefill   = false;
+  bool _didAutoFetch = false;
 
   _PredictResult? _result;
   String?         _error;
+  FloodData?      _liveData;   // populated from liveLevelsProvider on predict
 
   late final AnimationController _resultAnim;
   late final Animation<double>   _resultFade;
@@ -71,7 +74,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     if (_didPrefill) return;
     _didPrefill = true;
 
-    // 1. Route args {city, river_level} (from CityDetailScreen deep-link)
     String? argCity;
     double? argLevel;
     final args = ModalRoute.of(context)?.settings.arguments;
@@ -81,7 +83,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       if (lv != null) argLevel = double.tryParse(lv.toString());
     }
 
-    // 2. selectedCityProvider (set by Dashboard / other screens)
     final providerCity = ref.read(selectedCityProvider);
     final city = argCity ?? providerCity;
 
@@ -90,7 +91,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     }
   }
 
-  /// Returns a zeroed [FloodData] stub for cities not yet in the live list.
   static FloodData _emptyFloodData(String city) => FloodData(
     city:                city,
     district:            '',
@@ -107,18 +107,19 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     lastUpdated:         DateTime.now(),
   );
 
-  void _fillFromCity(String city, {double? overrideLevel}) {
+  FloodData _matchCity(String city) {
     final liveList = ref.read(liveLevelsProvider);
-
-    // exact match → prefix match → zeroed stub (always FloodData)
-    final FloodData match = liveList.firstWhere(
+    return liveList.firstWhere(
       (d) => d.city.toLowerCase() == city.toLowerCase(),
       orElse: () => liveList.firstWhere(
         (d) => d.city.toLowerCase().contains(city.toLowerCase()),
         orElse: () => _emptyFloodData(city),
       ),
     );
+  }
 
+  void _fillFromCity(String city, {double? overrideLevel}) {
+    final match    = _matchCity(city);
     final level    = overrideLevel ?? match.currentLevel;
     final rainfall = match.effectiveRainfallMm > 0
         ? (match.effectiveRainfallMm * 7).toStringAsFixed(1)
@@ -128,7 +129,8 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       _cityCtrl.text      = city;
       _peakLevelCtrl.text = level > 0 ? level.toStringAsFixed(2) : '';
       _rainfallCtrl.text  = rainfall;
-      _dischargeCtrl.text = '';
+      _dischargeCtrl.text =
+          match.flowRate != null ? match.flowRate!.toStringAsFixed(0) : '';
       _autoFilled = level > 0;
     });
 
@@ -143,6 +145,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   @override
   void dispose() {
     _resultAnim.dispose();
+    _scrollCtrl.dispose();
     _cityCtrl.dispose();
     _peakLevelCtrl.dispose();
     _rainfallCtrl.dispose();
@@ -153,11 +156,23 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   Future<void> _predict() async {
     if (!_formKey.currentState!.validate()) return;
     HapticFeedback.mediumImpact();
-    setState(() { _loading = true; _result = null; _error = null; });
+
+    // Snapshot live data for the table BEFORE the API call
+    final city = _cityCtrl.text.trim();
+    final live = city.isNotEmpty ? _matchCity(city) : null;
+
+    setState(() {
+      _loading  = true;
+      _result   = null;
+      _error    = null;
+      _liveData = live?.currentLevel != null && live!.currentLevel > 0
+          ? live
+          : null;
+    });
     _resultAnim.reset();
 
     final payload = {
-      'state':          _cityCtrl.text.trim(),
+      'state':          city,
       'peak_level_m':   double.tryParse(_peakLevelCtrl.text.trim()) ?? 0.0,
       'rainfall_7d_mm': double.tryParse(_rainfallCtrl.text.trim())  ?? 0.0,
       'discharge_m3s':  double.tryParse(_dischargeCtrl.text.trim()) ?? 0.0,
@@ -172,25 +187,34 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
           .timeout(AppConfig.coldStartTimeout);
 
       if (res.statusCode == 200) {
-        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final body  = jsonDecode(res.body) as Map<String, dynamic>;
         final level = (body['risk_level'] ?? body['riskLevel'] ?? 'UNKNOWN')
-            .toString()
-            .toUpperCase();
-        final prob = body['probability'] as double? ??
+            .toString().toUpperCase();
+        final prob  = body['probability'] as double? ??
             (body['confidence'] as num?)?.toDouble();
         setState(() {
           _result = _PredictResult(riskLevel: level, confidence: prob);
         });
-        _resultAnim.forward();
       } else {
         setState(() => _error = 'Backend HTTP ${res.statusCode}: ${res.body}');
-        _resultAnim.forward();
       }
     } catch (e) {
       setState(() => _error = e.toString());
-      _resultAnim.forward();
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+        _resultAnim.forward();
+        // Scroll down so table is visible
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollCtrl.hasClients) {
+            _scrollCtrl.animateTo(
+              _scrollCtrl.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOutCubic,
+            );
+          }
+        });
+      }
     }
   }
 
@@ -202,6 +226,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       backgroundColor: t.scaffoldBg,
       body: SafeArea(
         child: CustomScrollView(
+          controller: _scrollCtrl,
           physics: const BouncingScrollPhysics(),
           slivers: [
 
@@ -235,50 +260,39 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                           _peakLevelCtrl.clear();
                           _rainfallCtrl.clear();
                           _dischargeCtrl.clear();
-                          _result = null;
-                          _error  = null;
+                          _result   = null;
+                          _error    = null;
+                          _liveData = null;
                         }),
                       ),
                       const SizedBox(height: 12),
 
                       _DarkField(
-                        ctrl:    _peakLevelCtrl,
-                        label:   'River Level (m)',
-                        hint:    'e.g. 12.50',
-                        icon:    Icons.water_rounded,
-                        numeric: true,
-                        t:       t,
+                        ctrl: _peakLevelCtrl, label: 'River Level (m)',
+                        hint: 'e.g. 12.50', icon: Icons.water_rounded,
+                        numeric: true, t: t,
                       ),
                       const SizedBox(height: 12),
 
                       _DarkField(
-                        ctrl:    _rainfallCtrl,
-                        label:   'Rainfall 7d (mm)',
-                        hint:    'e.g. 450',
-                        icon:    Icons.grain_rounded,
-                        numeric: true,
-                        t:       t,
+                        ctrl: _rainfallCtrl, label: 'Rainfall 7d (mm)',
+                        hint: 'e.g. 450', icon: Icons.grain_rounded,
+                        numeric: true, t: t,
                       ),
                       const SizedBox(height: 12),
 
                       _DarkField(
-                        ctrl:     _dischargeCtrl,
-                        label:    'Discharge m³/s (optional)',
-                        hint:     'e.g. 8500',
-                        icon:     Icons.waves_rounded,
-                        numeric:  true,
-                        required: false,
-                        t:        t,
+                        ctrl: _dischargeCtrl,
+                        label: 'Discharge m³/s (optional)',
+                        hint: 'e.g. 8500', icon: Icons.waves_rounded,
+                        numeric: true, required: false, t: t,
                       ),
                       const SizedBox(height: 24),
 
-                      _GlowButton(
-                        loading: _loading,
-                        onTap:   _predict,
-                        t:       t,
-                      ),
+                      _GlowButton(loading: _loading, onTap: _predict, t: t),
                       const SizedBox(height: 20),
 
+                      // ─ ML Result / Error card
                       if (_result != null || _error != null)
                         FadeTransition(
                           opacity: _resultFade,
@@ -289,6 +303,16 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                                 : _ResultCard(result: _result!, t: t),
                           ),
                         ),
+
+                      // ─ Live station data table (shown after any prediction)
+                      if ((_result != null || _error != null) &&
+                          _liveData != null) ...[
+                        const SizedBox(height: 16),
+                        FadeTransition(
+                          opacity: _resultFade,
+                          child: _LiveDataTable(data: _liveData!, t: t),
+                        ),
+                      ],
 
                       const SizedBox(height: 16),
                       _TipBox(t: t, autoFilled: _autoFilled),
@@ -302,6 +326,208 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _LiveDataTable — live station data card with key/value rows
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LiveDataTable extends StatelessWidget {
+  final FloodData   data;
+  final RiverColors t;
+  const _LiveDataTable({required this.data, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final riskCol = data.priorityColor;
+
+    // Colour-code the river level relative to thresholds
+    Color levelColor() {
+      if (data.dangerLevel > 0 && data.currentLevel >= data.dangerLevel)
+        return AppPalette.critical;
+      if (data.warningLevel > 0 && data.currentLevel >= data.warningLevel)
+        return AppPalette.warning;
+      return AppPalette.safe;
+    }
+
+    final lvlCol = levelColor();
+
+    final rows = [
+      _Row('River',          data.riverName ?? '—',                null),
+      _Row('District',       data.district.isNotEmpty ? data.district : '—', null),
+      _Row('State',          data.state.isNotEmpty ? data.state : '—',       null),
+      _Row('Current Level',  '${data.currentLevel.toStringAsFixed(2)} m',   lvlCol),
+      _Row('Warning Level',  '${data.warningLevel.toStringAsFixed(2)} m',   AppPalette.warning),
+      _Row('Danger Level',   '${data.dangerLevel.toStringAsFixed(2)} m',    AppPalette.danger),
+      _Row('Capacity',       '${data.capacityPercent.toStringAsFixed(1)} %',
+          data.capacityPercent >= 90
+              ? AppPalette.critical
+              : data.capacityPercent >= 70
+                  ? AppPalette.warning
+                  : AppPalette.safe),
+      _Row('Rainfall 24h',
+          data.effectiveRainfallMm > 0
+              ? '${data.effectiveRainfallMm.toStringAsFixed(1)} mm'
+              : '—',
+          null),
+      if (data.flowRate != null)
+        _Row('Flow Rate',
+            '${data.flowRate!.toStringAsFixed(0)} m³/s', null),
+      _Row('IMD Severity',   data.imdSeverity ?? '—',               null),
+      _Row('Risk Level',     data.riskLevel,                        riskCol),
+      _Row('Status',         data.status,                           null),
+      _Row('Last Updated',
+          '${data.lastUpdated.day.toString().padLeft(2,'0')}/'  
+          '${data.lastUpdated.month.toString().padLeft(2,'0')}/'  
+          '${data.lastUpdated.year}  '
+          '${data.lastUpdated.hour.toString().padLeft(2,'0')}:'  
+          '${data.lastUpdated.minute.toString().padLeft(2,'0')}',
+          null),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.stroke),
+        boxShadow: [
+          BoxShadow(
+              color: t.accent.withValues(alpha: 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ─ Header row
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.08),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(18)),
+              border: Border(
+                  bottom: BorderSide(
+                      color: t.stroke.withValues(alpha: 0.5), width: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.sensors_rounded,
+                      color: t.accent, size: 16),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'LIVE STATION DATA',
+                      style: TextStyle(
+                          color: t.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8),
+                    ),
+                    Text(
+                      data.city,
+                      style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 10),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                // Live pulse dot
+                Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(
+                    color: AppPalette.safe,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                          color: AppPalette.safe.withValues(alpha: 0.5),
+                          blurRadius: 6),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text('LIVE',
+                    style: TextStyle(
+                        color: AppPalette.safe,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+
+          // ─ Data rows
+          ...rows.asMap().entries.map((e) {
+            final isLast = e.key == rows.length - 1;
+            final row    = e.value;
+            return Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 11),
+              decoration: BoxDecoration(
+                color: e.key.isEven
+                    ? Colors.transparent
+                    : t.cardBgElevated.withValues(alpha: 0.4),
+                borderRadius: isLast
+                    ? const BorderRadius.vertical(
+                        bottom: Radius.circular(18))
+                    : null,
+                border: isLast
+                    ? null
+                    : Border(
+                        bottom: BorderSide(
+                            color: t.stroke.withValues(alpha: 0.25),
+                            width: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 110,
+                    child: Text(
+                      row.label,
+                      style: TextStyle(
+                          color: t.textSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      row.value,
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        color: row.valueColor ?? t.textPrimary,
+                        fontSize: 12,
+                        fontWeight: row.valueColor != null
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _Row {
+  final String label;
+  final String value;
+  final Color? valueColor;
+  const _Row(this.label, this.value, this.valueColor);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -407,7 +633,7 @@ class _CityFieldState extends State<_CityField> {
             labelText: 'City / Station',
             hintText: 'e.g. Patna',
             labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
-            hintStyle: TextStyle(color: t.stroke, fontSize: 13),
+            hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
             prefixIcon:
                 Icon(Icons.location_on_rounded, color: t.textSecondary, size: 18),
             suffixIcon: widget.autoFilled
@@ -561,9 +787,8 @@ class _DarkFieldState extends State<_DarkField> {
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.t;
-    final borderColor =
-        _focused ? t.accent.withValues(alpha: 0.7) : t.stroke;
+    final t           = widget.t;
+    final borderColor = _focused ? t.accent.withValues(alpha: 0.7) : t.stroke;
 
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
@@ -596,7 +821,7 @@ class _DarkFieldState extends State<_DarkField> {
             labelText: widget.label,
             hintText:  widget.hint,
             labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
-            hintStyle:  TextStyle(color: t.stroke, fontSize: 13),
+            hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
             prefixIcon:
                 Icon(widget.icon, color: t.textSecondary, size: 18),
             border: InputBorder.none,
@@ -604,8 +829,7 @@ class _DarkFieldState extends State<_DarkField> {
                 horizontal: 14, vertical: 14),
           ),
           validator: widget.required
-              ? (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Required' : null
+              ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null
               : null,
         ),
       ),
@@ -915,8 +1139,8 @@ class _TipBox extends StatelessWidget {
               autoFilled
                   ? 'Fields auto-filled from live station data. '
                     'Tap × on the city field to switch to a different city.'
-                  : 'Tip: Tap a city on the Dashboard or set selectedCityProvider '
-                    'before navigating here to auto-fill and run prediction instantly.',
+                  : 'Tip: Tap a city on the Dashboard to auto-fill all '
+                    'fields and run the prediction instantly.',
               style: TextStyle(
                   color: t.textSecondary, fontSize: 11, height: 1.5),
             ),
