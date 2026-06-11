@@ -1,5 +1,5 @@
 // lib/providers/flood_providers.dart
-// v9 — added selectedCityProvider for PredictScreen auto-fetch
+// v10 — selectedCityProvider uses NotifierProvider (StateProvider not in this project)
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,12 +14,25 @@ import 'real_time_river_provider.dart';
 //
 // Holds the city name chosen on DashboardScreen / CityDetailScreen so that
 // PredictScreen can auto-fill and auto-run the prediction without any tap.
-// Set this before navigating to PredictScreen:
-//   ref.read(selectedCityProvider.notifier).state = city;
+//
+// Usage before navigating:
+//   ref.read(selectedCityProvider.notifier).set(city);
 //   Navigator.pushNamed(context, PredictScreen.route);
+//
+// Clear after returning (optional):
+//   ref.read(selectedCityProvider.notifier).clear();
 // ─────────────────────────────────────────────────────────────────────────────
 
-final selectedCityProvider = StateProvider<String?>((ref) => null);
+class SelectedCityNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void set(String city) => state = city;
+  void clear()         => state = null;
+}
+
+final selectedCityProvider =
+    NotifierProvider<SelectedCityNotifier, String?>(SelectedCityNotifier.new);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // realTimeProvider
