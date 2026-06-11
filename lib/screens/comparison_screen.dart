@@ -2,9 +2,9 @@
 // OpsFlood — Station Comparison v2.0
 //
 // Sources:
-//   • liveLevelsProvider   → FloodData stations (CWC national + Bihar WRD)
-//   • mergedStationsProvider → RiverStation objects (CWC + Bihar live)
-// All sources are merged, de-duplicated by stationId/city, then displayed.
+//   • liveLevelsProvider      → FloodData stations (CWC national + Bihar WRD)
+//   • mergedStationsProvider  → RiverStation objects (CWC + Bihar live)
+// All sources are merged, de-duplicated by id/city, then displayed.
 // Up to 4 stations can be selected for side-by-side comparison.
 
 import 'package:flutter/material.dart';
@@ -15,7 +15,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../models/flood_data.dart';
 import '../models/river_station.dart';
 import '../providers/flood_providers.dart';
-import '../providers/cwc_provider.dart';
+import '../providers/real_time_river_provider.dart'; // mergedStationsProvider
 import '../theme/river_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,8 +50,7 @@ class CompStation {
 
   String get trendLabel {
     if (history.length < 2) return '=';
-    final delta =
-        history.last.level - history[history.length - 2].level;
+    final delta = history.last.level - history[history.length - 2].level;
     if (delta > 0.05) return '↑';
     if (delta < -0.05) return '↓';
     return '=';
@@ -74,11 +73,12 @@ class CompStation {
   }
 
   // Build from FloodData (liveLevelsProvider)
+  // FloodData has no stationId field — use city as the dedup key.
   factory CompStation.fromFloodData(FloodData d) {
-    final danger  = d.dangerLevel  ?? d.currentLevel * 1.15;
-    final warning = d.warningLevel ?? d.currentLevel * 0.92;
+    final danger  = d.dangerLevel  > 0 ? d.dangerLevel  : d.currentLevel * 1.15;
+    final warning = d.warningLevel > 0 ? d.warningLevel : d.currentLevel * 0.92;
     return CompStation(
-      id:           d.stationId ?? d.city,
+      id:           d.city,
       name:         d.city,
       river:        d.riverName ?? 'Unknown',
       state:        d.state,
@@ -91,16 +91,21 @@ class CompStation {
   }
 
   // Build from RiverStation (mergedStationsProvider)
+  // Actual RiverStation fields:
+  //   current / warning / danger  (not currentLevel / warningLevel / dangerLevel)
+  //   station                     (used for both id and display name)
+  //   river                       (not riverName)
+  //   dataSource                  (not source)
   factory CompStation.fromRiverStation(RiverStation s) {
-    final current = s.currentLevel ?? 0.0;
-    final danger  = s.dangerLevel  ?? current * 1.15;
-    final warning = s.warningLevel ?? current * 0.92;
+    final current = s.current;
+    final danger  = s.danger  > 0 ? s.danger  : current * 1.15;
+    final warning = s.warning > 0 ? s.warning : current * 0.92;
     return CompStation(
-      id:           s.stationCode,
-      name:         s.stationName,
-      river:        s.riverName,
-      state:        s.state ?? '',
-      source:       s.source ?? 'CWC',
+      id:           s.station,
+      name:         s.station,
+      river:        s.river,
+      state:        s.state,
+      source:       s.dataSource ?? 'CWC',
       currentLevel: current,
       dangerLevel:  danger,
       warningLevel: warning,
@@ -113,8 +118,8 @@ class CompStation {
   static List<_LevelPoint> _syntheticHistory(
       double current, double danger) {
     return List.generate(24, (i) {
-      final frac  = i / 23.0;
-      final base  = (current * 0.93) + (current * 0.07 * frac);
+      final frac = i / 23.0;
+      final base = (current * 0.93) + (current * 0.07 * frac);
       return _LevelPoint(i.toDouble(), base);
     });
   }
@@ -130,26 +135,28 @@ class _LevelPoint {
 // Provider: derive CompStation list from live Riverpod state
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// allCompStationsProvider is a derived Riverpod Provider that watches both
+/// upstream providers; the station list automatically updates whenever new
+/// data arrives from the API — no manual refresh needed in the comparison screen.
 final allCompStationsProvider = Provider<List<CompStation>>((ref) {
   // Source 1: FloodData live levels
   final liveList = ref.watch(liveLevelsProvider);
 
   // Source 2: RiverStation merged (CWC + Bihar CWC mirror)
-  final mergedAsync = ref.watch(mergedStationsProvider);
-  final riverList   = mergedAsync.valueOrNull ?? [];
+  final riverList = ref.watch(mergedStationsProvider);
 
-  final seen  = <String>{};
+  final seen   = <String>{};
   final result = <CompStation>[];
 
   // FloodData first (richer metadata)
   for (final d in liveList) {
-    final key = (d.stationId ?? d.city).toLowerCase();
+    final key = d.city.toLowerCase();
     if (seen.add(key)) result.add(CompStation.fromFloodData(d));
   }
 
-  // RiverStation additions (skip already-seen by code)
+  // RiverStation additions (skip already-seen by station name)
   for (final s in riverList) {
-    final key = s.stationCode.toLowerCase();
+    final key = s.station.toLowerCase();
     if (seen.add(key)) result.add(CompStation.fromRiverStation(s));
   }
 
@@ -181,16 +188,16 @@ class ComparisonScreen extends ConsumerStatefulWidget {
       _ComparisonScreenState();
 }
 
-class _ComparisonScreenState
-    extends ConsumerState<ComparisonScreen> {
+class _ComparisonScreenState extends ConsumerState<ComparisonScreen> {
   final _selected   = <CompStation>[];
   final _searchCtrl = TextEditingController();
-  String _query     = '';
+  String _query        = '';
   String _sourceFilter = 'All'; // 'All' | 'Live' | 'CWC' | 'Bihar'
 
   List<CompStation> _filtered(List<CompStation> all) {
     return all.where((s) {
-      final matchesQuery = s.name.toLowerCase().contains(_query.toLowerCase()) ||
+      final matchesQuery =
+          s.name.toLowerCase().contains(_query.toLowerCase()) ||
           s.river.toLowerCase().contains(_query.toLowerCase()) ||
           s.state.toLowerCase().contains(_query.toLowerCase());
       final matchesSource =
@@ -243,8 +250,8 @@ class _ComparisonScreenState
                     fontWeight: FontWeight.w800,
                     fontSize: 18)),
             Text('${all.length} stations available',
-                style: TextStyle(
-                    color: t.textSecondary, fontSize: 11)),
+                style:
+                    TextStyle(color: t.textSecondary, fontSize: 11)),
           ],
         ),
         actions: [
@@ -260,7 +267,6 @@ class _ComparisonScreenState
       ),
       body: Column(
         children: [
-          // ── Search + source filter ──
           _SearchBar(
             t: t,
             ctrl: _searchCtrl,
@@ -269,27 +275,18 @@ class _ComparisonScreenState
             onQueryChanged: (v) => setState(() => _query = v),
             onSourceChanged: (v) => setState(() => _sourceFilter = v),
           ),
-
-          // ── Station chip picker ──
           _StationPicker(
             t: t,
             stations: list,
             selected: _selected,
             onToggle: _toggle,
           ),
-
-          // ── Selected count badge ──
           if (_selected.isNotEmpty)
             _SelectedBar(t: t, selected: _selected),
-
-          // ── Body ──
           Expanded(
             child: _selected.isEmpty
                 ? _EmptyState(t: t, totalCount: all.length)
-                : _CompareBody(
-                    t: t,
-                    selected: _selected,
-                  ),
+                : _CompareBody(t: t, selected: _selected),
           ),
         ],
       ),
@@ -395,11 +392,12 @@ class _SourceChip extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  const _SourceChip(
-      {required this.t,
-      required this.label,
-      required this.active,
-      required this.onTap});
+  const _SourceChip({
+    required this.t,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -409,12 +407,9 @@ class _SourceChip extends StatelessWidget {
         padding:
             const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: active
-              ? t.accent.withValues(alpha: 0.15)
-              : t.cardBg,
+          color: active ? t.accent.withValues(alpha: 0.15) : t.cardBg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: active ? t.accent : t.stroke),
+          border: Border.all(color: active ? t.accent : t.stroke),
         ),
         child: Text(label,
             style: TextStyle(
@@ -447,9 +442,11 @@ class _StationPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     if (stations.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        padding:
+            const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         child: Text('No stations match your search.',
-            style: TextStyle(color: t.textSecondary, fontSize: 13)),
+            style:
+                TextStyle(color: t.textSecondary, fontSize: 13)),
       );
     }
     return SizedBox(
@@ -461,10 +458,12 @@ class _StationPicker extends StatelessWidget {
         itemCount: stations.length,
         separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (_, i) {
-          final s      = stations[i];
+          final s     = stations[i];
           final picked = selected.any((x) => x.id == s.id);
-          final idx    = selected.indexWhere((x) => x.id == s.id);
-          final color  = picked ? _chartColors[idx % 4] : t.textSecondary;
+          final idx   = selected.indexWhere((x) => x.id == s.id);
+          final color = picked
+              ? _chartColors[idx % 4]
+              : t.textSecondary;
 
           return GestureDetector(
             onTap: () => onToggle(s),
@@ -535,7 +534,8 @@ class _SelectedBar extends StatelessWidget {
     return Container(
       padding:
           const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         color: t.cardBg,
         borderRadius: BorderRadius.circular(10),
@@ -608,8 +608,8 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             '$totalCount stations loaded • scroll the chips above',
-            style: TextStyle(
-                color: t.textSecondary, fontSize: 12),
+            style:
+                TextStyle(color: t.textSecondary, fontSize: 12),
           ),
         ],
       ),
@@ -624,8 +624,7 @@ class _EmptyState extends StatelessWidget {
 class _CompareBody extends StatelessWidget {
   final RiverColors t;
   final List<CompStation> selected;
-  const _CompareBody(
-      {required this.t, required this.selected});
+  const _CompareBody({required this.t, required this.selected});
 
   @override
   Widget build(BuildContext context) {
@@ -653,8 +652,7 @@ class _CompareBody extends StatelessWidget {
 class _ChartCard extends StatelessWidget {
   final RiverColors t;
   final List<CompStation> selected;
-  const _ChartCard(
-      {required this.t, required this.selected});
+  const _ChartCard({required this.t, required this.selected});
 
   @override
   Widget build(BuildContext context) {
@@ -705,8 +703,7 @@ class _ChartCard extends StatelessWidget {
                       getTitlesWidget: (v, _) => Text(
                         '${v.toInt()}h',
                         style: TextStyle(
-                            color: t.textSecondary,
-                            fontSize: 9),
+                            color: t.textSecondary, fontSize: 9),
                       ),
                     ),
                   ),
@@ -717,8 +714,7 @@ class _ChartCard extends StatelessWidget {
                       getTitlesWidget: (v, _) => Text(
                         v.toStringAsFixed(1),
                         style: TextStyle(
-                            color: t.textSecondary,
-                            fontSize: 9),
+                            color: t.textSecondary, fontSize: 9),
                       ),
                     ),
                   ),
@@ -807,8 +803,7 @@ class _ChartCard extends StatelessWidget {
 class _SummaryTable extends StatelessWidget {
   final RiverColors t;
   final List<CompStation> selected;
-  const _SummaryTable(
-      {required this.t, required this.selected});
+  const _SummaryTable({required this.t, required this.selected});
 
   @override
   Widget build(BuildContext context) {
@@ -839,8 +834,8 @@ class _SummaryTable extends StatelessWidget {
             children: [
               TableRow(
                 decoration: BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(color: t.stroke))),
+                    border: Border(
+                        bottom: BorderSide(color: t.stroke))),
                 children: [
                   _th(t, 'Station'),
                   _th(t, 'Level (m)'),
@@ -938,8 +933,7 @@ class _SummaryTable extends StatelessWidget {
 class _DangerBars extends StatelessWidget {
   final RiverColors t;
   final List<CompStation> selected;
-  const _DangerBars(
-      {required this.t, required this.selected});
+  const _DangerBars({required this.t, required this.selected});
 
   @override
   Widget build(BuildContext context) {
@@ -1039,14 +1033,12 @@ class _DangerBars extends StatelessWidget {
                       Text(
                         'Current: ${s.currentLevel.toStringAsFixed(2)} m',
                         style: TextStyle(
-                            color: t.textSecondary,
-                            fontSize: 10),
+                            color: t.textSecondary, fontSize: 10),
                       ),
                       Text(
                         'Danger: ${s.dangerLevel.toStringAsFixed(2)} m',
                         style: TextStyle(
-                            color: t.textSecondary,
-                            fontSize: 10),
+                            color: t.textSecondary, fontSize: 10),
                       ),
                     ],
                   ),
