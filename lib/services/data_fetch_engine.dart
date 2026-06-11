@@ -270,7 +270,6 @@ class DataFetchEngine {
   static const _fcmStaleness  = Duration(minutes: 3);
   static const _maxBackoffMin = Duration(minutes: 5);
 
-  // CWC station codes to query from the backend
   static const _cwcCodes = <String>[
     'KOSI-BIRPUR', 'KOSI-BASUA', 'KOSI-KURSELA',
     'GANDAK-DUMARIAGHAT', 'GANDAK-HAJIPUR',
@@ -278,7 +277,6 @@ class DataFetchEngine {
     'PUNPUN-SRIPALPUR',
   ];
 
-  // Map backend CWC code → gauge station name (for merging into station map)
   static const _cwcCodeToStation = <String, String>{
     'KOSI-BIRPUR':        'Birpur (CWC)',
     'KOSI-BASUA':         'Basua',
@@ -291,7 +289,12 @@ class DataFetchEngine {
   };
 
   final _ctrl = StreamController<DataFetchSnapshot>.broadcast();
+
+  /// Primary stream — subscribe to receive every new snapshot.
   Stream<DataFetchSnapshot> get stream => _ctrl.stream;
+
+  /// Alias so call-sites using .alertStream keep compiling.
+  Stream<DataFetchSnapshot> get alertStream => _ctrl.stream;
 
   DataFetchSnapshot? _last;
   DataFetchSnapshot? get last => _last;
@@ -351,7 +354,6 @@ class DataFetchEngine {
     final now     = DateTime.now();
     final api     = BackendApiService.instance;
 
-    // ── Step 1: Seed ──────────────────────────────────────────────────────────
     final Map<String, StationReading> stations = {};
     for (final g in kBiharGauges) {
       final key  = _normaliseKey(g.station);
@@ -380,7 +382,6 @@ class DataFetchEngine {
         name: 'SEED', healthy: true,
         stationCount: stations.length, isFromSeed: true));
 
-    // ── Step 2: WRD Bihar (via BackendApiService) ─────────────────────────────
     final wrdStart = DateTime.now();
     int wrdCount   = 0;
     _wrdForecast24h.clear();
@@ -425,7 +426,6 @@ class DataFetchEngine {
       _log('WRD Bihar failed: $e');
     }
 
-    // ── Step 3: CWC stations (via backend /api/cwc-stations) ─────────────────
     final cwcStart = DateTime.now();
     int   cwcCount = 0;
     try {
@@ -456,7 +456,6 @@ class DataFetchEngine {
         lastSuccessAt: cwcCount > 0 ? now : null,
       ));
     } catch (e) {
-      // Backend /api/cwc-stations may not exist yet — non-fatal
       sources.add(SourceStatus(
         name:         'CWC_FFS',
         healthy:      false,
@@ -466,7 +465,6 @@ class DataFetchEngine {
       _log('CWC backend fetch failed (non-fatal): $e');
     }
 
-    // ── Step 4: GloFAS + Open-Meteo rainfall (via backend) ───────────────────
     final stList = stations.values.toList();
     final lats   = stList.map((s) => s.lat).toList();
     final lons   = stList.map((s) => s.lon).toList();
@@ -512,7 +510,6 @@ class DataFetchEngine {
       _log('Rainfall (backend) failed: $e');
     }
 
-    // Merge GloFAS + rain into SEED-only stations
     for (int i = 0; i < stList.length; i++) {
       final s    = stList[i];
       final key  = _normaliseKey(s.stationName);
@@ -537,7 +534,6 @@ class DataFetchEngine {
       }
     }
 
-    // ── Step 5: Rate of rise ──────────────────────────────────────────────────
     final withRoR = <StationReading>[];
     for (final s in stations.values) {
       final key  = _normaliseKey(s.stationName);
@@ -554,7 +550,6 @@ class DataFetchEngine {
       withRoR.add(s.copyWith(rateOfRiseMph: ror));
     }
 
-    // ── Step 6: 24/48/72h forecast ────────────────────────────────────────────
     final finalList = withRoR.map((s) {
       if (!s.isLive) return s;
       final key      = _normaliseKey(s.stationName);
