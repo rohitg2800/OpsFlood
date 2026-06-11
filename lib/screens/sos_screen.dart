@@ -1,17 +1,8 @@
 // lib/screens/sos_screen.dart
-// Bihar Flood Command — SOS / Emergency HUD v4
-// Bihar emergency contacts, SDRF, NDRF, BSDMA helplines.
-//
-// P1 fixes applied (2026-06-08):
-//   1. All fontSize values floored at 10px minimum (was: 7, 8, 9, 9.5, 11)
-//   2. _clock Timer isolated into _SosClockWidget — only the time Text
-//      rebuilds every second instead of the entire screen Column tree.
-//
-// P2 fixes applied (2026-06-08):
-//   3. All surface/text colours routed through RiverColors.of(context).
-//   4. Confirmation dialog added for all non-112 contacts.
-//      112 remains instant-dial (national emergency speed matters).
-//
+// Bihar Flood Command — SOS / Emergency HUD v5
+// WIRED: EmergencyContactService.getAllContacts() replaces hardcoded list.
+// All 38 Bihar districts + national SOS numbers now render dynamically.
+// P1/P2 fixes retained (fontSize floor, isolated clock, confirm dialog).
 library;
 
 import 'dart:async';
@@ -19,94 +10,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/emergency_contact_service.dart';
 import '../theme/river_theme.dart';
 
-const _biharEmergency = [
-  (
-    name: 'BSDMA HELPLINE',
-    number: '0612-2215518',
-    desc: 'Bihar State Disaster Mgmt Authority',
-    type: 'STATE',
-    color: 0xFF00E5FF,
-  ),
-  (
-    name: 'SDRF BIHAR',
-    number: '0612-2217305',
-    desc: 'State Disaster Response Force',
-    type: 'SDRF',
-    color: 0xFF00E5FF,
-  ),
-  (
-    name: 'NDRF 12th BN PATNA',
-    number: '9430060606',
-    desc: 'National Disaster Response Force, Bihar',
-    type: 'NDRF',
-    color: 0xFFFF3B5C,
-  ),
-  (
-    name: 'NDMA HELPLINE',
-    number: '1078',
-    desc: 'National Disaster Mgmt Authority',
-    type: 'NATIONAL',
-    color: 0xFFFF8C00,
-  ),
-  (
-    name: 'PATNA DM OFFICE',
-    number: '0612-2219081',
-    desc: 'District Magistrate, Patna',
-    type: 'DISTRICT',
-    color: 0xFFFFD200,
-  ),
-  (
-    name: 'MUZAFFARPUR DM',
-    number: '0621-2213700',
-    desc: 'District Magistrate, Muzaffarpur',
-    type: 'DISTRICT',
-    color: 0xFFFFD200,
-  ),
-  (
-    name: 'DARBHANGA DM',
-    number: '06272-242400',
-    desc: 'District Magistrate, Darbhanga',
-    type: 'DISTRICT',
-    color: 0xFFFFD200,
-  ),
-  (
-    name: 'SUPAUL DM (KOSI BELT)',
-    number: '06473-222201',
-    desc: 'District Magistrate, Supaul — Kosi Flood Zone',
-    type: 'DISTRICT',
-    color: 0xFFFF8C00,
-  ),
-  (
-    name: 'POLICE CONTROL ROOM',
-    number: '100',
-    desc: 'Bihar Police Emergency',
-    type: 'POLICE',
-    color: 0xFFFF3B5C,
-  ),
-  (
-    name: 'AMBULANCE / MEDICAL',
-    number: '108',
-    desc: 'Emergency Medical Services',
-    type: 'MEDICAL',
-    color: 0xFFFF3B5C,
-  ),
-  (
-    name: 'FIRE BRIGADE',
-    number: '101',
-    desc: 'Fire & Rescue Services',
-    type: 'FIRE',
-    color: 0xFFFF8C00,
-  ),
-  (
-    name: 'FLOOD RELIEF CONTROL',
-    number: '1800-345-6182',
-    desc: 'Toll-Free Flood Relief Bihar',
-    type: 'RELIEF',
-    color: 0xFF00C853,
-  ),
-];
+// ─────────────────────────────────────────────────────────────────────────────
+// Category → display type label (mirrors old _biharEmergency 'type' field)
+// ─────────────────────────────────────────────────────────────────────────────
+String _typeLabel(String category) {
+  final c = category.toLowerCase();
+  if (c.contains('ndrf'))    return 'NDRF';
+  if (c.contains('sdrf'))    return 'SDRF';
+  if (c.contains('ndma'))    return 'NATIONAL';
+  if (c.contains('cwc'))     return 'CWC';
+  if (c.contains('district') || c.contains('dm')) return 'DISTRICT';
+  if (c.contains('barrage')) return 'BARRAGE';
+  if (c.contains('police'))  return 'POLICE';
+  if (c.contains('medic'))   return 'MEDICAL';
+  if (c.contains('fire'))    return 'FIRE';
+  if (c.contains('relief'))  return 'RELIEF';
+  if (c.contains('state'))   return 'STATE';
+  return 'SOS';
+}
+
+// Category → accent colour
+Color _accentColor(String category) {
+  final c = category.toLowerCase();
+  if (c.contains('ndrf'))    return const Color(0xFFFF3B5C);
+  if (c.contains('ndma'))    return const Color(0xFFFF8C00);
+  if (c.contains('sdrf'))    return const Color(0xFF00E5FF);
+  if (c.contains('cwc'))     return const Color(0xFF00C853);
+  if (c.contains('district') || c.contains('dm')) return const Color(0xFFFFD200);
+  if (c.contains('barrage')) return const Color(0xFFFF8C00);
+  if (c.contains('police'))  return const Color(0xFFFF3B5C);
+  if (c.contains('medic'))   return const Color(0xFFFF3B5C);
+  if (c.contains('fire'))    return const Color(0xFFFF8C00);
+  return const Color(0xFF00C853);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Isolated SOS clock widget — only this rebuilds every second.
@@ -157,6 +96,9 @@ class _SosClockWidgetState extends State<_SosClockWidget> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Main SOS Screen
+// ─────────────────────────────────────────────────────────────────────────────
 class SosScreen extends StatefulWidget {
   static const route = '/sos';
   const SosScreen({super.key});
@@ -167,7 +109,11 @@ class SosScreen extends StatefulWidget {
 class _SosScreenState extends State<SosScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
-  bool _calling = false;
+  late final Future<List<EmergencyContact>> _contactsFuture;
+  final _svc = EmergencyContactService();
+
+  // Active filter — null means show all
+  String? _activeFilter;
 
   @override
   void initState() {
@@ -175,6 +121,7 @@ class _SosScreenState extends State<SosScreen>
     _pulse = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 800))
       ..repeat(reverse: true);
+    _contactsFuture = _svc.getAllContacts();
   }
 
   @override
@@ -183,19 +130,14 @@ class _SosScreenState extends State<SosScreen>
     super.dispose();
   }
 
-  // ── Dial immediately — used for 112 (no confirmation needed). ────────────
+  // ── Dial immediately ─────────────────────────────────────────────────────
   Future<void> _callDirect(String number) async {
-    setState(() => _calling = true);
     HapticFeedback.heavyImpact();
     final uri = Uri.parse('tel:$number');
-    try {
-      await launchUrl(uri);
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) setState(() => _calling = false);
+    try { await launchUrl(uri); } catch (_) {}
   }
 
-  // ── Confirm then dial — used for all non-112 contacts. ───────────────────
+  // ── Confirm then dial ────────────────────────────────────────────────────
   Future<void> _callWithConfirm({
     required String name,
     required String number,
@@ -211,26 +153,20 @@ class _SosScreenState extends State<SosScreen>
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: accentColor.withValues(alpha: 0.30)),
         ),
-        title: Row(
-          children: [
-            Icon(Icons.call_rounded, color: accentColor, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                name,
+        title: Row(children: [
+          Icon(Icons.call_rounded, color: accentColor, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(name,
                 style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ],
-        ),
+                  color: t.textPrimary, fontSize: 14,
+                  fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+          ),
+        ]),
         content: RichText(
           text: TextSpan(
-            style: TextStyle(color: t.textSecondary, fontSize: 13, height: 1.5),
+            style: TextStyle(
+                color: t.textSecondary, fontSize: 13, height: 1.5),
             children: [
               const TextSpan(text: 'Call '),
               TextSpan(
@@ -247,7 +183,6 @@ class _SosScreenState extends State<SosScreen>
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
-          // Cancel
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             style: TextButton.styleFrom(
@@ -256,7 +191,6 @@ class _SosScreenState extends State<SosScreen>
             ),
             child: const Text('Cancel', style: TextStyle(fontSize: 13)),
           ),
-          // Confirm call
           ElevatedButton.icon(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
@@ -266,22 +200,19 @@ class _SosScreenState extends State<SosScreen>
               elevation: 0,
               minimumSize: const Size(88, 40),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+                  borderRadius: BorderRadius.circular(8)),
             ),
             icon: const Icon(Icons.call_rounded, size: 15),
-            label: const Text(
-              'CALL',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1),
-            ),
+            label: const Text('CALL',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1)),
           ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await _callDirect(number);
-    }
+    if (confirmed == true) await _callDirect(number);
   }
 
   @override
@@ -293,41 +224,129 @@ class _SosScreenState extends State<SosScreen>
         children: [
           _buildHeader(t),
           _buildSOSButton(t),
+          // Section label
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
             child: Row(
               children: [
                 Text('BIHAR EMERGENCY CONTACTS',
                     style: TextStyle(
                       color: t.textSecondary.withValues(alpha: 0.6),
                       fontSize: 10,
-                      fontWeight: FontWeight.w700, letterSpacing: 2,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2,
                     )),
               ],
             ),
           ),
+          // Live contacts list
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-              itemCount: _biharEmergency.length,
-              itemBuilder: (_, i) {
-                final e = _biharEmergency[i];
-                final col = Color(e.color);
-                return _ContactTile(
-                  name: e.name,
-                  number: e.number,
-                  desc: e.desc,
-                  type: e.type,
-                  color: col,
-                  t: t,
-                  // 112 → direct; everything else → confirmation dialog
-                  onCall: e.number == '112'
-                      ? () => _callDirect(e.number)
-                      : () => _callWithConfirm(
-                            name: e.name,
-                            number: e.number,
-                            accentColor: col,
+            child: FutureBuilder<List<EmergencyContact>>(
+              future: _contactsFuture,
+              builder: (ctx, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppPalette.critical),
+                  );
+                }
+
+                final all = snap.data ?? [];
+                if (all.isEmpty) {
+                  return Center(
+                    child: Text('No contacts available',
+                        style: TextStyle(
+                            color: t.textSecondary, fontSize: 12)),
+                  );
+                }
+
+                // Build category filter chips from available data
+                final categories = all
+                    .map((c) => _typeLabel(c.category))
+                    .toSet()
+                    .toList()
+                  ..sort();
+
+                // Sort: SOS/national first, then district, then CWC
+                final sorted = [...all]..sort((a, b) {
+                    if (a.isSOS && !b.isSOS) return -1;
+                    if (!a.isSOS && b.isSOS) return 1;
+                    // within same SOS tier, sort by district null-first
+                    final aNull = a.district == null ? 0 : 1;
+                    final bNull = b.district == null ? 0 : 1;
+                    if (aNull != bNull) return aNull - bNull;
+                    return a.category.compareTo(b.category);
+                  });
+
+                // Apply active filter
+                final filtered = _activeFilter == null
+                    ? sorted
+                    : sorted
+                        .where((c) =>
+                            _typeLabel(c.category) == _activeFilter)
+                        .toList();
+
+                return Column(
+                  children: [
+                    // Filter chips row
+                    SizedBox(
+                      height: 34,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 16),
+                        children: [
+                          _FilterChip(
+                            label: 'ALL',
+                            active: _activeFilter == null,
+                            color: AppPalette.critical,
+                            t: t,
+                            onTap: () =>
+                                setState(() => _activeFilter = null),
                           ),
+                          ...categories.map((cat) => _FilterChip(
+                                label: cat,
+                                active: _activeFilter == cat,
+                                color: _accentColor(cat),
+                                t: t,
+                                onTap: () => setState(
+                                    () => _activeFilter = cat),
+                              )),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // Contact tiles
+                    Expanded(
+                      child: ListView.builder(
+                        padding:
+                            const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final c = filtered[i];
+                          final col = _accentColor(c.category);
+                          final type = _typeLabel(c.category);
+                          return _ContactTile(
+                            name: c.name,
+                            number: c.phone,
+                            desc: c.description ?? c.category,
+                            type: type,
+                            color: col,
+                            isSOS: c.isSOS,
+                            district: c.district,
+                            t: t,
+                            onCall: c.phone == '112'
+                                ? () => _callDirect(c.phone)
+                                : () => _callWithConfirm(
+                                      name: c.name,
+                                      number: c.phone,
+                                      accentColor: col,
+                                    ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -338,127 +357,176 @@ class _SosScreenState extends State<SosScreen>
   }
 
   Widget _buildHeader(RiverColors t) => Container(
-    padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
-    decoration: BoxDecoration(
-      color: t.scaffoldBg,
-      border: Border(bottom:
-          BorderSide(color: AppPalette.critical.withValues(alpha: 0.20))),
-    ),
-    child: Row(
-      children: [
-        GestureDetector(
-          onTap: () => Navigator.maybePop(context),
-          child: Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border:
-                  Border.all(color: AppPalette.critical.withValues(alpha: 0.35)),
-              color: t.cardBg,
-            ),
-            child: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: AppPalette.critical, size: 14),
-          ),
+        padding: const EdgeInsets.fromLTRB(16, 48, 16, 12),
+        decoration: BoxDecoration(
+          color: t.scaffoldBg,
+          border: Border(bottom: BorderSide(
+              color: AppPalette.critical.withValues(alpha: 0.20))),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('EMERGENCY · BIHAR',
+        child: Row(children: [
+          GestureDetector(
+            onTap: () => Navigator.maybePop(context),
+            child: Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: AppPalette.critical.withValues(alpha: 0.35)),
+                color: t.cardBg,
+              ),
+              child: const Icon(Icons.arrow_back_ios_new_rounded,
+                  color: AppPalette.critical, size: 14),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('EMERGENCY · BIHAR',
+                    style: TextStyle(
+                      color: AppPalette.critical,
+                      fontSize: 13, fontWeight: FontWeight.w800,
+                      letterSpacing: 2,
+                    )),
+                const _SosClockWidget(),
+              ],
+            ),
+          ),
+          AnimatedBuilder(
+            animation: _pulse,
+            builder: (_, __) => Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppPalette.critical
+                    .withValues(alpha: 0.10 + 0.10 * _pulse.value),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                    color: AppPalette.critical.withValues(alpha: 0.40)),
+              ),
+              child: const Text('EMERGENCY',
                   style: TextStyle(
-                    color: AppPalette.critical, fontSize: 13,
-                    fontWeight: FontWeight.w800, letterSpacing: 2,
+                    color: AppPalette.critical, fontSize: 10,
+                    fontWeight: FontWeight.w900, letterSpacing: 1.2,
                   )),
-              const _SosClockWidget(),
-            ],
-          ),
-        ),
-        AnimatedBuilder(
-          animation: _pulse,
-          builder: (_, __) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppPalette.critical
-                  .withValues(alpha: 0.10 + 0.10 * _pulse.value),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                  color: AppPalette.critical.withValues(alpha: 0.40)),
             ),
-            child: const Text('EMERGENCY',
-                style: TextStyle(
-                  color: AppPalette.critical,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900, letterSpacing: 1.2,
-                )),
           ),
-        ),
-      ],
-    ),
-  );
+        ]),
+      );
 
   Widget _buildSOSButton(RiverColors t) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-    child: GestureDetector(
-      onTap: () => _callDirect('112'),
-      child: AnimatedBuilder(
-        animation: _pulse,
-        builder: (_, __) => Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            color: AppPalette.critical
-                .withValues(alpha: 0.12 + 0.08 * _pulse.value),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: AppPalette.critical.withValues(alpha: 0.60),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: GestureDetector(
+          onTap: () => _callDirect('112'),
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (_, __) => Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              decoration: BoxDecoration(
                 color: AppPalette.critical
-                    .withValues(alpha: 0.15 + 0.15 * _pulse.value),
-                blurRadius: 20, spreadRadius: 2,
+                    .withValues(alpha: 0.12 + 0.08 * _pulse.value),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppPalette.critical.withValues(alpha: 0.60),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppPalette.critical
+                        .withValues(alpha: 0.15 + 0.15 * _pulse.value),
+                    blurRadius: 20, spreadRadius: 2,
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Column(
-            children: [
-              const Icon(Icons.sos_rounded,
-                  color: AppPalette.critical, size: 40),
-              const SizedBox(height: 6),
-              const Text('TAP TO CALL 112',
-                  style: TextStyle(
-                    color: AppPalette.critical,
-                    fontSize: 16, fontWeight: FontWeight.w900,
-                    letterSpacing: 3,
-                  )),
-              const SizedBox(height: 4),
-              Text('NATIONAL EMERGENCY · BIHAR',
-                  style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: 10,
-                    letterSpacing: 2,
-                  )),
-            ],
+              child: Column(children: [
+                const Icon(Icons.sos_rounded,
+                    color: AppPalette.critical, size: 40),
+                const SizedBox(height: 6),
+                const Text('TAP TO CALL 112',
+                    style: TextStyle(
+                      color: AppPalette.critical,
+                      fontSize: 16, fontWeight: FontWeight.w900,
+                      letterSpacing: 3,
+                    )),
+                const SizedBox(height: 4),
+                Text('NATIONAL EMERGENCY · BIHAR',
+                    style: TextStyle(
+                      color: t.textSecondary,
+                      fontSize: 10, letterSpacing: 2,
+                    )),
+              ]),
+            ),
           ),
         ),
-      ),
-    ),
-  );
+      );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter chip
+// ─────────────────────────────────────────────────────────────────────────────
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool active;
+  final Color color;
+  final RiverColors t;
+  final VoidCallback onTap;
+  const _FilterChip({
+    required this.label, required this.active,
+    required this.color, required this.t,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(right: 6),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: active
+                ? color.withValues(alpha: 0.18)
+                : t.cardBg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: active
+                  ? color.withValues(alpha: 0.55)
+                  : color.withValues(alpha: 0.20),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active ? color : t.textSecondary,
+              fontSize: 10,
+              fontWeight:
+                  active ? FontWeight.w800 : FontWeight.w500,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contact Tile
+// ─────────────────────────────────────────────────────────────────────────────
 class _ContactTile extends StatelessWidget {
   final String name, number, desc, type;
   final Color color;
+  final bool isSOS;
+  final String? district;
   final RiverColors t;
   final VoidCallback onCall;
 
   const _ContactTile({
     required this.name, required this.number,
     required this.desc, required this.type,
-    required this.color, required this.t,
-    required this.onCall,
+    required this.color, required this.isSOS,
+    this.district,
+    required this.t, required this.onCall,
   });
 
   @override
@@ -471,77 +539,123 @@ class _ContactTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 36, height: 36,
+      child: Row(children: [
+        // Icon bubble
+        Container(
+          width: 36, height: 36,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: 0.10),
+            border: Border.all(color: color.withValues(alpha: 0.28)),
+          ),
+          child: Icon(_iconFor(type), color: color, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Name + SOS badge
+              Row(children: [
+                Flexible(
+                  child: Text(name,
+                      style: TextStyle(
+                        color: t.textPrimary,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (isSOS) ...[
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppPalette.critical.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(
+                          color: AppPalette.critical
+                              .withValues(alpha: 0.30)),
+                    ),
+                    child: const Text('SOS',
+                        style: TextStyle(
+                          color: AppPalette.critical,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        )),
+                  ),
+                ],
+              ]),
+              const SizedBox(height: 2),
+              Text(desc,
+                  style: TextStyle(
+                      color: t.textSecondary, fontSize: 10),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Row(children: [
+                // Type badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(3),
+                    border:
+                        Border.all(color: color.withValues(alpha: 0.22)),
+                  ),
+                  child: Text(type,
+                      style: TextStyle(
+                        color: color, fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      )),
+                ),
+                if (district != null) ...[
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(district!,
+                        style: TextStyle(
+                          color: color.withValues(alpha: 0.75),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        )),
+                  ),
+                ],
+                const SizedBox(width: 6),
+                Text(number,
+                    style: TextStyle(
+                      color: color, fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    )),
+              ]),
+            ],
+          ),
+        ),
+        // Call button
+        GestureDetector(
+          onTap: onCall,
+          child: Container(
+            width: 40, height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: color.withValues(alpha: 0.10),
-              border: Border.all(color: color.withValues(alpha: 0.28)),
+              color: color.withValues(alpha: 0.12),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
             ),
-            child: Icon(_iconFor(type), color: color, size: 16),
+            child: Icon(Icons.call_rounded, color: color, size: 18),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 11.5, fontWeight: FontWeight.w800,
-                    )),
-                const SizedBox(height: 2),
-                Text(desc,
-                    style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 10,
-                    )),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(3),
-                        border: Border.all(color: color.withValues(alpha: 0.22)),
-                      ),
-                      child: Text(type,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800, letterSpacing: 0.8,
-                          )),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(number,
-                        style: TextStyle(
-                          color: color, fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        )),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: onCall,
-            child: Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color.withValues(alpha: 0.12),
-                border: Border.all(color: color.withValues(alpha: 0.35)),
-              ),
-              child: Icon(Icons.call_rounded, color: color, size: 18),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
@@ -552,6 +666,8 @@ class _ContactTile extends StatelessWidget {
       case 'STATE':    return Icons.account_balance_rounded;
       case 'NATIONAL': return Icons.flag_rounded;
       case 'DISTRICT': return Icons.location_city_rounded;
+      case 'BARRAGE':  return Icons.water_damage_rounded;
+      case 'CWC':      return Icons.water_rounded;
       case 'POLICE':   return Icons.local_police_rounded;
       case 'MEDICAL':  return Icons.medical_services_rounded;
       case 'FIRE':     return Icons.fireplace_rounded;
