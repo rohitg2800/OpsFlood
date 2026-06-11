@@ -1,5 +1,5 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v4.1  (M5 fix: tileOpacity → opacity for flutter_map 8.x)
+// OpsFlood — BiharRiverMapScreen v4.2  (M6 fix: wrap precip TileLayer in Opacity widget for flutter_map 8.x)
 library;
 
 import 'package:flutter/material.dart';
@@ -244,13 +244,16 @@ class _BiharRiverMapScreenState
                       'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
                   userAgentPackageName: 'com.rohitg.floodwatch',
                 ),
-              // M5 FIX: flutter_map 8.x uses `opacity` not `tileOpacity`
+              // M6 FIX: flutter_map 8.x dropped TileLayer(opacity:).
+              // Wrap the TileLayer in an Opacity widget instead.
               if (_showPrecip && owmUrl.isNotEmpty)
-                TileLayer(
-                  urlTemplate:          owmUrl,
-                  userAgentPackageName: 'com.rohitg.floodwatch',
-                  opacity:              _precipOpacity,
-                  backgroundColor:      Colors.transparent,
+                Opacity(
+                  opacity: _precipOpacity,
+                  child: TileLayer(
+                    urlTemplate:          owmUrl,
+                    userAgentPackageName: 'com.rohitg.floodwatch',
+                    backgroundColor:      Colors.transparent,
+                  ),
                 ),
               MarkerLayer(
                 markers: gauges.map((gauge) {
