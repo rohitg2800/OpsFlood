@@ -1,13 +1,19 @@
-// lib/providers/real_time_river_provider.dart  v8.0
+// lib/providers/real_time_river_provider.dart  v8.1
 //
-// v8: liveEngineStationsProvider injected as the TOP priority tier so
+// v8.1 fix:
+//   • Bihar-only guard added to dfStations filter inside mergedStationsProvider.
+//     Any non-Bihar station that leaks from dataFetchStationsProvider
+//     (e.g. backend /api/cwc-stations returning all-India rows) is now
+//     dropped before it reaches the merged list.
+//   • Added _isBihar() helper consistent with IndiaStationsService.
+//
+// v8.0: liveEngineStationsProvider injected as the TOP priority tier so
 //     BiharLiveEngine's real-time readings override any seed current=0 values.
-//     This makes map markers and district polygons colour-correct.
 //
 // Priority ladder (highest → lowest):
 //   ❸ LiveEngine  (BiharLiveEngine feed, updated every 15 min)
 //   ❷ live-CWC    (CWC FFEM BEFIQR scraper)
-//   ❶ DataFetch   (backend API)
+//   ❶ DataFetch   (backend API) ← Bihar-filtered ★ v8.1
 //   ❵ WRD Bihar
 //   ❴ seed-CWC    (static fallback)
 //   Birpur always explicit via kosiBirpurProvider
@@ -24,7 +30,14 @@ import 'station_history_provider.dart';
 import 'cwc_provider.dart';
 import 'data_fetch_provider.dart';
 import 'kosi_birpur_provider.dart';
-import 'live_engine_bridge_provider.dart';   // ★ NEW
+import 'live_engine_bridge_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bihar state filter — matches all known backend spellings
+// ─────────────────────────────────────────────────────────────────────────────
+const _kBiharAliases = {'bihar', 'br', 'state of bihar'};
+bool _isBihar(String state) =>
+    _kBiharAliases.contains(state.toLowerCase().trim());
 
 // ─────────────────────────────────────────────────────────────────────────────
 String _norm(String s) => s
@@ -155,24 +168,24 @@ final realTimeRiverProvider =
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. mergedStationsProvider — THE single source of truth for all screens
 //
-// Priority ladder (v8):
-//   ❸ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)  ★ NEW
+// Priority ladder (v8.1):
+//   ❸ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
 //   ❷ live-CWC   (CWC FFEM BEFIQR scraper)
-//   ❶ DataFetch  (backend API)
+//   ❶ DataFetch  (backend API) ← Bihar-only filter applied ★ v8.1
 //   ❵ WRD Bihar
 //   ❴ seed-CWC   (static fallback, lowest)
 //   Birpur always explicit via kosiBirpurProvider
 // ─────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
-  // ★ Tier 0 — BiharLiveEngine stations (real-time, highest priority)
-  final liveEngineRS  = ref.watch(liveEngineStationsProvider);
+  // Tier 0 — BiharLiveEngine stations (real-time, highest priority)
+  final liveEngineRS    = ref.watch(liveEngineStationsProvider);
   final liveEngineNames = { for (final s in liveEngineRS) _norm(s.station) };
 
-  final wrdAsync     = ref.watch(realTimeRiverProvider);
-  final cwcAsync     = ref.watch(cwcStationsProvider);
-  final birpurAsync  = ref.watch(kosiBirpurProvider);
+  final wrdAsync    = ref.watch(realTimeRiverProvider);
+  final cwcAsync    = ref.watch(cwcStationsProvider);
+  final birpurAsync = ref.watch(kosiBirpurProvider);
 
-  // ── FIX #1: never return [] on cold-start ────────────────────────
+  // Never return [] on cold-start — use WRD cache
   List<RiverStation> wrdList;
   if (wrdAsync.isLoading || wrdAsync.asData?.value == null) {
     final cached = WrdBiharService.instance.cachedStations;
@@ -181,7 +194,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     wrdList = wrdAsync.asData!.value;
   }
 
-  // ── Build Birpur entry from kosiBirpurProvider ─────────────────────
+  // Build Birpur entry from kosiBirpurProvider
   final RiverStation birpurStation;
   final birpurReading = birpurAsync.asData?.value;
   if (birpurReading != null) {
@@ -215,31 +228,41 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     );
   }
 
-  // ── live vs seed CWC ─────────────────────────────────────────────────
+  // Live vs seed CWC
   final allCwcStations = cwcAsync.asData?.value ?? const <CwcStation>[];
-  final cwcLive   = allCwcStations
+  final cwcLive = allCwcStations
       .where((s) => !s.isFromSeed && !_isBirpur(s.site)).toList();
-  final cwcSeed   = allCwcStations
+  final cwcSeed = allCwcStations
       .where((s) =>  s.isFromSeed && !_isBirpur(s.site)).toList();
 
-  final cwcLiveRS = cwcLive.map(_cwcToRiverStation).toList();
-  final cwcSeedRS = cwcSeed.map(_cwcToRiverStation).toList();
+  final cwcLiveRS    = cwcLive.map(_cwcToRiverStation).toList();
+  final cwcSeedRS    = cwcSeed.map(_cwcToRiverStation).toList();
   final cwcLiveNames = { for (final s in cwcLiveRS) _norm(s.station) };
 
-  // DataFetch: exclude LiveEngine + Birpur + seed-CWC names
-  final dfStations = ref.watch(dataFetchStationsProvider)
+  // ★ v8.1 — DataFetch: Bihar-only + exclude LiveEngine + Birpur + live-CWC
+  final allDfStations = ref.watch(dataFetchStationsProvider);
+  final dfStations = allDfStations
       .where((s) =>
+          _isBihar(s.state) &&                                          // ★ Bihar gate
           !_isBirpur(s.station) &&
-          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&
           !cwcLiveNames.any((n) => _sameStation(n, s.station)))
       .toList();
+
+  if (kDebugMode && allDfStations.length != dfStations.length) {
+    debugPrint(
+      '[Merged v8.1] dropped ${allDfStations.length - dfStations.length} '
+      'non-Bihar stations from DataFetch tier',
+    );
+  }
+
   final dfNames = { for (final s in dfStations) _norm(s.station) };
 
   // WRD: exclude LiveEngine + Birpur + already-covered stations
   final wrdFiltered = wrdList
       .where((s) =>
           !_isBirpur(s.station) &&
-          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&
           !cwcLiveNames.any((n) => _sameStation(n, s.station)) &&
           !dfNames.any((n) => _sameStation(n, s.station)))
       .toList();
@@ -248,15 +271,15 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   // Seed CWC: last resort
   final cwcSeedFiltered = cwcSeedRS
       .where((s) =>
-          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&
           !cwcLiveNames.any((n) => _sameStation(n, s.station)) &&
           !dfNames.any((n) => _sameStation(n, s.station)) &&
           !wrdNames.any((n) => _sameStation(n, s.station)))
       .toList();
 
-  // ── Final merge ──────────────────────────────────────────────────────────────
+  // Final merge
   final merged = [
-    ...liveEngineRS,         // ★ Tier 0 — always on top
+    ...liveEngineRS,
     ...cwcLiveRS,
     ...dfStations,
     ...wrdFiltered,
@@ -267,10 +290,10 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged v8] ${liveEngineRS.length} LiveEngine'
+      '[Merged v8.1] ${liveEngineRS.length} LiveEngine'
       ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
-      ' + ${dfStations.length} DataFetch'
+      ' + ${dfStations.length} DataFetch(Bihar)'
       ' + ${wrdFiltered.length} WRD'
       ' + 1 Birpur'
       ' = ${merged.length} total',
