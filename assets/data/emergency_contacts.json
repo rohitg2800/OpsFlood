@@ -5,7 +5,7 @@
     "phone": "1078",
     "category": "NDMA",
     "is_sos": true,
-    "description": "National Disaster Management Authority – 24×7"
+    "description": "National Disaster Management Authority \u2013 24\u00d77"
   },
   {
     "id": "ndrf_hq",
@@ -21,7 +21,7 @@
     "phone": "0612-2294204",
     "category": "SDRF Bihar",
     "is_sos": true,
-    "description": "Bihar State EOC – 24×7"
+    "description": "Bihar State EOC \u2013 24\u00d77"
   },
   {
     "id": "bihar_eocc_toll",
@@ -30,824 +30,6 @@
     "category": "SDRF Bihar",
     "is_sos": true,
     "description": "Toll-free state disaster helpline"
-  },
-  {
-    "id": "cwc_patna",
-    "name": "CWC Flood Forecasting – Patna",
-    "phone": "0612-2221735",
-    "category": "CWC",
-    "district": "Patna",
-    "is_sos": false,
-    "description": "Central Water Commission – Patna Sub-Division"
-  },
-  {
-    "id": "ndrf_patna",
-    "name": "NDRF 9th Battalion – Patna",
-    "phone": "0612-2594112",
-    "category": "NDRF",
-    "district": "Patna",
-    "is_sos": true,
-    "description": "NDRF 9th Bn, Bihta, Patna"
-  },
-  {
-    "id": "dm_patna",
-    "name": "District Magistrate – Patna",
-    "phone": "0612-2219810",
-    "category": "District Administration",
-    "district": "Patna",
-    "is_sos": true,
-    "description": "DM Office Patna"
-  },
-  {
-    "id": "sdrf_patna",
-    "name": "SDRF Control Room – Patna",
-    "phone": "0612-2294204",
-    "category": "SDRF Bihar",
-    "district": "Patna",
-    "is_sos": true
-  },
-  {
-    "id": "dm_vaishali",
-    "name": "District Magistrate – Vaishali",
-    "phone": "06224-222244",
-    "category": "District Administration",
-    "district": "Vaishali",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_vaishali",
-    "name": "SDRF Control Room – Vaishali",
-    "phone": "06224-222010",
-    "category": "SDRF Bihar",
-    "district": "Vaishali",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_gandak_vaishali",
-    "name": "CWC Gandak Division – Hajipur (Vaishali)",
-    "phone": "06224-272532",
-    "category": "CWC",
-    "district": "Vaishali",
-    "is_sos": false,
-    "description": "CWC Gandak Division covering Hajipur / Rosera gauging stations"
-  },
-  {
-    "id": "dm_muzaffarpur",
-    "name": "District Magistrate – Muzaffarpur",
-    "phone": "0621-2213270",
-    "category": "District Administration",
-    "district": "Muzaffarpur",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_muzaffarpur",
-    "name": "SDRF Control Room – Muzaffarpur",
-    "phone": "0621-2210000",
-    "category": "SDRF Bihar",
-    "district": "Muzaffarpur",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_burhi_gandak_muzaffarpur",
-    "name": "CWC Burhi Gandak – Muzaffarpur",
-    "phone": "0621-2213505",
-    "category": "CWC",
-    "district": "Muzaffarpur",
-    "is_sos": false,
-    "description": "CWC gauge at Dheng / Muzaffarpur on Burhi Gandak"
-  },
-  {
-    "id": "dm_sitamarhi",
-    "name": "District Magistrate – Sitamarhi",
-    "phone": "06226-242265",
-    "category": "District Administration",
-    "district": "Sitamarhi",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_sitamarhi",
-    "name": "SDRF Control Room – Sitamarhi",
-    "phone": "06226-242100",
-    "category": "SDRF Bihar",
-    "district": "Sitamarhi",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_bagmati_sitamarhi",
-    "name": "CWC Bagmati Division – Sitamarhi",
-    "phone": "06226-242430",
-    "category": "CWC",
-    "district": "Sitamarhi",
-    "is_sos": false,
-    "description": "CWC Bagmati gauge at Dheng / Runisaidpur"
-  },
-  {
-    "id": "dm_darbhanga",
-    "name": "District Magistrate – Darbhanga",
-    "phone": "06272-222250",
-    "category": "District Administration",
-    "district": "Darbhanga",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_darbhanga",
-    "name": "SDRF Control Room – Darbhanga",
-    "phone": "06272-222010",
-    "category": "SDRF Bihar",
-    "district": "Darbhanga",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_kamla_darbhanga",
-    "name": "CWC Kamla-Balan Division – Darbhanga",
-    "phone": "06272-222900",
-    "category": "CWC",
-    "district": "Darbhanga",
-    "is_sos": false,
-    "description": "CWC Kamla gauge at Jhanjharpur / Benibad"
-  },
-  {
-    "id": "dm_samastipur",
-    "name": "District Magistrate – Samastipur",
-    "phone": "06274-222257",
-    "category": "District Administration",
-    "district": "Samastipur",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_samastipur",
-    "name": "SDRF Control Room – Samastipur",
-    "phone": "06274-223500",
-    "category": "SDRF Bihar",
-    "district": "Samastipur",
-    "is_sos": true
-  },
-  {
-    "id": "dm_begusarai",
-    "name": "District Magistrate – Begusarai",
-    "phone": "06243-222253",
-    "category": "District Administration",
-    "district": "Begusarai",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_begusarai",
-    "name": "SDRF Control Room – Begusarai",
-    "phone": "06243-222100",
-    "category": "SDRF Bihar",
-    "district": "Begusarai",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_burhi_gandak_begusarai",
-    "name": "CWC Burhi Gandak – Rosera (Begusarai)",
-    "phone": "06243-224400",
-    "category": "CWC",
-    "district": "Begusarai",
-    "is_sos": false,
-    "description": "CWC gauge at Rosera on Burhi Gandak river"
-  },
-  {
-    "id": "dm_bhagalpur",
-    "name": "District Magistrate – Bhagalpur",
-    "phone": "0641-2400257",
-    "category": "District Administration",
-    "district": "Bhagalpur",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_bhagalpur",
-    "name": "SDRF Control Room – Bhagalpur",
-    "phone": "0641-2401000",
-    "category": "SDRF Bihar",
-    "district": "Bhagalpur",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_ganga_bhagalpur",
-    "name": "CWC Ganga Division – Bhagalpur",
-    "phone": "0641-2400567",
-    "category": "CWC",
-    "district": "Bhagalpur",
-    "is_sos": false,
-    "description": "CWC Ganga gauge at Bhagalpur / Sultanganj"
-  },
-  {
-    "id": "dm_katihar",
-    "name": "District Magistrate – Katihar",
-    "phone": "06452-222244",
-    "category": "District Administration",
-    "district": "Katihar",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_katihar",
-    "name": "SDRF Control Room – Katihar",
-    "phone": "06452-222100",
-    "category": "SDRF Bihar",
-    "district": "Katihar",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_kosi_katihar",
-    "name": "CWC Kosi – Kursela (Katihar)",
-    "phone": "06452-224500",
-    "category": "CWC",
-    "district": "Katihar",
-    "is_sos": false,
-    "description": "CWC gauge at Kursela – Kosi outfall into Ganga"
-  },
-  {
-    "id": "dm_supaul",
-    "name": "District Magistrate – Supaul",
-    "phone": "06473-222201",
-    "category": "District Administration",
-    "district": "Supaul",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_supaul",
-    "name": "SDRF Control Room – Supaul",
-    "phone": "06473-222100",
-    "category": "SDRF Bihar",
-    "district": "Supaul",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_kosi_supaul",
-    "name": "CWC Kosi Division – Supaul / Birpur",
-    "phone": "06473-222450",
-    "category": "CWC",
-    "district": "Supaul",
-    "is_sos": false,
-    "description": "CWC Kosi gauge at Baltara / Supaul"
-  },
-  {
-    "id": "kosi_birpur_control",
-    "name": "Kosi Barrage Control Room – Birpur",
-    "phone": "06473-240201",
-    "category": "Barrage",
-    "district": "Supaul",
-    "is_sos": true,
-    "description": "Kosi Barrage discharge & gate operations"
-  },
-  {
-    "id": "dm_madhepura",
-    "name": "District Magistrate – Madhepura",
-    "phone": "06476-222237",
-    "category": "District Administration",
-    "district": "Madhepura",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_madhepura",
-    "name": "SDRF Control Room – Madhepura",
-    "phone": "06476-222100",
-    "category": "SDRF Bihar",
-    "district": "Madhepura",
-    "is_sos": true
-  },
-  {
-    "id": "dm_saharsa",
-    "name": "District Magistrate – Saharsa",
-    "phone": "06478-222244",
-    "category": "District Administration",
-    "district": "Saharsa",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_saharsa",
-    "name": "SDRF Control Room – Saharsa",
-    "phone": "06478-222100",
-    "category": "SDRF Bihar",
-    "district": "Saharsa",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_kosi_saharsa",
-    "name": "CWC Kosi – Koparia (Saharsa)",
-    "phone": "06478-224400",
-    "category": "CWC",
-    "district": "Saharsa",
-    "is_sos": false,
-    "description": "CWC gauge at Koparia on Kosi river"
-  },
-  {
-    "id": "dm_araria",
-    "name": "District Magistrate – Araria",
-    "phone": "06453-222233",
-    "category": "District Administration",
-    "district": "Araria",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_araria",
-    "name": "SDRF Control Room – Araria",
-    "phone": "06453-222100",
-    "category": "SDRF Bihar",
-    "district": "Araria",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_parman_araria",
-    "name": "CWC Parman / Bhutahi Balan – Araria",
-    "phone": "06453-224400",
-    "category": "CWC",
-    "district": "Araria",
-    "is_sos": false,
-    "description": "CWC small river gauges – Araria"
-  },
-  {
-    "id": "dm_kishanganj",
-    "name": "District Magistrate – Kishanganj",
-    "phone": "06456-222270",
-    "category": "District Administration",
-    "district": "Kishanganj",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_kishanganj",
-    "name": "SDRF Control Room – Kishanganj",
-    "phone": "06456-222100",
-    "category": "SDRF Bihar",
-    "district": "Kishanganj",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_mahananda_kishanganj",
-    "name": "CWC Mahananda Division – Kishanganj",
-    "phone": "06456-224400",
-    "category": "CWC",
-    "district": "Kishanganj",
-    "is_sos": false,
-    "description": "CWC Mahananda gauge at Dhulian / Mirzapur"
-  },
-  {
-    "id": "dm_purnia",
-    "name": "District Magistrate – Purnia",
-    "phone": "06454-222233",
-    "category": "District Administration",
-    "district": "Purnia",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_purnia",
-    "name": "SDRF Control Room – Purnia",
-    "phone": "06454-222100",
-    "category": "SDRF Bihar",
-    "district": "Purnia",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_mahananda_purnia",
-    "name": "CWC Mahananda – Jhawa (Purnia)",
-    "phone": "06454-224500",
-    "category": "CWC",
-    "district": "Purnia",
-    "is_sos": false,
-    "description": "CWC gauge at Jhawa on Mahananda river"
-  },
-  {
-    "id": "dm_madhubani",
-    "name": "District Magistrate – Madhubani",
-    "phone": "06276-222244",
-    "category": "District Administration",
-    "district": "Madhubani",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_madhubani",
-    "name": "SDRF Control Room – Madhubani",
-    "phone": "06276-222100",
-    "category": "SDRF Bihar",
-    "district": "Madhubani",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_kamla_madhubani",
-    "name": "CWC Kamla – Jainagar (Madhubani)",
-    "phone": "06276-224400",
-    "category": "CWC",
-    "district": "Madhubani",
-    "is_sos": false,
-    "description": "CWC Kamla-Balan gauge at Jainagar"
-  },
-  {
-    "id": "dm_sheohar",
-    "name": "District Magistrate – Sheohar",
-    "phone": "06228-222233",
-    "category": "District Administration",
-    "district": "Sheohar",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_sheohar",
-    "name": "SDRF Control Room – Sheohar",
-    "phone": "06228-222100",
-    "category": "SDRF Bihar",
-    "district": "Sheohar",
-    "is_sos": true
-  },
-  {
-    "id": "dm_east_champaran",
-    "name": "District Magistrate – East Champaran",
-    "phone": "06252-242244",
-    "category": "District Administration",
-    "district": "East Champaran",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_east_champaran",
-    "name": "SDRF Control Room – East Champaran",
-    "phone": "06252-242100",
-    "category": "SDRF Bihar",
-    "district": "East Champaran",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_gandak_east_champaran",
-    "name": "CWC Gandak – Triveni (East Champaran)",
-    "phone": "06252-244400",
-    "category": "CWC",
-    "district": "East Champaran",
-    "is_sos": false,
-    "description": "CWC Gandak gauge at Dheng / Triveni barrage"
-  },
-  {
-    "id": "dm_west_champaran",
-    "name": "District Magistrate – West Champaran",
-    "phone": "06254-242244",
-    "category": "District Administration",
-    "district": "West Champaran",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_west_champaran",
-    "name": "SDRF Control Room – West Champaran",
-    "phone": "06254-242100",
-    "category": "SDRF Bihar",
-    "district": "West Champaran",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_gandak_west_champaran",
-    "name": "CWC Gandak – Bagaha (West Champaran)",
-    "phone": "06254-244400",
-    "category": "CWC",
-    "district": "West Champaran",
-    "is_sos": false,
-    "description": "CWC Gandak gauge at Bagaha"
-  },
-  {
-    "id": "dm_gopalganj",
-    "name": "District Magistrate – Gopalganj",
-    "phone": "06156-222244",
-    "category": "District Administration",
-    "district": "Gopalganj",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_gopalganj",
-    "name": "SDRF Control Room – Gopalganj",
-    "phone": "06156-222100",
-    "category": "SDRF Bihar",
-    "district": "Gopalganj",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_gandak_gopalganj",
-    "name": "CWC Gandak – Dumri Ghat (Gopalganj)",
-    "phone": "06156-224400",
-    "category": "CWC",
-    "district": "Gopalganj",
-    "is_sos": false,
-    "description": "CWC Gandak gauge at Dumri Ghat"
-  },
-  {
-    "id": "dm_siwan",
-    "name": "District Magistrate – Siwan",
-    "phone": "06154-242244",
-    "category": "District Administration",
-    "district": "Siwan",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_siwan",
-    "name": "SDRF Control Room – Siwan",
-    "phone": "06154-242100",
-    "category": "SDRF Bihar",
-    "district": "Siwan",
-    "is_sos": true
-  },
-  {
-    "id": "dm_saran",
-    "name": "District Magistrate – Saran",
-    "phone": "06162-242244",
-    "category": "District Administration",
-    "district": "Saran",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_saran",
-    "name": "SDRF Control Room – Saran",
-    "phone": "06162-242100",
-    "category": "SDRF Bihar",
-    "district": "Saran",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_ghaghra_saran",
-    "name": "CWC Ghaghra – Revelganj (Saran)",
-    "phone": "06162-244400",
-    "category": "CWC",
-    "district": "Saran",
-    "is_sos": false,
-    "description": "CWC Ghaghra gauge at Revelganj / Doriganj"
-  },
-  {
-    "id": "dm_bhojpur",
-    "name": "District Magistrate – Bhojpur",
-    "phone": "06182-222244",
-    "category": "District Administration",
-    "district": "Bhojpur",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_bhojpur",
-    "name": "SDRF Control Room – Bhojpur",
-    "phone": "06182-222100",
-    "category": "SDRF Bihar",
-    "district": "Bhojpur",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_sone_bhojpur",
-    "name": "CWC Son – Koilwar (Bhojpur)",
-    "phone": "06182-244400",
-    "category": "CWC",
-    "district": "Bhojpur",
-    "is_sos": false,
-    "description": "CWC Son river gauge at Koilwar Bridge"
-  },
-  {
-    "id": "dm_rohtas",
-    "name": "District Magistrate – Rohtas",
-    "phone": "06184-222244",
-    "category": "District Administration",
-    "district": "Rohtas",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_rohtas",
-    "name": "SDRF Control Room – Rohtas",
-    "phone": "06184-222100",
-    "category": "SDRF Bihar",
-    "district": "Rohtas",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_son_rohtas",
-    "name": "CWC Son – Dehri-on-Son (Rohtas)",
-    "phone": "06184-244400",
-    "category": "CWC",
-    "district": "Rohtas",
-    "is_sos": false,
-    "description": "CWC Son gauge at Dehri / Indrapuri barrage"
-  },
-  {
-    "id": "dm_buxar",
-    "name": "District Magistrate – Buxar",
-    "phone": "06183-222244",
-    "category": "District Administration",
-    "district": "Buxar",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_buxar",
-    "name": "SDRF Control Room – Buxar",
-    "phone": "06183-222100",
-    "category": "SDRF Bihar",
-    "district": "Buxar",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_ganga_buxar",
-    "name": "CWC Ganga – Buxar",
-    "phone": "06183-224400",
-    "category": "CWC",
-    "district": "Buxar",
-    "is_sos": false,
-    "description": "CWC Ganga main-stem gauge at Buxar"
-  },
-  {
-    "id": "dm_kaimur",
-    "name": "District Magistrate – Kaimur",
-    "phone": "06189-222244",
-    "category": "District Administration",
-    "district": "Kaimur",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_kaimur",
-    "name": "SDRF Control Room – Kaimur",
-    "phone": "06189-222100",
-    "category": "SDRF Bihar",
-    "district": "Kaimur",
-    "is_sos": true
-  },
-  {
-    "id": "dm_gaya",
-    "name": "District Magistrate – Gaya",
-    "phone": "0631-2221315",
-    "category": "District Administration",
-    "district": "Gaya",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_gaya",
-    "name": "SDRF Control Room – Gaya",
-    "phone": "0631-2222100",
-    "category": "SDRF Bihar",
-    "district": "Gaya",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_falgu_gaya",
-    "name": "CWC Falgu – Gaya",
-    "phone": "0631-2224400",
-    "category": "CWC",
-    "district": "Gaya",
-    "is_sos": false,
-    "description": "CWC Falgu river gauge at Gaya"
-  },
-  {
-    "id": "dm_nawada",
-    "name": "District Magistrate – Nawada",
-    "phone": "06324-222233",
-    "category": "District Administration",
-    "district": "Nawada",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_nawada",
-    "name": "SDRF Control Room – Nawada",
-    "phone": "06324-222100",
-    "category": "SDRF Bihar",
-    "district": "Nawada",
-    "is_sos": true
-  },
-  {
-    "id": "dm_aurangabad",
-    "name": "District Magistrate – Aurangabad",
-    "phone": "06186-222244",
-    "category": "District Administration",
-    "district": "Aurangabad",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_aurangabad",
-    "name": "SDRF Control Room – Aurangabad",
-    "phone": "06186-222100",
-    "category": "SDRF Bihar",
-    "district": "Aurangabad",
-    "is_sos": true
-  },
-  {
-    "id": "dm_jehanabad",
-    "name": "District Magistrate – Jehanabad",
-    "phone": "06114-222244",
-    "category": "District Administration",
-    "district": "Jehanabad",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_jehanabad",
-    "name": "SDRF Control Room – Jehanabad",
-    "phone": "06114-222100",
-    "category": "SDRF Bihar",
-    "district": "Jehanabad",
-    "is_sos": true
-  },
-  {
-    "id": "dm_arwal",
-    "name": "District Magistrate – Arwal",
-    "phone": "06117-222244",
-    "category": "District Administration",
-    "district": "Arwal",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_arwal",
-    "name": "SDRF Control Room – Arwal",
-    "phone": "06117-222100",
-    "category": "SDRF Bihar",
-    "district": "Arwal",
-    "is_sos": true
-  },
-  {
-    "id": "dm_nalanda",
-    "name": "District Magistrate – Nalanda",
-    "phone": "06112-222244",
-    "category": "District Administration",
-    "district": "Nalanda",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_nalanda",
-    "name": "SDRF Control Room – Nalanda",
-    "phone": "06112-222100",
-    "category": "SDRF Bihar",
-    "district": "Nalanda",
-    "is_sos": true
-  },
-  {
-    "id": "dm_sheikhpura",
-    "name": "District Magistrate – Sheikhpura",
-    "phone": "06341-222233",
-    "category": "District Administration",
-    "district": "Sheikhpura",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_sheikhpura",
-    "name": "SDRF Control Room – Sheikhpura",
-    "phone": "06341-222100",
-    "category": "SDRF Bihar",
-    "district": "Sheikhpura",
-    "is_sos": true
-  },
-  {
-    "id": "dm_lakhisarai",
-    "name": "District Magistrate – Lakhisarai",
-    "phone": "06346-222244",
-    "category": "District Administration",
-    "district": "Lakhisarai",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_lakhisarai",
-    "name": "SDRF Control Room – Lakhisarai",
-    "phone": "06346-222100",
-    "category": "SDRF Bihar",
-    "district": "Lakhisarai",
-    "is_sos": true
-  },
-  {
-    "id": "dm_jamui",
-    "name": "District Magistrate – Jamui",
-    "phone": "06345-222233",
-    "category": "District Administration",
-    "district": "Jamui",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_jamui",
-    "name": "SDRF Control Room – Jamui",
-    "phone": "06345-222100",
-    "category": "SDRF Bihar",
-    "district": "Jamui",
-    "is_sos": true
-  },
-  {
-    "id": "dm_banka",
-    "name": "District Magistrate – Banka",
-    "phone": "06424-222233",
-    "category": "District Administration",
-    "district": "Banka",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_banka",
-    "name": "SDRF Control Room – Banka",
-    "phone": "06424-222100",
-    "category": "SDRF Bihar",
-    "district": "Banka",
-    "is_sos": true
-  },
-  {
-    "id": "dm_munger",
-    "name": "District Magistrate – Munger",
-    "phone": "06344-222244",
-    "category": "District Administration",
-    "district": "Munger",
-    "is_sos": true
-  },
-  {
-    "id": "sdrf_munger",
-    "name": "SDRF Control Room – Munger",
-    "phone": "06344-222100",
-    "category": "SDRF Bihar",
-    "district": "Munger",
-    "is_sos": true
-  },
-  {
-    "id": "cwc_ganga_munger",
-    "name": "CWC Ganga – Munger",
-    "phone": "06344-224400",
-    "category": "CWC",
-    "district": "Munger",
-    "is_sos": false,
-    "description": "CWC Ganga gauge at Munger"
   },
   {
     "id": "police",
@@ -876,6 +58,833 @@
     "phone": "1077",
     "category": "NDMA",
     "is_sos": true,
-    "description": "Central government 24×7 disaster helpline"
+    "description": "Central government 24\u00d77 disaster helpline"
+  },
+  {
+    "id": "cwc_patna",
+    "name": "CWC Flood Forecasting \u2013 Patna",
+    "phone": "0612-2221735",
+    "category": "CWC",
+    "district": "Patna",
+    "is_sos": false,
+    "description": "Central Water Commission \u2013 Patna Sub-Division"
+  },
+  {
+    "id": "ndrf_patna",
+    "name": "NDRF 9th Battalion \u2013 Patna",
+    "phone": "0612-2594112",
+    "category": "NDRF",
+    "district": "Patna",
+    "is_sos": true,
+    "description": "NDRF 9th Bn, Bihta, Patna"
+  },
+  {
+    "id": "dm_patna",
+    "name": "District Magistrate \u2013 Patna",
+    "phone": "0612-2219810",
+    "category": "District Administration",
+    "district": "Patna",
+    "is_sos": true,
+    "description": "DM Office Patna"
+  },
+  {
+    "id": "sdrf_patna",
+    "name": "SDRF Control Room \u2013 Patna",
+    "phone": "0612-2294204",
+    "category": "SDRF Bihar",
+    "district": "Patna",
+    "is_sos": true
+  },
+  {
+    "id": "dm_vaishali",
+    "name": "District Magistrate \u2013 Vaishali",
+    "phone": "06224-222244",
+    "category": "District Administration",
+    "district": "Vaishali",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_vaishali",
+    "name": "SDRF Control Room \u2013 Vaishali",
+    "phone": "06224-222010",
+    "category": "SDRF Bihar",
+    "district": "Vaishali",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_gandak_vaishali",
+    "name": "CWC Gandak Division \u2013 Hajipur (Vaishali)",
+    "phone": "06224-272532",
+    "category": "CWC",
+    "district": "Vaishali",
+    "is_sos": false,
+    "description": "CWC Gandak Division covering Hajipur / Rosera gauging stations"
+  },
+  {
+    "id": "dm_muzaffarpur",
+    "name": "District Magistrate \u2013 Muzaffarpur",
+    "phone": "0621-2213270",
+    "category": "District Administration",
+    "district": "Muzaffarpur",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_muzaffarpur",
+    "name": "SDRF Control Room \u2013 Muzaffarpur",
+    "phone": "0621-2210000",
+    "category": "SDRF Bihar",
+    "district": "Muzaffarpur",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_burhi_gandak_muzaffarpur",
+    "name": "CWC Burhi Gandak \u2013 Muzaffarpur",
+    "phone": "0621-2213505",
+    "category": "CWC",
+    "district": "Muzaffarpur",
+    "is_sos": false,
+    "description": "CWC gauge at Dheng / Muzaffarpur on Burhi Gandak"
+  },
+  {
+    "id": "dm_sitamarhi",
+    "name": "District Magistrate \u2013 Sitamarhi",
+    "phone": "06226-242265",
+    "category": "District Administration",
+    "district": "Sitamarhi",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_sitamarhi",
+    "name": "SDRF Control Room \u2013 Sitamarhi",
+    "phone": "06226-242100",
+    "category": "SDRF Bihar",
+    "district": "Sitamarhi",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_bagmati_sitamarhi",
+    "name": "CWC Bagmati Division \u2013 Sitamarhi",
+    "phone": "06226-242430",
+    "category": "CWC",
+    "district": "Sitamarhi",
+    "is_sos": false,
+    "description": "CWC Bagmati gauge at Dheng / Runisaidpur"
+  },
+  {
+    "id": "dm_darbhanga",
+    "name": "District Magistrate \u2013 Darbhanga",
+    "phone": "06272-222250",
+    "category": "District Administration",
+    "district": "Darbhanga",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_darbhanga",
+    "name": "SDRF Control Room \u2013 Darbhanga",
+    "phone": "06272-222010",
+    "category": "SDRF Bihar",
+    "district": "Darbhanga",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_kamla_darbhanga",
+    "name": "CWC Kamla-Balan Division \u2013 Darbhanga",
+    "phone": "06272-222900",
+    "category": "CWC",
+    "district": "Darbhanga",
+    "is_sos": false,
+    "description": "CWC Kamla gauge at Jhanjharpur / Benibad"
+  },
+  {
+    "id": "dm_samastipur",
+    "name": "District Magistrate \u2013 Samastipur",
+    "phone": "06274-222257",
+    "category": "District Administration",
+    "district": "Samastipur",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_samastipur",
+    "name": "SDRF Control Room \u2013 Samastipur",
+    "phone": "06274-223500",
+    "category": "SDRF Bihar",
+    "district": "Samastipur",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_gandak_samastipur",
+    "name": "CWC Gandak \u2013 Rosera / Samastipur",
+    "phone": "06274-224400",
+    "category": "CWC",
+    "district": "Samastipur",
+    "is_sos": false,
+    "description": "CWC Gandak gauge at Rosera & Samastipur station"
+  },
+  {
+    "id": "dm_begusarai",
+    "name": "District Magistrate \u2013 Begusarai",
+    "phone": "06243-222253",
+    "category": "District Administration",
+    "district": "Begusarai",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_begusarai",
+    "name": "SDRF Control Room \u2013 Begusarai",
+    "phone": "06243-222100",
+    "category": "SDRF Bihar",
+    "district": "Begusarai",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_burhi_gandak_begusarai",
+    "name": "CWC Burhi Gandak \u2013 Rosera (Begusarai)",
+    "phone": "06243-224400",
+    "category": "CWC",
+    "district": "Begusarai",
+    "is_sos": false,
+    "description": "CWC gauge at Rosera on Burhi Gandak river"
+  },
+  {
+    "id": "dm_bhagalpur",
+    "name": "District Magistrate \u2013 Bhagalpur",
+    "phone": "0641-2400257",
+    "category": "District Administration",
+    "district": "Bhagalpur",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_bhagalpur",
+    "name": "SDRF Control Room \u2013 Bhagalpur",
+    "phone": "0641-2401000",
+    "category": "SDRF Bihar",
+    "district": "Bhagalpur",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_ganga_bhagalpur",
+    "name": "CWC Ganga Division \u2013 Bhagalpur",
+    "phone": "0641-2400567",
+    "category": "CWC",
+    "district": "Bhagalpur",
+    "is_sos": false,
+    "description": "CWC Ganga gauge at Bhagalpur / Sultanganj / Kahalgaon / Naugachia"
+  },
+  {
+    "id": "dm_katihar",
+    "name": "District Magistrate \u2013 Katihar",
+    "phone": "06452-222244",
+    "category": "District Administration",
+    "district": "Katihar",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_katihar",
+    "name": "SDRF Control Room \u2013 Katihar",
+    "phone": "06452-222100",
+    "category": "SDRF Bihar",
+    "district": "Katihar",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_kosi_katihar",
+    "name": "CWC Kosi \u2013 Kursela (Katihar)",
+    "phone": "06452-224500",
+    "category": "CWC",
+    "district": "Katihar",
+    "is_sos": false,
+    "description": "CWC gauge at Kursela \u2013 Kosi outfall into Ganga"
+  },
+  {
+    "id": "dm_supaul",
+    "name": "District Magistrate \u2013 Supaul",
+    "phone": "06473-222201",
+    "category": "District Administration",
+    "district": "Supaul",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_supaul",
+    "name": "SDRF Control Room \u2013 Supaul",
+    "phone": "06473-222100",
+    "category": "SDRF Bihar",
+    "district": "Supaul",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_kosi_supaul",
+    "name": "CWC Kosi Division \u2013 Supaul / Birpur",
+    "phone": "06473-222450",
+    "category": "CWC",
+    "district": "Supaul",
+    "is_sos": false,
+    "description": "CWC Kosi gauge at Baltara / Basua / Nirmali / Ghonghepur / Birpur"
+  },
+  {
+    "id": "kosi_birpur_control",
+    "name": "Kosi Barrage Control Room \u2013 Birpur",
+    "phone": "06473-240201",
+    "category": "Barrage",
+    "district": "Supaul",
+    "is_sos": true,
+    "description": "Kosi Barrage discharge & gate operations"
+  },
+  {
+    "id": "dm_madhepura",
+    "name": "District Magistrate \u2013 Madhepura",
+    "phone": "06476-222237",
+    "category": "District Administration",
+    "district": "Madhepura",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_madhepura",
+    "name": "SDRF Control Room \u2013 Madhepura",
+    "phone": "06476-222100",
+    "category": "SDRF Bihar",
+    "district": "Madhepura",
+    "is_sos": true
+  },
+  {
+    "id": "dm_saharsa",
+    "name": "District Magistrate \u2013 Saharsa",
+    "phone": "06478-222244",
+    "category": "District Administration",
+    "district": "Saharsa",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_saharsa",
+    "name": "SDRF Control Room \u2013 Saharsa",
+    "phone": "06478-222100",
+    "category": "SDRF Bihar",
+    "district": "Saharsa",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_kosi_saharsa",
+    "name": "CWC Kosi \u2013 Koparia (Saharsa)",
+    "phone": "06478-224400",
+    "category": "CWC",
+    "district": "Saharsa",
+    "is_sos": false,
+    "description": "CWC gauge at Koparia on Kosi river"
+  },
+  {
+    "id": "dm_araria",
+    "name": "District Magistrate \u2013 Araria",
+    "phone": "06453-222233",
+    "category": "District Administration",
+    "district": "Araria",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_araria",
+    "name": "SDRF Control Room \u2013 Araria",
+    "phone": "06453-222100",
+    "category": "SDRF Bihar",
+    "district": "Araria",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_parman_araria",
+    "name": "CWC Parman / Bhutahi Balan \u2013 Araria",
+    "phone": "06453-224400",
+    "category": "CWC",
+    "district": "Araria",
+    "is_sos": false,
+    "description": "CWC small river gauges \u2013 Araria"
+  },
+  {
+    "id": "dm_kishanganj",
+    "name": "District Magistrate \u2013 Kishanganj",
+    "phone": "06456-222270",
+    "category": "District Administration",
+    "district": "Kishanganj",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_kishanganj",
+    "name": "SDRF Control Room \u2013 Kishanganj",
+    "phone": "06456-222100",
+    "category": "SDRF Bihar",
+    "district": "Kishanganj",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_mahananda_kishanganj",
+    "name": "CWC Mahananda Division \u2013 Kishanganj",
+    "phone": "06456-224400",
+    "category": "CWC",
+    "district": "Kishanganj",
+    "is_sos": false,
+    "description": "CWC Mahananda gauge at Dhulian / Mirzapur"
+  },
+  {
+    "id": "dm_purnia",
+    "name": "District Magistrate \u2013 Purnia",
+    "phone": "06454-222233",
+    "category": "District Administration",
+    "district": "Purnia",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_purnia",
+    "name": "SDRF Control Room \u2013 Purnia",
+    "phone": "06454-222100",
+    "category": "SDRF Bihar",
+    "district": "Purnia",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_mahananda_purnia",
+    "name": "CWC Mahananda \u2013 Jhawa (Purnia)",
+    "phone": "06454-224500",
+    "category": "CWC",
+    "district": "Purnia",
+    "is_sos": false,
+    "description": "CWC gauge at Jhawa on Mahananda river"
+  },
+  {
+    "id": "dm_madhubani",
+    "name": "District Magistrate \u2013 Madhubani",
+    "phone": "06276-222244",
+    "category": "District Administration",
+    "district": "Madhubani",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_madhubani",
+    "name": "SDRF Control Room \u2013 Madhubani",
+    "phone": "06276-222100",
+    "category": "SDRF Bihar",
+    "district": "Madhubani",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_kamla_madhubani",
+    "name": "CWC Kamla \u2013 Jainagar (Madhubani)",
+    "phone": "06276-224400",
+    "category": "CWC",
+    "district": "Madhubani",
+    "is_sos": false,
+    "description": "CWC Kamla-Balan gauge at Jainagar / Jhanjharpur"
+  },
+  {
+    "id": "dm_sheohar",
+    "name": "District Magistrate \u2013 Sheohar",
+    "phone": "06228-222233",
+    "category": "District Administration",
+    "district": "Sheohar",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_sheohar",
+    "name": "SDRF Control Room \u2013 Sheohar",
+    "phone": "06228-222100",
+    "category": "SDRF Bihar",
+    "district": "Sheohar",
+    "is_sos": true
+  },
+  {
+    "id": "dm_east_champaran",
+    "name": "District Magistrate \u2013 East Champaran",
+    "phone": "06252-242244",
+    "category": "District Administration",
+    "district": "East Champaran",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_east_champaran",
+    "name": "SDRF Control Room \u2013 East Champaran",
+    "phone": "06252-242100",
+    "category": "SDRF Bihar",
+    "district": "East Champaran",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_gandak_east_champaran",
+    "name": "CWC Gandak \u2013 Triveni (East Champaran)",
+    "phone": "06252-244400",
+    "category": "CWC",
+    "district": "East Champaran",
+    "is_sos": false,
+    "description": "CWC Gandak gauge at Triveni Barrage"
+  },
+  {
+    "id": "dm_west_champaran",
+    "name": "District Magistrate \u2013 West Champaran",
+    "phone": "06254-242244",
+    "category": "District Administration",
+    "district": "West Champaran",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_west_champaran",
+    "name": "SDRF Control Room \u2013 West Champaran",
+    "phone": "06254-242100",
+    "category": "SDRF Bihar",
+    "district": "West Champaran",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_gandak_west_champaran",
+    "name": "CWC Gandak \u2013 Bagaha / Sikta (West Champaran)",
+    "phone": "06254-244400",
+    "category": "CWC",
+    "district": "West Champaran",
+    "is_sos": false,
+    "description": "CWC Gandak gauge at Bagaha & Sikta"
+  },
+  {
+    "id": "dm_gopalganj",
+    "name": "District Magistrate \u2013 Gopalganj",
+    "phone": "06156-222244",
+    "category": "District Administration",
+    "district": "Gopalganj",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_gopalganj",
+    "name": "SDRF Control Room \u2013 Gopalganj",
+    "phone": "06156-222100",
+    "category": "SDRF Bihar",
+    "district": "Gopalganj",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_gandak_gopalganj",
+    "name": "CWC Gandak \u2013 Dumri Ghat (Gopalganj)",
+    "phone": "06156-224400",
+    "category": "CWC",
+    "district": "Gopalganj",
+    "is_sos": false,
+    "description": "CWC Gandak gauge at Dumri Ghat"
+  },
+  {
+    "id": "dm_siwan",
+    "name": "District Magistrate \u2013 Siwan",
+    "phone": "06154-242244",
+    "category": "District Administration",
+    "district": "Siwan",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_siwan",
+    "name": "SDRF Control Room \u2013 Siwan",
+    "phone": "06154-242100",
+    "category": "SDRF Bihar",
+    "district": "Siwan",
+    "is_sos": true
+  },
+  {
+    "id": "dm_saran",
+    "name": "District Magistrate \u2013 Saran",
+    "phone": "06162-242244",
+    "category": "District Administration",
+    "district": "Saran",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_saran",
+    "name": "SDRF Control Room \u2013 Saran",
+    "phone": "06162-242100",
+    "category": "SDRF Bihar",
+    "district": "Saran",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_ghaghra_saran",
+    "name": "CWC Ghaghra \u2013 Revelganj (Saran)",
+    "phone": "06162-244400",
+    "category": "CWC",
+    "district": "Saran",
+    "is_sos": false,
+    "description": "CWC Ghaghra gauge at Revelganj / Doriganj"
+  },
+  {
+    "id": "dm_bhojpur",
+    "name": "District Magistrate \u2013 Bhojpur",
+    "phone": "06182-222244",
+    "category": "District Administration",
+    "district": "Bhojpur",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_bhojpur",
+    "name": "SDRF Control Room \u2013 Bhojpur",
+    "phone": "06182-222100",
+    "category": "SDRF Bihar",
+    "district": "Bhojpur",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_sone_bhojpur",
+    "name": "CWC Son \u2013 Koilwar (Bhojpur)",
+    "phone": "06182-244400",
+    "category": "CWC",
+    "district": "Bhojpur",
+    "is_sos": false,
+    "description": "CWC Son river gauge at Koilwar Bridge"
+  },
+  {
+    "id": "dm_rohtas",
+    "name": "District Magistrate \u2013 Rohtas",
+    "phone": "06184-222244",
+    "category": "District Administration",
+    "district": "Rohtas",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_rohtas",
+    "name": "SDRF Control Room \u2013 Rohtas",
+    "phone": "06184-222100",
+    "category": "SDRF Bihar",
+    "district": "Rohtas",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_son_rohtas",
+    "name": "CWC Son \u2013 Dehri-on-Son / Indrapuri (Rohtas)",
+    "phone": "06184-244400",
+    "category": "CWC",
+    "district": "Rohtas",
+    "is_sos": false,
+    "description": "CWC Son gauge at Dehri / Indrapuri barrage"
+  },
+  {
+    "id": "dm_buxar",
+    "name": "District Magistrate \u2013 Buxar",
+    "phone": "06183-222244",
+    "category": "District Administration",
+    "district": "Buxar",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_buxar",
+    "name": "SDRF Control Room \u2013 Buxar",
+    "phone": "06183-222100",
+    "category": "SDRF Bihar",
+    "district": "Buxar",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_ganga_buxar",
+    "name": "CWC Ganga \u2013 Buxar",
+    "phone": "06183-224400",
+    "category": "CWC",
+    "district": "Buxar",
+    "is_sos": false,
+    "description": "CWC Ganga main-stem gauge at Buxar"
+  },
+  {
+    "id": "dm_kaimur",
+    "name": "District Magistrate \u2013 Kaimur",
+    "phone": "06189-222244",
+    "category": "District Administration",
+    "district": "Kaimur",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_kaimur",
+    "name": "SDRF Control Room \u2013 Kaimur",
+    "phone": "06189-222100",
+    "category": "SDRF Bihar",
+    "district": "Kaimur",
+    "is_sos": true
+  },
+  {
+    "id": "dm_gaya",
+    "name": "District Magistrate \u2013 Gaya",
+    "phone": "0631-2221315",
+    "category": "District Administration",
+    "district": "Gaya",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_gaya",
+    "name": "SDRF Control Room \u2013 Gaya",
+    "phone": "0631-2222100",
+    "category": "SDRF Bihar",
+    "district": "Gaya",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_falgu_gaya",
+    "name": "CWC Falgu \u2013 Gaya",
+    "phone": "0631-2224400",
+    "category": "CWC",
+    "district": "Gaya",
+    "is_sos": false,
+    "description": "CWC Falgu river gauge at Gaya"
+  },
+  {
+    "id": "dm_nawada",
+    "name": "District Magistrate \u2013 Nawada",
+    "phone": "06324-222233",
+    "category": "District Administration",
+    "district": "Nawada",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_nawada",
+    "name": "SDRF Control Room \u2013 Nawada",
+    "phone": "06324-222100",
+    "category": "SDRF Bihar",
+    "district": "Nawada",
+    "is_sos": true
+  },
+  {
+    "id": "dm_aurangabad",
+    "name": "District Magistrate \u2013 Aurangabad",
+    "phone": "06186-222244",
+    "category": "District Administration",
+    "district": "Aurangabad",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_aurangabad",
+    "name": "SDRF Control Room \u2013 Aurangabad",
+    "phone": "06186-222100",
+    "category": "SDRF Bihar",
+    "district": "Aurangabad",
+    "is_sos": true
+  },
+  {
+    "id": "dm_jehanabad",
+    "name": "District Magistrate \u2013 Jehanabad",
+    "phone": "06114-222244",
+    "category": "District Administration",
+    "district": "Jehanabad",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_jehanabad",
+    "name": "SDRF Control Room \u2013 Jehanabad",
+    "phone": "06114-222100",
+    "category": "SDRF Bihar",
+    "district": "Jehanabad",
+    "is_sos": true
+  },
+  {
+    "id": "dm_arwal",
+    "name": "District Magistrate \u2013 Arwal",
+    "phone": "06117-222244",
+    "category": "District Administration",
+    "district": "Arwal",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_arwal",
+    "name": "SDRF Control Room \u2013 Arwal",
+    "phone": "06117-222100",
+    "category": "SDRF Bihar",
+    "district": "Arwal",
+    "is_sos": true
+  },
+  {
+    "id": "dm_nalanda",
+    "name": "District Magistrate \u2013 Nalanda",
+    "phone": "06112-222244",
+    "category": "District Administration",
+    "district": "Nalanda",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_nalanda",
+    "name": "SDRF Control Room \u2013 Nalanda",
+    "phone": "06112-222100",
+    "category": "SDRF Bihar",
+    "district": "Nalanda",
+    "is_sos": true
+  },
+  {
+    "id": "dm_sheikhpura",
+    "name": "District Magistrate \u2013 Sheikhpura",
+    "phone": "06341-222233",
+    "category": "District Administration",
+    "district": "Sheikhpura",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_sheikhpura",
+    "name": "SDRF Control Room \u2013 Sheikhpura",
+    "phone": "06341-222100",
+    "category": "SDRF Bihar",
+    "district": "Sheikhpura",
+    "is_sos": true
+  },
+  {
+    "id": "dm_lakhisarai",
+    "name": "District Magistrate \u2013 Lakhisarai",
+    "phone": "06346-222244",
+    "category": "District Administration",
+    "district": "Lakhisarai",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_lakhisarai",
+    "name": "SDRF Control Room \u2013 Lakhisarai",
+    "phone": "06346-222100",
+    "category": "SDRF Bihar",
+    "district": "Lakhisarai",
+    "is_sos": true
+  },
+  {
+    "id": "dm_jamui",
+    "name": "District Magistrate \u2013 Jamui",
+    "phone": "06345-222233",
+    "category": "District Administration",
+    "district": "Jamui",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_jamui",
+    "name": "SDRF Control Room \u2013 Jamui",
+    "phone": "06345-222100",
+    "category": "SDRF Bihar",
+    "district": "Jamui",
+    "is_sos": true
+  },
+  {
+    "id": "dm_banka",
+    "name": "District Magistrate \u2013 Banka",
+    "phone": "06424-222233",
+    "category": "District Administration",
+    "district": "Banka",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_banka",
+    "name": "SDRF Control Room \u2013 Banka",
+    "phone": "06424-222100",
+    "category": "SDRF Bihar",
+    "district": "Banka",
+    "is_sos": true
+  },
+  {
+    "id": "dm_munger",
+    "name": "District Magistrate \u2013 Munger",
+    "phone": "06344-222244",
+    "category": "District Administration",
+    "district": "Munger",
+    "is_sos": true
+  },
+  {
+    "id": "sdrf_munger",
+    "name": "SDRF Control Room \u2013 Munger",
+    "phone": "06344-222100",
+    "category": "SDRF Bihar",
+    "district": "Munger",
+    "is_sos": true
+  },
+  {
+    "id": "cwc_ganga_munger",
+    "name": "CWC Ganga \u2013 Munger",
+    "phone": "06344-224400",
+    "category": "CWC",
+    "district": "Munger",
+    "is_sos": false,
+    "description": "CWC Ganga gauge at Munger"
   }
 ]
