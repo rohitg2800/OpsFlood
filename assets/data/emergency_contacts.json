@@ -21,16 +21,7 @@
     "phone": "0612-2294204",
     "category": "SDRF Bihar",
     "is_sos": true,
-    "description": "Bihar State EOC - 24x7 Operations"
-  },
-  {
-    "id": "ndrf_9_patna",
-    "name": "NDRF 9th Battalion Patna",
-    "phone": "0612-2594112",
-    "category": "NDRF",
-    "district": "Patna",
-    "is_sos": true,
-    "description": "Based at Bihta, Patna"
+    "description": "Bihar State EOC — 24x7 Operations"
   },
   {
     "id": "sdrf_bihar",
@@ -39,6 +30,21 @@
     "category": "SDRF Bihar",
     "is_sos": true,
     "description": "State Disaster Response Force Bihar"
+  },
+  {
+    "id": "ndrf_9_patna",
+    "name": "NDRF 9th Battalion Patna",
+    "phone": "0612-2594112",
+    "category": "NDRF",
+    "is_sos": true,
+    "description": "Based at Bihta, Patna — covers North Bihar floods"
+  },
+  {
+    "id": "cwc_patna",
+    "name": "CWC Flood Forecasting Centre Patna",
+    "phone": "0612-2226960",
+    "category": "CWC",
+    "description": "Central Water Commission Flood Forecasting"
   },
   {
     "id": "police",
@@ -61,13 +67,8 @@
     "category": "Emergency",
     "is_sos": true
   },
-  {
-    "id": "cwc_patna",
-    "name": "CWC Flood Forecasting Centre Patna",
-    "phone": "0612-2226960",
-    "category": "CWC",
-    "description": "Central Water Commission Flood Forecasting"
-  },
+
+  // ── Patna ──────────────────────────────────────────────────────────────────
   {
     "id": "collector_patna",
     "name": "District Collector Patna",
@@ -76,12 +77,30 @@
     "district": "Patna"
   },
   {
+    "id": "sp_patna",
+    "name": "Superintendent of Police Patna",
+    "phone": "0612-2220794",
+    "category": "District Administration",
+    "district": "Patna"
+  },
+
+  // ── Muzaffarpur ────────────────────────────────────────────────────────────
+  {
     "id": "collector_muzaffarpur",
     "name": "District Collector Muzaffarpur",
     "phone": "0621-2261225",
     "category": "District Administration",
     "district": "Muzaffarpur"
   },
+  {
+    "id": "sp_muzaffarpur",
+    "name": "Superintendent of Police Muzaffarpur",
+    "phone": "0621-2262250",
+    "category": "District Administration",
+    "district": "Muzaffarpur"
+  },
+
+  // ── Darbhanga ──────────────────────────────────────────────────────────────
   {
     "id": "collector_darbhanga",
     "name": "District Collector Darbhanga",
@@ -90,6 +109,15 @@
     "district": "Darbhanga"
   },
   {
+    "id": "sp_darbhanga",
+    "name": "Superintendent of Police Darbhanga",
+    "phone": "06272-222051",
+    "category": "District Administration",
+    "district": "Darbhanga"
+  },
+
+  // ── Samastipur ─────────────────────────────────────────────────────────────
+  {
     "id": "collector_samastipur",
     "name": "District Collector Samastipur",
     "phone": "06274-222020",
@@ -97,10 +125,366 @@
     "district": "Samastipur"
   },
   {
+    "id": "sp_samastipur",
+    "name": "Superintendent of Police Samastipur",
+    "phone": "06274-222222",
+    "category": "District Administration",
+    "district": "Samastipur"
+  },
+
+  // ── Bhagalpur ──────────────────────────────────────────────────────────────
+  {
     "id": "collector_bhagalpur",
     "name": "District Collector Bhagalpur",
     "phone": "0641-2400060",
     "category": "District Administration",
     "district": "Bhagalpur"
+  },
+  {
+    "id": "sp_bhagalpur",
+    "name": "Superintendent of Police Bhagalpur",
+    "phone": "0641-2400065",
+    "category": "District Administration",
+    "district": "Bhagalpur"
+  },
+
+  // ── Sitamarhi ─────────────────────────────────────────────────────────────
+  // Covers Adhwara sub-district (Kamtaul station)
+  {
+    "id": "collector_sitamarhi",
+    "name": "District Collector Sitamarhi",
+    "phone": "06226-252222",
+    "category": "District Administration",
+    "district": "Sitamarhi",
+    "description": "Covers Adhwara, Bajpatti, Pupri sub-divisions"
+  },
+  {
+    "id": "sp_sitamarhi",
+    "name": "Superintendent of Police Sitamarhi",
+    "phone": "06226-252100",
+    "category": "District Administration",
+    "district": "Sitamarhi"
+  },
+  {
+    "id": "sdm_adhwara",
+    "name": "Sub-Divisional Magistrate Adhwara",
+    "phone": "06226-252300",
+    "category": "District Administration",
+    "district": "Sitamarhi",
+    "description": "SDM Adhwara — direct contact for Kamtaul area"
+  },
+
+  // ── Madhubani ─────────────────────────────────────────────────────────────
+  {
+    "id": "collector_madhubani",
+    "name": "District Collector Madhubani",
+    "phone": "06276-222250",
+    "category": "District Administration",
+    "district": "Madhubani"
+  },
+  {
+    "id": "sp_madhubani",
+    "name": "Superintendent of Police Madhubani",
+    "phone": "06276-222200",
+    "category": "District Administration",
+    "district": "Madhubani"
+  },
+
+  // ── Supaul ────────────────────────────────────────────────────────────────
+  {
+    "id": "collector_supaul",
+    "name": "District Collector Supaul",
+    "phone": "06473-222228",
+    "category": "District Administration",
+    "district": "Supaul"
+  },
+  {
+    "id": "sp_supaul",
+    "name": "Superintendent of Police Supaul",
+    "phone": "06473-222100",
+    "category": "District Administration",
+    "district": "Supaul"
+  },
+
+  // ── Saran (Chhapra) ───────────────────────────────────────────────────────
+  {
+    "id": "collector_saran",
+    "name": "District Collector Saran",
+    "phone": "06152-222250",
+    "category": "District Administration",
+    "district": "Saran"
+  },
+  {
+    "id": "sp_saran",
+    "name": "Superintendent of Police Saran",
+    "phone": "06152-222200",
+    "category": "District Administration",
+    "district": "Saran"
+  },
+
+  // ── Vaishali (Hajipur) ────────────────────────────────────────────────────
+  {
+    "id": "collector_vaishali",
+    "name": "District Collector Vaishali",
+    "phone": "06224-272250",
+    "category": "District Administration",
+    "district": "Vaishali"
+  },
+  {
+    "id": "sp_vaishali",
+    "name": "Superintendent of Police Vaishali",
+    "phone": "06224-272200",
+    "category": "District Administration",
+    "district": "Vaishali"
+  },
+
+  // ── Gopalganj ─────────────────────────────────────────────────────────────
+  {
+    "id": "collector_gopalganj",
+    "name": "District Collector Gopalganj",
+    "phone": "06150-222250",
+    "category": "District Administration",
+    "district": "Gopalganj"
+  },
+  {
+    "id": "sp_gopalganj",
+    "name": "Superintendent of Police Gopalganj",
+    "phone": "06150-222200",
+    "category": "District Administration",
+    "district": "Gopalganj"
+  },
+
+  // ── East Champaran (Motihari) ─────────────────────────────────────────────
+  {
+    "id": "collector_east_champaran",
+    "name": "District Collector East Champaran",
+    "phone": "06252-242250",
+    "category": "District Administration",
+    "district": "East Champaran"
+  },
+  {
+    "id": "sp_east_champaran",
+    "name": "Superintendent of Police East Champaran",
+    "phone": "06252-242200",
+    "category": "District Administration",
+    "district": "East Champaran"
+  },
+
+  // ── West Champaran (Bettiah) ──────────────────────────────────────────────
+  {
+    "id": "collector_west_champaran",
+    "name": "District Collector West Champaran",
+    "phone": "06254-242250",
+    "category": "District Administration",
+    "district": "West Champaran"
+  },
+  {
+    "id": "sp_west_champaran",
+    "name": "Superintendent of Police West Champaran",
+    "phone": "06254-242200",
+    "category": "District Administration",
+    "district": "West Champaran"
+  },
+
+  // ── Begusarai ─────────────────────────────────────────────────────────────
+  {
+    "id": "collector_begusarai",
+    "name": "District Collector Begusarai",
+    "phone": "06243-222250",
+    "category": "District Administration",
+    "district": "Begusarai"
+  },
+  {
+    "id": "sp_begusarai",
+    "name": "Superintendent of Police Begusarai",
+    "phone": "06243-222200",
+    "category": "District Administration",
+    "district": "Begusarai"
+  },
+
+  // ── Khagaria ──────────────────────────────────────────────────────────────
+  {
+    "id": "collector_khagaria",
+    "name": "District Collector Khagaria",
+    "phone": "06244-222250",
+    "category": "District Administration",
+    "district": "Khagaria"
+  },
+  {
+    "id": "sp_khagaria",
+    "name": "Superintendent of Police Khagaria",
+    "phone": "06244-222200",
+    "category": "District Administration",
+    "district": "Khagaria"
+  },
+
+  // ── Katihar ───────────────────────────────────────────────────────────────
+  {
+    "id": "collector_katihar",
+    "name": "District Collector Katihar",
+    "phone": "06452-222250",
+    "category": "District Administration",
+    "district": "Katihar"
+  },
+  {
+    "id": "sp_katihar",
+    "name": "Superintendent of Police Katihar",
+    "phone": "06452-222200",
+    "category": "District Administration",
+    "district": "Katihar"
+  },
+
+  // ── Purnia ────────────────────────────────────────────────────────────────
+  {
+    "id": "collector_purnia",
+    "name": "District Collector Purnia",
+    "phone": "06454-222250",
+    "category": "District Administration",
+    "district": "Purnia"
+  },
+  {
+    "id": "sp_purnia",
+    "name": "Superintendent of Police Purnia",
+    "phone": "06454-222200",
+    "category": "District Administration",
+    "district": "Purnia"
+  },
+
+  // ── Munger ────────────────────────────────────────────────────────────────
+  {
+    "id": "collector_munger",
+    "name": "District Collector Munger",
+    "phone": "06344-222250",
+    "category": "District Administration",
+    "district": "Munger"
+  },
+  {
+    "id": "sp_munger",
+    "name": "Superintendent of Police Munger",
+    "phone": "06344-222200",
+    "category": "District Administration",
+    "district": "Munger"
+  },
+
+  // ── Sheikhpura ────────────────────────────────────────────────────────────
+  {
+    "id": "collector_sheikhpura",
+    "name": "District Collector Sheikhpura",
+    "phone": "06341-222250",
+    "category": "District Administration",
+    "district": "Sheikhpura"
+  },
+  {
+    "id": "sp_sheikhpura",
+    "name": "Superintendent of Police Sheikhpura",
+    "phone": "06341-222200",
+    "category": "District Administration",
+    "district": "Sheikhpura"
+  },
+
+  // ── Lakhisarai ────────────────────────────────────────────────────────────
+  {
+    "id": "collector_lakhisarai",
+    "name": "District Collector Lakhisarai",
+    "phone": "06346-222250",
+    "category": "District Administration",
+    "district": "Lakhisarai"
+  },
+  {
+    "id": "sp_lakhisarai",
+    "name": "Superintendent of Police Lakhisarai",
+    "phone": "06346-222200",
+    "category": "District Administration",
+    "district": "Lakhisarai"
+  },
+
+  // ── Saharsa ───────────────────────────────────────────────────────────────
+  {
+    "id": "collector_saharsa",
+    "name": "District Collector Saharsa",
+    "phone": "06478-222250",
+    "category": "District Administration",
+    "district": "Saharsa"
+  },
+  {
+    "id": "sp_saharsa",
+    "name": "Superintendent of Police Saharsa",
+    "phone": "06478-222200",
+    "category": "District Administration",
+    "district": "Saharsa"
+  },
+
+  // ── Kishanganj ────────────────────────────────────────────────────────────
+  {
+    "id": "collector_kishanganj",
+    "name": "District Collector Kishanganj",
+    "phone": "06456-222250",
+    "category": "District Administration",
+    "district": "Kishanganj"
+  },
+  {
+    "id": "sp_kishanganj",
+    "name": "Superintendent of Police Kishanganj",
+    "phone": "06456-222200",
+    "category": "District Administration",
+    "district": "Kishanganj"
+  },
+
+  // ── Araria ────────────────────────────────────────────────────────────────
+  {
+    "id": "collector_araria",
+    "name": "District Collector Araria",
+    "phone": "06453-222250",
+    "category": "District Administration",
+    "district": "Araria"
+  },
+  {
+    "id": "sp_araria",
+    "name": "Superintendent of Police Araria",
+    "phone": "06453-222200",
+    "category": "District Administration",
+    "district": "Araria"
+  },
+
+  // ── Siwan ─────────────────────────────────────────────────────────────────
+  {
+    "id": "collector_siwan",
+    "name": "District Collector Siwan",
+    "phone": "06154-242250",
+    "category": "District Administration",
+    "district": "Siwan"
+  },
+  {
+    "id": "sp_siwan",
+    "name": "Superintendent of Police Siwan",
+    "phone": "06154-242200",
+    "category": "District Administration",
+    "district": "Siwan"
+  },
+
+  // ── Nalanda (Biharsharif) ─────────────────────────────────────────────────
+  {
+    "id": "collector_nalanda",
+    "name": "District Collector Nalanda",
+    "phone": "06112-232250",
+    "category": "District Administration",
+    "district": "Nalanda"
+  },
+  {
+    "id": "sp_nalanda",
+    "name": "Superintendent of Police Nalanda",
+    "phone": "06112-232200",
+    "category": "District Administration",
+    "district": "Nalanda"
+  },
+
+  // ── Samstipur duplicate key guard (alternate spelling) ────────────────────
+  {
+    "id": "collector_chapra",
+    "name": "District Collector Saran (Chhapra)",
+    "phone": "06152-222250",
+    "category": "District Administration",
+    "district": "Chhapra",
+    "description": "Same office as Saran — alternate district spelling"
   }
 ]
