@@ -1,13 +1,9 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5
+// EQUINOX-BH — Dashboard v5.1
 //
-// v5 additions (on top of v4):
-//   • Every tile/row is tappable → navigates to correct detail screen
-//   • KPI cards are tappable (Critical/Severe → Alerts tab, Stations → LiveStations)
-//   • Section headers have "See all →" buttons wired to correct tabs/routes
-//   • Bihar Live chips + alert rows navigate to RiverMonitorScreen / AlertsScreen
-//   • Auto-refresh timer every 5 minutes
-//   • Critical-alert top banner (dismissable) with "View Alerts →" CTA
+// v5.1 additions:
+//   • _AlertColorStrip — 5-level colour-coded summary row (Critical/Severe/Warning/Safe/NoData)
+//     inserted right below the KPI grid, matching the map-legend colours exactly.
 library;
 
 import 'dart:math' as math;
@@ -39,7 +35,8 @@ Color _riskColor(String level) {
   switch (level.toUpperCase()) {
     case 'CRITICAL': return AppPalette.critical;
     case 'SEVERE':   return AppPalette.danger;
-    case 'MODERATE': return AppPalette.warning;
+    case 'MODERATE':
+    case 'WARNING':  return AppPalette.warning;
     default:         return AppPalette.safe;
   }
 }
@@ -48,10 +45,21 @@ IconData _riskIcon(String level) {
   switch (level.toUpperCase()) {
     case 'CRITICAL': return Icons.warning_rounded;
     case 'SEVERE':   return Icons.warning_amber_rounded;
-    case 'MODERATE': return Icons.info_rounded;
+    case 'MODERATE':
+    case 'WARNING':  return Icons.info_rounded;
     default:         return Icons.check_circle_rounded;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alert level colours — single source of truth matching the map legend
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _kCriticalColor  = Color(0xFFFF3B30); // vivid red
+const _kSevereColor    = Color(0xFFFF6B35); // orange
+const _kWarningColor   = Color(0xFFFFCC00); // bright yellow
+const _kSafeColor      = Color(0xFF34C759); // bright green
+const _kNoDataColor    = Color(0xFF8E8E93); // grey
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DashboardScreen
@@ -78,7 +86,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   bool    _reduceMotion  = false;
   bool    _isRefreshing  = false;
   bool    _nearbyBooted  = false;
-  bool    _bannerDismissed = false;   // critical top-banner state
+  bool    _bannerDismissed = false;
 
   @override
   void initState() {
@@ -104,12 +112,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       }
     });
 
-    // ── Auto-refresh every 5 minutes ────────────────────────────────────────
     _autoRefreshTimer = Timer.periodic(
       const Duration(minutes: 5),
-      (_) {
-        if (mounted) _onRefresh();
-      },
+      (_) { if (mounted) _onRefresh(); },
     );
   }
 
@@ -167,7 +172,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
   }
 
-  // ── Navigation helpers ───────────────────────────────────────────────────
   void _goAlerts()        => MainShell.jumpTo(context, 2);
   void _goMap()           => MainShell.jumpTo(context, 1);
   void _goRiverMonitor()  => Navigator.pushNamed(context, RiverMonitorScreen.route);
@@ -192,11 +196,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final biharAlerts    = ref.watch(biharTopAlertsProvider);
     final biharLoading   = ref.watch(biharIsLoadingProvider);
 
-    // Reset banner when criticals clear
-    if (critCount == 0 && !_bannerDismissed) {
-      // no-op, keep _bannerDismissed as-is
-    }
-
     return Scaffold(
       backgroundColor: t.scaffoldBg,
       body: RefreshIndicator(
@@ -207,7 +206,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           physics: const AlwaysScrollableScrollPhysics(
               parent: BouncingScrollPhysics()),
           slivers: [
-            // ── App bar ────────────────────────────────────────────────────
             _DashboardAppBar(
               t: t,
               criticalCount: critCount,
@@ -219,7 +217,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               onAlertsTap: _goAlerts,
             ),
 
-            // ── Critical alert banner ─────────────────────────────────────
             if (critCount > 0 && !_bannerDismissed)
               SliverToBoxAdapter(
                 child: _CriticalBanner(
@@ -229,7 +226,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-            // ── Status banner (offline / waking) ──────────────────────────
             if (isOffline || isWakingUp)
               SliverToBoxAdapter(
                 child: _StatusBanner(
@@ -241,7 +237,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               const SliverToBoxAdapter(child: DashboardEmptyState())
             else ...[
 
-              // ── Hero gauge (tappable → map) ────────────────────────────
               SliverToBoxAdapter(
                 child: GestureDetector(
                   onTap: _goMap,
@@ -257,7 +252,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── KPI grid (cards tappable) ──────────────────────────────
               SliverToBoxAdapter(
                 child: _KpiGrid(
                   t: t,
@@ -271,12 +265,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Stations near you ─────────────────────────────────────
+              // ── NEW: 5-level alert colour strip ───────────────────────
+              SliverToBoxAdapter(
+                child: _AlertColorStrip(
+                  t: t,
+                  levels: liveLevels,
+                  onAlertsTap: _goAlerts,
+                  onSafeTap: _goLiveStations,
+                ),
+              ),
+
               const SliverToBoxAdapter(
                 child: NearbyStationsSection(),
               ),
 
-              // ── Bihar Live ────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'BIHAR LIVE',
@@ -301,7 +303,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Active alerts ─────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'ACTIVE ALERTS',
@@ -322,7 +323,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Monitored stations ────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'MONITORED STATIONS',
@@ -345,7 +345,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Capacity trend ────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'CAPACITY TREND',
@@ -366,7 +365,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Data sources ──────────────────────────────────────────
               SliverToBoxAdapter(
                 child: _SectionHeader(
                   label: 'DATA SOURCES',
@@ -384,7 +382,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Footer ───────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: DashboardFooter(
                   totalStations: liveLevels.length,
@@ -414,7 +411,182 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CriticalBanner  — dismissable red banner at top when criticalCount > 0
+// _AlertColorStrip  — 5-level colour-coded summary matching the map legend
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AlertColorStrip extends StatelessWidget {
+  final RiverColors    t;
+  final List<FloodData> levels;
+  final VoidCallback   onAlertsTap;
+  final VoidCallback   onSafeTap;
+
+  const _AlertColorStrip({
+    required this.t,
+    required this.levels,
+    required this.onAlertsTap,
+    required this.onSafeTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Count each level
+    int critical = 0, severe = 0, warning = 0, safe = 0, noData = 0;
+    for (final d in levels) {
+      switch (d.riskLevel.toUpperCase()) {
+        case 'CRITICAL':
+        case 'DANGER':   critical++; break;
+        case 'SEVERE':   severe++;   break;
+        case 'MODERATE':
+        case 'WARNING':
+        case 'HIGH':     warning++;  break;
+        case 'NORMAL':
+        case 'SAFE':
+        case 'LOW':      safe++;     break;
+        default:         noData++;   break;
+      }
+    }
+
+    final items = [
+      _StripItem(color: _kCriticalColor, label: 'Critical',  count: critical, icon: Icons.warning_rounded,        onTap: onAlertsTap, pulse: critical > 0),
+      _StripItem(color: _kSevereColor,   label: 'Severe',    count: severe,   icon: Icons.warning_amber_rounded,   onTap: onAlertsTap, pulse: severe > 0),
+      _StripItem(color: _kWarningColor,  label: 'Warning',   count: warning,  icon: Icons.info_rounded,            onTap: onAlertsTap),
+      _StripItem(color: _kSafeColor,     label: 'Safe',      count: safe,     icon: Icons.check_circle_rounded,    onTap: onSafeTap),
+      _StripItem(color: _kNoDataColor,   label: 'No data',   count: noData,   icon: Icons.help_outline_rounded,    onTap: onSafeTap),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: t.cardBg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.stroke),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (int i = 0; i < items.length; i++) ...[
+              if (i > 0)
+                Container(width: 1, height: 36, color: t.stroke),
+              Expanded(child: _StripCell(item: items[i], t: t)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StripItem {
+  final Color      color;
+  final String     label;
+  final int        count;
+  final IconData   icon;
+  final VoidCallback onTap;
+  final bool       pulse;
+  const _StripItem({
+    required this.color,
+    required this.label,
+    required this.count,
+    required this.icon,
+    required this.onTap,
+    this.pulse = false,
+  });
+}
+
+class _StripCell extends StatelessWidget {
+  final _StripItem  item;
+  final RiverColors t;
+  const _StripCell({required this.item, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = item.count > 0;
+    final dotColor = isActive ? item.color : item.color.withValues(alpha: 0.35);
+
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        item.onTap();
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Coloured dot with optional pulse ring for active alerts
+          SizedBox(
+            width: 28, height: 28,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Outer pulse ring when count > 0 and is alert level
+                if (item.pulse && isActive)
+                  Container(
+                    width: 26, height: 26,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: item.color.withValues(alpha: 0.30),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                Container(
+                  width: 18, height: 18,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: isActive ? 0.80 : 0.30),
+                      width: 1.5,
+                    ),
+                    boxShadow: isActive ? [
+                      BoxShadow(
+                        color: item.color.withValues(alpha: 0.45),
+                        blurRadius: 6,
+                        spreadRadius: item.pulse ? 1 : 0,
+                      ),
+                    ] : null,
+                  ),
+                  child: Icon(item.icon,
+                      color: Colors.white,
+                      size: 10),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 5),
+          // Count
+          Text(
+            '${item.count}',
+            style: TextStyle(
+              color: isActive ? item.color : t.textSecondary,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          // Label
+          Text(
+            item.label,
+            style: TextStyle(
+              color: t.textSecondary,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _CriticalBanner
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CriticalBanner extends StatelessWidget {
@@ -525,7 +697,6 @@ class _BiharLivePanel extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                // Stations chip → RiverMonitorScreen
                 GestureDetector(
                   onTap: onStationsTap,
                   child: _BiharChip(
@@ -535,7 +706,6 @@ class _BiharLivePanel extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 if (criticalCount > 0) ...[
-                  // Critical chip → AlertsScreen
                   GestureDetector(
                     onTap: onAlertsTap,
                     child: _BiharChip(
@@ -1031,7 +1201,6 @@ class _HeroGauge extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          // Status pill — tappable if critical
           GestureDetector(
             onTap: criticalCount > 0 ? onAlertsTap : null,
             child: AnimatedBuilder(
@@ -1202,7 +1371,7 @@ class _ArcGaugePainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _KpiGrid — cards tappable
+// _KpiGrid
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _KpiGrid extends StatelessWidget {
@@ -1387,7 +1556,7 @@ class _KpiItem {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SectionHeader  — optional "See all →" button
+// _SectionHeader
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -1451,7 +1620,7 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _StationTile  — now tappable
+// _StationTile
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StationTile extends StatelessWidget {
