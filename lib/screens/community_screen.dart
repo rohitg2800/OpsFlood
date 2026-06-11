@@ -1,7 +1,8 @@
 // lib/screens/community_screen.dart
 // OpsFlood — Module 5: Community & Offline
-//
-// CommunityScreen  (v2 — adds static route constant)
+// v2.1: M5 fix — LocationService.instance.getCurrentPosition()
+//       → requestAndGetPosition(context)  (no singleton exists in location_service.dart)
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,8 +18,7 @@ const _kBoxName = 'community_incidents';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
-
-  static const String route = '/community';   // ← added for main.dart router
+  static const String route = '/community';
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -40,14 +40,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
           children: [
             OpsIcon(OpsIcons.community, size: 18, color: t.accent),
             const SizedBox(width: 8),
-            Text(
-              'Community Reports',
-              style: TextStyle(
-                color: t.textPrimary,
-                fontWeight: FontWeight.w900,
-                fontSize: 16,
-              ),
-            ),
+            Text('Community Reports',
+                style: TextStyle(color: t.textPrimary,
+                    fontWeight: FontWeight.w900, fontSize: 16)),
           ],
         ),
         actions: [
@@ -62,8 +57,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             )
           else
             IconButton(
-              icon: Icon(Icons.cloud_sync_rounded,
-                  color: t.textSecondary),
+              icon: Icon(Icons.cloud_sync_rounded, color: t.textSecondary),
               onPressed: _syncWithBackend,
               tooltip: 'Sync with server',
             ),
@@ -75,17 +69,14 @@ class _CommunityScreenState extends State<CommunityScreen> {
               t: t,
               selected: _filterType,
               onSelect: (v) => setState(() => _filterType = v)),
-          Expanded(
-              child: _IncidentFeed(t: t, filterType: _filterType)),
+          Expanded(child: _IncidentFeed(t: t, filterType: _filterType)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: t.accent,
-        icon: const Icon(Icons.add_location_alt_rounded,
-            color: Colors.black),
+        icon: const Icon(Icons.add_location_alt_rounded, color: Colors.black),
         label: const Text('Report',
-            style: TextStyle(
-                color: Colors.black, fontWeight: FontWeight.w800)),
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
         onPressed: () => _showSubmitSheet(context, t),
       ),
     );
@@ -115,14 +106,11 @@ class _CommunityScreenState extends State<CommunityScreen> {
   }
 }
 
-// ── Type filter bar ──────────────────────────────────────────────────────
-
 class _TypeFilterBar extends StatelessWidget {
   final RiverColors t;
   final IncidentType? selected;
   final ValueChanged<IncidentType?> onSelect;
-  const _TypeFilterBar(
-      {required this.t, required this.selected, required this.onSelect});
+  const _TypeFilterBar({required this.t, required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -130,12 +118,10 @@ class _TypeFilterBar extends StatelessWidget {
       height: 48,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
           _chip(null, '🗂 All', context),
-          ...IncidentType.values
-              .map((t) => _chip(t, '${t.emoji} ${t.label}', context)),
+          ...IncidentType.values.map((t) => _chip(t, '${t.emoji} ${t.label}', context)),
         ],
       ),
     );
@@ -149,35 +135,23 @@ class _TypeFilterBar extends StatelessWidget {
         onTap: () => onSelect(type),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            color: active
-                ? t.accent.withValues(alpha: 0.18)
-                : t.cardBg,
+            color: active ? t.accent.withValues(alpha: 0.18) : t.cardBg,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: active
-                  ? t.accent.withValues(alpha: 0.7)
-                  : t.stroke,
-            ),
+                color: active ? t.accent.withValues(alpha: 0.7) : t.stroke),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: active ? t.accent : t.textSecondary,
-              fontWeight:
-                  active ? FontWeight.w700 : FontWeight.w500,
-              fontSize: 11,
-            ),
-          ),
+          child: Text(label,
+              style: TextStyle(
+                  color: active ? t.accent : t.textSecondary,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 11)),
         ),
       ),
     );
   }
 }
-
-// ── Incident feed ────────────────────────────────────────────────────────
 
 class _IncidentFeed extends StatelessWidget {
   final RiverColors t;
@@ -187,8 +161,7 @@ class _IncidentFeed extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
-      valueListenable:
-          Hive.box<CommunityIncident>(_kBoxName).listenable(),
+      valueListenable: Hive.box<CommunityIncident>(_kBoxName).listenable(),
       builder: (_, Box<CommunityIncident> box, __) {
         var items = box.values.toList()
           ..sort((a, b) => b.reportedAt.compareTo(a.reportedAt));
@@ -201,14 +174,12 @@ class _IncidentFeed extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.people_outline_rounded,
-                    size: 52,
-                    color: t.textSecondary.withValues(alpha: 0.4)),
+                    size: 52, color: t.textSecondary.withValues(alpha: 0.4)),
                 const SizedBox(height: 12),
                 Text(
                   'No reports yet.\nBe the first to report a ground situation.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: t.textSecondary, fontSize: 13),
+                  style: TextStyle(color: t.textSecondary, fontSize: 13),
                 ),
               ],
             ),
@@ -217,22 +188,17 @@ class _IncidentFeed extends StatelessWidget {
         return RefreshIndicator(
           color: t.accent,
           backgroundColor: t.cardBg,
-          onRefresh: () async =>
-              Future.delayed(const Duration(seconds: 1)),
+          onRefresh: () async => Future.delayed(const Duration(seconds: 1)),
           child: ListView.builder(
-            padding:
-                const EdgeInsets.fromLTRB(12, 4, 12, 100),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
             itemCount: items.length,
-            itemBuilder: (_, i) =>
-                _IncidentCard(incident: items[i], t: t),
+            itemBuilder: (_, i) => _IncidentCard(incident: items[i], t: t),
           ),
         );
       },
     );
   }
 }
-
-// ── Incident card ────────────────────────────────────────────────────────
 
 class _IncidentCard extends StatelessWidget {
   final CommunityIncident incident;
@@ -248,108 +214,57 @@ class _IncidentCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.stroke),
-      ),
+          color: t.cardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: t.stroke)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(inc.type.emoji,
-                  style: const TextStyle(fontSize: 18)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  inc.type.label,
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
+          Row(children: [
+            Text(inc.type.emoji, style: const TextStyle(fontSize: 18)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(inc.type.label,
+                style: TextStyle(color: t.textPrimary,
+                    fontWeight: FontWeight.w800, fontSize: 13))),
+            if (!sync)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppPalette.warning.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppPalette.warning.withValues(alpha: 0.50)),
                 ),
+                child: Text('📵 Offline',
+                    style: TextStyle(color: AppPalette.warning,
+                        fontSize: 9, fontWeight: FontWeight.w700)),
               ),
-              if (!sync)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppPalette.warning
-                        .withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: AppPalette.warning
-                            .withValues(alpha: 0.50)),
-                  ),
-                  child: Text(
-                    '📵 Offline',
-                    style: TextStyle(
-                      color: AppPalette.warning,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          ]),
           const SizedBox(height: 6),
-          Text(
-            inc.description,
-            style: TextStyle(
-              color: t.textSecondary,
-              fontSize: 12,
-              height: 1.5,
-            ),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-          ),
+          Text(inc.description,
+              style: TextStyle(color: t.textSecondary, fontSize: 12, height: 1.5),
+              maxLines: 3, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(Icons.location_on_rounded,
-                  size: 12, color: t.textSecondary),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  inc.locationLabel ?? inc.district,
-                  style: TextStyle(
-                      color: t.textSecondary, fontSize: 10),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Text(
-                age,
-                style: TextStyle(
-                    color:
-                        t.textSecondary.withValues(alpha: 0.6),
-                    fontSize: 10),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () {
-                  inc.upvotes++;
-                  inc.save();
-                  HapticFeedback.lightImpact();
-                },
-                child: Row(
-                  children: [
-                    Icon(Icons.thumb_up_rounded,
-                        size: 14, color: t.accent),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${inc.upvotes}',
-                      style: TextStyle(
-                        color: t.accent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          Row(children: [
+            Icon(Icons.location_on_rounded, size: 12, color: t.textSecondary),
+            const SizedBox(width: 4),
+            Expanded(child: Text(
+                inc.locationLabel ?? inc.district,
+                style: TextStyle(color: t.textSecondary, fontSize: 10),
+                overflow: TextOverflow.ellipsis)),
+            Text(age, style: TextStyle(
+                color: t.textSecondary.withValues(alpha: 0.6), fontSize: 10)),
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: () { inc.upvotes++; inc.save(); HapticFeedback.lightImpact(); },
+              child: Row(children: [
+                Icon(Icons.thumb_up_rounded, size: 14, color: t.accent),
+                const SizedBox(width: 4),
+                Text('${inc.upvotes}',
+                    style: TextStyle(color: t.accent, fontSize: 11,
+                        fontWeight: FontWeight.w700)),
+              ]),
+            ),
+          ]),
         ],
       ),
     );
@@ -364,14 +279,11 @@ class _IncidentCard extends StatelessWidget {
   }
 }
 
-// ── Submit sheet ───────────────────────────────────────────────────────────
-
 class _SubmitIncidentSheet extends StatefulWidget {
   final RiverColors t;
   const _SubmitIncidentSheet({required this.t});
   @override
-  State<_SubmitIncidentSheet> createState() =>
-      _SubmitIncidentSheetState();
+  State<_SubmitIncidentSheet> createState() => _SubmitIncidentSheetState();
 }
 
 class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
@@ -386,7 +298,8 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
   @override
   void initState() {
     super.initState();
-    _fetchLocation();
+    // _fetchLocation needs context; defer to first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchLocation());
   }
 
   @override
@@ -396,16 +309,21 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
   }
 
   Future<void> _fetchLocation() async {
+    // M5 FIX: LocationService singleton doesn't exist in location_service.dart.
+    // Use requestAndGetPosition(context) — the top-level function that handles
+    // permissions, rationale dialog, and returns a Position?.
     try {
-      final pos =
-          await LocationService.instance.getCurrentPosition();
+      final pos = await requestAndGetPosition(context);
       if (mounted) {
         setState(() {
-          _lat = pos.latitude;
-          _lon = pos.longitude;
-          _locationLabel =
-              '${pos.latitude.toStringAsFixed(4)}, '
-              '${pos.longitude.toStringAsFixed(4)}';
+          if (pos != null) {
+            _lat = pos.latitude;
+            _lon = pos.longitude;
+            _locationLabel = '${pos.latitude.toStringAsFixed(4)}, '
+                '${pos.longitude.toStringAsFixed(4)}';
+          } else {
+            _locationLabel = 'Location unavailable';
+          }
           _loadingLocation = false;
         });
       }
@@ -422,8 +340,7 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
   Future<void> _submit() async {
     if (_descCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text(
-            'Please describe the incident before submitting.'),
+        content: const Text('Please describe the incident before submitting.'),
         backgroundColor: widget.t.cardBg,
         behavior: SnackBarBehavior.floating,
       ));
@@ -446,229 +363,4 @@ class _SubmitIncidentSheetState extends State<_SubmitIncidentSheet> {
     if (mounted) {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text(
-            '✅ Incident saved locally — will sync when online.'),
-        backgroundColor: widget.t.cardBg,
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = widget.t;
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-        decoration: BoxDecoration(
-          color: t.cardBg,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: t.stroke),
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40, height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: t.stroke,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Text('Report a Flood Incident',
-                  style: TextStyle(
-                      color: t.textPrimary,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16)),
-              Text('बाढ़ की घटना रिपोर्ट करें',
-                  style: TextStyle(
-                      color: t.textSecondary, fontSize: 11)),
-              const SizedBox(height: 16),
-              Text('Incident Type',
-                  style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: IncidentType.values.map((type) {
-                  final active = _selectedType == type;
-                  return GestureDetector(
-                    onTap: () =>
-                        setState(() => _selectedType = type),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: active
-                            ? t.accent.withValues(alpha: 0.18)
-                            : t.cardBgElevated,
-                        borderRadius:
-                            BorderRadius.circular(20),
-                        border: Border.all(
-                          color: active
-                              ? t.accent.withValues(alpha: 0.70)
-                              : t.stroke,
-                        ),
-                      ),
-                      child: Text(
-                        '${type.emoji} ${type.label}',
-                        style: TextStyle(
-                          color: active
-                              ? t.accent
-                              : t.textSecondary,
-                          fontWeight: active
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Text('Description  /  विवरण',
-                  style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _descCtrl,
-                maxLines: 4,
-                style: TextStyle(
-                    color: t.textPrimary, fontSize: 13),
-                decoration: InputDecoration(
-                  hintText:
-                      'Describe what you see… (English or Hindi)',
-                  hintStyle: TextStyle(
-                      color:
-                          t.textSecondary.withValues(alpha: 0.5),
-                      fontSize: 12),
-                  filled: true,
-                  fillColor: t.cardBgElevated,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: t.stroke),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: t.stroke),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        BorderSide(color: t.accent, width: 1.5),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Icon(Icons.location_on_rounded,
-                      size: 14, color: t.accent),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: _loadingLocation
-                        ? SizedBox(
-                            height: 14, width: 14,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                color: t.accent),
-                          )
-                        : Text(
-                            _locationLabel,
-                            style: TextStyle(
-                                color: t.textSecondary,
-                                fontSize: 11),
-                          ),
-                  ),
-                  TextButton(
-                    onPressed:
-                        _loadingLocation ? null : _fetchLocation,
-                    child: Text('Refresh',
-                        style: TextStyle(
-                            color: t.accent, fontSize: 11)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(
-                    content: const Text(
-                        'Image attachment coming in Module 6'),
-                    backgroundColor: t.cardBg,
-                    behavior: SnackBarBehavior.floating,
-                  ));
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: t.cardBgElevated,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: t.stroke),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate_outlined,
-                          color: t.textSecondary, size: 18),
-                      const SizedBox(width: 8),
-                      Text('Attach Photo (optional)',
-                          style: TextStyle(
-                              color: t.textSecondary,
-                              fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: t.accent,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(14)),
-                  ),
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 18, height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.black),
-                        )
-                      : const Text(
-                          'Submit Report',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14),
-                        ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+        content: const Text('✅ Incident saved locall
