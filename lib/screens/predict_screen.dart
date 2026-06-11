@@ -1,18 +1,10 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — PredictScreen v6  (live data table from RiverStation)
+// OpsFlood — PredictScreen v6.1
 //
-// Fix from v5:
-//   • Table was always empty because _matchCity compared d.city (gauge name
-//     e.g. "Digha Ghat") against a typed city (e.g. "Patna") — never matched.
-//   • v6 reads mergedStationsProvider directly (RiverStation list) and builds
-//     the table rows from RiverStation fields, bypassing the FloodData shim.
-//   • Match strategy (broadest reasonable):
-//       1. station name contains the query word
-//       2. city field contains the query word
-//       3. river field contains the query word
-//       4. any token of the query appears in station name
-//     First non-empty result wins; if nothing found, table is hidden.
-//   • Also changed ref.read → ref.watch for live reactivity.
+// Fix from v6:
+//   • RiverStation has no 'discharge' field.
+//     All references replaced: discharge → flowRate  (double? flowRate)
+//     rainfall   → rainfallLastHour  (double? rainfallLastHour)
 library;
 
 import 'dart:convert';
@@ -56,7 +48,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
 
   _PredictResult?      _result;
   String?              _error;
-  List<RiverStation>?  _matchedStations; // populated on predict
+  List<RiverStation>?  _matchedStations;
 
   late final AnimationController _resultAnim;
   late final Animation<double>   _resultFade;
@@ -98,48 +90,38 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     }
   }
 
-  // ── Match query against RiverStation list (broadest reasonable search) ──
+  // ── 5-tier fuzzy match against RiverStation list ──────────────────────────
   List<RiverStation> _findStations(String query) {
     if (query.isEmpty) return [];
-    final q     = query.toLowerCase().trim();
-    final all   = ref.read(mergedStationsProvider);
-    // Also check liveLevelsProvider (FloodData) city field as a fallback
-    final liveF = ref.read(liveLevelsProvider);
+    final q   = query.toLowerCase().trim();
+    final all = ref.read(mergedStationsProvider);
 
-    // 1. Station name contains query
-    var hits = all
-        .where((s) => s.station.toLowerCase().contains(q))
-        .toList();
+    // 1. station name contains query
+    var hits = all.where((s) => s.station.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
-    // 2. City field contains query
-    hits = all
-        .where((s) => s.city.toLowerCase().contains(q))
-        .toList();
+    // 2. city field contains query
+    hits = all.where((s) => s.city.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
-    // 3. River field contains query
-    hits = all
-        .where((s) => s.river.toLowerCase().contains(q))
-        .toList();
+    // 3. river field contains query
+    hits = all.where((s) => s.river.toLowerCase().contains(q)).toList();
     if (hits.isNotEmpty) return hits;
 
-    // 4. Any token of the query appears in station name
+    // 4. any word-token of query appears in station name
     final tokens = q.split(RegExp(r'\s+'));
-    hits = all
-        .where((s) {
-          final sLow = s.station.toLowerCase();
-          return tokens.any((t) => t.length > 2 && sLow.contains(t));
-        })
-        .toList();
+    hits = all.where((s) {
+      final sLow = s.station.toLowerCase();
+      return tokens.any((t) => t.length > 2 && sLow.contains(t));
+    }).toList();
     if (hits.isNotEmpty) return hits;
 
     // 5. FloodData city fallback
-    final fdHit = liveF
+    final liveF = ref.read(liveLevelsProvider);
+    return liveF
         .where((d) => d.city.toLowerCase().contains(q))
         .map((d) => all.firstWhere(
-              (s) => s.station.toLowerCase() ==
-                  d.city.toLowerCase(),
+              (s) => s.station.toLowerCase() == d.city.toLowerCase(),
               orElse: () => RiverStation(
                 city:        d.city,
                 state:       d.state,
@@ -155,7 +137,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
               ),
             ))
         .toList();
-    return fdHit;
   }
 
   void _fillFromCity(String city, {double? overrideLevel}) {
@@ -163,16 +144,16 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     final first    = stations.isNotEmpty ? stations.first : null;
 
     final level    = overrideLevel ?? first?.current ?? 0.0;
-    final rainfall = ''; // rainfall not on RiverStation; user fills manually
-    final discharge = first != null && (first.discharge ?? 0) > 0
-        ? first.discharge!.toStringAsFixed(0)
+    // flowRate → pre-fill Discharge field if available
+    final flowStr  = first != null && (first.flowRate ?? 0) > 0
+        ? first.flowRate!.toStringAsFixed(0)
         : '';
 
     setState(() {
       _cityCtrl.text      = city;
       _peakLevelCtrl.text = level > 0 ? level.toStringAsFixed(2) : '';
-      _rainfallCtrl.text  = rainfall;
-      _dischargeCtrl.text = discharge;
+      _rainfallCtrl.text  = ''; // rainfallLastHour is 1-hr value, not 7d
+      _dischargeCtrl.text = flowStr;
       _autoFilled         = level > 0;
     });
 
@@ -199,7 +180,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     if (!_formKey.currentState!.validate()) return;
     HapticFeedback.mediumImpact();
 
-    // Snapshot matched stations for table
     final city     = _cityCtrl.text.trim();
     final stations = _findStations(city);
 
@@ -260,8 +240,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
-    // Keep watching so table refreshes when data updates
-    ref.watch(mergedStationsProvider);
+    ref.watch(mergedStationsProvider); // reactive refresh
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -270,7 +249,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
           controller: _scrollCtrl,
           physics: const BouncingScrollPhysics(),
           slivers: [
-
             SliverToBoxAdapter(child: _Header(t: t)),
 
             if (_loading && _autoFilled)
@@ -286,7 +264,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-
                       _SectionLabel('Input Parameters', t: t),
                       const SizedBox(height: 10),
 
@@ -354,13 +331,12 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                           opacity: _resultFade,
                           child: _LiveStationTable(
                             stations: _matchedStations!,
-                            query:    _cityCtrl.text,
                             t:        t,
                           ),
                         ),
                       ],
 
-                      // ─ "No station found" notice (only when city typed but not found)
+                      // ─ No-match notice
                       if ((_result != null || _error != null) &&
                           (_matchedStations == null ||
                               _matchedStations!.isEmpty) &&
@@ -388,25 +364,19 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _LiveStationTable — shows one card per matched RiverStation
+// _LiveStationTable
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LiveStationTable extends StatelessWidget {
   final List<RiverStation> stations;
-  final String             query;
   final RiverColors        t;
-  const _LiveStationTable({
-    required this.stations,
-    required this.query,
-    required this.t,
-  });
+  const _LiveStationTable({required this.stations, required this.t});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section label
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: Row(
@@ -438,7 +408,6 @@ class _StationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Colour for current level
     Color levelColor() {
       if (s.danger > 0 && s.current >= s.danger)   return AppPalette.critical;
       if (s.warning > 0 && s.current >= s.warning) return AppPalette.warning;
@@ -460,9 +429,8 @@ class _StationCard extends StatelessWidget {
                 ? AppPalette.warning
                 : AppPalette.safe;
 
-    final capacityPct = s.danger > 0
-        ? (s.current / s.danger * 100).clamp(0.0, 200.0)
-        : 0.0;
+    final capacityPct =
+        s.danger > 0 ? (s.current / s.danger * 100).clamp(0.0, 200.0) : 0.0;
 
     final rows = [
       _Row('River',         s.river.isNotEmpty ? s.river : '—',    null),
@@ -476,9 +444,16 @@ class _StationCard extends StatelessWidget {
           ? '${s.hfl.toStringAsFixed(2)} m'     : '—',            null),
       _Row('Capacity',      s.danger > 0
           ? '${capacityPct.toStringAsFixed(1)} %' : '—',          capColor()),
-      if (s.discharge != null && (s.discharge ?? 0) > 0)
-        _Row('Discharge',
-            '${s.discharge!.toStringAsFixed(0)} m³/s',            null),
+      // flowRate replaces old 'discharge'
+      if (s.flowRate != null && (s.flowRate ?? 0) > 0)
+        _Row('Flow Rate',
+            '${s.flowRate!.toStringAsFixed(0)} m³/s',             null),
+      // rainfallLastHour if present
+      if (s.rainfallLastHour != null && (s.rainfallLastHour ?? 0) > 0)
+        _Row('Rainfall (1h)',
+            '${s.rainfallLastHour!.toStringAsFixed(1)} mm',        null),
+      if (s.trend != null && s.trend!.isNotEmpty)
+        _Row('Trend', s.trend!,                                     null),
       _Row('Status',        s.dangerClass.name.toUpperCase(),       dangerClassColor),
       _Row('Data Source',   s.dataSource ?? '—',                   null),
       _Row('Last Updated',  s.lastUpdated?.isNotEmpty == true
@@ -546,7 +521,6 @@ class _StationCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Live / estimated badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 7, vertical: 3),
@@ -563,7 +537,8 @@ class _StationCard extends StatelessWidget {
                   child: Text(
                     s.isLive ? 'LIVE' : 'EST',
                     style: TextStyle(
-                        color: s.isLive ? AppPalette.safe : AppPalette.warning,
+                        color:
+                            s.isLive ? AppPalette.safe : AppPalette.warning,
                         fontSize: 8,
                         fontWeight: FontWeight.w900),
                   ),
@@ -592,8 +567,8 @@ class _StationCard extends StatelessWidget {
                           minHeight: 6,
                           backgroundColor:
                               t.stroke.withValues(alpha: 0.3),
-                          valueColor: AlwaysStoppedAnimation(
-                              levelColor()),
+                          valueColor:
+                              AlwaysStoppedAnimation(levelColor()),
                         ),
                       ),
                     ),
@@ -627,8 +602,7 @@ class _StationCard extends StatelessWidget {
                     ? null
                     : Border(
                         bottom: BorderSide(
-                            color:
-                                t.stroke.withValues(alpha: 0.20),
+                            color: t.stroke.withValues(alpha: 0.20),
                             width: 0.5)),
               ),
               child: Row(
@@ -809,11 +783,11 @@ class _CityFieldState extends State<_CityField> {
               fontSize: 14),
           decoration: InputDecoration(
             labelText: 'City / Station',
-            hintText: 'e.g. Patna',
+            hintText:  'e.g. Patna',
             labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
             hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
-            prefixIcon:
-                Icon(Icons.location_on_rounded, color: t.textSecondary, size: 18),
+            prefixIcon: Icon(Icons.location_on_rounded,
+                color: t.textSecondary, size: 18),
             suffixIcon: widget.autoFilled
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1000,14 +974,14 @@ class _DarkFieldState extends State<_DarkField> {
             hintText:  widget.hint,
             labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
             hintStyle:  TextStyle(color: t.stroke,        fontSize: 13),
-            prefixIcon:
-                Icon(widget.icon, color: t.textSecondary, size: 18),
+            prefixIcon: Icon(widget.icon, color: t.textSecondary, size: 18),
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 14),
           ),
           validator: widget.required
-              ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null
+              ? (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null
               : null,
         ),
       ),
@@ -1189,7 +1163,8 @@ class _ResultCard extends StatelessWidget {
                     children: [
                       CustomPaint(
                         size: const Size(54, 54),
-                        painter: _RingPainter(value: pct / 100, color: col),
+                        painter:
+                            _RingPainter(value: pct / 100, color: col),
                       ),
                       Text(
                         '${pct.toStringAsFixed(0)}%',
