@@ -1,5 +1,5 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v9
+// EQUINOX-BH — CityDetailScreen v10
 // Uses PUBLIC widget classes from city_detail_screen_widgets.dart
 // (Dart private _ classes can't cross file boundaries)
 library;
@@ -155,7 +155,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
               physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics()),
               slivers: [
-                // ── App Bar ─────────────────────────────────────────────────
+                // ── App Bar ────────────────────────────────────────────────────────
                 SliverAppBar(
                   backgroundColor: Colors.transparent,
                   surfaceTintColor: Colors.transparent,
@@ -204,19 +204,19 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                   ],
                 ),
 
-                // ── Threshold banner ─────────────────────────────────────────
+                // ── Threshold banner ───────────────────────────────────────────────
                 if (data != null)
                   SliverToBoxAdapter(
-                    child: ThresholdBanner(data: data),  // PUBLIC class
+                    child: ThresholdBanner(data: data),
                   ),
 
-                // ── No-data skeleton ─────────────────────────────────────────
+                // ── No-data skeleton ───────────────────────────────────────────────
                 if (data == null)
                   SliverFillRemaining(
                     child: CitySkeletonView(cityName: widget.cityName),
                   )
 
-                // ── Loaded body ───────────────────────────────────────────────
+                // ── Loaded body ───────────────────────────────────────────────────
                 else
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
@@ -271,11 +271,14 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                         ],
 
                         // 5 ─ Emergency contacts
+                        // stationName = widget.cityName so SosScreen can
+                        // pre-filter contacts to the matching district.
                         _section(5, CollapsibleContacts(
-                          contacts: contacts,
-                          state:    data.state,
-                          expanded: _contactsExpanded,
-                          onToggle: () => setState(
+                          contacts:    contacts,
+                          state:       data.state,
+                          stationName: widget.cityName,
+                          expanded:    _contactsExpanded,
+                          onToggle:    () => setState(
                               () => _contactsExpanded = !_contactsExpanded),
                         )),
                         const SizedBox(height: 12),
@@ -314,7 +317,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _BiharDataCard  (file-private, only used here — stays with underscore)
+// _BiharDataCard  (file-private)
 // ─────────────────────────────────────────────────────────────────────────────
 class _BiharDataCard extends StatelessWidget {
   final BiharStationData? station;
