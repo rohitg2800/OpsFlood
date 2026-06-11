@@ -181,8 +181,10 @@ class _AppLocalizationsDelegate
   bool isSupported(Locale locale) =>
       <String>['en', 'hi'].contains(locale.languageCode);
 
+  // shouldReload must return true so that when MaterialApp.locale changes,
+  // Flutter re-invokes load() and rebuilds all localised widgets.
   @override
-  bool shouldReload(_AppLocalizationsDelegate old) => false;
+  bool shouldReload(_AppLocalizationsDelegate old) => true;
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
