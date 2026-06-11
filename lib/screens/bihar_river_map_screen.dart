@@ -5,6 +5,7 @@
 //   • Suppress flutter_map fallback-freshness log spam for RainViewer tiles.
 //     RainViewer sends no Cache-Control header; we inject max-age=600 (10 min)
 //     via NetworkTileProvider so the caching layer never hits its 168h fallback.
+//   • Fix latlong2 import path (latlong2/latlong2 → latlong2/latlong2).
 library;
 
 import 'package:flutter/material.dart';
@@ -595,18 +596,16 @@ class _StationPin extends StatelessWidget {
   final double?   rainfall;
   const _StationPin({required this.level, this.rainfall});
 
-  // Outer dot (fill)
   double get _dotSize {
     switch (level) {
       case RiskLevel.critical: return 26;
       case RiskLevel.severe:   return 22;
       case RiskLevel.moderate: return 20;
-      case RiskLevel.safe:     return 16; // was 13 — now clearly visible
+      case RiskLevel.safe:     return 16;
       case RiskLevel.noData:   return 12;
     }
   }
 
-  // Glow blur radius
   double get _glowBlur {
     switch (level) {
       case RiskLevel.critical: return 16;
@@ -642,11 +641,8 @@ class _StationPin extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Pulsing ring (critical + severe)
               if (_showPulse)
                 _PulsingRing(color: color, size: containerSize - 4),
-
-              // Rainfall outer ring
               if (hasRainfall && !_showPulse)
                 Container(
                   width:  dotSize + 12,
@@ -658,26 +654,21 @@ class _StationPin extends StatelessWidget {
                         width: 2),
                   ),
                 ),
-
-              // ── Main dot with WHITE border for visibility ──
               Container(
                 width: dotSize, height: dotSize,
                 decoration: BoxDecoration(
                   color: color,
                   shape: BoxShape.circle,
-                  // White outline — the key visibility fix on dark tiles
                   border: Border.all(
                     color: Colors.white.withValues(alpha: 0.90),
                     width: 2.0,
                   ),
                   boxShadow: [
-                    // Coloured glow
                     BoxShadow(
                       color: color.withValues(alpha: 0.65),
                       blurRadius: _glowBlur,
                       spreadRadius: level == RiskLevel.critical ? 2 : 0,
                     ),
-                    // Dark drop shadow so it pops on light tiles too
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.35),
                       blurRadius: 4,
@@ -690,8 +681,6 @@ class _StationPin extends StatelessWidget {
             ],
           ),
         ),
-
-        // Label badge
         if (_showLabel)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -789,7 +778,7 @@ class _PulsingRingState extends State<_PulsingRing>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _LayerPanel  — precipitation button no longer gated behind OWM key
+// _LayerPanel
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LayerPanel extends StatelessWidget {
@@ -875,7 +864,6 @@ class _LayerPanel extends StatelessWidget {
               style: TextStyle(color: t.textSecondary, fontSize: 9,
                   fontWeight: FontWeight.w800, letterSpacing: 1.5)),
           const SizedBox(height: 8),
-          // ── Precipitation — always tappable (RainViewer, no key) ──
           GestureDetector(
             onTap: onPrecipToggle,
             child: AnimatedContainer(
@@ -908,7 +896,6 @@ class _LayerPanel extends StatelessWidget {
                               ? FontWeight.w800
                               : FontWeight.w500)),
                   const SizedBox(width: 6),
-                  // "FREE" badge instead of 🔒
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 5, vertical: 2),
