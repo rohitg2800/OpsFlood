@@ -1,16 +1,12 @@
-// lib/services/bihar_live_engine.dart  v1.2
+// lib/services/bihar_live_engine.dart  v1.2.1
 //
-// v1.2 fixes (on top of v1.1):
-//   • BiharWrdScraper()     → BiharWrdScraper.instance   (singleton, private ctor)
-//   • _wrdScraper.fetchLatest() → .fetchAll()            (correct method name)
-//     Returns List<BiharStationReading>, so _scrapedToItem now accepts that type.
-//   • IndiaStationsService.fetchStations() → .fetchAll() (correct method name)
-//     Returns List<FloodData>, so _listToItems replaced with _floodDataToItem.
+// v1.2.1: add missing import '../models/flood_data.dart' (FloodData type).
 library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import '../models/flood_data.dart';   // FloodData
 import 'befiqr_cwc_service.dart';
 import 'bihar_wrd_scraper.dart';
 import 'india_stations_service.dart';
@@ -138,7 +134,6 @@ class BiharLiveEngine {
   static const _kosiInterval  = Duration(minutes: 20);
   static const _timeout       = Duration(seconds: 20);
 
-  // FIX v1.2: BiharWrdScraper() → .instance (private constructor)
   final _wrd         = WrdBiharService.instance;
   final _befiqr      = BefiqrCwcService();
   final _kosiBirpur  = KosiBirpurService();
@@ -199,7 +194,7 @@ class BiharLiveEngine {
     _emit();
   }
 
-  // ── fetch workers ──────────────────────────────────────────────────────────────
+  // ── fetch workers ──────────────────────────────────────────────────────────
 
   Future<void> _fetchGauge() async {
     final t0 = DateTime.now();
@@ -207,14 +202,12 @@ class BiharLiveEngine {
       final data = await _wrd.fetch().timeout(_timeout);
       _gaugeCache = data.map(_wrdStationToItem).toList();
       _setHealth(SourceId.wrdBihar, true, DateTime.now().difference(t0));
-
-      // FIX v1.2: .fetchLatest() → .fetchAll() — returns List<BiharStationReading>
       try {
         final scraped = await _wrdScraper.fetchAll().timeout(_timeout);
         final scraperItems = scraped.map(_biharStationToItem).toList();
         final seen = {for (final i in _gaugeCache) i.id};
         _gaugeCache.addAll(scraperItems.where((i) => !seen.contains(i.id)));
-      } catch (_) {/* scraper optional */}
+      } catch (_) {}
     } catch (e) {
       _setHealth(SourceId.wrdBihar, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] WRD: $e');
@@ -240,13 +233,9 @@ class BiharLiveEngine {
     try {
       final data = await _wris.fetchBiharTelemetry().timeout(_timeout);
       _wrisCache = _listToItems(
-        data,
-        SourceId.wris,
-        FeedItemKind.telemetry,
-        titleKey:    'stationName',
-        valueKey:    'waterLevel',
-        dangerKey:   'alertLevel',
-        subtitleKey: 'riverName',
+        data, SourceId.wris, FeedItemKind.telemetry,
+        titleKey: 'stationName', valueKey: 'waterLevel',
+        dangerKey: 'alertLevel', subtitleKey: 'riverName',
       );
       _setHealth(SourceId.wris, true, DateTime.now().difference(t0));
     } catch (e) {
@@ -272,7 +261,6 @@ class BiharLiveEngine {
   Future<void> _fetchIndiaStations() async {
     final t0 = DateTime.now();
     try {
-      // FIX v1.2: .fetchStations() → .fetchAll() — returns List<FloodData>
       final stations = await _indStations.fetchAll().timeout(_timeout);
 
       List<BiharFeedItem> befiqrItems = [];
@@ -309,13 +297,8 @@ class BiharLiveEngine {
         _setHealth(SourceId.cwcBefiqr, true, DateTime.now().difference(t0));
       } catch (_) {}
 
-      // FIX v1.2: typed converter for List<FloodData>
       final stationItems = stations.map(_floodDataToItem).toList();
-
-      _stationCache = <BiharFeedItem>[
-        ...stationItems,
-        ...befiqrItems,
-      ];
+      _stationCache = <BiharFeedItem>[...stationItems, ...befiqrItems];
       _setHealth(SourceId.indiaStations, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.indiaStations, false, DateTime.now().difference(t0), '$e');
@@ -386,7 +369,6 @@ class BiharLiveEngine {
     );
   }
 
-  /// FIX v1.2: BiharStationReading (typed) — replaces old _scrapedToItem(Map)
   BiharFeedItem _biharStationToItem(BiharStationReading r) {
     final level  = r.currentLevel.toStringAsFixed(2);
     final status = r.status;
@@ -406,15 +388,14 @@ class BiharLiveEngine {
       fetchedAt:   r.observedAt,
       severity:    _dangerToSeverity(status),
       raw: {
-        'river':    r.river,    'station': r.stationName,
-        'district': r.district, 'level':   r.currentLevel,
-        'danger':   r.dangerLevel, 'hfl':  r.hfl,
-        'trend':    r.trend,    'status':  r.status,
+        'river':    r.river,       'station':  r.stationName,
+        'district': r.district,    'level':    r.currentLevel,
+        'danger':   r.dangerLevel, 'hfl':      r.hfl,
+        'trend':    r.trend,       'status':   r.status,
       },
     );
   }
 
-  /// FIX v1.2: FloodData (typed) — IndiaStationsService.fetchAll() return type
   BiharFeedItem _floodDataToItem(FloodData fd) {
     final level  = fd.currentLevel.toStringAsFixed(2);
     final status = fd.riskLevel;
@@ -431,9 +412,9 @@ class BiharLiveEngine {
       fetchedAt:   fd.lastUpdated,
       severity:    _riskToSeverity(status),
       raw: {
-        'city':    fd.city,    'state':   fd.state,
-        'river':   fd.riverName, 'level': fd.currentLevel,
-        'danger':  fd.dangerLevel, 'warning': fd.warningLevel,
+        'city':    fd.city,       'state':   fd.state,
+        'river':   fd.riverName,  'level':   fd.currentLevel,
+        'danger':  fd.dangerLevel,'warning': fd.warningLevel,
         'risk':    fd.riskLevel,
       },
     );
@@ -449,7 +430,10 @@ class BiharLiveEngine {
     dangerLevel: r.statusLabel,
     fetchedAt:   r.observedAt,
     severity:    _dangerToSeverity(r.statusLabel),
-    raw: {'river': 'Kosi', 'station': 'Birpur', 'level': r.levelM, 'danger': r.dangerLevel, 'warning': r.warningLevel},
+    raw: {
+      'river': 'Kosi', 'station': 'Birpur',
+      'level': r.levelM, 'danger': r.dangerLevel, 'warning': r.warningLevel,
+    },
   );
 
   BiharFeedItem _liveResultToItem(LiveRiverResult r) {
@@ -466,11 +450,13 @@ class BiharLiveEngine {
       dangerLevel: status,
       fetchedAt:   DateTime.now(),
       severity:    _dangerToSeverity(status),
-      raw: {'river': s.river, 'station': s.station, 'level': s.current, 'danger': s.danger, 'warning': s.warning, 'source': r.source},
+      raw: {
+        'river': s.river, 'station': s.station, 'level': s.current,
+        'danger': s.danger, 'warning': s.warning, 'source': r.source,
+      },
     );
   }
 
-  /// Generic list-of-maps → BiharFeedItems  (used only for WRIS telemetry maps)
   List<BiharFeedItem> _listToItems(
     dynamic raw, SourceId source, FeedItemKind kind, {
     required String titleKey, required String valueKey,
@@ -495,15 +481,15 @@ class BiharLiveEngine {
   }
 
   BiharFeedItem _newsToItem(NewsItem n) => BiharFeedItem(
-    id:       'news|${n.id}',
-    kind:     n.severity == NewsSeverity.critical || n.severity == NewsSeverity.high
-                  ? FeedItemKind.alert : FeedItemKind.news,
-    source:   SourceId.news,
-    title:    n.title,
-    subtitle: '${n.source} · ${_fmtDate(n.publishedAt)}',
-    url:      n.url,
+    id:        'news|${n.id}',
+    kind:      n.severity == NewsSeverity.critical || n.severity == NewsSeverity.high
+                   ? FeedItemKind.alert : FeedItemKind.news,
+    source:    SourceId.news,
+    title:     n.title,
+    subtitle:  '${n.source} · ${_fmtDate(n.publishedAt)}',
+    url:       n.url,
     fetchedAt: n.publishedAt,
-    severity: n.severity,
+    severity:  n.severity,
     raw: {'summary': n.summary, 'source': n.source, 'url': n.url},
   );
 
@@ -511,16 +497,16 @@ class BiharLiveEngine {
 
   static NewsSeverity _dangerToSeverity(String status) {
     final s = status.toLowerCase();
-    if (s.contains('danger')   || s.contains('breach')  ||
-        s.contains('red')      || s.contains('extreme') ||
-        s.contains('above_hfl')|| s.contains('above_danger'))
+    if (s.contains('danger')    || s.contains('breach')  ||
+        s.contains('red')       || s.contains('extreme') ||
+        s.contains('above_hfl') || s.contains('above_danger'))
       return NewsSeverity.critical;
-    if (s.contains('warning')  || s.contains('high')    ||
-        s.contains('orange')   || s.contains('above')   ||
+    if (s.contains('warning')   || s.contains('high')    ||
+        s.contains('orange')    || s.contains('above')   ||
         s.contains('near_danger'))
       return NewsSeverity.high;
-    if (s.contains('watch')    || s.contains('caution') ||
-        s.contains('yellow')   || s.contains('moderate'))
+    if (s.contains('watch')     || s.contains('caution') ||
+        s.contains('yellow')    || s.contains('moderate'))
       return NewsSeverity.moderate;
     return NewsSeverity.info;
   }
@@ -535,7 +521,10 @@ class BiharLiveEngine {
   }
 
   static String _fmtDate(DateTime d) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = [
+      'Jan','Feb','Mar','Apr','May','Jun',
+      'Jul','Aug','Sep','Oct','Nov','Dec',
+    ];
     return '${d.day} ${months[d.month - 1]}';
   }
 }
