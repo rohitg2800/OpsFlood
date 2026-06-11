@@ -5,7 +5,7 @@
 //   • Suppress flutter_map fallback-freshness log spam for RainViewer tiles.
 //     RainViewer sends no Cache-Control header; we inject max-age=600 (10 min)
 //     via NetworkTileProvider so the caching layer never hits its 168h fallback.
-//   • Remove direct latlong2 import — flutter_map ^8 re-exports LatLng.
+//   • flutter_map v8 does NOT re-export LatLng — import latlong2 explicitly.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../data/bihar_rivers.dart';
 import '../providers/bihar_live_provider.dart';
