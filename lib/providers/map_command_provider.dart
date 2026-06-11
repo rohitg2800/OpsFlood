@@ -83,6 +83,7 @@ final mapSyncMetaProvider =
     NotifierProvider<SyncMetaNotifier, SyncMeta>(SyncMetaNotifier.new);
 
 // ─── CwcStation → RiverStation adapter ───────────────────────────────────────
+// Kept for any legacy callers; map now uses mergedStationsProvider directly.
 extension CwcStationAdapter on CwcStation {
   RiverStation toRiverStation() => RiverStation(
     city:    site,
@@ -100,30 +101,27 @@ extension CwcStationAdapter on CwcStation {
   );
 }
 
-// ─── Merged + filtered station list ──────────────────────────────────────────
+// ─── Map station list — fed from the full merged live pipeline ────────────────
+// Uses mergedStationsProvider (CWC-live > DataFetch > WRD > CWC-seed > Birpur)
+// so marker colours and pulse animations reflect real-time criticality.
 final mapStationsProvider = Provider<List<RiverStation>>((ref) {
-  final rtAsync  = ref.watch(realTimeRiverProvider);
-  final cwcAsync = ref.watch(cwcStationsProvider);
-  final mode     = ref.watch(mapViewModeProvider);
-
-  final List<RiverStation> all = [
-    ...rtAsync.asData?.value ?? const [],
-    ...(cwcAsync.asData?.value ?? const [])
-        .map((s) => s.toRiverStation()),
-  ];
-
-  final seen   = <String>{};
-  final unique = all.where((s) => seen.add(s.station)).toList();
+  final mode = ref.watch(mapViewModeProvider);
+  final all  = ref.watch(mergedStationsProvider); // ← full live pipeline
 
   final filtered = mode == MapViewMode.bihar
-      ? unique.where((s) => s.state.toLowerCase().contains('bihar')).toList()
-      : unique;
+      ? all.where((s) => s.state.toLowerCase().contains('bihar')).toList()
+      : all;
 
-  filtered.sort((a, b) => b.riskScore.compareTo(a.riskScore));
-  return filtered;
+  // Already sorted by riskScore inside mergedStationsProvider,
+  // but re-sort after filter to keep highest-risk on top in telemetry sheet.
+  final result = List<RiverStation>.from(filtered)
+    ..sort((a, b) => b.riskScore.compareTo(a.riskScore));
+  return result;
 });
 
-// ─── District risk map (for heatmap layer) ────────────────────────────────────
+// ─── District risk map (for heatmap / polygon layer) ─────────────────────────
+// Aggregates per-district: keeps the worst DangerClass seen across all stations
+// in that district, so the polygon colour matches the live criticality.
 final biharDistrictRiskProvider = Provider<Map<String, DangerClass>>((ref) {
   final stations = ref.watch(mapStationsProvider);
   final map = <String, DangerClass>{};
