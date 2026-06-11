@@ -1,13 +1,18 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — PredictScreen v5  (live data table after prediction)
+// OpsFlood — PredictScreen v6  (live data table from RiverStation)
 //
-// New in v5:
-//   • After "Run Prediction" completes, a _LiveDataTable card appears below
-//     the result card, pulling the matched FloodData from liveLevelsProvider.
-//   • Shows: River Level, Warning, Danger, Capacity %, Rainfall 24h,
-//     Flow Rate, Risk Level, Status, Last Updated.
-//   • Row values are colour-coded by danger proximity.
-//   • Table auto-scrolls into view via a scroll controller.
+// Fix from v5:
+//   • Table was always empty because _matchCity compared d.city (gauge name
+//     e.g. "Digha Ghat") against a typed city (e.g. "Patna") — never matched.
+//   • v6 reads mergedStationsProvider directly (RiverStation list) and builds
+//     the table rows from RiverStation fields, bypassing the FloodData shim.
+//   • Match strategy (broadest reasonable):
+//       1. station name contains the query word
+//       2. city field contains the query word
+//       3. river field contains the query word
+//       4. any token of the query appears in station name
+//     First non-empty result wins; if nothing found, table is hidden.
+//   • Also changed ref.read → ref.watch for live reactivity.
 library;
 
 import 'dart:convert';
@@ -21,7 +26,9 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../l10n/context_l10n.dart';
 import '../models/flood_data.dart';
+import '../models/river_station.dart';
 import '../providers/flood_providers.dart';
+import '../providers/real_time_river_provider.dart';
 import '../theme/river_theme.dart';
 
 class PredictScreen extends ConsumerStatefulWidget {
@@ -34,8 +41,8 @@ class PredictScreen extends ConsumerStatefulWidget {
 
 class _PredictScreenState extends ConsumerState<PredictScreen>
     with SingleTickerProviderStateMixin {
-  final _formKey      = GlobalKey<FormState>();
-  final _scrollCtrl   = ScrollController();
+  final _formKey    = GlobalKey<FormState>();
+  final _scrollCtrl = ScrollController();
 
   final _cityCtrl      = TextEditingController();
   final _peakLevelCtrl = TextEditingController();
@@ -47,9 +54,9 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   bool _didPrefill   = false;
   bool _didAutoFetch = false;
 
-  _PredictResult? _result;
-  String?         _error;
-  FloodData?      _liveData;   // populated from liveLevelsProvider on predict
+  _PredictResult?      _result;
+  String?              _error;
+  List<RiverStation>?  _matchedStations; // populated on predict
 
   late final AnimationController _resultAnim;
   late final Animation<double>   _resultFade;
@@ -91,47 +98,82 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     }
   }
 
-  static FloodData _emptyFloodData(String city) => FloodData(
-    city:                city,
-    district:            '',
-    state:               '',
-    riverName:           '',
-    currentLevel:        0.0,
-    warningLevel:        0.0,
-    dangerLevel:         0.0,
-    safeLevel:           0.0,
-    capacityPercent:     0.0,
-    riskLevel:           'UNKNOWN',
-    status:              'UNKNOWN',
-    effectiveRainfallMm: 0.0,
-    lastUpdated:         DateTime.now(),
-  );
+  // ── Match query against RiverStation list (broadest reasonable search) ──
+  List<RiverStation> _findStations(String query) {
+    if (query.isEmpty) return [];
+    final q     = query.toLowerCase().trim();
+    final all   = ref.read(mergedStationsProvider);
+    // Also check liveLevelsProvider (FloodData) city field as a fallback
+    final liveF = ref.read(liveLevelsProvider);
 
-  FloodData _matchCity(String city) {
-    final liveList = ref.read(liveLevelsProvider);
-    return liveList.firstWhere(
-      (d) => d.city.toLowerCase() == city.toLowerCase(),
-      orElse: () => liveList.firstWhere(
-        (d) => d.city.toLowerCase().contains(city.toLowerCase()),
-        orElse: () => _emptyFloodData(city),
-      ),
-    );
+    // 1. Station name contains query
+    var hits = all
+        .where((s) => s.station.toLowerCase().contains(q))
+        .toList();
+    if (hits.isNotEmpty) return hits;
+
+    // 2. City field contains query
+    hits = all
+        .where((s) => s.city.toLowerCase().contains(q))
+        .toList();
+    if (hits.isNotEmpty) return hits;
+
+    // 3. River field contains query
+    hits = all
+        .where((s) => s.river.toLowerCase().contains(q))
+        .toList();
+    if (hits.isNotEmpty) return hits;
+
+    // 4. Any token of the query appears in station name
+    final tokens = q.split(RegExp(r'\s+'));
+    hits = all
+        .where((s) {
+          final sLow = s.station.toLowerCase();
+          return tokens.any((t) => t.length > 2 && sLow.contains(t));
+        })
+        .toList();
+    if (hits.isNotEmpty) return hits;
+
+    // 5. FloodData city fallback
+    final fdHit = liveF
+        .where((d) => d.city.toLowerCase().contains(q))
+        .map((d) => all.firstWhere(
+              (s) => s.station.toLowerCase() ==
+                  d.city.toLowerCase(),
+              orElse: () => RiverStation(
+                city:        d.city,
+                state:       d.state,
+                river:       d.riverName ?? '',
+                station:     d.city,
+                current:     d.currentLevel,
+                warning:     d.warningLevel,
+                danger:      d.dangerLevel,
+                hfl:         d.dangerLevel + 1.5,
+                dataSource:  d.status,
+                lastUpdated: '',
+                isLive:      false,
+              ),
+            ))
+        .toList();
+    return fdHit;
   }
 
   void _fillFromCity(String city, {double? overrideLevel}) {
-    final match    = _matchCity(city);
-    final level    = overrideLevel ?? match.currentLevel;
-    final rainfall = match.effectiveRainfallMm > 0
-        ? (match.effectiveRainfallMm * 7).toStringAsFixed(1)
+    final stations = _findStations(city);
+    final first    = stations.isNotEmpty ? stations.first : null;
+
+    final level    = overrideLevel ?? first?.current ?? 0.0;
+    final rainfall = ''; // rainfall not on RiverStation; user fills manually
+    final discharge = first != null && (first.discharge ?? 0) > 0
+        ? first.discharge!.toStringAsFixed(0)
         : '';
 
     setState(() {
       _cityCtrl.text      = city;
       _peakLevelCtrl.text = level > 0 ? level.toStringAsFixed(2) : '';
       _rainfallCtrl.text  = rainfall;
-      _dischargeCtrl.text =
-          match.flowRate != null ? match.flowRate!.toStringAsFixed(0) : '';
-      _autoFilled = level > 0;
+      _dischargeCtrl.text = discharge;
+      _autoFilled         = level > 0;
     });
 
     if (!_didAutoFetch && level > 0) {
@@ -157,17 +199,15 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     if (!_formKey.currentState!.validate()) return;
     HapticFeedback.mediumImpact();
 
-    // Snapshot live data for the table BEFORE the API call
-    final city = _cityCtrl.text.trim();
-    final live = city.isNotEmpty ? _matchCity(city) : null;
+    // Snapshot matched stations for table
+    final city     = _cityCtrl.text.trim();
+    final stations = _findStations(city);
 
     setState(() {
-      _loading  = true;
-      _result   = null;
-      _error    = null;
-      _liveData = live?.currentLevel != null && live!.currentLevel > 0
-          ? live
-          : null;
+      _loading         = true;
+      _result          = null;
+      _error           = null;
+      _matchedStations = stations.isNotEmpty ? stations : null;
     });
     _resultAnim.reset();
 
@@ -204,7 +244,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       if (mounted) {
         setState(() => _loading = false);
         _resultAnim.forward();
-        // Scroll down so table is visible
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollCtrl.hasClients) {
             _scrollCtrl.animateTo(
@@ -221,6 +260,8 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
+    // Keep watching so table refreshes when data updates
+    ref.watch(mergedStationsProvider);
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -253,16 +294,16 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                         ctrl:       _cityCtrl,
                         autoFilled: _autoFilled,
                         t:          t,
-                        onClear:    () => setState(() {
-                          _autoFilled   = false;
-                          _didAutoFetch = false;
+                        onClear: () => setState(() {
+                          _autoFilled      = false;
+                          _didAutoFetch    = false;
                           _cityCtrl.clear();
                           _peakLevelCtrl.clear();
                           _rainfallCtrl.clear();
                           _dischargeCtrl.clear();
-                          _result   = null;
-                          _error    = null;
-                          _liveData = null;
+                          _result          = null;
+                          _error           = null;
+                          _matchedStations = null;
                         }),
                       ),
                       const SizedBox(height: 12),
@@ -292,7 +333,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       _GlowButton(loading: _loading, onTap: _predict, t: t),
                       const SizedBox(height: 20),
 
-                      // ─ ML Result / Error card
+                      // ─ ML result / error
                       if (_result != null || _error != null)
                         FadeTransition(
                           opacity: _resultFade,
@@ -304,13 +345,31 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                           ),
                         ),
 
-                      // ─ Live station data table (shown after any prediction)
+                      // ─ Live station table
                       if ((_result != null || _error != null) &&
-                          _liveData != null) ...[
+                          _matchedStations != null &&
+                          _matchedStations!.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         FadeTransition(
                           opacity: _resultFade,
-                          child: _LiveDataTable(data: _liveData!, t: t),
+                          child: _LiveStationTable(
+                            stations: _matchedStations!,
+                            query:    _cityCtrl.text,
+                            t:        t,
+                          ),
+                        ),
+                      ],
+
+                      // ─ "No station found" notice (only when city typed but not found)
+                      if ((_result != null || _error != null) &&
+                          (_matchedStations == null ||
+                              _matchedStations!.isEmpty) &&
+                          _cityCtrl.text.trim().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        FadeTransition(
+                          opacity: _resultFade,
+                          child: _NoStationNotice(
+                              city: _cityCtrl.text.trim(), t: t),
                         ),
                       ],
 
@@ -329,174 +388,258 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _LiveDataTable — live station data card with key/value rows
+// _LiveStationTable — shows one card per matched RiverStation
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LiveDataTable extends StatelessWidget {
-  final FloodData   data;
-  final RiverColors t;
-  const _LiveDataTable({required this.data, required this.t});
+class _LiveStationTable extends StatelessWidget {
+  final List<RiverStation> stations;
+  final String             query;
+  final RiverColors        t;
+  const _LiveStationTable({
+    required this.stations,
+    required this.query,
+    required this.t,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final riskCol = data.priorityColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section label
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(
+            children: [
+              Icon(Icons.sensors_rounded, color: t.accent, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                'LIVE STATION DATA  •  ${stations.length} GAUGE'
+                '${stations.length > 1 ? "S" : ""} MATCHED',
+                style: TextStyle(
+                    color: t.accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.6),
+              ),
+            ],
+          ),
+        ),
+        ...stations.map((s) => _StationCard(s: s, t: t)),
+      ],
+    );
+  }
+}
 
-    // Colour-code the river level relative to thresholds
+class _StationCard extends StatelessWidget {
+  final RiverStation s;
+  final RiverColors  t;
+  const _StationCard({required this.s, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    // Colour for current level
     Color levelColor() {
-      if (data.dangerLevel > 0 && data.currentLevel >= data.dangerLevel)
-        return AppPalette.critical;
-      if (data.warningLevel > 0 && data.currentLevel >= data.warningLevel)
-        return AppPalette.warning;
+      if (s.danger > 0 && s.current >= s.danger)   return AppPalette.critical;
+      if (s.warning > 0 && s.current >= s.warning) return AppPalette.warning;
       return AppPalette.safe;
     }
 
-    final lvlCol = levelColor();
+    Color capColor() {
+      final pct = s.danger > 0 ? (s.current / s.danger * 100) : 0.0;
+      if (pct >= 100) return AppPalette.critical;
+      if (pct >= 80)  return AppPalette.warning;
+      return AppPalette.safe;
+    }
+
+    final dangerClassColor = s.dangerClass == DangerClass.extreme
+        ? AppPalette.critical
+        : s.dangerClass == DangerClass.severe
+            ? AppPalette.danger
+            : s.dangerClass == DangerClass.aboveNormal
+                ? AppPalette.warning
+                : AppPalette.safe;
+
+    final capacityPct = s.danger > 0
+        ? (s.current / s.danger * 100).clamp(0.0, 200.0)
+        : 0.0;
 
     final rows = [
-      _Row('River',          data.riverName ?? '—',                null),
-      _Row('District',       data.district.isNotEmpty ? data.district : '—', null),
-      _Row('State',          data.state.isNotEmpty ? data.state : '—',       null),
-      _Row('Current Level',  '${data.currentLevel.toStringAsFixed(2)} m',   lvlCol),
-      _Row('Warning Level',  '${data.warningLevel.toStringAsFixed(2)} m',   AppPalette.warning),
-      _Row('Danger Level',   '${data.dangerLevel.toStringAsFixed(2)} m',    AppPalette.danger),
-      _Row('Capacity',       '${data.capacityPercent.toStringAsFixed(1)} %',
-          data.capacityPercent >= 90
-              ? AppPalette.critical
-              : data.capacityPercent >= 70
-                  ? AppPalette.warning
-                  : AppPalette.safe),
-      _Row('Rainfall 24h',
-          data.effectiveRainfallMm > 0
-              ? '${data.effectiveRainfallMm.toStringAsFixed(1)} mm'
-              : '—',
-          null),
-      if (data.flowRate != null)
-        _Row('Flow Rate',
-            '${data.flowRate!.toStringAsFixed(0)} m³/s', null),
-      _Row('IMD Severity',   data.imdSeverity ?? '—',               null),
-      _Row('Risk Level',     data.riskLevel,                        riskCol),
-      _Row('Status',         data.status,                           null),
-      _Row('Last Updated',
-          '${data.lastUpdated.day.toString().padLeft(2,'0')}/'  
-          '${data.lastUpdated.month.toString().padLeft(2,'0')}/'  
-          '${data.lastUpdated.year}  '
-          '${data.lastUpdated.hour.toString().padLeft(2,'0')}:'  
-          '${data.lastUpdated.minute.toString().padLeft(2,'0')}',
-          null),
+      _Row('River',         s.river.isNotEmpty ? s.river : '—',    null),
+      _Row('State',         s.state.isNotEmpty ? s.state : '—',    null),
+      _Row('Current Level', '${s.current.toStringAsFixed(2)} m',   levelColor()),
+      _Row('Warning Level', s.warning > 0
+          ? '${s.warning.toStringAsFixed(2)} m' : '—',            AppPalette.warning),
+      _Row('Danger Level',  s.danger > 0
+          ? '${s.danger.toStringAsFixed(2)} m'  : '—',            AppPalette.danger),
+      _Row('HFL',           s.hfl > 0
+          ? '${s.hfl.toStringAsFixed(2)} m'     : '—',            null),
+      _Row('Capacity',      s.danger > 0
+          ? '${capacityPct.toStringAsFixed(1)} %' : '—',          capColor()),
+      if (s.discharge != null && (s.discharge ?? 0) > 0)
+        _Row('Discharge',
+            '${s.discharge!.toStringAsFixed(0)} m³/s',            null),
+      _Row('Status',        s.dangerClass.name.toUpperCase(),       dangerClassColor),
+      _Row('Data Source',   s.dataSource ?? '—',                   null),
+      _Row('Last Updated',  s.lastUpdated?.isNotEmpty == true
+          ? s.lastUpdated! : '—',                                  null),
+      _Row('Live',          s.isLive ? 'YES' : 'ESTIMATED',
+          s.isLive ? AppPalette.safe : AppPalette.warning),
     ];
 
     return Container(
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.stroke),
         boxShadow: [
           BoxShadow(
-              color: t.accent.withValues(alpha: 0.06),
-              blurRadius: 16,
-              offset: const Offset(0, 4)),
+              color: dangerClassColor.withValues(alpha: 0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 3)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─ Header row
+          // Card header
           Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.08),
+              color: dangerClassColor.withValues(alpha: 0.07),
               borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(18)),
+                  const BorderRadius.vertical(top: Radius.circular(16)),
               border: Border(
                   bottom: BorderSide(
-                      color: t.stroke.withValues(alpha: 0.5), width: 0.5)),
+                      color: t.stroke.withValues(alpha: 0.4), width: 0.5)),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 32, height: 32,
+                  width: 30, height: 30,
                   decoration: BoxDecoration(
-                    color: t.accent.withValues(alpha: 0.12),
+                    color: dangerClassColor.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.sensors_rounded,
-                      color: t.accent, size: 16),
+                  child: Icon(Icons.water_rounded,
+                      color: dangerClassColor, size: 15),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'LIVE STATION DATA',
-                      style: TextStyle(
-                          color: t.accent,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.8),
-                    ),
-                    Text(
-                      data.city,
-                      style: TextStyle(
-                          color: t.textSecondary,
-                          fontSize: 10),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                // Live pulse dot
-                Container(
-                  width: 8, height: 8,
-                  decoration: BoxDecoration(
-                    color: AppPalette.safe,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppPalette.safe.withValues(alpha: 0.5),
-                          blurRadius: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.station,
+                        style: TextStyle(
+                            color: t.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700),
+                      ),
+                      if (s.city.isNotEmpty && s.city != s.station)
+                        Text(
+                          s.city,
+                          style: TextStyle(
+                              color: t.textSecondary, fontSize: 10),
+                        ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Text('LIVE',
+                // Live / estimated badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (s.isLive ? AppPalette.safe : AppPalette.warning)
+                        .withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: (s.isLive
+                                ? AppPalette.safe
+                                : AppPalette.warning)
+                            .withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    s.isLive ? 'LIVE' : 'EST',
                     style: TextStyle(
-                        color: AppPalette.safe,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800)),
+                        color: s.isLive ? AppPalette.safe : AppPalette.warning,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900),
+                  ),
+                ),
               ],
             ),
           ),
 
-          // ─ Data rows
+          // Level progress bar
+          if (s.danger > 0) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+              child: Row(
+                children: [
+                  Text('0',
+                      style: TextStyle(
+                          color: t.textSecondary, fontSize: 9)),
+                  Expanded(
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (capacityPct / 100).clamp(0.0, 1.0),
+                          minHeight: 6,
+                          backgroundColor:
+                              t.stroke.withValues(alpha: 0.3),
+                          valueColor: AlwaysStoppedAnimation(
+                              levelColor()),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${s.danger.toStringAsFixed(1)} m',
+                    style: TextStyle(
+                        color: AppPalette.danger, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Data rows
           ...rows.asMap().entries.map((e) {
             final isLast = e.key == rows.length - 1;
             final row    = e.value;
             return Container(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 11),
+                  horizontal: 14, vertical: 9),
               decoration: BoxDecoration(
                 color: e.key.isEven
                     ? Colors.transparent
-                    : t.cardBgElevated.withValues(alpha: 0.4),
+                    : t.cardBgElevated.withValues(alpha: 0.35),
                 borderRadius: isLast
                     ? const BorderRadius.vertical(
-                        bottom: Radius.circular(18))
+                        bottom: Radius.circular(16))
                     : null,
                 border: isLast
                     ? null
                     : Border(
                         bottom: BorderSide(
-                            color: t.stroke.withValues(alpha: 0.25),
+                            color:
+                                t.stroke.withValues(alpha: 0.20),
                             width: 0.5)),
               ),
               child: Row(
                 children: [
                   SizedBox(
-                    width: 110,
+                    width: 100,
                     child: Text(
                       row.label,
                       style: TextStyle(
                           color: t.textSecondary,
-                          fontSize: 12,
+                          fontSize: 11,
                           fontWeight: FontWeight.w500),
                     ),
                   ),
@@ -506,7 +649,7 @@ class _LiveDataTable extends StatelessWidget {
                       textAlign: TextAlign.end,
                       style: TextStyle(
                         color: row.valueColor ?? t.textPrimary,
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: row.valueColor != null
                             ? FontWeight.w700
                             : FontWeight.w500,
@@ -528,6 +671,41 @@ class _Row {
   final String value;
   final Color? valueColor;
   const _Row(this.label, this.value, this.valueColor);
+}
+
+// ── No station notice ──
+
+class _NoStationNotice extends StatelessWidget {
+  final String city;
+  final RiverColors t;
+  const _NoStationNotice({required this.city, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.stroke),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded,
+              color: t.textSecondary, size: 15),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No live gauge found for “$city”. '
+              'Live data table will appear once a matching station is available.',
+              style: TextStyle(
+                  color: t.textSecondary, fontSize: 11, height: 1.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
