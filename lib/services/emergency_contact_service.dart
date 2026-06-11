@@ -137,23 +137,52 @@ class EmergencyContactService {
         .toList();
   }
 
+  /// Resolves a station name to its district string (null if unmapped).
+  ///
+  /// Resolution order:
+  ///   1. Exact match (original behaviour – fastest).
+  ///   2. Case-insensitive exact match.
+  ///   3. The station name *contains* a known key (e.g. "Kosi @ Birpur" → Birpur).
+  ///   4. A known key *contains* the station name (e.g. "birpur barrage" → Birpur).
+  String? districtForStation(String stationName) {
+    // 1. Exact
+    if (_stationDistrict.containsKey(stationName)) {
+      return _stationDistrict[stationName];
+    }
+
+    final lower = stationName.toLowerCase().trim();
+
+    // 2. Case-insensitive exact
+    for (final entry in _stationDistrict.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+    }
+
+    // 3. Station name contains a known key  (e.g. "Kosi @ Birpur" contains "Birpur")
+    for (final entry in _stationDistrict.entries) {
+      if (lower.contains(entry.key.toLowerCase())) return entry.value;
+    }
+
+    // 4. Known key contains station name  (e.g. "birpur" inside "Birpur Barrage" key)
+    for (final entry in _stationDistrict.entries) {
+      if (entry.key.toLowerCase().contains(lower)) return entry.value;
+    }
+
+    return null;
+  }
+
   /// Convenience: look up contacts by gauging-station name.
   /// Returns district contacts + globals when mapped.
   /// Falls back to ALL global contacts (district == null) when unmapped,
   /// so the card is never empty.
   Future<List<EmergencyContact>> getContactsForStation(
       String stationName) async {
-    final district = _stationDistrict[stationName];
+    final district = districtForStation(stationName);
     if (district != null) return getContactsByDistrict(district);
     // Unmapped station — return every contact that has no district filter
-    // (i.e. national / Bihar-wide contacts).  Never returns empty list.
+    // (i.e. national / Bihar-wide contacts). Never returns empty list.
     final all = await getAllContacts();
     return all.where((c) => c.district == null).toList();
   }
-
-  /// Resolves a station name to its district string (null if unmapped).
-  String? districtForStation(String stationName) =>
-      _stationDistrict[stationName];
 
   Future<List<EmergencyContact>> getSOSContacts() async {
     final all = await getAllContacts();
