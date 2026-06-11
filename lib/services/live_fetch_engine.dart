@@ -1,14 +1,19 @@
-// lib/services/live_fetch_engine.dart  (v3.0 — backend-only)
+// lib/services/live_fetch_engine.dart  (v3.1 — Bihar-only)
 //
-// KEY CHANGE from v2.7:
-//   ALL external HTTP calls (BeFIQR/WRD, GloFAS, Open-Meteo) are now routed
-//   through the OpsFlood backend via BackendApiService.  The Flutter app
-//   makes zero direct calls to third-party APIs.
+// v3.0 → v3.1 fix:
+//   _fetchAllCities() was iterating over ALL cities in IndiaGeodata.monitoredCities
+//   (80+ stations across 20+ states).  This caused the dashboard, KPI cards,
+//   Hero Gauge, Alert Log, and Monitored Stations list to show non-Bihar data.
 //
-//   Backend endpoints used:
-//     GET /api/live-levels?state=Bihar   → WRD station gauge readings
-//     GET /api/glofas?lats=&lons=&cities= → GloFAS river discharge
-//     GET /api/rainfall?lats=&lons=&cities= → Open-Meteo precipitation
+//   Fix:
+//   • _kBiharAliases set added — matches all known state spellings.
+//   • _fetchAllCities() now filters allCities to Bihar-only before any HTTP call.
+//   • liveFloodData getter also guards with _isBihar() so the in-memory cache
+//     can never leak non-Bihar entries even if the cache was warmed before the
+//     fix was applied.
+//   • Debug log updated to print "Bihar cities" count.
+//
+// v3.0: ALL external HTTP calls routed through BackendApiService.
 
 import 'dart:async';
 
@@ -19,6 +24,13 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'backend_api_service.dart';
 import 'wrd_bihar_service.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bihar state filter
+// ─────────────────────────────────────────────────────────────────────────────
+const _kBiharAliases = {'bihar', 'br', 'state of bihar'};
+bool _isBihar(String state) =>
+    _kBiharAliases.contains(state.toLowerCase().trim());
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SourceHealth
@@ -134,6 +146,12 @@ class LiveFetchEngine {
   static const _cacheTtl     = Duration(minutes: 15);
   static const _pollInterval = Duration(seconds: 45);
 
+  // ★ v3.1: Bihar-only city list, computed once at engine construction
+  static final List<Map<String, dynamic>> _biharCities = IndiaGeodata
+      .monitoredCities
+      .where((c) => _isBihar(c['state'] as String? ?? ''))
+      .toList();
+
   final Map<String, LiveCityData> _cache = {};
   DateTime?  _lastFetch;
   Timer?     _pollTimer;
@@ -154,12 +172,11 @@ class LiveFetchEngine {
   SourceHealth _imdHealth     = const SourceHealth.unknown();
   SourceHealth _wrdHealth     = const SourceHealth.unknown();
 
-  // cwcHealth mirrors wrdHealth — WRD Bihar IS the CWC Bihar source
   SourceHealth get _cwcHealth => _wrdHealth;
 
   void Function()? onStateChanged;
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  // —— Lifecycle —————————————————————————————————————————————————————————————————————————
   Future<void> startPolling() async {
     if (_pollTimer != null) return;
     await refreshData();
@@ -171,7 +188,7 @@ class LiveFetchEngine {
     _pollTimer = null;
   }
 
-  // ── Status getters ────────────────────────────────────────────────────────
+  // —— Status getters ———————————————————————————————————————————————————————————————————————
   bool      get isLoading           => _isLoading;
   bool      get isOnline            => _isOnline;
   bool      get isUsingFallback     => !_isOnline && _cache.isNotEmpty;
@@ -187,7 +204,7 @@ class LiveFetchEngine {
   int get wrdDiskCount  => _wrdDiskCount;
   int get wrdTotalCount => _wrdLiveCount + _wrdDiskCount;
 
-  // ── Source health getters ─────────────────────────────────────────────────
+  // —— Source health getters ——————————————————————————————————————————————————————————————
   SourceHealth get backendHealth => _backendHealth;
   SourceHealth get glofasHealth  => _glofasHealth;
   SourceHealth get imdHealth     => _imdHealth;
@@ -206,24 +223,33 @@ class LiveFetchEngine {
   int? get wrdLatencyMs     => _wrdHealth.latencyMs;
   int? get cwcLatencyMs     => _cwcHealth.latencyMs;
 
-  // ── Data getters ──────────────────────────────────────────────────────────
+  // —— Data getters ———————————————————————————————————————————————————————————————————————
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
+  // ★ v3.1: double-guard — only return Bihar entries from cache
   List<FloodData> get liveFloodData {
-    return _cache.entries.map((e) {
-      final city = e.key;
-      final data = e.value;
-      final mc   = IndiaGeodata.monitoredCities.firstWhere(
-        (c) => (c['city'] as String).toLowerCase() == city,
-        orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
-      );
-      return data.toFloodData(
-        mc['city']     as String,
-        mc['state']    as String,
-        riverName:  mc['river']    as String?,
-        district:  (mc['district'] as String?) ?? '',
-      );
-    }).toList();
+    return _cache.entries
+        .where((e) {
+          final mc = IndiaGeodata.monitoredCities.firstWhere(
+            (c) => (c['city'] as String).toLowerCase() == e.key,
+            orElse: () => {'city': e.key, 'state': 'Bihar'},
+          );
+          return _isBihar(mc['state'] as String? ?? '');
+        })
+        .map((e) {
+          final city = e.key;
+          final data = e.value;
+          final mc = IndiaGeodata.monitoredCities.firstWhere(
+            (c) => (c['city'] as String).toLowerCase() == city,
+            orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
+          );
+          return data.toFloodData(
+            mc['city']    as String,
+            mc['state']   as String,
+            riverName: mc['river']    as String?,
+            district: (mc['district'] as String?) ?? '',
+          );
+        }).toList();
   }
 
   List<dynamic> get activeCriticalAlerts => _buildCriticalAlerts();
@@ -252,7 +278,7 @@ class LiveFetchEngine {
     'backend':   BackendApiService.instance.baseUrl,
   };
 
-  // ── Per-city helpers ──────────────────────────────────────────────────────
+  // —— Per-city helpers ——————————————————————————————————————————————————————————————————————
   LiveCityData? dataForCity(String city) {
     _maybeBackgroundRefresh();
     return _cache[city.toLowerCase().trim()];
@@ -265,11 +291,12 @@ class LiveFetchEngine {
       (c) => (c['city'] as String).toLowerCase() == city.toLowerCase(),
       orElse: () => {'city': city, 'district': '', 'state': 'Bihar'},
     );
+    if (!_isBihar(mc['state'] as String? ?? '')) return null; // ★ v3.1 guard
     return d.toFloodData(
-      mc['city']     as String,
-      mc['state']    as String,
-      riverName:  mc['river']    as String?,
-      district:  (mc['district'] as String?) ?? '',
+      mc['city']    as String,
+      mc['state']   as String,
+      riverName: mc['river']    as String?,
+      district: (mc['district'] as String?) ?? '',
     );
   }
 
@@ -278,7 +305,7 @@ class LiveFetchEngine {
   List<dynamic> emergencyContactsForState(String state) => const [];
   List<dynamic> trendForCity(String city)               => const [];
 
-  // ── Refresh ───────────────────────────────────────────────────────────────
+  // —— Refresh ————————————————————————————————————————————————————————————————————————
   Future<void> refreshData() async {
     _isLoading = true;
     _notify();
@@ -307,16 +334,17 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  // ── Core fetch — ALL via backend ──────────────────────────────────────────
+  // —— Core fetch — Bihar cities ONLY ————————————————————————————————————————————————————————
   Future<void> _fetchAllCities() async {
-    final allCities = IndiaGeodata.monitoredCities;
+    // ★ v3.1: use Bihar-only city list instead of all IndiaGeodata.monitoredCities
+    final allCities = _biharCities;
     if (allCities.isEmpty) return;
 
     final lats     = allCities.map((c) => (c['lat']  as num).toDouble()).toList();
     final lons     = allCities.map((c) => (c['lon']  as num).toDouble()).toList();
     final cityKeys = allCities.map((c) => (c['city'] as String).toLowerCase().trim()).toList();
 
-    // ── 1. WRD Bihar — station gauge readings from backend ────────────────
+    // 1. WRD Bihar — station gauge readings
     final wrdStart = DateTime.now();
     Map<String, WrdStation> wrdByKey = {};
     _wrdLiveCount = 0;
@@ -351,7 +379,7 @@ class LiveFetchEngine {
       _log('WRD fetch failed: $e');
     }
 
-    // ── 2. GloFAS — river discharge from backend ──────────────────────────
+    // 2. GloFAS — river discharge (Bihar stations only)
     var dischargeMap = <String, double?>{};
     var meanMap      = <String, double?>{};
     final glofasStart = DateTime.now();
@@ -381,7 +409,7 @@ class LiveFetchEngine {
       _log('GloFAS fetch failed: $e');
     }
 
-    // ── 3. Rainfall — Open-Meteo precipitation from backend ───────────────
+    // 3. Rainfall — Open-Meteo precipitation (Bihar stations only)
     var rainMap = <String, double?>{};
     final imdStart = DateTime.now();
     try {
@@ -409,7 +437,7 @@ class LiveFetchEngine {
       _log('Rainfall fetch failed: $e');
     }
 
-    // ── 4. Assemble cache ─────────────────────────────────────────────────
+    // 4. Assemble cache
     final now = DateTime.now();
     for (int i = 0; i < allCities.length; i++) {
       final mc       = allCities[i];
@@ -426,7 +454,6 @@ class LiveFetchEngine {
           ? (discharge / mean) * dl * 0.85
           : null;
 
-      // WRD match: exact key → word-token scan
       WrdStation? wrd = wrdByKey[key];
       if (wrd == null) {
         for (final word in key.split(RegExp(r'\s+'))) {
@@ -458,14 +485,14 @@ class LiveFetchEngine {
     }
 
     _lastFetch = now;
-    _log('cache updated — ${_cache.length} cities '
+    _log('cache updated — ${_cache.length} Bihar cities '
         '(wrd=${_wrdHealth.healthy} [live=$_wrdLiveCount disk=$_wrdDiskCount], '
         'glofas=${_glofasHealth.healthy}, '
         'rainfall=${_imdHealth.healthy})');
     _notify();
   }
 
-  // ── Risk helpers ──────────────────────────────────────────────────────────
+  // —— Risk helpers ———————————————————————————————————————————————————————————————————————
   String? _deriveGlofasRisk(double? discharge, double? mean) {
     if (discharge == null || mean == null || mean <= 0) return null;
     final ratio = discharge / mean;
@@ -511,6 +538,6 @@ class LiveFetchEngine {
 
   void _notify() => onStateChanged?.call();
   void _log(String msg) {
-    if (kDebugMode) debugPrint('[LiveFetchEngine] $msg');
+    if (kDebugMode) debugPrint('[LiveFetchEngine v3.1] $msg');
   }
 }
