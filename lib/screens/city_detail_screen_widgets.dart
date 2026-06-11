@@ -1,11 +1,6 @@
 // lib/screens/city_detail_screen_widgets.dart
-// Helper widgets for CityDetailScreen.
-// ALL fixes applied:
-//   • No ImdAlert/NdmaAdvisory classes — uses Map<String,dynamic> directly
-//   • _riskColor defined here as a top-level function
-//   • SparklineChart uses snapshots: + color: (not data:/lineColor:)
-//   • EmergencyContact.phone (not .number)
-//   • city_detail_screen.dart must import this file
+// Helper widgets for CityDetailScreen — COMPLETE FILE
+// All private widget classes used by city_detail_screen.dart live here.
 library;
 
 import 'package:flutter/material.dart';
@@ -16,8 +11,10 @@ import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import '../theme/river_theme.dart';
 import '../widgets/sparkline_chart.dart';
+import 'bihar_river_map_screen.dart';
+import 'prediction_screen.dart';
 
-// ── top-level helper (mirrors the one in city_detail_screen.dart) ────────────
+// ── top-level helper ─────────────────────────────────────────────────────────
 Color _riskColor(String risk) {
   switch (risk.toUpperCase()) {
     case 'CRITICAL': return AppPalette.critical;
@@ -30,7 +27,6 @@ Color _riskColor(String risk) {
 // ─────────────────────────────────────────────────────────────────────────────
 // _ThresholdBanner
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _ThresholdBanner extends StatelessWidget {
   final FloodData data;
   const _ThresholdBanner({required this.data});
@@ -39,8 +35,8 @@ class _ThresholdBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final t    = RiverColors.of(context);
     final risk = data.riskLevel.toUpperCase();
-    final Color  bg;
-    final String msg;
+    final Color    bg;
+    final String   msg;
     final IconData icon;
 
     switch (risk) {
@@ -90,7 +86,6 @@ class _ThresholdBanner extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // _SkeletonView
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _SkeletonView extends StatelessWidget {
   final String cityName;
   const _SkeletonView({required this.cityName});
@@ -115,7 +110,6 @@ class _SkeletonView extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // _GaugeHeroCard
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _GaugeHeroCard extends StatelessWidget {
   final FloodData data;
   const _GaugeHeroCard({required this.data});
@@ -198,9 +192,8 @@ class _GaugeHeroCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _TrendCard  — uses SparklineChart(snapshots:, color:)
+// _TrendCard
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _TrendCard extends StatelessWidget {
   final List<RiverLevelSnapshot> trend;
   final double warningLevel;
@@ -249,7 +242,6 @@ class _TrendCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // _SectionLabel
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _SectionLabel extends StatelessWidget {
   final String label;
   const _SectionLabel(this.label);
@@ -267,9 +259,8 @@ class _SectionLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ImdAlertTile  — alert is Map<String,dynamic>, no ImdAlert class exists
+// _ImdAlertTile
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _ImdAlertTile extends StatelessWidget {
   final Map<String, dynamic> alert;
   const _ImdAlertTile({required this.alert});
@@ -335,9 +326,8 @@ class _ImdAlertTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _NdmaAdvisoryTile  — adv is Map<String,dynamic>, no NdmaAdvisory class exists
+// _NdmaAdvisoryTile
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _NdmaAdvisoryTile extends StatelessWidget {
   final Map<String, dynamic> adv;
   const _NdmaAdvisoryTile({required this.adv});
@@ -373,15 +363,187 @@ class _NdmaAdvisoryTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CollapsibleContacts  — EmergencyContact.phone (not .number)
+// _CollapsibleContacts
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
   final String       state;
   final bool         expanded;
   final VoidCallback onToggle;
+
   const _CollapsibleContacts({
     required this.contacts,
     required this.state,
-    r
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.stroke),
+      ),
+      child: Column(children: [
+        InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(children: [
+              const Icon(Icons.contact_phone_rounded,
+                  size: 14, color: AppPalette.warning),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '📞  Emergency Contacts — $state',
+                  style: TextStyle(color: t.textPrimary,
+                      fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+              ),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                color: t.textSecondary,
+                size: 18,
+              ),
+            ]),
+          ),
+        ),
+        if (expanded) ...[
+          Divider(height: 1, color: t.stroke),
+          if (contacts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text('No contacts available.',
+                  style: TextStyle(color: t.textSecondary, fontSize: 12)),
+            )
+          else
+            ...contacts.map((c) => _ContactRow(contact: c, t: t)),
+        ],
+      ]),
+    );
+  }
+}
+
+class _ContactRow extends StatelessWidget {
+  final EmergencyContact contact;
+  final RiverColors      t;
+  const _ContactRow({required this.contact, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () async {
+        HapticFeedback.selectionClick();
+        final uri = Uri.parse('tel:${contact.phone}');
+        if (await canLaunchUrl(uri)) launchUrl(uri);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color: AppPalette.warning.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: AppPalette.warning.withValues(alpha: 0.35)),
+            ),
+            child: const Icon(Icons.phone_rounded,
+                size: 15, color: AppPalette.warning),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(contact.name,
+                  style: TextStyle(color: t.textPrimary,
+                      fontWeight: FontWeight.w700, fontSize: 12)),
+              Text(contact.phone,
+                  style: TextStyle(color: t.textSecondary, fontSize: 11)),
+            ],
+          )),
+          Icon(Icons.chevron_right_rounded,
+              size: 16, color: t.textSecondary),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _PredictCta
+// ─────────────────────────────────────────────────────────────────────────────
+class _PredictCta extends StatelessWidget {
+  final String cityName;
+  final double currentLevel;
+  const _PredictCta({
+    required this.cityName,
+    required this.currentLevel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        Navigator.pushNamed(
+          context,
+          PredictionScreen.route,
+          arguments: {'cityName': cityName, 'currentLevel': currentLevel},
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: t.accent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.accent.withValues(alpha: 0.40)),
+        ),
+        child: Center(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.auto_graph_rounded, size: 14, color: t.accent),
+            const SizedBox(width: 6),
+            Text('Predict',
+                style: TextStyle(color: t.accent,
+                    fontWeight: FontWeight.w800, fontSize: 13)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _MapChip
+// ─────────────────────────────────────────────────────────────────────────────
+class _MapChip extends StatelessWidget {
+  final String cityName;
+  const _MapChip({required this.cityName});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RiverColors.of(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        Navigator.pushNamed(context, BiharRiverMapScreen.route);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: t.cardBgElevated,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.stroke),
+        ),
+        child: Icon(Icons.map_rounded, size: 16, color: t.textSecondary),
+      ),
+    );
+  }
+}
