@@ -1,38 +1,18 @@
-// lib/services/bihar_live_engine.dart  v1.0
+// lib/services/bihar_live_engine.dart  v1.1
 //
-// ██████╗ ██╗██╗  ██╗ █████╗ ██████╗     ██╗     ██╗██╗   ██╗███████╗
-// ██╔══██╗██║██║  ██║██╔══██╗██╔══██╗    ██║     ██║██║   ██║██╔════╝
-// ██████╔╝██║███████║███████║██████╔╝    ██║     ██║██║   ██║█████╗
-// ██╔══██╗██║██╔══██║██╔══██║██╔══██╗    ██║     ██║╚██╗ ██╔╝██╔══╝
-// ██████╔╝██║██║  ██║██║  ██║██║  ██║    ███████╗██║ ╚████╔╝ ███████╗
-// ╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚══════╝╚═╝  ╚═══╝  ╚══════╝
-//  ENGINE
-//
-// Unified live data + news fetch orchestrator — BIHAR ONLY.
-//
-// Sources wired:
-//   1. WRD Bihar  (wrd_bihar_service.dart)         — river gauge levels
-//   2. CWC / BEFIQR  (befiqr_cwc_service.dart)     — CWC station readings
-//   3. Kosi / Birpur (kosi_birpur_service.dart)     — Kosi barrage readings
-//   4. WRIS  (wris_service.dart)                   — WRIS telemetry stations
-//   5. Real-time river (real_time_river_service.dart) — live gauge push
-//   6. India Stations  (india_stations_service.dart)  — CWC Bihar stations
-//   7. NewsService  (news_service.dart)            — Bihar news + alerts
-//
-// Public API:
-//   BiharLiveEngine.instance.stream   → Stream<BiharLiveFeed>
-//   BiharLiveEngine.instance.latest   → BiharLiveFeed?   (last emitted)
-//   BiharLiveEngine.instance.start()  → begin auto-refresh
-//   BiharLiveEngine.instance.stop()   → cancel timers
-//   BiharLiveEngine.instance.refresh()→ force immediate fetch
-//
-// Refresh intervals (configurable):
-//   • River / gauge data  : every 15 minutes
-//   • News / alerts       : every 10 minutes
-//   • Kosi barrage        : every 20 minutes
-//
-// Each source is fetched independently so a failure in one does not
-// block others. Per-source health is tracked in SourceHealth.
+// v1.1 fixes:
+//   • WrdBiharService() → WrdBiharService.instance  (singleton)
+//   • WrisService()     → WrisService.instance       (singleton)
+//   • BiharWrdScraper() kept as-is (no singleton; constructor is public)
+//   • KosiBirpurService.fetchLatest() → .fetchLive()  (correct method name)
+//   • RealTimeRiverService.fetchBiharGauges() removed — not a real method;
+//     replaced with _rtRiver.fetchAll() which returns List<LiveRiverResult>
+//     and converted to BiharFeedItem via _liveResultToItem()
+//   • IndiaStationsService.fetchBiharStations() → .fetchStations()
+//   • BefiqrCwcService.fetchBiharReadings() → .fetchStations()
+//     (returns List<CwcStation> — converted to Map<String,dynamic> inline)
+//   • _stationCache type fixed: was List<BiharFeedItem> mis-assigned from
+//     List<dynamic>; now explicitly typed and built correctly.
 library;
 
 import 'dart:async';
@@ -168,10 +148,11 @@ class BiharLiveEngine {
   static const _timeout       = Duration(seconds: 20);
 
   // ── services ──────────────────────────────────────────────────────────────
-  final _wrd          = WrdBiharService();
+  // FIX v1.1: use singleton accessors where applicable
+  final _wrd          = WrdBiharService.instance;   // was WrdBiharService()
   final _befiqr       = BefiqrCwcService();
   final _kosiBirpur   = KosiBirpurService();
-  final _wris         = WrisService();
+  final _wris         = WrisService.instance;       // was WrisService()
   final _rtRiver      = RealTimeRiverService();
   final _indStations  = IndiaStationsService();
   final _wrdScraper   = BiharWrdScraper();
@@ -185,11 +166,11 @@ class BiharLiveEngine {
   Timer?             _kosiTimer;
   bool               _running = false;
 
-  // ── internal caches (avoids re-fetching unchanged sources) ────────────────
+  // ── internal caches ────────────────────────────────────────────────────────
   List<BiharFeedItem> _gaugeCache    = [];
   List<BiharFeedItem> _kosiCache     = [];
   List<BiharFeedItem> _wrisCache     = [];
-  List<BiharFeedItem> _stationCache  = [];
+  List<BiharFeedItem> _stationCache  = [];   // FIX v1.1: explicitly typed
   List<BiharFeedItem> _rtCache       = [];
   List<BiharFeedItem> _newsCache     = [];
 
@@ -207,17 +188,11 @@ class BiharLiveEngine {
     _running = true;
     debugPrint('[BiharLiveEngine] starting …');
 
-    // Immediate first fetch
     await refresh();
 
-    // Gauge sources: every 15 min
     _gaugeTimer = Timer.periodic(_gaugeInterval, (_) => _fetchGauge());
-
-    // News: every 10 min
-    _newsTimer = Timer.periodic(_newsInterval, (_) => _fetchNews());
-
-    // Kosi barrage: every 20 min
-    _kosiTimer = Timer.periodic(_kosiInterval, (_) => _fetchKosi());
+    _newsTimer  = Timer.periodic(_newsInterval,  (_) => _fetchNews());
+    _kosiTimer  = Timer.periodic(_kosiInterval,  (_) => _fetchKosi());
   }
 
   /// Stop all timers and close the stream.
@@ -248,11 +223,11 @@ class BiharLiveEngine {
   Future<void> _fetchGauge() async {
     final t0 = DateTime.now();
     try {
-      // WRD Bihar — primary gauge source
+      // WRD Bihar — primary gauge source (fetch() returns List<WrdStation>)
       final data = await _wrd
-          .fetchStations()
+          .fetch()
           .timeout(_timeout);
-      _gaugeCache = data.map(_wrdToItem).toList();
+      _gaugeCache = data.map(_wrdStationToItem).toList();
       _setHealth(SourceId.wrdBihar, true, DateTime.now().difference(t0));
 
       // Also try WRD scraper for extra district-level rows
@@ -263,7 +238,6 @@ class BiharLiveEngine {
         final scraperItems = (scraped as List<dynamic>)
             .map((e) => _scrapedToItem(e as Map<String, dynamic>))
             .toList();
-        // Merge — prefer WRD service data for same station
         final seen = {for (final i in _gaugeCache) i.id};
         _gaugeCache.addAll(scraperItems.where((i) => !seen.contains(i.id)));
       } catch (_) {/* scraper optional */}
@@ -277,18 +251,11 @@ class BiharLiveEngine {
   Future<void> _fetchKosi() async {
     final t0 = DateTime.now();
     try {
+      // FIX v1.1: .fetchLatest() → .fetchLive()
       final data = await _kosiBirpur
-          .fetchLatest()
+          .fetchLive()
           .timeout(_timeout);
-      _kosiCache = _listToItems(
-        data,
-        SourceId.kosiBirpur,
-        FeedItemKind.barrage,
-        titleKey:    'station',
-        valueKey:    'level',
-        dangerKey:   'status',
-        subtitleKey: 'river',
-      );
+      _kosiCache = [_kosiReadingToItem(data)];
       _setHealth(SourceId.kosiBirpur, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.kosiBirpur, false, DateTime.now().difference(t0), '$e');
@@ -323,18 +290,11 @@ class BiharLiveEngine {
   Future<void> _fetchRealTime() async {
     final t0 = DateTime.now();
     try {
-      final data = await _rtRiver
-          .fetchBiharGauges()
+      // FIX v1.1: fetchBiharGauges() doesn't exist → use fetchAll()
+      final results = await _rtRiver
+          .fetchAll()
           .timeout(_timeout);
-      _rtCache = _listToItems(
-        data,
-        SourceId.realTimeRiver,
-        FeedItemKind.riverGauge,
-        titleKey:    'name',
-        valueKey:    'level',
-        dangerKey:   'status',
-        subtitleKey: 'river',
-      );
+      _rtCache = results.map(_liveResultToItem).toList();
       _setHealth(SourceId.realTimeRiver, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.realTimeRiver, false, DateTime.now().difference(t0), '$e');
@@ -346,24 +306,67 @@ class BiharLiveEngine {
   Future<void> _fetchIndiaStations() async {
     final t0 = DateTime.now();
     try {
+      // FIX v1.1: .fetchBiharStations() → .fetchStations()
       final stations = await _indStations
-          .fetchBiharStations()
+          .fetchStations()
           .timeout(_timeout);
-      // Also try CWC BEFIQR for extra readings
-      List<dynamic> befiqrData = [];
+
+      // FIX v1.1: .fetchBiharReadings() → .fetchStations()
+      //           returns List<CwcStation>, convert to BiharFeedItem directly
+      List<BiharFeedItem> befiqrItems = [];
       try {
-        befiqrData = await _befiqr.fetchBiharReadings().timeout(_timeout);
+        final cwcStations = await _befiqr
+            .fetchStations()
+            .timeout(_timeout);
+        befiqrItems = cwcStations
+            .map((s) => BiharFeedItem(
+                  id:          'cwc|${s.site.toLowerCase().trim()}',
+                  kind:        FeedItemKind.riverGauge,
+                  source:      SourceId.cwcBefiqr,
+                  title:       s.site,
+                  subtitle:    'River: ${s.river}',
+                  value:       '${s.currentLevel.toStringAsFixed(2)} m',
+                  dangerLevel: s.currentLevel >= s.dangerLevel
+                      ? 'Danger'
+                      : s.currentLevel >= (s.warningLevel ?? s.dangerLevel - 1)
+                          ? 'Warning'
+                          : 'Normal',
+                  fetchedAt:   s.fetchedAt,
+                  severity:    s.currentLevel >= s.dangerLevel
+                      ? NewsSeverity.critical
+                      : s.currentLevel >= (s.warningLevel ?? s.dangerLevel - 1)
+                          ? NewsSeverity.high
+                          : NewsSeverity.info,
+                  raw: {
+                    'river':   s.river,
+                    'site':    s.site,
+                    'level':   s.currentLevel,
+                    'danger':  s.dangerLevel,
+                    'warning': s.warningLevel,
+                  },
+                ))
+            .toList();
+        _setHealth(SourceId.cwcBefiqr, true, DateTime.now().difference(t0));
       } catch (_) {}
 
-      final all = [
-        ...stations.map((s) => _stationToItem(s as Map<String, dynamic>, SourceId.indiaStations)),
-        ...befiqrData.map((s) => _stationToItem(s as Map<String, dynamic>, SourceId.cwcBefiqr)),
+      // FIX v1.1: stations is List<dynamic> from IndiaStationsService
+      // Use _listToItems which handles dynamic safely.
+      final stationItems = _listToItems(
+        stations,
+        SourceId.indiaStations,
+        FeedItemKind.riverGauge,
+        titleKey:    'stationName',
+        valueKey:    'waterLevel',
+        dangerKey:   'alertLevel',
+        subtitleKey: 'riverName',
+      );
+
+      // FIX v1.1: explicit List<BiharFeedItem> to avoid type mismatch
+      _stationCache = <BiharFeedItem>[
+        ...stationItems,
+        ...befiqrItems,
       ];
-      _stationCache = all;
       _setHealth(SourceId.indiaStations, true, DateTime.now().difference(t0));
-      if (befiqrData.isNotEmpty) {
-        _setHealth(SourceId.cwcBefiqr, true, DateTime.now().difference(t0));
-      }
     } catch (e) {
       _setHealth(SourceId.indiaStations, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] IndiaStations: $e');
@@ -396,7 +399,6 @@ class BiharLiveEngine {
       ..._newsCache,
     ];
 
-    // Deduplicate by id
     final seen  = <String>{};
     final dedup = all.where((i) => seen.add(i.id)).toList();
 
@@ -426,33 +428,72 @@ class BiharLiveEngine {
 
   // ── item converters ───────────────────────────────────────────────────────
 
-  /// WRD Bihar service map → BiharFeedItem
-  BiharFeedItem _wrdToItem(dynamic raw) {
-    final m       = (raw as Map<String, dynamic>? ?? {});
-    final name    = m['stationName']?.toString()    ??
-                    m['station']?.toString()        ??
-                    m['name']?.toString()           ?? 'Bihar Station';
-    final level   = m['waterLevel']?.toString()     ??
-                    m['level']?.toString()          ?? '—';
-    final danger  = m['dangerLevel']?.toString()    ??
-                    m['alertStatus']?.toString()    ??
-                    m['status']?.toString()         ?? '';
-    final river   = m['riverName']?.toString()      ??
-                    m['river']?.toString()          ?? '';
-    final change  = m['change']?.toString()         ??
-                    m['levelChange']?.toString()    ?? '';
+  /// WrdStation → BiharFeedItem  (v1.1: typed parameter)
+  BiharFeedItem _wrdStationToItem(WrdStation s) {
+    final level  = s.currentLevel?.toStringAsFixed(2) ?? '—';
+    final status = s.riskLabel ?? '';
     return BiharFeedItem(
-      id:          'wrd|${name.toLowerCase().trim()}',
+      id:          'wrd|${s.site.toLowerCase().trim()}',
       kind:        FeedItemKind.riverGauge,
       source:      SourceId.wrdBihar,
-      title:       name,
-      subtitle:    river.isNotEmpty ? 'River: $river' : 'WRD Bihar',
-      value:       level.isNotEmpty ? '$level m' : null,
-      dangerLevel: danger,
-      changeStr:   change.isNotEmpty ? change : null,
+      title:       s.site,
+      subtitle:    s.river.isNotEmpty ? 'River: ${s.river}' : 'WRD Bihar',
+      value:       '$level m',
+      dangerLevel: status,
+      fetchedAt:   s.fetchedAt,
+      severity:    _dangerToSeverity(status),
+      raw: {
+        'river':  s.river,
+        'site':   s.site,
+        'level':  s.currentLevel,
+        'danger': s.dangerLevel,
+      },
+    );
+  }
+
+  /// KosiBirpurReading → BiharFeedItem  (v1.1: typed parameter)
+  BiharFeedItem _kosiReadingToItem(KosiBirpurReading r) => BiharFeedItem(
+    id:          'kosi|birpur',
+    kind:        FeedItemKind.barrage,
+    source:      SourceId.kosiBirpur,
+    title:       'Birpur',
+    subtitle:    'Kosi Barrage',
+    value:       '${r.levelM.toStringAsFixed(2)} m',
+    dangerLevel: r.statusLabel,
+    fetchedAt:   r.observedAt,
+    severity:    _dangerToSeverity(r.statusLabel),
+    raw: {
+      'river':   'Kosi',
+      'station': 'Birpur',
+      'level':   r.levelM,
+      'danger':  r.dangerLevel,
+      'warning': r.warningLevel,
+    },
+  );
+
+  /// LiveRiverResult → BiharFeedItem  (v1.1: replaces fetchBiharGauges)
+  BiharFeedItem _liveResultToItem(LiveRiverResult r) {
+    final s      = r.station;
+    final level  = s.current > 0 ? '${s.current.toStringAsFixed(2)} m' : null;
+    final status = r.mlRiskLevel ?? s.liveStatus ?? '';
+    return BiharFeedItem(
+      id:          'rt|${s.station.toLowerCase().trim()}',
+      kind:        FeedItemKind.riverGauge,
+      source:      SourceId.realTimeRiver,
+      title:       s.station,
+      subtitle:    '${s.river} · ${r.source}',
+      value:       level,
+      dangerLevel: status,
       fetchedAt:   DateTime.now(),
-      severity:    _dangerToSeverity(danger),
-      raw:         m,
+      severity:    _dangerToSeverity(status),
+      raw: {
+        'river':      s.river,
+        'station':    s.station,
+        'level':      s.current,
+        'danger':     s.danger,
+        'warning':    s.warning,
+        'source':     r.source,
+      },
     );
   }
 
@@ -488,10 +529,10 @@ class BiharLiveEngine {
   }) {
     if (raw is! List) return [];
     return raw.map((e) {
-      final m       = (e as Map<String, dynamic>? ?? {});
-      final title   = m[titleKey]?.toString()   ?? 'Station';
-      final value   = m[valueKey]?.toString()   ?? '—';
-      final danger  = m[dangerKey]?.toString()  ?? '';
+      final m       = (e is Map ? e.cast<String, dynamic>() : <String, dynamic>{});
+      final title   = m[titleKey]?.toString()    ?? 'Station';
+      final value   = m[valueKey]?.toString()    ?? '—';
+      final danger  = m[dangerKey]?.toString()   ?? '';
       final sub     = m[subtitleKey]?.toString() ?? source.name;
       return BiharFeedItem(
         id:          '${source.name}|${title.toLowerCase().trim()}',
@@ -506,30 +547,6 @@ class BiharLiveEngine {
         raw:         m,
       );
     }).toList();
-  }
-
-  /// IndiaStations / BEFIQR map → BiharFeedItem
-  BiharFeedItem _stationToItem(Map<String, dynamic> m, SourceId src) {
-    final name   = m['stationName']?.toString()  ??
-                   m['name']?.toString()         ?? 'CWC Station';
-    final level  = m['waterLevel']?.toString()   ??
-                   m['level']?.toString()        ?? '—';
-    final status = m['alertLevel']?.toString()   ??
-                   m['status']?.toString()       ?? '';
-    final river  = m['riverName']?.toString()    ??
-                   m['river']?.toString()        ?? '';
-    return BiharFeedItem(
-      id:          '${src.name}|${name.toLowerCase().trim()}',
-      kind:        FeedItemKind.riverGauge,
-      source:      src,
-      title:       name,
-      subtitle:    river.isNotEmpty ? 'River: $river' : src.name,
-      value:       level.isNotEmpty ? '$level m' : null,
-      dangerLevel: status,
-      fetchedAt:   DateTime.now(),
-      severity:    _dangerToSeverity(status),
-      raw:         m,
-    );
   }
 
   /// NewsItem → BiharFeedItem

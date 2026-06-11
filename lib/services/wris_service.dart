@@ -1,6 +1,3 @@
-curl "https://ffs.india.gov.in/ffscwc/map/getGaugeForecast" \
-  -H "Content-Type: application/json" \
-  -d '{"stationId":"01100","date":"2026-05-25"}' | python3 -m json.tool
 // lib/services/wris_service.dart
 //
 // OpsFlood — WrisService  (DISABLED — indiawris.gov.in is not publicly
@@ -15,6 +12,11 @@ curl "https://ffs.india.gov.in/ffscwc/map/getGaugeForecast" \
 //
 // Re-enable once a working public CWC gauge API becomes available.
 library;
+
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import '../data/india_cities.dart';
 
@@ -51,8 +53,6 @@ class WrisService {
 
   static const _kTimeout = Duration(seconds: 12);
 
-  // FIX: correct base path is /wrisapi/v2, NOT /api/v2
-  // /api/v2 returns HTTP 301 and Dart's http.Client does NOT follow redirects.
   static const _kBase =
       'https://indiawris.gov.in/wrisapi/v2/RainfallAndFlood/GaugeDischargeData';
   static const _kStationSearch =
@@ -82,6 +82,13 @@ class WrisService {
     }
   }
 
+  /// Fetch Bihar telemetry stations. Returns empty list on failure.
+  /// Called by BiharLiveEngine — never throws.
+  Future<List<Map<String, dynamic>>> fetchBiharTelemetry() async {
+    // WRIS public API is disabled (redirect loop). Return empty immediately.
+    return [];
+  }
+
   // ── Station resolution ──────────────────────────────────────────────────────
 
   Future<String?> _resolveStation(IndiaCity city) async {
@@ -89,13 +96,11 @@ class WrisService {
     if (_stationCache.containsKey(key)) return _stationCache[key];
 
     try {
-      // 1. Use CWC station code directly if available
       if (city.cwcStation != null && city.cwcStation!.isNotEmpty) {
         _stationCache[key] = city.cwcStation;
         return city.cwcStation;
       }
 
-      // 2. Search WRIS for nearest gauge station within 50 km
       final uri = Uri.parse(_kStationSearch).replace(queryParameters: {
         'latitude':    city.lat.toStringAsFixed(4),
         'longitude':   city.lon.toStringAsFixed(4),
@@ -126,7 +131,6 @@ class WrisService {
         return null;
       }
 
-      // Pick closest by Euclidean lat/lon distance
       Map<String, dynamic>? best;
       double bestDist = double.infinity;
       for (final s in stations) {
@@ -180,7 +184,6 @@ class WrisService {
       for (final k in ['data', 'gaugeData', 'results', 'readings']) {
         if (body[k] is List) { rows = body[k] as List; break; }
       }
-      // Merge station-level threshold metadata into first row
       final meta = body['stationDetails'] ?? body['metadata'] ?? body['station'];
       if (meta is Map && rows.isNotEmpty) {
         final danger  = _d(meta['dangerLevel']  ?? meta['danger_level']);
