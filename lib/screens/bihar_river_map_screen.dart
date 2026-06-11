@@ -318,14 +318,14 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                   userAgentPackageName: 'com.rohitg.floodwatch',
                 ),
               // ── RainViewer precipitation overlay (FREE, no key) ──
+              // Note: backgroundColor removed — not a valid param in flutter_map 8.x
+              // Overlay tiles are transparent by default where no rain data exists.
               if (_showPrecip)
                 Opacity(
                   opacity: _precipOpacity,
                   child: TileLayer(
                     urlTemplate:          _rainViewerUrl,
                     userAgentPackageName: 'com.rohitg.floodwatch',
-                    // RainViewer tiles are transparent where no rain
-                    backgroundColor:      Colors.transparent,
                   ),
                 ),
               // ── Markers ──────────────────────────────────────────────
