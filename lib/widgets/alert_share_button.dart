@@ -7,7 +7,10 @@ import '../services/alert_share_service.dart';
 
 class AlertShareButton extends StatelessWidget {
   final FloodAlert alert;
-  const AlertShareButton({super.key, required this.alert});
+  // Optional district param accepted (but not required) so city_detail_screen
+  // can pass district: data.state without breaking the constructor.
+  final String? district;
+  const AlertShareButton({super.key, required this.alert, this.district});
 
   @override
   Widget build(BuildContext context) {
