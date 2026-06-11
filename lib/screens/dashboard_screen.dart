@@ -1,9 +1,9 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5.1
+// EQUINOX-BH — Dashboard v5.2
 //
-// v5.1 additions:
-//   • _AlertColorStrip — 5-level colour-coded summary row (Critical/Severe/Warning/Safe/NoData)
-//     inserted right below the KPI grid, matching the map-legend colours exactly.
+// v5.2 fix:
+//   • _bootNearby now calls nearbyStationsProvider.refresh() with no arguments,
+//     matching the simplified NearbyStationsNotifier signature.
 library;
 
 import 'dart:math' as math;
@@ -17,6 +17,7 @@ import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
 import '../providers/bihar_dashboard_provider.dart';
 import '../providers/bihar_live_provider.dart';
+import '../providers/nearby_stations_provider.dart';
 import '../services/real_time_service.dart';
 import '../services/location_service.dart';
 import '../theme/river_theme.dart';
@@ -118,21 +119,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
+  // ── v5.2: no arguments — provider reads mergedStationsProvider internally ──
   Future<void> _bootNearby() async {
     if (_nearbyBooted) return;
     _nearbyBooted = true;
-    final liveLevels = ref.read(liveLevelsProvider);
-    if (liveLevels.isEmpty) return;
-    final stations = liveLevels.map((d) => <String, dynamic>{
-      'id':        d.city,
-      'name':      d.city,
-      'river':     d.riverName ?? '',
-      'district':  d.state,
-      'lat':       d.latitude  ?? 25.5,
-      'lon':       d.longitude ?? 85.1,
-      'riskLabel': d.riskLevel,
-    }).toList();
-    await ref.read(nearbyStationsProvider.notifier).refresh(context, stations);
+    await ref.read(nearbyStationsProvider.notifier).refresh();
   }
 
   @override
@@ -265,7 +256,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── NEW: 5-level alert colour strip ───────────────────────
+              // ── 5-level alert colour strip ────────────────────────────
               SliverToBoxAdapter(
                 child: _AlertColorStrip(
                   t: t,
@@ -275,6 +266,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
+              // ── Preferred cities + emergency contacts ─────────────────
               const SliverToBoxAdapter(
                 child: NearbyStationsSection(),
               ),
@@ -429,7 +421,6 @@ class _AlertColorStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Count each level
     int critical = 0, severe = 0, warning = 0, safe = 0, noData = 0;
     for (final d in levels) {
       switch (d.riskLevel.toUpperCase()) {
@@ -513,13 +504,11 @@ class _StripCell extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Coloured dot with optional pulse ring for active alerts
           SizedBox(
             width: 28, height: 28,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Outer pulse ring when count > 0 and is alert level
                 if (item.pulse && isActive)
                   Container(
                     width: 26, height: 26,
@@ -556,7 +545,6 @@ class _StripCell extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 5),
-          // Count
           Text(
             '${item.count}',
             style: TextStyle(
@@ -568,7 +556,6 @@ class _StripCell extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          // Label
           Text(
             item.label,
             style: TextStyle(
