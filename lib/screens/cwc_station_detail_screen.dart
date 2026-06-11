@@ -1,14 +1,18 @@
-// lib/screens/cwc_station_detail_screen.dart  v3
-// Fix: _SourceBadge now correctly colours BEAMS source (gold).
-// No logic changes — only the source-colour guard was updated.
+// lib/screens/cwc_station_detail_screen.dart  v4
+// Emergency contacts card injected directly after Status section.
+// Contacts are resolved from EmergencyContactService.getContactsForStation()
+// using the station's site name → district mapping.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/befiqr_cwc_service.dart';
+import '../services/emergency_contact_service.dart';
 import '../services/kosi_birpur_service.dart';
 import '../theme/river_theme.dart';
 import '../widgets/ai_prediction_panel.dart';
@@ -139,9 +143,366 @@ class CwcStationDetailScreen extends StatelessWidget {
             // ── Status timeline ───────────────────────────────────────────
             _SectionTitle('Status'),
             _StatusTimeline(station: station, color: color),
+            const SizedBox(height: 20),
+
+            // ── Emergency Contacts ────────────────────────────────────────
+            _SectionTitle('Emergency Contacts'),
+            _EmergencyContactsCard(
+              stationName: station.site,
+              statusColor: color,
+            ),
             const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Emergency Contacts Card ────────────────────────────────────────────────────
+
+class _EmergencyContactsCard extends StatefulWidget {
+  final String stationName;
+  final Color  statusColor;
+  const _EmergencyContactsCard({
+    required this.stationName,
+    required this.statusColor,
+  });
+
+  @override
+  State<_EmergencyContactsCard> createState() =>
+      _EmergencyContactsCardState();
+}
+
+class _EmergencyContactsCardState
+    extends State<_EmergencyContactsCard> {
+  final _svc = EmergencyContactService();
+  late Future<List<EmergencyContact>> _future;
+
+  // Category → icon map
+  static IconData _iconFor(String cat) {
+    final c = cat.toLowerCase();
+    if (c.contains('ndrf'))   return Icons.shield_rounded;
+    if (c.contains('sdrf'))   return Icons.local_police_rounded;
+    if (c.contains('ndma'))   return Icons.crisis_alert_rounded;
+    if (c.contains('cwc'))    return Icons.water_rounded;
+    if (c.contains('dist'))   return Icons.account_balance_rounded;
+    if (c.contains('barrage')) return Icons.water_damage_rounded;
+    if (c.contains('medic'))  return Icons.local_hospital_rounded;
+    if (c.contains('fire'))   return Icons.local_fire_department_rounded;
+    return Icons.phone_in_talk_rounded;
+  }
+
+  // Category → accent colour
+  Color _colorFor(String cat) {
+    final c = cat.toLowerCase();
+    if (c.contains('ndrf'))   return AppPalette.cyan;
+    if (c.contains('sdrf'))   return AppPalette.amber;
+    if (c.contains('ndma'))   return AppPalette.critical;
+    if (c.contains('cwc'))    return AppPalette.safe;
+    if (c.contains('dist'))   return AppPalette.gold;
+    if (c.contains('barrage')) return AppPalette.danger;
+    if (c.contains('medic'))  return const Color(0xFF4CAF50);
+    return AppPalette.textGrey;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _svc.getContactsForStation(widget.stationName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<EmergencyContact>>(
+      future: _future,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            height: 80,
+            decoration: BoxDecoration(
+              color: AppPalette.abyss1,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppPalette.cyan),
+              ),
+            ),
+          );
+        }
+
+        final contacts = snap.data ?? [];
+        if (contacts.isEmpty) {
+          return _emptyState();
+        }
+
+        // Sort: SOS first, then by category
+        final sorted = [...contacts]
+          ..sort((a, b) {
+            if (a.isSOS && !b.isSOS) return -1;
+            if (!a.isSOS && b.isSOS) return 1;
+            return a.category.compareTo(b.category);
+          });
+
+        // Resolve district label for header
+        final district = _svc.districtForStation(widget.stationName);
+        final headerLabel = district != null
+            ? '$district District'
+            : 'All Bihar';
+
+        return Container(
+          decoration: BoxDecoration(
+            color: AppPalette.abyss1,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: widget.statusColor.withValues(alpha: 0.25),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Padding(
+                padding:
+                    const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                child: Row(children: [
+                  Icon(Icons.location_on_rounded,
+                      size: 13, color: widget.statusColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    headerLabel,
+                    style: TextStyle(
+                      color: widget.statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${sorted.length} contacts',
+                    style: const TextStyle(
+                      color: AppPalette.textGrey,
+                      fontSize: 10,
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 8),
+              const Divider(
+                  color: AppPalette.abyss2, height: 1, indent: 14, endIndent: 14),
+
+              // Contact rows
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: sorted.length,
+                separatorBuilder: (_, __) => const Divider(
+                    color: AppPalette.abyss2, height: 1,
+                    indent: 14, endIndent: 14),
+                itemBuilder: (_, i) {
+                  final c = sorted[i];
+                  final accent = _colorFor(c.category);
+                  return _ContactRow(
+                    contact: c,
+                    accent: accent,
+                    icon: _iconFor(c.category),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _emptyState() => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppPalette.abyss1,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Row(children: [
+          Icon(Icons.info_outline_rounded,
+              color: AppPalette.textGrey, size: 18),
+          SizedBox(width: 10),
+          Text('No contacts available for this station.',
+              style: TextStyle(
+                  color: AppPalette.textGrey, fontSize: 12)),
+        ]),
+      );
+}
+
+// ─── Single Contact Row ─────────────────────────────────────────────────────────
+
+class _ContactRow extends StatelessWidget {
+  final EmergencyContact contact;
+  final Color            accent;
+  final IconData         icon;
+  const _ContactRow({
+    required this.contact,
+    required this.accent,
+    required this.icon,
+  });
+
+  Future<void> _call() async {
+    final uri = Uri(scheme: 'tel', path: contact.phone);
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
+  Future<void> _copyNumber(BuildContext ctx) async {
+    await Clipboard.setData(ClipboardData(text: contact.phone));
+    if (ctx.mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('${contact.phone} copied'),
+          backgroundColor: AppPalette.abyss2,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: _call,
+      onLongPress: () => _copyNumber(context),
+      borderRadius: BorderRadius.circular(0),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 11),
+        child: Row(children: [
+          // Category icon bubble
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: accent.withValues(alpha: 0.30)),
+            ),
+            child: Icon(icon, color: accent, size: 16),
+          ),
+          const SizedBox(width: 12),
+
+          // Name + category
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Flexible(
+                    child: Text(
+                      contact.name,
+                      style: const TextStyle(
+                        color: AppPalette.textWhite,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (contact.isSOS) ...[
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppPalette.critical
+                            .withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                            color: AppPalette.critical
+                                .withValues(alpha: 0.35)),
+                      ),
+                      child: const Text('SOS',
+                          style: TextStyle(
+                            color: AppPalette.critical,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.4,
+                          )),
+                    ),
+                  ],
+                ]),
+                const SizedBox(height: 2),
+                Text(
+                  contact.category,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (contact.description != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    contact.description!,
+                    style: const TextStyle(
+                      color: AppPalette.textGrey,
+                      fontSize: 9,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 10),
+
+          // Phone number + call button
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                contact.phone,
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: accent.withValues(alpha: 0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.call_rounded,
+                        color: accent, size: 10),
+                    const SizedBox(width: 3),
+                    Text('CALL',
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.4,
+                        )),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ]),
       ),
     );
   }
@@ -784,12 +1145,6 @@ class _SourceBadge extends StatelessWidget {
   final bool   isStale;
   const _SourceBadge({required this.source, required this.isStale});
 
-  // Maps live-source name → badge accent colour.
-  // 'BEAMS'      = gold   (Bihar WRD authoritative)
-  // 'CWC-FFS'    = cyan   (Central Water Commission)
-  // 'befiqr'     = safe/green
-  // 'India-WRIS' = blue-ish (use cyan)
-  // anything else / SEED = muted grey
   static Color _accentFor(String src) {
     final s = src.toLowerCase();
     if (s.contains('beams'))          return AppPalette.gold;
@@ -797,7 +1152,7 @@ class _SourceBadge extends StatelessWidget {
         s.contains('ffs') ||
         s.contains('wris'))           return AppPalette.cyan;
     if (s.contains('befiqr'))         return AppPalette.safe;
-    return AppPalette.textGrey;       // SEED or unknown
+    return AppPalette.textGrey;
   }
 
   @override
