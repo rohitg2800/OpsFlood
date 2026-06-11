@@ -1,17 +1,17 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v5.1
+// OpsFlood — BiharRiverMapScreen v5.2
 //
-// v5.1 fixes:
-//   • Precipitation: switched from OWM (needs key) → RainViewer (free, no key)
-//   • Pin visibility: white border on every dot + larger sizes + stronger glow
-//   • Safe dot bumped 13→16 so it's clearly visible on dark map tiles
+// v5.2 fixes:
+//   • Suppress flutter_map fallback-freshness log spam for RainViewer tiles.
+//     RainViewer sends no Cache-Control header; we inject max-age=600 (10 min)
+//     via NetworkTileProvider so the caching layer never hits its 168h fallback.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong2.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../data/bihar_rivers.dart';
@@ -88,6 +88,14 @@ Color _riskColour(String risk, RiverColors t) => _riskColor(_parseRisk(risk));
 // smooth=1, snow=1 gives best visibility.
 const _rainViewerUrl =
     'https://tilecache.rainviewer.com/v2/radar/nowcast/{z}/{x}/{y}/2/1_1.png';
+
+// RainViewer does not send Cache-Control headers, which causes flutter_map's
+// caching layer to fall back to a 168-hour TTL and log a notice per tile.
+// Injecting max-age=600 (10 min) matches the nowcast update cadence and
+// silences the fallback log entirely.
+const _rainViewerHeaders = <String, String>{
+  'Cache-Control': 'max-age=600',
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tile styles
@@ -318,14 +326,18 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                   userAgentPackageName: 'com.rohitg.floodwatch',
                 ),
               // ── RainViewer precipitation overlay (FREE, no key) ──
-              // Note: backgroundColor removed — not a valid param in flutter_map 8.x
-              // Overlay tiles are transparent by default where no rain data exists.
+              // NetworkTileProvider injects Cache-Control: max-age=600 so the
+              // caching layer derives a 10-min freshness age directly from the
+              // header, eliminating the 168h fallback log.
               if (_showPrecip)
                 Opacity(
                   opacity: _precipOpacity,
                   child: TileLayer(
                     urlTemplate:          _rainViewerUrl,
                     userAgentPackageName: 'com.rohitg.floodwatch',
+                    tileProvider: NetworkTileProvider(
+                      headers: _rainViewerHeaders,
+                    ),
                   ),
                 ),
               // ── Markers ──────────────────────────────────────────────
