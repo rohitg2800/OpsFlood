@@ -4,6 +4,10 @@
 // v5.2 fix:
 //   • _bootNearby now calls nearbyStationsProvider.refresh() with no arguments,
 //     matching the simplified NearbyStationsNotifier signature.
+//   • Removed location_service.dart import — nearbyStationsProvider and
+//     NearbyStationsSection are imported from their canonical locations
+//     (nearby_stations_provider.dart and nearby_stations_section.dart via
+//     dashboard_screen_part2.dart) to avoid symbol ambiguity.
 library;
 
 import 'dart:math' as math;
@@ -19,7 +23,6 @@ import '../providers/bihar_dashboard_provider.dart';
 import '../providers/bihar_live_provider.dart';
 import '../providers/nearby_stations_provider.dart';
 import '../services/real_time_service.dart';
-import '../services/location_service.dart';
 import '../theme/river_theme.dart';
 import 'dashboard_screen_part2.dart';
 import 'main_shell.dart';
