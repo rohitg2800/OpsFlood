@@ -10,6 +10,13 @@
 //   • Rainfall badge on station pins when 24h rainfall > 10 mm
 //   • Legend updated with rainfall badge entry
 //   • All v3 logic preserved verbatim (normaliser, 3-pass resolver, sheet, etc.)
+//
+// FIXES applied:
+//   • opacity → tileOpacity  (flutter_map ≥ 7 removed `opacity`)
+//   • biharState.valueOrNull → biharState.whenOrNull(data:(v)=>v)
+//     (Riverpod 3.x removed valueOrNull from AsyncValue)
+//   • SliderThemeData.thumbRadius removed (renamed/deprecated in Flutter 3.x);
+//     use thumbShape: RoundSliderThumbShape(enabledThumbRadius: 7) instead
 library;
 
 import 'package:flutter/material.dart';
@@ -225,7 +232,8 @@ class _BiharRiverMapScreenState
     final t          = RiverColors.of(context);
     final biharState = ref.watch(biharLiveProvider);
 
-    final rawData = biharState.valueOrNull;
+    // FIX: Riverpod 3.x removed valueOrNull — use whenOrNull instead
+    final rawData = biharState.whenOrNull(data: (v) => v);
     if (rawData != _lastData) {
       _lastData    = rawData;
       _cachedIndex = rawData != null
@@ -278,11 +286,12 @@ class _BiharRiverMapScreenState
                 ),
 
               // ─ OWM precipitation overlay ────────────────────────
+              // FIX: `opacity` was removed in flutter_map 7+; use `tileOpacity`
               if (_showPrecip && owmUrl.isNotEmpty)
                 TileLayer(
                   urlTemplate:          owmUrl,
                   userAgentPackageName: 'com.rohitg.floodwatch',
-                  opacity:              _precipOpacity,
+                  tileOpacity:          _precipOpacity,
                   backgroundColor:      Colors.transparent,
                 ),
 
@@ -701,6 +710,8 @@ class _LayerPanel extends StatelessWidget {
           ),
 
           // ─ Opacity slider (only when precip is on) ────────────────
+          // FIX: `thumbRadius` removed from SliderThemeData in Flutter 3.x
+          //      Use thumbShape: RoundSliderThumbShape(enabledThumbRadius: 7)
           if (showPrecip && owmKeySet) ...[
             const SizedBox(height: 10),
             Row(
@@ -716,7 +727,8 @@ class _LayerPanel extends StatelessWidget {
                   child: SliderTheme(
                     data: SliderThemeData(
                       trackHeight: 3,
-                      thumbRadius: 7,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 7),
                       activeTrackColor: Colors.lightBlue,
                       inactiveTrackColor:
                           Colors.lightBlue.withValues(alpha: 0.2),
