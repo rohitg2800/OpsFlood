@@ -1,16 +1,8 @@
 // lib/screens/notification_settings_screen.dart
 // OpsFlood — Module 7: Push Notifications & FCM Topics
-//
-// NotificationSettingsScreen
-// ─────────────────────────────────────────────────────────────────────────
-// Full notification preferences screen:
-//   • Per-severity toggle row (Emergency / Critical / Warning / Info)
-//   • District multi-select chip grid (38 Bihar districts)
-//   • River multi-select chip grid
-//   • Quiet hours time picker (start / end)
-//   • "Send Test Notification" button for each severity
-//   All settings persisted to SharedPreferences.
-//   FCM topic subscriptions updated in real time.
+// v1.1 M5 fix: SwitchListTile does not have a `leading` param in Flutter 3.x.
+//              Move the emoji into the title Row instead.
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,7 +24,6 @@ class NotificationSettingsScreen extends StatefulWidget {
 
 class _NotificationSettingsState
     extends State<NotificationSettingsScreen> {
-  // ─ Severity prefs
   final _sevEnabled = <String, bool>{
     'emergency': true,
     'critical':  true,
@@ -40,12 +31,10 @@ class _NotificationSettingsState
     'info':      true,
   };
 
-  // ─ Quiet hours
-  bool      _quietEnabled  = false;
-  TimeOfDay _quietStart    = const TimeOfDay(hour: 22, minute: 0);
-  TimeOfDay _quietEnd      = const TimeOfDay(hour:  7, minute: 0);
+  bool      _quietEnabled = false;
+  TimeOfDay _quietStart   = const TimeOfDay(hour: 22, minute: 0);
+  TimeOfDay _quietEnd     = const TimeOfDay(hour:  7, minute: 0);
 
-  // ─ District & river selection (chip grid)
   final Set<String> _selDistricts = {};
   final Set<String> _selRivers    = {};
 
@@ -89,8 +78,7 @@ class _NotificationSettingsState
     if (_loading) {
       return Scaffold(
         backgroundColor: t.bgBase,
-        body: Center(
-            child: CircularProgressIndicator(color: t.accent)),
+        body: Center(child: CircularProgressIndicator(color: t.accent)),
       );
     }
     return Scaffold(
@@ -99,26 +87,17 @@ class _NotificationSettingsState
         backgroundColor: t.navBg,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_rounded,
-              color: t.textPrimary),
+          icon: Icon(Icons.arrow_back_rounded, color: t.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Text(
-          'Notification Settings',
-          style: TextStyle(
-            color: t.textPrimary,
-            fontWeight: FontWeight.w900,
-            fontSize: 16,
-          ),
-        ),
+        title: Text('Notification Settings',
+            style: TextStyle(color: t.textPrimary,
+                fontWeight: FontWeight.w900, fontSize: 16)),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-
-          // ─ Severity toggles
-          _header(t, Icons.notifications_active_rounded,
-              'Alert Severity'),
+          _header(t, Icons.notifications_active_rounded, 'Alert Severity'),
           const SizedBox(height: 8),
           ..._sevEnabled.entries.map((e) => _SeverityRow(
                 t:       t,
@@ -126,22 +105,17 @@ class _NotificationSettingsState
                 enabled: e.value,
                 onChanged: (v) async {
                   setState(() => _sevEnabled[e.key] = v);
-                  final prefs =
-                      await SharedPreferences.getInstance();
+                  final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool('notif_sev_${e.key}', v);
-                  // Auto-subscribe / unsubscribe FCM topic
                   final topic = 'flood_${e.key}';
                   if (v) {
                     await FcmTopicManager.instance.subscribeTo(topic);
                   } else {
-                    await FcmTopicManager.instance
-                        .unsubscribeFrom(topic);
+                    await FcmTopicManager.instance.unsubscribeFrom(topic);
                   }
                 },
               )),
           const SizedBox(height: 20),
-
-          // ─ Quiet hours
           _header(t, Icons.bedtime_rounded, 'Quiet Hours'),
           const SizedBox(height: 8),
           _card(t, [
@@ -149,12 +123,10 @@ class _NotificationSettingsState
               activeColor: t.accent,
               value: _quietEnabled,
               title: Text('Enable quiet hours',
-                  style: TextStyle(
-                      color: t.textPrimary, fontSize: 14)),
+                  style: TextStyle(color: t.textPrimary, fontSize: 14)),
               subtitle: Text(
                 'No push during quiet window even for warnings',
-                style: TextStyle(
-                    color: t.textSecondary, fontSize: 11),
+                style: TextStyle(color: t.textSecondary, fontSize: 11),
               ),
               onChanged: (v) async {
                 setState(() => _quietEnabled = v);
@@ -162,136 +134,92 @@ class _NotificationSettingsState
                 await prefs.setBool('quiet_hours_enabled', v);
               },
             ),
-            if (_quietEnabled) ...
-              [
-                _TimeTile(
-                  t:       t,
-                  label:   'Quiet from',
-                  time:    _quietStart,
-                  onPick: (picked) async {
-                    setState(() => _quietStart = picked);
-                    final prefs =
-                        await SharedPreferences.getInstance();
-                    await prefs.setInt(
-                        'quiet_start_hour', picked.hour);
-                    await prefs.setInt(
-                        'quiet_start_min', picked.minute);
-                  },
-                ),
-                _TimeTile(
-                  t:       t,
-                  label:   'Quiet until',
-                  time:    _quietEnd,
-                  onPick: (picked) async {
-                    setState(() => _quietEnd = picked);
-                    final prefs =
-                        await SharedPreferences.getInstance();
-                    await prefs.setInt(
-                        'quiet_end_hour', picked.hour);
-                    await prefs.setInt(
-                        'quiet_end_min', picked.minute);
-                  },
-                ),
-              ],
+            if (_quietEnabled) ...[
+              _TimeTile(
+                t: t, label: 'Quiet from', time: _quietStart,
+                onPick: (picked) async {
+                  setState(() => _quietStart = picked);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setInt('quiet_start_hour', picked.hour);
+                  await prefs.setInt('quiet_start_min',  picked.minute);
+                },
+              ),
+              _TimeTile(
+                t: t, label: 'Quiet until', time: _quietEnd,
+                onPick: (picked) async {
+                  setState(() => _quietEnd = picked);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setInt('quiet_end_hour', picked.hour);
+                  await prefs.setInt('quiet_end_min',  picked.minute);
+                },
+              ),
+            ],
           ]),
           const SizedBox(height: 20),
-
-          // ─ District subscriptions
           _header(t, Icons.map_rounded, 'District Alerts'),
           const SizedBox(height: 4),
-          Text(
-            'Receive alerts for specific Bihar districts.',
-            style: TextStyle(
-                color: t.textSecondary, fontSize: 11),
-          ),
+          Text('Receive alerts for specific Bihar districts.',
+              style: TextStyle(color: t.textSecondary, fontSize: 11)),
           const SizedBox(height: 8),
           _ChipGrid(
-            t:        t,
-            items:    FcmTopics.biharDistricts,
+            t: t,
+            items: FcmTopics.biharDistricts,
             selected: _selDistricts,
-            format:   (s) => s
+            format: (s) => s
                 .replaceAll('_', ' ')
                 .split(' ')
-                .map((w) => w.isEmpty
-                    ? ''
-                    : w[0].toUpperCase() + w.substring(1))
+                .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
                 .join(' '),
             onToggle: (slug, selected) async {
               setState(() {
-                if (selected) {
-                  _selDistricts.add(slug);
-                } else {
-                  _selDistricts.remove(slug);
-                }
+                if (selected) _selDistricts.add(slug);
+                else          _selDistricts.remove(slug);
               });
               await FcmTopicManager.instance
-                  .setDistrictSubscriptions(
-                      _selDistricts.toList());
+                  .setDistrictSubscriptions(_selDistricts.toList());
             },
           ),
           const SizedBox(height: 20),
-
-          // ─ River subscriptions
           _header(t, Icons.water_rounded, 'River Alerts'),
           const SizedBox(height: 8),
           _ChipGrid(
-            t:        t,
-            items:    FcmTopics.biharRivers,
+            t: t,
+            items: FcmTopics.biharRivers,
             selected: _selRivers,
-            format:   (s) => s
+            format: (s) => s
                 .replaceAll('_', ' ')
                 .split(' ')
-                .map((w) => w.isEmpty
-                    ? ''
-                    : w[0].toUpperCase() + w.substring(1))
+                .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
                 .join(' '),
             onToggle: (slug, selected) async {
               setState(() {
-                if (selected) {
-                  _selRivers.add(slug);
-                } else {
-                  _selRivers.remove(slug);
-                }
+                if (selected) _selRivers.add(slug);
+                else          _selRivers.remove(slug);
               });
               await FcmTopicManager.instance
                   .setRiverSubscriptions(_selRivers.toList());
             },
           ),
           const SizedBox(height: 20),
-
-          // ─ Test notifications
           _header(t, Icons.science_rounded, 'Test Notifications'),
           const SizedBox(height: 8),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 8, runSpacing: 8,
             children: [
-              _TestButton(
-                  t: t,
-                  label: '🚨 Emergency',
-                  color: const Color(0xFFFF1744),
-                  channelId: 'flood_emergency',
+              _TestButton(t: t, label: '🚨 Emergency',
+                  color: const Color(0xFFFF1744), channelId: 'flood_emergency',
                   title: '🚨 EMERGENCY TEST',
                   body: 'Simulated HFL breach at Birpur, Kosi river'),
-              _TestButton(
-                  t: t,
-                  label: '🔴 Critical',
-                  color: const Color(0xFFFF6D00),
-                  channelId: 'flood_critical',
+              _TestButton(t: t, label: '🔴 Critical',
+                  color: const Color(0xFFFF6D00), channelId: 'flood_critical',
                   title: '🔴 CRITICAL TEST',
                   body: 'Level above danger at Baltara, Gandak'),
-              _TestButton(
-                  t: t,
-                  label: '⚠️ Warning',
-                  color: const Color(0xFFFFD600),
-                  channelId: 'flood_warning',
+              _TestButton(t: t, label: '⚠️ Warning',
+                  color: const Color(0xFFFFD600), channelId: 'flood_warning',
                   title: '⚠️ Warning TEST',
                   body: 'Rapid rise detected at Rosera, Bagmati'),
-              _TestButton(
-                  t: t,
-                  label: 'ℹ️ Info',
-                  color: const Color(0xFF00E5FF),
-                  channelId: 'flood_info',
+              _TestButton(t: t, label: 'ℹ️ Info',
+                  color: const Color(0xFF00E5FF), channelId: 'flood_info',
                   title: 'ℹ️ Advisory TEST',
                   body: 'Heavy rainfall (78 mm) near Darbhanga'),
             ],
@@ -302,36 +230,25 @@ class _NotificationSettingsState
     );
   }
 
-  // ── Helpers
-
   Widget _header(RiverColors t, IconData icon, String label) =>
-      Row(
-        children: [
-          Icon(icon, color: t.accent, size: 16),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: t.textPrimary,
-              fontWeight: FontWeight.w900,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      );
+      Row(children: [
+        Icon(icon, color: t.accent, size: 16),
+        const SizedBox(width: 8),
+        Text(label,
+            style: TextStyle(color: t.textPrimary,
+                fontWeight: FontWeight.w900, fontSize: 14)),
+      ]);
 
-  Widget _card(RiverColors t, List<Widget> children) =>
-      Container(
-        decoration: BoxDecoration(
-          color: t.cardBg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.stroke),
-        ),
-        child: Column(children: children),
-      );
+  Widget _card(RiverColors t, List<Widget> children) => Container(
+    decoration: BoxDecoration(
+        color: t.cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.stroke)),
+    child: Column(children: children),
+  );
 }
 
-// ── Severity row ───────────────────────────────────────────────────────────
+// ── Severity row ─────────────────────────────────────────────────────────────
 
 const _sevMeta = {
   'emergency': ('🚨', 'Emergency', Color(0xFFFF1744)),
@@ -358,28 +275,25 @@ class _SeverityRow extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: t.cardBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: t.stroke),
-      ),
+          color: t.cardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: t.stroke)),
+      // M5 FIX: SwitchListTile has no `leading` param in Flutter 3.x.
+      // Move the emoji Text into the title Row instead.
       child: SwitchListTile(
         activeColor: meta.$3,
         value: enabled,
-        leading: Text(meta.$1,
-            style: const TextStyle(fontSize: 20)),
-        title: Text(
-          meta.$2,
-          style: TextStyle(
-            color: t.textPrimary,
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
+        title: Row(children: [
+          Text(meta.$1, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 10),
+          Text(
+            meta.$2,
+            style: TextStyle(color: t.textPrimary,
+                fontWeight: FontWeight.w700, fontSize: 13),
           ),
-        ),
-        subtitle: Text(
-          _subtitle(sev),
-          style: TextStyle(
-              color: t.textSecondary, fontSize: 10),
-        ),
+        ]),
+        subtitle: Text(_subtitle(sev),
+            style: TextStyle(color: t.textSecondary, fontSize: 10)),
         onChanged: onChanged,
       ),
     );
@@ -396,7 +310,7 @@ class _SeverityRow extends StatelessWidget {
   }
 }
 
-// ── Time picker tile ───────────────────────────────────────────────────────
+// ── Time picker tile ──────────────────────────────────────────────────────────
 
 class _TimeTile extends StatelessWidget {
   final RiverColors t;
@@ -413,8 +327,7 @@ class _TimeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
         title: Text(label,
-            style: TextStyle(
-                color: t.textPrimary, fontSize: 13)),
+            style: TextStyle(color: t.textPrimary, fontSize: 13)),
         trailing: GestureDetector(
           onTap: () async {
             HapticFeedback.lightImpact();
@@ -440,23 +353,17 @@ class _TimeTile extends StatelessWidget {
             decoration: BoxDecoration(
               color: t.accent.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: t.accent.withValues(alpha: 0.4)),
+              border: Border.all(color: t.accent.withValues(alpha: 0.4)),
             ),
-            child: Text(
-              time.format(context),
-              style: TextStyle(
-                color: t.accent,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
+            child: Text(time.format(context),
+                style: TextStyle(color: t.accent,
+                    fontWeight: FontWeight.w700, fontSize: 13)),
           ),
         ),
       );
 }
 
-// ── Chip grid ──────────────────────────────────────────────────────────────
+// ── Chip grid ─────────────────────────────────────────────────────────────────
 
 class _ChipGrid extends StatelessWidget {
   final RiverColors       t;
@@ -474,8 +381,7 @@ class _ChipGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Wrap(
-        spacing: 6,
-        runSpacing: 6,
+        spacing: 6, runSpacing: 6,
         children: items.map((slug) {
           final active = selected.contains(slug);
           return GestureDetector(
@@ -493,28 +399,23 @@ class _ChipGrid extends StatelessWidget {
                     : t.cardBg,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: active
-                      ? t.accent.withValues(alpha: 0.7)
-                      : t.stroke,
-                ),
+                    color: active
+                        ? t.accent.withValues(alpha: 0.7)
+                        : t.stroke),
               ),
-              child: Text(
-                format(slug),
-                style: TextStyle(
-                  color: active ? t.accent : t.textSecondary,
-                  fontWeight: active
-                      ? FontWeight.w700
-                      : FontWeight.w500,
-                  fontSize: 10,
-                ),
-              ),
+              child: Text(format(slug),
+                  style: TextStyle(
+                      color: active ? t.accent : t.textSecondary,
+                      fontWeight:
+                          active ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 10)),
             ),
           );
         }).toList(),
       );
 }
 
-// ── Test notification button ──────────────────────────────────────────────
+// ── Test notification button ───────────────────────────────────────────────────
 
 class _TestButton extends StatelessWidget {
   final RiverColors t;
@@ -538,8 +439,7 @@ class _TestButton extends StatelessWidget {
           backgroundColor: color.withValues(alpha: 0.15),
           foregroundColor: color,
           side: BorderSide(color: color.withValues(alpha: 0.5)),
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12)),
         ),
@@ -553,10 +453,8 @@ class _TestButton extends StatelessWidget {
             payload:   'test_$channelId',
           );
         },
-        child: Text(
-          label,
-          style: const TextStyle(
-              fontWeight: FontWeight.w700, fontSize: 12),
-        ),
+        child: Text(label,
+            style: const TextStyle(
+                fontWeight: FontWeight.w700, fontSize: 12)),
       );
 }
