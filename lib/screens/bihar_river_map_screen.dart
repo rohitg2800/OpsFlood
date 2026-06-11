@@ -85,7 +85,10 @@ Color _riskColour(String risk, RiverColors t) => _riskColor(_parseRisk(risk));
 const _rainViewerUrl =
     'https://tilecache.rainviewer.com/v2/radar/nowcast/{z}/{x}/{y}/2/1_1.png';
 
-const _rainViewerHeaders = <String, String>{
+// NOTE: must be `final` (mutable map), NOT `const`.
+// TileLayer calls headers.putIfAbsent() internally; a const map throws
+// UnsupportedError: Cannot modify unmodifiable map.
+final _rainViewerHeaders = <String, String>{
   'Cache-Control': 'max-age=600',
 };
 
@@ -322,7 +325,9 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                     urlTemplate:          _rainViewerUrl,
                     userAgentPackageName: 'com.rohitg.floodwatch',
                     tileProvider: NetworkTileProvider(
-                      headers: _rainViewerHeaders,
+                      // headers must be a mutable map — TileLayer calls
+                      // putIfAbsent() on it at construction time.
+                      headers: Map<String, String>.of(_rainViewerHeaders),
                     ),
                   ),
                 ),
