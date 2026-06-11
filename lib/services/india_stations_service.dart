@@ -1,10 +1,9 @@
 // lib/services/india_stations_service.dart
 //
 // OpsFlood — IndiaStationsService
-// Fetches ALL stations from opsflood.onrender.com/api/v1/stations/all
-// and merges with GloFAS discharge for every lat/lon.
-//
-// Output: List<FloodData> covering all states returned by backend.
+// Fetches stations from opsflood.onrender.com/api/v1/stations/all
+// and returns ONLY Bihar stations (state filter applied).
+// Merges with GloFAS discharge for every lat/lon.
 library;
 
 import 'dart:async';
@@ -14,6 +13,16 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../models/flood_data.dart';
+
+// Canonical Bihar state spellings returned by the backend.
+const _kBiharAliases = {
+  'bihar',
+  'br',         // ISO code sometimes used
+  'state of bihar',
+};
+
+bool _isBihar(String state) =>
+    _kBiharAliases.contains(state.toLowerCase().trim());
 
 class IndiaStationsService {
   static final IndiaStationsService _instance = IndiaStationsService._();
@@ -25,8 +34,9 @@ class IndiaStationsService {
   // GloFAS discharge cache — keyed by "lat2:lon2"
   final Map<String, _CE> _glofasCache = {};
 
-  // ── Public API ─────────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────
 
+  /// Returns Bihar-only stations, merged with GloFAS discharge.
   Future<List<FloodData>> fetchAll() async {
     try {
       final uri = Uri.parse('${AppConfig.baseUrl}/api/v1/stations/all');
@@ -50,10 +60,23 @@ class IndiaStationsService {
       }
       if (raw.isEmpty) return [];
 
-      // Fan-out GloFAS fetch for unique lat/lon pairs (cached)
+      // Pre-filter to Bihar rows before expensive GloFAS fan-out.
+      final biharRaw = raw.where((s) {
+        if (s is! Map) return false;
+        final state = (s['state'] ?? s['state_name'] ?? '').toString();
+        return _isBihar(state);
+      }).toList();
+
+      if (kDebugMode) {
+        debugPrint('[IndiaStations] ${raw.length} total → '
+            '${biharRaw.length} Bihar stations');
+      }
+
+      if (biharRaw.isEmpty) return [];
+
+      // Fan-out GloFAS fetch for unique lat/lon pairs (cached).
       final coords = <String, Map<String, double>>{};
-      for (final s in raw) {
-        if (s is! Map) continue;
+      for (final s in biharRaw) {
         final lat = _d(s['latitude'] ?? s['lat']);
         final lon = _d(s['longitude'] ?? s['lon']);
         if (lat == null || lon == null) continue;
@@ -67,13 +90,14 @@ class IndiaStationsService {
       );
 
       final results = <FloodData>[];
-      for (final s in raw) {
-        if (s is! Map) continue;
-        final fd = _toFloodData(s);
+      for (final s in biharRaw) {
+        final fd = _toFloodData(s as Map);
         if (fd != null) results.add(fd);
       }
 
-      if (kDebugMode) debugPrint('[IndiaStations] fetched ${results.length} stations');
+      if (kDebugMode) {
+        debugPrint('[IndiaStations] returning ${results.length} Bihar FloodData');
+      }
       return results;
     } catch (e) {
       if (kDebugMode) debugPrint('[IndiaStations] error: $e');
@@ -81,7 +105,7 @@ class IndiaStationsService {
     }
   }
 
-  // ── GloFAS helper ──────────────────────────────────────────────────────────
+  // ── GloFAS helper ──────────────────────────────────────────────────────
 
   Future<void> _ensureGloFas(String key, double lat, double lon) async {
     if (_glofasCache[key]?.valid == true) return;
@@ -107,12 +131,13 @@ class IndiaStationsService {
     return _d(_glofasCache[k]?.data['discharge']);
   }
 
-  // ── FloodData builder ──────────────────────────────────────────────────────
+  // ── FloodData builder ────────────────────────────────────────────────────
 
   FloodData? _toFloodData(Map raw) {
     final city  = raw['city']?.toString() ?? raw['station_name']?.toString() ?? '';
     final state = raw['state']?.toString() ?? raw['state_name']?.toString() ?? '';
-    if (city.isEmpty || state.isEmpty) return null;
+    // Guard: only Bihar (redundant safety net on top of pre-filter above).
+    if (city.isEmpty || state.isEmpty || !_isBihar(state)) return null;
 
     final current = _d(raw['current_level'] ?? raw['river_level']) ?? 0.0;
     final danger  = _d(raw['danger_level'])  ?? 0.0;
