@@ -2,6 +2,10 @@
 // Public widget classes used by city_detail_screen.dart
 // KEY FIX: All classes are PUBLIC (no leading underscore) so they are
 // accessible across file boundaries via import.
+//
+// v2 wiring (2026-06-11):
+//   CollapsibleContacts now accepts stationName and passes it to SosScreen
+//   via route arguments so SosScreen can pre-filter to that district.
 library;
 
 import 'package:flutter/material.dart';
@@ -14,6 +18,7 @@ import '../theme/river_theme.dart';
 import '../widgets/sparkline_chart.dart';
 import 'bihar_river_map_screen.dart';
 import 'predict_screen.dart';
+import 'sos_screen.dart';
 
 // ── top-level helper ──────────────────────────────────────────────────────────
 Color cityDetailRiskColor(String risk) {
@@ -363,10 +368,13 @@ class NdmaAdvisoryTile extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CollapsibleContacts
+// stationName is passed through to SosScreen so that screen pre-filters
+// contacts to the matching district.
 // ─────────────────────────────────────────────────────────────────────────────
 class CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
   final String       state;
+  final String       stationName;   // e.g. "Birpur", "Gandhi Ghat"
   final bool         expanded;
   final VoidCallback onToggle;
 
@@ -374,6 +382,7 @@ class CollapsibleContacts extends StatelessWidget {
     super.key,
     required this.contacts,
     required this.state,
+    required this.stationName,
     required this.expanded,
     required this.onToggle,
   });
@@ -388,6 +397,7 @@ class CollapsibleContacts extends StatelessWidget {
         border: Border.all(color: t.stroke),
       ),
       child: Column(children: [
+        // ── Header row ──────────────────────────────────────────────────────
         InkWell(
           onTap: onToggle,
           borderRadius: BorderRadius.circular(16),
@@ -413,6 +423,8 @@ class CollapsibleContacts extends StatelessWidget {
             ]),
           ),
         ),
+
+        // ── Expanded body ────────────────────────────────────────────────────
         if (expanded) ...[
           Divider(height: 1, color: t.stroke),
           if (contacts.isEmpty)
@@ -423,6 +435,45 @@ class CollapsibleContacts extends StatelessWidget {
             )
           else
             ...contacts.map((c) => _ContactRow(contact: c, t: t)),
+
+          // ── "View All" button → SosScreen with stationName ───────────────
+          Divider(height: 1, color: t.stroke),
+          InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.pushNamed(
+                context,
+                SosScreen.route,
+                arguments: {'stationName': stationName},
+              );
+            },
+            borderRadius: const BorderRadius.only(
+              bottomLeft:  Radius.circular(16),
+              bottomRight: Radius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.sos_rounded,
+                      size: 14, color: AppPalette.critical),
+                  const SizedBox(width: 6),
+                  Text(
+                    'View All Emergency Contacts for $stationName',
+                    style: const TextStyle(
+                      color: AppPalette.critical,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right_rounded,
+                      size: 14, color: AppPalette.critical),
+                ],
+              ),
+            ),
+          ),
         ],
       ]),
     );
