@@ -1,10 +1,16 @@
-// lib/providers/real_time_river_provider.dart  v7.1
+// lib/providers/real_time_river_provider.dart  v8.0
 //
-// v7 → v7.1 fix:
-//   Removed dangling references to undefined constants
-//   kBirpurWarningLevel / kBirpurDangerLevel in the Birpur seed-fallback block.
-//   Replaced with inline literals matching kBiharGauges (211.50 / 212.40 m).
+// v8: liveEngineStationsProvider injected as the TOP priority tier so
+//     BiharLiveEngine's real-time readings override any seed current=0 values.
+//     This makes map markers and district polygons colour-correct.
 //
+// Priority ladder (highest → lowest):
+//   ❸ LiveEngine  (BiharLiveEngine feed, updated every 15 min)
+//   ❷ live-CWC    (CWC FFEM BEFIQR scraper)
+//   ❶ DataFetch   (backend API)
+//   ❵ WRD Bihar
+//   ❴ seed-CWC    (static fallback)
+//   Birpur always explicit via kosiBirpurProvider
 library;
 
 import 'dart:async';
@@ -18,6 +24,7 @@ import 'station_history_provider.dart';
 import 'cwc_provider.dart';
 import 'data_fetch_provider.dart';
 import 'kosi_birpur_provider.dart';
+import 'live_engine_bridge_provider.dart';   // ★ NEW
 
 // ─────────────────────────────────────────────────────────────────────────────
 String _norm(String s) => s
@@ -39,8 +46,6 @@ bool _sameStation(String a, String b) {
 bool _isBirpur(String name) =>
     name.toLowerCase().contains('birpur');
 
-// Birpur thresholds — single source of truth for this file.
-// Must match kBiharGauges entry for Birpur in data/bihar_rivers.dart.
 const double _kBirpurWarning = 211.50;
 const double _kBirpurDanger  = 212.40;
 const double _kBirpurHfl     = _kBirpurDanger + 1.5; // 213.90
@@ -150,19 +155,24 @@ final realTimeRiverProvider =
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. mergedStationsProvider — THE single source of truth for all screens
 //
-// Priority ladder:
-//   live-CWC  (highest) ──┐
-//   DataFetch           ──┤
-//   WRD                 ──┤  ← Birpur is removed from all three buckets
-//   seed-CWC  (lowest)  ──┘     and replaced by kosiBirpurProvider result
-//                                (level=GloFAS||live, enrich=discharge+trend)
+// Priority ladder (v8):
+//   ❸ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)  ★ NEW
+//   ❷ live-CWC   (CWC FFEM BEFIQR scraper)
+//   ❶ DataFetch  (backend API)
+//   ❵ WRD Bihar
+//   ❴ seed-CWC   (static fallback, lowest)
+//   Birpur always explicit via kosiBirpurProvider
 // ─────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
+  // ★ Tier 0 — BiharLiveEngine stations (real-time, highest priority)
+  final liveEngineRS  = ref.watch(liveEngineStationsProvider);
+  final liveEngineNames = { for (final s in liveEngineRS) _norm(s.station) };
+
   final wrdAsync     = ref.watch(realTimeRiverProvider);
   final cwcAsync     = ref.watch(cwcStationsProvider);
   final birpurAsync  = ref.watch(kosiBirpurProvider);
 
-  // ── FIX #1: never return [] on cold-start ───────────────────────────
+  // ── FIX #1: never return [] on cold-start ────────────────────────
   List<RiverStation> wrdList;
   if (wrdAsync.isLoading || wrdAsync.asData?.value == null) {
     final cached = WrdBiharService.instance.cachedStations;
@@ -171,9 +181,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     wrdList = wrdAsync.asData!.value;
   }
 
-  // ── Build Birpur entry from kosiBirpurProvider ────────────────────────
-  // If kosiBirpurProvider is still loading, build a placeholder from
-  // whatever DataFetch already has (avoids blank Birpur card).
+  // ── Build Birpur entry from kosiBirpurProvider ─────────────────────
   final RiverStation birpurStation;
   final birpurReading = birpurAsync.asData?.value;
   if (birpurReading != null) {
@@ -193,24 +201,21 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       isLive: birpurReading.source != 'SEED',
     );
   } else {
-    // Still loading — use DataFetch Birpur if available, else seed.
-    // FIX v7.1: inline literals replace removed kBirpurWarningLevel /
-    // kBirpurDangerLevel constants.
     final dfBirpur = ref.watch(dataFetchStationsProvider)
         .where((s) => _isBirpur(s.station)).firstOrNull;
     birpurStation = dfBirpur ?? RiverStation(
       city: 'Birpur', state: 'Bihar', river: 'Kosi', station: 'Birpur',
       current:     210.80,
-      warning:     _kBirpurWarning,   // 211.50 m
-      danger:      _kBirpurDanger,    // 212.40 m
-      hfl:         _kBirpurHfl,       // 213.90 m
+      warning:     _kBirpurWarning,
+      danger:      _kBirpurDanger,
+      hfl:         _kBirpurHfl,
       dataSource: 'SEED',
       lastUpdated: '00:00',
       isLive: false,
     );
   }
 
-  // ── FIX #2/#3: split live vs seed CWC ──────────────────────────────
+  // ── live vs seed CWC ─────────────────────────────────────────────────
   final allCwcStations = cwcAsync.asData?.value ?? const <CwcStation>[];
   final cwcLive   = allCwcStations
       .where((s) => !s.isFromSeed && !_isBirpur(s.site)).toList();
@@ -221,48 +226,53 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   final cwcSeedRS = cwcSeed.map(_cwcToRiverStation).toList();
   final cwcLiveNames = { for (final s in cwcLiveRS) _norm(s.station) };
 
-  // ── DataFetch: exclude Birpur (handled separately) + seed-CWC names ────
+  // DataFetch: exclude LiveEngine + Birpur + seed-CWC names
   final dfStations = ref.watch(dataFetchStationsProvider)
       .where((s) =>
           !_isBirpur(s.station) &&
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
           !cwcLiveNames.any((n) => _sameStation(n, s.station)))
       .toList();
   final dfNames = { for (final s in dfStations) _norm(s.station) };
 
-  // ── WRD: exclude Birpur + already-covered stations ─────────────────
+  // WRD: exclude LiveEngine + Birpur + already-covered stations
   final wrdFiltered = wrdList
       .where((s) =>
           !_isBirpur(s.station) &&
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
           !cwcLiveNames.any((n) => _sameStation(n, s.station)) &&
           !dfNames.any((n) => _sameStation(n, s.station)))
       .toList();
   final wrdNames = { for (final s in wrdFiltered) _norm(s.station) };
 
-  // ── Seed CWC: last resort, no Birpur ──────────────────────────────
+  // Seed CWC: last resort
   final cwcSeedFiltered = cwcSeedRS
       .where((s) =>
+          !liveEngineNames.any((n) => _sameStation(n, s.station)) &&   // ★ NEW
           !cwcLiveNames.any((n) => _sameStation(n, s.station)) &&
           !dfNames.any((n) => _sameStation(n, s.station)) &&
           !wrdNames.any((n) => _sameStation(n, s.station)))
       .toList();
 
-  // ── Final merge: Birpur always explicit, never from dedup ───────────
+  // ── Final merge ──────────────────────────────────────────────────────────────
   final merged = [
+    ...liveEngineRS,         // ★ Tier 0 — always on top
     ...cwcLiveRS,
     ...dfStations,
     ...wrdFiltered,
     ...cwcSeedFiltered,
-    birpurStation,   // always exactly one Birpur, always enriched
+    birpurStation,
   ];
   merged.sort((a, b) => b.riskScore.compareTo(a.riskScore));
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged] ${cwcLiveRS.length} CWC-live'
+      '[Merged v8] ${liveEngineRS.length} LiveEngine'
+      ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
       ' + ${dfStations.length} DataFetch'
       ' + ${wrdFiltered.length} WRD'
-      ' + 1 Birpur(${birpurReading?.source ?? "loading"})'
+      ' + 1 Birpur'
       ' = ${merged.length} total',
     );
   }
