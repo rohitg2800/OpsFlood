@@ -1,12 +1,7 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v8  (M3 fix: AlertShareButton synthetic alert)
-//
-// v8 changes on top of v7:
-//   • Adds _syntheticAlert(FloodData) helper that builds a FloodAlert from
-//     city data so AlertShareButton(alert:) can be satisfied.
-//   • Removes the invalid named params stationName/currentLevel/dangerLevel/
-//     severity/iconOnly from both AlertShareButton call sites.
-//   • Imports alert_engine.dart for FloodAlert / AlertSeverity / AlertType.
+// EQUINOX-BH — CityDetailScreen v9
+// Uses PUBLIC widget classes from city_detail_screen_widgets.dart
+// (Dart private _ classes can't cross file boundaries)
 library;
 
 import 'dart:async';
@@ -14,7 +9,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/flood_data.dart';
@@ -22,17 +16,12 @@ import '../models/river_monitoring.dart';
 import '../providers/bihar_city_provider.dart';
 import '../providers/bihar_live_provider.dart';
 import '../providers/flood_providers.dart';
-import '../services/alert_engine.dart';            // ← M3 fix
+import '../services/alert_engine.dart';
 import '../theme/river_theme.dart';
-import '../widgets/alert_share_button.dart';       // ← Phase 4
+import '../widgets/alert_share_button.dart';
 import '../widgets/sparkline_chart.dart';
-import 'city_detail_screen_widgets.dart';          // ← FIX: widget classes live here
+import 'city_detail_screen_widgets.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// M3 FIX: synthetic FloodAlert builder
-// AlertShareButton only accepts a FloodAlert. We build one on the fly from
-// the city's FloodData so no changes to the widget are required.
-// ─────────────────────────────────────────────────────────────────────────────
 FloodAlert _syntheticAlert(FloodData data, String stationName) {
   AlertSeverity severity;
   AlertType     type;
@@ -53,7 +42,6 @@ FloodAlert _syntheticAlert(FloodData data, String stationName) {
       severity = AlertSeverity.info;
       type     = AlertType.levelAboveWarning;
   }
-
   return FloodAlert(
     id:             '${stationName.toLowerCase().replaceAll(' ', '_')}.city_detail',
     type:           type,
@@ -72,9 +60,10 @@ FloodAlert _syntheticAlert(FloodData data, String stationName) {
   );
 }
 
+Color _riskColor(String risk) => cityDetailRiskColor(risk);
+
 class CityDetailScreen extends ConsumerStatefulWidget {
   static const String route = '/city_detail';
-
   final String cityName;
   const CityDetailScreen({super.key, required this.cityName});
 
@@ -85,8 +74,8 @@ class CityDetailScreen extends ConsumerStatefulWidget {
 class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _entryCtrl;
-  late final List<Animation<double>>  _sectionFades;
-  late final List<Animation<Offset>>  _sectionSlides;
+  late final List<Animation<double>> _sectionFades;
+  late final List<Animation<Offset>> _sectionSlides;
 
   bool _contactsExpanded = false;
   bool _refreshing       = false;
@@ -97,27 +86,19 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
   void initState() {
     super.initState();
     _entryCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 900));
-
+        vsync: this, duration: const Duration(milliseconds: 900));
     _sectionFades  = [];
     _sectionSlides = [];
     for (int i = 0; i < _sectionCount; i++) {
       final start = i * 0.10;
       final end   = (start + 0.28).clamp(0.0, 1.0);
-      _sectionFades.add(
-        Tween<double>(begin: 0, end: 1).animate(
-            CurvedAnimation(
-                parent: _entryCtrl,
-                curve: Interval(start, end, curve: Curves.easeOut))),
-      );
+      _sectionFades.add(Tween<double>(begin: 0, end: 1).animate(
+          CurvedAnimation(parent: _entryCtrl,
+              curve: Interval(start, end, curve: Curves.easeOut))));
       _sectionSlides.add(
-        Tween<Offset>(
-                begin: const Offset(0, 0.06), end: Offset.zero)
-            .animate(CurvedAnimation(
-                parent: _entryCtrl,
-                curve: Interval(start, end, curve: Curves.easeOutCubic))),
-      );
+          Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
+              .animate(CurvedAnimation(parent: _entryCtrl,
+                  curve: Interval(start, end, curve: Curves.easeOutCubic))));
     }
     _entryCtrl.forward();
   }
@@ -137,9 +118,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
         ref.read(realTimeProvider).refreshData(),
         ref.read(biharLiveProvider.notifier).refresh(),
       ]);
-      _entryCtrl
-        ..reset()
-        ..forward();
+      _entryCtrl..reset()..forward();
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
@@ -147,10 +126,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
 
   Widget _section(int idx, Widget child) => FadeTransition(
         opacity: _sectionFades[idx],
-        child: SlideTransition(
-          position: _sectionSlides[idx],
-          child: child,
-        ),
+        child: SlideTransition(position: _sectionSlides[idx], child: child),
       );
 
   @override
@@ -158,14 +134,11 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
     final t          = RiverColors.of(context);
     final data       = ref.watch(cityDataProvider(widget.cityName));
     final trend      = ref.watch(cityTrendProvider(widget.cityName));
-    final imdAlerts  = ref.watch(
-        stateImdAlertsProvider(data?.state ?? ''));
-    final advisories = ref.watch(
-        stateNdmaAdvisoriesProvider(data?.state ?? ''));
+    final imdAlerts  = ref.watch(stateImdAlertsProvider(data?.state ?? ''));
+    final advisories = ref.watch(stateNdmaAdvisoriesProvider(data?.state ?? ''));
     final contacts   = ref
         .watch(stateEmergencyContactsProvider(data?.state ?? ''))
         .cast<EmergencyContact>();
-
     final biharStation = ref.watch(biharCityProvider(widget.cityName));
     final biharLoading = ref.watch(biharCityLoadingProvider);
 
@@ -182,8 +155,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
               physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics()),
               slivers: [
-
-                // ── App Bar ──────────────────────────────────────────────────
+                // ── App Bar ─────────────────────────────────────────────────
                 SliverAppBar(
                   backgroundColor: Colors.transparent,
                   surfaceTintColor: Colors.transparent,
@@ -197,32 +169,21 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                   title: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.cityName,
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 17,
-                        ),
-                      ),
+                      Text(widget.cityName,
+                          style: TextStyle(color: t.textPrimary,
+                              fontWeight: FontWeight.w800, fontSize: 17)),
                       if (data != null)
-                        Text(
-                          '${data.riverName ?? "River"}  ·  ${data.state}',
-                          style: TextStyle(
-                              color: t.textSecondary,
-                              fontSize: 10),
-                        ),
+                        Text('${data.riverName ?? "River"}  ·  ${data.state}',
+                            style: TextStyle(
+                                color: t.textSecondary, fontSize: 10)),
                     ],
                   ),
                   actions: [
-                    // M3 FIX: replaced stationName/currentLevel/dangerLevel/
-                    // severity/iconOnly with alert: _syntheticAlert()
                     if (data != null)
                       AlertShareButton(
                         alert:     _syntheticAlert(data, widget.cityName),
                         district:  data.district.isNotEmpty
-                                       ? data.district
-                                       : data.state,
+                                       ? data.district : data.state,
                         riverName: data.riverName ?? 'River',
                       ),
                     if (_refreshing)
@@ -231,8 +192,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                         child: SizedBox(
                           width: 18, height: 18,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: t.accent),
+                              strokeWidth: 2, color: t.accent),
                         ),
                       )
                     else
@@ -244,123 +204,103 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                   ],
                 ),
 
-                // ── threshold banner ────────────────────────────────────────
+                // ── Threshold banner ─────────────────────────────────────────
                 if (data != null)
                   SliverToBoxAdapter(
-                    child: _ThresholdBanner(data: data),
+                    child: ThresholdBanner(data: data),  // PUBLIC class
                   ),
 
-                // ── no-data skeleton ──────────────────────────────────────
+                // ── No-data skeleton ─────────────────────────────────────────
                 if (data == null)
                   SliverFillRemaining(
-                    child: _SkeletonView(cityName: widget.cityName),
+                    child: CitySkeletonView(cityName: widget.cityName),
                   )
 
-                // ── loaded body ──────────────────────────────────────────
+                // ── Loaded body ───────────────────────────────────────────────
                 else
                   SliverPadding(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 10, 16, 100),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
 
                         // 0 ─ Hero gauge
-                        _section(0, _GaugeHeroCard(data: data)),
+                        _section(0, GaugeHeroCard(data: data)),
                         const SizedBox(height: 12),
 
                         // 1 ─ Bihar live panel
-                        _section(
-                          1,
-                          _BiharDataCard(
-                            station:     biharStation,
-                            isLoading:   biharLoading,
-                            fallbackCity: widget.cityName,
-                          ),
-                        ),
+                        _section(1, _BiharDataCard(
+                          station:      biharStation,
+                          isLoading:    biharLoading,
+                          fallbackCity: widget.cityName,
+                        )),
                         const SizedBox(height: 12),
 
                         // 2 ─ 24-hr trend sparkline
                         if (trend.length >= 2) ...[
-                          _section(
-                            2,
-                            _TrendCard(
-                              trend:        trend,
-                              warningLevel: data.warningLevel,
-                              dangerLevel:  data.dangerLevel,
-                              riskColor:    _riskColor(data.riskLevel),
-                            ),
-                          ),
+                          _section(2, TrendCard(
+                            trend:        trend,
+                            warningLevel: data.warningLevel,
+                            dangerLevel:  data.dangerLevel,
+                            riskColor:    _riskColor(data.riskLevel),
+                          )),
                           const SizedBox(height: 12),
                         ],
 
                         // 3 ─ IMD alerts
                         if (imdAlerts.isNotEmpty) ...[
-                          _section(
-                            3,
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _SectionLabel('🌧  IMD Weather Alerts'),
-                                ...imdAlerts.take(3).map((a) => _ImdAlertTile(alert: a)),
-                              ],
-                            ),
-                          ),
+                          _section(3, Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SectionLabel('🌧  IMD Weather Alerts'),
+                              ...imdAlerts.take(3).map((a) => ImdAlertTile(alert: a)),
+                            ],
+                          )),
                           const SizedBox(height: 12),
                         ],
 
                         // 4 ─ NDMA advisories
                         if (advisories.isNotEmpty) ...[
-                          _section(
-                            4,
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _SectionLabel('🚨  NDMA Advisories'),
-                                ...advisories.take(2).map((a) => _NdmaAdvisoryTile(adv: a)),
-                              ],
-                            ),
-                          ),
+                          _section(4, Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SectionLabel('🚨  NDMA Advisories'),
+                              ...advisories.take(2).map((a) => NdmaAdvisoryTile(adv: a)),
+                            ],
+                          )),
                           const SizedBox(height: 12),
                         ],
 
                         // 5 ─ Emergency contacts
-                        _section(
-                          5,
-                          _CollapsibleContacts(
-                            contacts:  contacts,
-                            state:     data.state,
-                            expanded:  _contactsExpanded,
-                            onToggle:  () => setState(
-                                () => _contactsExpanded = !_contactsExpanded),
-                          ),
-                        ),
+                        _section(5, CollapsibleContacts(
+                          contacts: contacts,
+                          state:    data.state,
+                          expanded: _contactsExpanded,
+                          onToggle: () => setState(
+                              () => _contactsExpanded = !_contactsExpanded),
+                        )),
                         const SizedBox(height: 12),
 
-                        // 6 ─ Predict + Map CTAs + Share button
-                        _section(
-                          6,
-                          Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: _PredictCta(
-                                    cityName:     widget.cityName,
-                                    currentLevel: data.currentLevel),
+                        // 6 ─ Predict + Map + Share CTAs
+                        _section(6, Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: PredictCta(
+                                cityName:     widget.cityName,
+                                currentLevel: data.currentLevel,
                               ),
-                              const SizedBox(width: 10),
-                              _MapChip(cityName: widget.cityName),
-                              const SizedBox(width: 10),
-                              // M3 FIX: replaced invalid params with synthetic alert
-                              AlertShareButton(
-                                alert:     _syntheticAlert(data, widget.cityName),
-                                district:  data.district.isNotEmpty
-                                               ? data.district
-                                               : data.state,
-                                riverName: data.riverName ?? 'River',
-                              ),
-                            ],
-                          ),
-                        ),
+                            ),
+                            const SizedBox(width: 10),
+                            MapChip(cityName: widget.cityName),
+                            const SizedBox(width: 10),
+                            AlertShareButton(
+                              alert:     _syntheticAlert(data, widget.cityName),
+                              district:  data.district.isNotEmpty
+                                             ? data.district : data.state,
+                              riverName: data.riverName ?? 'River',
+                            ),
+                          ],
+                        )),
                       ]),
                     ),
                   ),
@@ -374,14 +314,12 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ★ _BiharDataCard
+// _BiharDataCard  (file-private, only used here — stays with underscore)
 // ─────────────────────────────────────────────────────────────────────────────
-
 class _BiharDataCard extends StatelessWidget {
   final BiharStationData? station;
-  final bool isLoading;
+  final bool   isLoading;
   final String fallbackCity;
-
   const _BiharDataCard({
     required this.station,
     required this.isLoading,
@@ -420,13 +358,11 @@ class _BiharDataCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.info_outline_rounded,
-                color: t.textSecondary, size: 15),
+            Icon(Icons.info_outline_rounded, color: t.textSecondary, size: 15),
             const SizedBox(width: 8),
-            Text(
-              'No Bihar WRD data available for $fallbackCity',
-              style: TextStyle(
-                  color: t.textSecondary, fontSize: 12),
+            Expanded(
+              child: Text('No Bihar WRD data available for $fallbackCity',
+                  style: TextStyle(color: t.textSecondary, fontSize: 12)),
             ),
           ],
         ),
@@ -435,13 +371,11 @@ class _BiharDataCard extends StatelessWidget {
 
     final s = station!;
 
-    Color dischargeColor = AppPalette.safe;
+    Color  dischargeColor = AppPalette.safe;
     String dischargeDelta = '';
     if (s.discharge != null && s.dischargeMean != null) {
       final pct = ((s.discharge! - s.dischargeMean!) / s.dischargeMean! * 100);
-      if (pct > 20) {
-        dischargeColor = pct > 50 ? AppPalette.danger : AppPalette.warning;
-      }
+      if (pct > 20) dischargeColor = pct > 50 ? AppPalette.danger : AppPalette.warning;
       dischargeDelta = pct >= 0
           ? '+${pct.toStringAsFixed(0)}% vs mean'
           : '${pct.toStringAsFixed(0)}% vs mean';
@@ -477,11 +411,8 @@ class _BiharDataCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
         boxShadow: [
-          BoxShadow(
-            color: AppPalette.cyan.withValues(alpha: 0.06),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: AppPalette.cyan.withValues(alpha: 0.06),
+              blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -491,15 +422,11 @@ class _BiharDataCard extends StatelessWidget {
             children: [
               const Icon(Icons.water_drop_rounded, color: AppPalette.cyan, size: 14),
               const SizedBox(width: 6),
-              Text(
-                'Bihar WRD + GloFAS + Rainfall',
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
+              Expanded(
+                child: Text('Bihar WRD + GloFAS + Rainfall',
+                    style: TextStyle(color: t.textPrimary,
+                        fontWeight: FontWeight.w700, fontSize: 13)),
               ),
-              const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
@@ -507,11 +434,10 @@ class _BiharDataCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.25)),
                 ),
-                child: Text(
-                  s.source,
-                  style: const TextStyle(
-                      color: AppPalette.cyan, fontSize: 9, fontWeight: FontWeight.w700),
-                ),
+                child: Text(s.source,
+                    style: const TextStyle(
+                        color: AppPalette.cyan, fontSize: 9,
+                        fontWeight: FontWeight.w700)),
               ),
             ],
           ),
@@ -522,8 +448,8 @@ class _BiharDataCard extends StatelessWidget {
                 child: _DataCell(
                   label: 'GloFAS Discharge',
                   value: s.discharge != null ? '${_fmt(s.discharge!)} m³/s' : '—',
-                  sub: s.dischargeMean != null ? 'Mean: ${_fmt(s.dischargeMean!)} m³/s' : null,
-                  icon: Icons.water_rounded,
+                  sub:   s.dischargeMean != null ? 'Mean: ${_fmt(s.dischargeMean!)} m³/s' : null,
+                  icon:       Icons.water_rounded,
                   valueColor: dischargeColor,
                   t: t,
                 ),
@@ -537,11 +463,9 @@ class _BiharDataCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: dischargeColor.withValues(alpha: 0.30)),
                   ),
-                  child: Text(
-                    dischargeDelta,
-                    style: TextStyle(
-                        color: dischargeColor, fontSize: 11, fontWeight: FontWeight.w700),
-                  ),
+                  child: Text(dischargeDelta,
+                      style: TextStyle(color: dischargeColor, fontSize: 11,
+                          fontWeight: FontWeight.w700)),
                 ),
               ],
             ],
@@ -566,7 +490,8 @@ class _BiharDataCard extends StatelessWidget {
               Expanded(
                 child: _DataCell(
                   label: '24h Forecast',
-                  value: s.forecast24h != null ? '${s.forecast24h!.toStringAsFixed(2)} m' : '—',
+                  value: s.forecast24h != null
+                      ? '${s.forecast24h!.toStringAsFixed(2)} m' : '—',
                   icon: Icons.update_rounded,
                   valueColor: t.textPrimary,
                   t: t,
@@ -582,13 +507,9 @@ class _BiharDataCard extends StatelessWidget {
             children: [
               Icon(trendIcon, color: trendColor, size: 16),
               const SizedBox(width: 6),
-              Text(
-                s.trend.isEmpty ? 'Stable' : s.trend,
-                style: TextStyle(
-                    color: trendColor,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12),
-              ),
+              Text(s.trend.isEmpty ? 'Stable' : s.trend,
+                  style: TextStyle(color: trendColor,
+                      fontWeight: FontWeight.w800, fontSize: 12)),
               const Spacer(),
               if (s.rainfall24h != null)
                 Row(
@@ -596,13 +517,9 @@ class _BiharDataCard extends StatelessWidget {
                     const Icon(Icons.grain_rounded,
                         color: Colors.lightBlue, size: 12),
                     const SizedBox(width: 4),
-                    Text(
-                      '${s.rainfall24h!.toStringAsFixed(1)} mm rain',
-                      style: const TextStyle(
-                          color: Colors.lightBlue,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700),
-                    ),
+                    Text('${s.rainfall24h!.toStringAsFixed(1)} mm rain',
+                        style: const TextStyle(color: Colors.lightBlue,
+                            fontSize: 11, fontWeight: FontWeight.w700)),
                   ],
                 ),
             ],
@@ -612,9 +529,8 @@ class _BiharDataCard extends StatelessWidget {
     );
   }
 
-  static String _fmt(double v) => v >= 1000
-      ? '${(v / 1000).toStringAsFixed(1)}k'
-      : v.toStringAsFixed(0);
+  static String _fmt(double v) =>
+      v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : v.toStringAsFixed(0);
 }
 
 class _DataCell extends StatelessWidget {
@@ -625,7 +541,6 @@ class _DataCell extends StatelessWidget {
   final Color       valueColor;
   final RiverColors t;
   final bool        centered;
-
   const _DataCell({
     required this.label,
     required this.value,
@@ -641,45 +556,26 @@ class _DataCell extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: centered ? 10 : 0),
       child: Column(
-        crossAxisAlignment: centered
-            ? CrossAxisAlignment.center
-            : CrossAxisAlignment.start,
+        crossAxisAlignment:
+            centered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: centered
-                ? MainAxisAlignment.center
-                : MainAxisAlignment.start,
+            mainAxisAlignment:
+                centered ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
               Icon(icon, size: 10, color: t.textSecondary),
               const SizedBox(width: 4),
-              Text(label,
-                  style: TextStyle(
-                      color: t.textSecondary,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600)),
+              Text(label, style: TextStyle(color: t.textSecondary,
+                  fontSize: 10, fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 3),
-          Text(value,
-              style: TextStyle(
-                  color: valueColor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13)),
+          Text(value, style: TextStyle(color: valueColor,
+              fontWeight: FontWeight.w800, fontSize: 13)),
           if (sub != null)
-            Text(sub!,
-                style: TextStyle(
-                    color: t.textSecondary, fontSize: 9)),
+            Text(sub!, style: TextStyle(color: t.textSecondary, fontSize: 9)),
         ],
       ),
     );
-  }
-}
-
-Color _riskColor(String risk) {
-  switch (risk.toUpperCase()) {
-    case 'CRITICAL': return AppPalette.critical;
-    case 'SEVERE':   return AppPalette.danger;
-    case 'MODERATE': return AppPalette.warning;
-    default:         return AppPalette.safe;
   }
 }

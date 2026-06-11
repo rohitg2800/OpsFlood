@@ -1,6 +1,7 @@
 // lib/screens/city_detail_screen_widgets.dart
-// Helper widgets for CityDetailScreen — COMPLETE FILE
-// All private widget classes used by city_detail_screen.dart live here.
+// Public widget classes used by city_detail_screen.dart
+// KEY FIX: All classes are PUBLIC (no leading underscore) so they are
+// accessible across file boundaries via import.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,10 +13,10 @@ import '../models/river_monitoring.dart';
 import '../theme/river_theme.dart';
 import '../widgets/sparkline_chart.dart';
 import 'bihar_river_map_screen.dart';
-import 'prediction_screen.dart';
+import 'predict_screen.dart';
 
-// ── top-level helper ─────────────────────────────────────────────────────────
-Color _riskColor(String risk) {
+// ── top-level helper ──────────────────────────────────────────────────────────
+Color cityDetailRiskColor(String risk) {
   switch (risk.toUpperCase()) {
     case 'CRITICAL': return AppPalette.critical;
     case 'SEVERE':   return AppPalette.danger;
@@ -25,11 +26,11 @@ Color _riskColor(String risk) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ThresholdBanner
+// ThresholdBanner
 // ─────────────────────────────────────────────────────────────────────────────
-class _ThresholdBanner extends StatelessWidget {
+class ThresholdBanner extends StatelessWidget {
   final FloodData data;
-  const _ThresholdBanner({required this.data});
+  const ThresholdBanner({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +60,7 @@ class _ThresholdBanner extends StatelessWidget {
         return const SizedBox.shrink();
     }
 
-    final rc = _riskColor(data.riskLevel);
+    final rc = cityDetailRiskColor(data.riskLevel);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -84,11 +85,11 @@ class _ThresholdBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SkeletonView
+// CitySkeletonView
 // ─────────────────────────────────────────────────────────────────────────────
-class _SkeletonView extends StatelessWidget {
+class CitySkeletonView extends StatelessWidget {
   final String cityName;
-  const _SkeletonView({required this.cityName});
+  const CitySkeletonView({super.key, required this.cityName});
 
   @override
   Widget build(BuildContext context) {
@@ -97,8 +98,7 @@ class _SkeletonView extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         SizedBox(
           width: 28, height: 28,
-          child: CircularProgressIndicator(
-              strokeWidth: 2.5, color: t.accent)),
+          child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent)),
         const SizedBox(height: 16),
         Text('Loading data for $cityName…',
             style: TextStyle(color: t.textSecondary, fontSize: 13)),
@@ -108,16 +108,16 @@ class _SkeletonView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _GaugeHeroCard
+// GaugeHeroCard
 // ─────────────────────────────────────────────────────────────────────────────
-class _GaugeHeroCard extends StatelessWidget {
+class GaugeHeroCard extends StatelessWidget {
   final FloodData data;
-  const _GaugeHeroCard({required this.data});
+  const GaugeHeroCard({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {
     final t     = RiverColors.of(context);
-    final riskC = _riskColor(data.riskLevel);
+    final riskC = cityDetailRiskColor(data.riskLevel);
     final pct   = (data.currentLevel / data.dangerLevel).clamp(0.0, 1.2);
 
     return Container(
@@ -127,9 +127,8 @@ class _GaugeHeroCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: riskC.withValues(alpha: 0.30)),
         boxShadow: [
-          BoxShadow(
-            color: riskC.withValues(alpha: 0.08),
-            blurRadius: 18, offset: const Offset(0, 5)),
+          BoxShadow(color: riskC.withValues(alpha: 0.08),
+              blurRadius: 18, offset: const Offset(0, 5)),
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -192,14 +191,15 @@ class _GaugeHeroCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _TrendCard
+// TrendCard
 // ─────────────────────────────────────────────────────────────────────────────
-class _TrendCard extends StatelessWidget {
+class TrendCard extends StatelessWidget {
   final List<RiverLevelSnapshot> trend;
   final double warningLevel;
   final double dangerLevel;
   final Color  riskColor;
-  const _TrendCard({
+  const TrendCard({
+    super.key,
     required this.trend,
     required this.warningLevel,
     required this.dangerLevel,
@@ -240,11 +240,11 @@ class _TrendCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SectionLabel
+// SectionLabel
 // ─────────────────────────────────────────────────────────────────────────────
-class _SectionLabel extends StatelessWidget {
+class SectionLabel extends StatelessWidget {
   final String label;
-  const _SectionLabel(this.label);
+  const SectionLabel(this.label, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -259,11 +259,11 @@ class _SectionLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ImdAlertTile
+// ImdAlertTile
 // ─────────────────────────────────────────────────────────────────────────────
-class _ImdAlertTile extends StatelessWidget {
+class ImdAlertTile extends StatelessWidget {
   final Map<String, dynamic> alert;
-  const _ImdAlertTile({required this.alert});
+  const ImdAlertTile({super.key, required this.alert});
 
   @override
   Widget build(BuildContext context) {
@@ -326,11 +326,11 @@ class _ImdAlertTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _NdmaAdvisoryTile
+// NdmaAdvisoryTile
 // ─────────────────────────────────────────────────────────────────────────────
-class _NdmaAdvisoryTile extends StatelessWidget {
+class NdmaAdvisoryTile extends StatelessWidget {
   final Map<String, dynamic> adv;
-  const _NdmaAdvisoryTile({required this.adv});
+  const NdmaAdvisoryTile({super.key, required this.adv});
 
   @override
   Widget build(BuildContext context) {
@@ -344,8 +344,7 @@ class _NdmaAdvisoryTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: t.cardBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: AppPalette.critical.withValues(alpha: 0.25)),
+        border: Border.all(color: AppPalette.critical.withValues(alpha: 0.25)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title,
@@ -363,15 +362,16 @@ class _NdmaAdvisoryTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CollapsibleContacts
+// CollapsibleContacts
 // ─────────────────────────────────────────────────────────────────────────────
-class _CollapsibleContacts extends StatelessWidget {
+class CollapsibleContacts extends StatelessWidget {
   final List<EmergencyContact> contacts;
   final String       state;
   final bool         expanded;
   final VoidCallback onToggle;
 
-  const _CollapsibleContacts({
+  const CollapsibleContacts({
+    super.key,
     required this.contacts,
     required this.state,
     required this.expanded,
@@ -408,8 +408,7 @@ class _CollapsibleContacts extends StatelessWidget {
                 expanded
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
-                color: t.textSecondary,
-                size: 18,
+                color: t.textSecondary, size: 18,
               ),
             ]),
           ),
@@ -451,11 +450,9 @@ class _ContactRow extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppPalette.warning.withValues(alpha: 0.12),
               shape: BoxShape.circle,
-              border: Border.all(
-                  color: AppPalette.warning.withValues(alpha: 0.35)),
+              border: Border.all(color: AppPalette.warning.withValues(alpha: 0.35)),
             ),
-            child: const Icon(Icons.phone_rounded,
-                size: 15, color: AppPalette.warning),
+            child: const Icon(Icons.phone_rounded, size: 15, color: AppPalette.warning),
           ),
           const SizedBox(width: 10),
           Expanded(child: Column(
@@ -468,8 +465,7 @@ class _ContactRow extends StatelessWidget {
                   style: TextStyle(color: t.textSecondary, fontSize: 11)),
             ],
           )),
-          Icon(Icons.chevron_right_rounded,
-              size: 16, color: t.textSecondary),
+          Icon(Icons.chevron_right_rounded, size: 16, color: t.textSecondary),
         ]),
       ),
     );
@@ -477,12 +473,13 @@ class _ContactRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _PredictCta
+// PredictCta
 // ─────────────────────────────────────────────────────────────────────────────
-class _PredictCta extends StatelessWidget {
+class PredictCta extends StatelessWidget {
   final String cityName;
   final double currentLevel;
-  const _PredictCta({
+  const PredictCta({
+    super.key,
     required this.cityName,
     required this.currentLevel,
   });
@@ -495,7 +492,7 @@ class _PredictCta extends StatelessWidget {
         HapticFeedback.selectionClick();
         Navigator.pushNamed(
           context,
-          PredictionScreen.route,
+          PredictScreen.route,
           arguments: {'cityName': cityName, 'currentLevel': currentLevel},
         );
       },
@@ -521,11 +518,11 @@ class _PredictCta extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _MapChip
+// MapChip
 // ─────────────────────────────────────────────────────────────────────────────
-class _MapChip extends StatelessWidget {
+class MapChip extends StatelessWidget {
   final String cityName;
-  const _MapChip({required this.cityName});
+  const MapChip({super.key, required this.cityName});
 
   @override
   Widget build(BuildContext context) {
