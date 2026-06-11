@@ -1,15 +1,12 @@
 // lib/screens/predict_screen.dart
-// OpsFlood — PredictScreen v3  (auto-fetch selected city)
+// OpsFlood — PredictScreen v4  (fix _FakeFlood type error)
 //
-// Changes from v2:
-//   • Watches selectedCityProvider — when a city is already chosen
-//     (set by DashboardScreen / CityDetailScreen before navigation),
-//     fields are auto-filled from live data and prediction fires
-//     automatically via WidgetsBinding.addPostFrameCallback.
-//   • Route args {city, river_level} still work as before.
-//   • City field shows a live-data badge and "tap to edit" hint when
-//     auto-filled so the user knows data came from the API.
-//   • Auto-fetch fires only once per screen visit (_didAutoFetch guard).
+// Fix from v3:
+//   • Removed _FakeFlood class — orElse now returns a zeroed FloodData
+//     so the return type is always FloodData (no more type mismatch).
+//   • Removed the broken `extension on dynamic` that was unused.
+//   • flowRate removed (not a FloodData field) — discharge left blank
+//     when city not found in live list.
 library;
 
 import 'dart:convert';
@@ -22,6 +19,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../l10n/context_l10n.dart';
+import '../models/flood_data.dart';
 import '../providers/flood_providers.dart';
 import '../theme/river_theme.dart';
 
@@ -43,9 +41,9 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   final _dischargeCtrl = TextEditingController();
 
   bool _loading       = false;
-  bool _autoFilled    = false;   // true when fields came from live data
-  bool _didPrefill    = false;   // guards didChangeDependencies one-shot
-  bool _didAutoFetch  = false;   // fires _predict() only once automatically
+  bool _autoFilled    = false;
+  bool _didPrefill    = false;
+  bool _didAutoFetch  = false;
 
   _PredictResult? _result;
   String?         _error;
@@ -73,7 +71,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     if (_didPrefill) return;
     _didPrefill = true;
 
-    // ── 1. Check route args first (from CityDetailScreen deep-link) ──
+    // 1. Route args {city, river_level} (from CityDetailScreen deep-link)
     String? argCity;
     double? argLevel;
     final args = ModalRoute.of(context)?.settings.arguments;
@@ -83,7 +81,7 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       if (lv != null) argLevel = double.tryParse(lv.toString());
     }
 
-    // ── 2. Also check selectedCityProvider (set by Dashboard / other screens) ──
+    // 2. selectedCityProvider (set by Dashboard / other screens)
     final providerCity = ref.read(selectedCityProvider);
     final city = argCity ?? providerCity;
 
@@ -92,36 +90,48 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
     }
   }
 
-  /// Fill all fields from live data for [city], then auto-run prediction.
+  /// Returns a zeroed [FloodData] stub for cities not yet in the live list.
+  static FloodData _emptyFloodData(String city) => FloodData(
+    city:                city,
+    district:            '',
+    state:               '',
+    riverName:           '',
+    currentLevel:        0.0,
+    warningLevel:        0.0,
+    dangerLevel:         0.0,
+    safeLevel:           0.0,
+    capacityPercent:     0.0,
+    riskLevel:           'UNKNOWN',
+    status:              'UNKNOWN',
+    effectiveRainfallMm: 0.0,
+    lastUpdated:         DateTime.now(),
+  );
+
   void _fillFromCity(String city, {double? overrideLevel}) {
-    // Look up live FloodData for this city
     final liveList = ref.read(liveLevelsProvider);
-    final match = liveList.firstWhere(
+
+    // exact match → prefix match → zeroed stub (always FloodData)
+    final FloodData match = liveList.firstWhere(
       (d) => d.city.toLowerCase() == city.toLowerCase(),
       orElse: () => liveList.firstWhere(
         (d) => d.city.toLowerCase().contains(city.toLowerCase()),
-        orElse: () => _emptyFlood(city),
+        orElse: () => _emptyFloodData(city),
       ),
     );
 
     final level    = overrideLevel ?? match.currentLevel;
-    // Derive a plausible 7-day rainfall from effective rainfall (or fallback)
     final rainfall = match.effectiveRainfallMm > 0
         ? (match.effectiveRainfallMm * 7).toStringAsFixed(1)
-        : '';
-    final discharge = match.flowRate != null
-        ? match.flowRate!.toStringAsFixed(0)
         : '';
 
     setState(() {
       _cityCtrl.text      = city;
       _peakLevelCtrl.text = level > 0 ? level.toStringAsFixed(2) : '';
       _rainfallCtrl.text  = rainfall;
-      _dischargeCtrl.text = discharge;
-      _autoFilled = level > 0;   // show live-badge only when we have real data
+      _dischargeCtrl.text = '';
+      _autoFilled = level > 0;
     });
 
-    // Schedule auto-prediction after the frame so the form is rendered first
     if (!_didAutoFetch && level > 0) {
       _didAutoFetch = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -129,9 +139,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
       });
     }
   }
-
-  // Minimal empty FloodData stub for cities not yet in live list
-  static _FakeFlood _emptyFlood(String city) => _FakeFlood(city);
 
   @override
   void dispose() {
@@ -198,16 +205,13 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
           physics: const BouncingScrollPhysics(),
           slivers: [
 
-            // ── Header ──
             SliverToBoxAdapter(child: _Header(t: t)),
 
-            // ── Auto-fetch banner (shown while loading on first auto-run) ──
             if (_loading && _autoFilled)
               SliverToBoxAdapter(
                 child: _AutoFetchBanner(t: t, city: _cityCtrl.text),
               ),
 
-            // ── Form ──
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
@@ -220,7 +224,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       _SectionLabel('Input Parameters', t: t),
                       const SizedBox(height: 10),
 
-                      // ─ City field — read-only when auto-filled, editable otherwise
                       _CityField(
                         ctrl:       _cityCtrl,
                         autoFilled: _autoFilled,
@@ -238,7 +241,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // ─ Peak level
                       _DarkField(
                         ctrl:    _peakLevelCtrl,
                         label:   'River Level (m)',
@@ -249,7 +251,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // ─ Rainfall 7d
                       _DarkField(
                         ctrl:    _rainfallCtrl,
                         label:   'Rainfall 7d (mm)',
@@ -260,10 +261,9 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // ─ Discharge (optional)
                       _DarkField(
                         ctrl:     _dischargeCtrl,
-                        label:    'Discharge m\u00b3/s (optional)',
+                        label:    'Discharge m³/s (optional)',
                         hint:     'e.g. 8500',
                         icon:     Icons.waves_rounded,
                         numeric:  true,
@@ -272,7 +272,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       ),
                       const SizedBox(height: 24),
 
-                      // ─ CTA
                       _GlowButton(
                         loading: _loading,
                         onTap:   _predict,
@@ -280,7 +279,6 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
                       ),
                       const SizedBox(height: 20),
 
-                      // ─ Result / Error card
                       if (_result != null || _error != null)
                         FadeTransition(
                           opacity: _resultFade,
@@ -306,24 +304,8 @@ class _PredictScreenState extends ConsumerState<PredictScreen>
   }
 }
 
-// Minimal stub used when city isn't in live list yet
-class _FakeFlood {
-  final String city;
-  double get currentLevel      => 0.0;
-  double get effectiveRainfallMm => 0.0;
-  double? get flowRate         => null;
-  _FakeFlood(this.city);
-}
-
-// Helper extension so _fillFromCity works with both FloodData and _FakeFlood
-extension on dynamic {
-  double   get _currentLevel      => (this as dynamic).currentLevel       as double;   // ignore: avoid_dynamic_calls
-  double   get _effectiveRainfall => (this as dynamic).effectiveRainfallMm as double; // ignore: avoid_dynamic_calls
-  double?  get _flowRate          => (this as dynamic).flowRate            as double?; // ignore: avoid_dynamic_calls
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// _AutoFetchBanner — shown at top while auto-prediction is running
+// _AutoFetchBanner
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AutoFetchBanner extends StatelessWidget {
@@ -365,7 +347,7 @@ class _AutoFetchBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CityField — shows live badge when auto-filled; editable otherwise
+// _CityField
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CityField extends StatefulWidget {
@@ -424,8 +406,7 @@ class _CityFieldState extends State<_CityField> {
           decoration: InputDecoration(
             labelText: 'City / Station',
             hintText: 'e.g. Patna',
-            labelStyle:
-                TextStyle(color: t.textSecondary, fontSize: 12),
+            labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
             hintStyle: TextStyle(color: t.stroke, fontSize: 13),
             prefixIcon:
                 Icon(Icons.location_on_rounded, color: t.textSecondary, size: 18),
@@ -433,7 +414,6 @@ class _CityFieldState extends State<_CityField> {
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Live badge
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
@@ -451,7 +431,6 @@ class _CityFieldState extends State<_CityField> {
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 0.8)),
                       ),
-                      // Clear button to switch city
                       GestureDetector(
                         onTap: widget.onClear,
                         child: Padding(
@@ -503,8 +482,7 @@ class _Header extends StatelessWidget {
               border: Border.all(
                   color: t.accent.withValues(alpha: 0.28), width: 1.5),
             ),
-            child:
-                Icon(Icons.psychology_rounded, color: t.accent, size: 22),
+            child: Icon(Icons.psychology_rounded, color: t.accent, size: 22),
           ),
           const SizedBox(width: 12),
           Column(
@@ -557,7 +535,6 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-// Dark-styled text field with leading icon and accent border on focus
 class _DarkField extends StatefulWidget {
   final TextEditingController ctrl;
   final String label, hint;
@@ -618,10 +595,8 @@ class _DarkFieldState extends State<_DarkField> {
           decoration: InputDecoration(
             labelText: widget.label,
             hintText:  widget.hint,
-            labelStyle:
-                TextStyle(color: t.textSecondary, fontSize: 12),
-            hintStyle:
-                TextStyle(color: t.stroke, fontSize: 13),
+            labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+            hintStyle:  TextStyle(color: t.stroke, fontSize: 13),
             prefixIcon:
                 Icon(widget.icon, color: t.textSecondary, size: 18),
             border: InputBorder.none,
@@ -638,7 +613,6 @@ class _DarkFieldState extends State<_DarkField> {
   }
 }
 
-// Gradient glow CTA button
 class _GlowButton extends StatelessWidget {
   final bool loading;
   final VoidCallback onTap;
@@ -744,9 +718,9 @@ class _ResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col  = _riskColor(result.riskLevel);
-    final ico  = _riskIcon(result.riskLevel);
-    final pct  = ((result.confidence ?? 0) * 100).clamp(0.0, 100.0);
+    final col   = _riskColor(result.riskLevel);
+    final ico   = _riskIcon(result.riskLevel);
+    final pct   = ((result.confidence ?? 0) * 100).clamp(0.0, 100.0);
     final hasCf = result.confidence != null;
 
     return Container(
@@ -813,8 +787,7 @@ class _ResultCard extends StatelessWidget {
                     children: [
                       CustomPaint(
                         size: const Size(54, 54),
-                        painter: _RingPainter(
-                            value: pct / 100, color: col),
+                        painter: _RingPainter(value: pct / 100, color: col),
                       ),
                       Text(
                         '${pct.toStringAsFixed(0)}%',
@@ -861,9 +834,9 @@ class _RingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cx = size.width  / 2;
-    final cy = size.height / 2;
-    final r  = (size.width - 6) / 2;
+    final cx   = size.width  / 2;
+    final cy   = size.height / 2;
+    final r    = (size.width - 6) / 2;
     final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
     canvas.drawArc(rect, -math.pi / 2, math.pi * 2, false,
         Paint()
@@ -941,7 +914,7 @@ class _TipBox extends StatelessWidget {
             child: Text(
               autoFilled
                   ? 'Fields auto-filled from live station data. '
-                    'Tap \u00d7 on the city field to switch to a different city.'
+                    'Tap × on the city field to switch to a different city.'
                   : 'Tip: Tap a city on the Dashboard or set selectedCityProvider '
                     'before navigating here to auto-fill and run prediction instantly.',
               style: TextStyle(
