@@ -1,4 +1,4 @@
-// lib/screens/alerts_screen.dart  v4.4 — all compile errors fixed
+// lib/screens/alerts_screen.dart  v4.5 — M2 fix: dangerLevel → thresholdLevel
 library;
 
 import 'package:flutter/material.dart';
@@ -115,7 +115,6 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
                     onChanged: (v) =>
                         setState(() => _filter = v))),
             if (isLoading && allAlerts.isEmpty)
-              // _LoadingState is top-level — NOT const here
               const SliverFillRemaining(child: _LoadingState())
             else if (shown.isEmpty)
               SliverFillRemaining(
@@ -168,7 +167,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// _LoadingState  (top-level so it can be used in const context)
+// _LoadingState
 // ───────────────────────────────────────────────────────────────────────────────
 class _LoadingState extends StatelessWidget {
   const _LoadingState();
@@ -189,7 +188,7 @@ class _LoadingState extends StatelessWidget {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// _EmptyState  (top-level so it can be used in SliverFillRemaining)
+// _EmptyState
 // ───────────────────────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final DateTime? lastUpdate;
@@ -257,7 +256,7 @@ class _AlertBadge extends StatelessWidget {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// _StatusBar  — overflow-safe horizontal chip row
+// _StatusBar
 // ───────────────────────────────────────────────────────────────────────────────
 class _StatusBar extends StatelessWidget {
   final List<SourceStatus> sources;
@@ -462,7 +461,7 @@ class _Chip extends StatelessWidget {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// _AlertCard  — expandable card with complete build() method
+// _AlertCard
 // ───────────────────────────────────────────────────────────────────────────────
 class _AlertCard extends StatefulWidget {
   final FloodAlert alert;
@@ -516,9 +515,7 @@ class _AlertCardState extends State<_AlertCard>
           borderRadius: BorderRadius.circular(14),
           child: Column(
             children: [
-              // severity colour stripe
               Container(height: 4, color: fg),
-              // tappable header
               InkWell(
                 onTap: _toggle,
                 child: Container(
@@ -565,7 +562,6 @@ class _AlertCardState extends State<_AlertCard>
                   ),
                 ),
               ),
-              // expandable detail body
               AnimatedCrossFade(
                 duration: const Duration(milliseconds: 220),
                 crossFadeState: _expanded
@@ -583,7 +579,7 @@ class _AlertCardState extends State<_AlertCard>
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// _AlertDetail  — expanded body shown below the header
+// _AlertDetail
 // ───────────────────────────────────────────────────────────────────────────────
 class _AlertDetail extends StatelessWidget {
   final FloodAlert alert;
@@ -611,9 +607,12 @@ class _AlertDetail extends StatelessWidget {
           _row(Icons.thermostat_rounded,
               'Current Level',
               '${a.currentLevel.toStringAsFixed(2)} m', fg),
+          // FIX (M2): FloodAlert has no dangerLevel field.
+          // thresholdLevel is the correct field — it holds the danger/warning
+          // threshold that was breached to generate this alert.
           _row(Icons.warning_amber_rounded,
-              'Danger Level',
-              '${a.dangerLevel.toStringAsFixed(2)} m', fg),
+              'Threshold Level',
+              '${a.thresholdLevel.toStringAsFixed(2)} m', fg),
           _row(Icons.access_time_rounded,
               'Issued',
               DateFormat('dd MMM HH:mm').format(a.issuedAt), fg),
