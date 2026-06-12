@@ -3,10 +3,15 @@
 // v1.1 M5 fix: SwitchListTile does not have a `leading` param in Flutter 3.x.
 //              Move the emoji into the title Row instead.
 //
-// FIX: _card() and _SeverityRow previously used Container(color:…) wrapping
+// FIX 1: _card() and _SeverityRow previously used Container(color:…) wrapping
 // SwitchListTile/ListTile. Flutter asserts ink splashes must paint on a
 // Material ancestor — a Container with color creates a DecoratedBox that hides
 // them. Fix: replace Container with Material(color:…, shape:…, clipBehavior:…).
+//
+// FIX 2: _card() and _SeverityRow had BOTH borderRadius AND shape set on
+// Material — Flutter asserts !(shape != null && borderRadius != null) at
+// material.dart line 209. Removed top-level borderRadius param; radius now
+// lives only inside shape: RoundedRectangleBorder.
 library;
 
 import 'package:flutter/material.dart';
@@ -244,11 +249,12 @@ class _NotificationSettingsState
                 fontWeight: FontWeight.w900, fontSize: 14)),
       ]);
 
-  /// Material replaces Container so ListTile/SwitchListTile ink splashes
-  /// paint on the correct ancestor and Flutter's assertion is satisfied.
+  /// FIX: Material must NOT have both [borderRadius] and [shape] set.
+  /// Flutter asserts !(shape != null && borderRadius != null) at material.dart:209.
+  /// Radius lives only inside shape: RoundedRectangleBorder — no top-level borderRadius.
   Widget _card(RiverColors t, List<Widget> children) => Material(
         color: t.cardBg,
-        borderRadius: BorderRadius.circular(14),
+        // ❌ borderRadius: BorderRadius.circular(14),  ← removed; causes crash
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
           side: BorderSide(color: t.stroke),
@@ -282,17 +288,17 @@ class _SeverityRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = _sevMeta[sev]!;
-    // Material instead of Container so SwitchListTile ink splash is visible.
-    return Material(
-      color: t.cardBg,
-      borderRadius: BorderRadius.circular(12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: t.stroke),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
+    // FIX: shape only, no borderRadius param — they are mutually exclusive on Material.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: t.cardBg,
+        // ❌ borderRadius: BorderRadius.circular(12),  ← removed; causes crash
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: t.stroke),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: SwitchListTile(
           activeColor: meta.$3,
           value: enabled,
