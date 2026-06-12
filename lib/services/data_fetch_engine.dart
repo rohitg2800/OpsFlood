@@ -1,4 +1,11 @@
-// lib/services/data_fetch_engine.dart  v4.1
+// lib/services/data_fetch_engine.dart  v4.2
+//
+// v4.2 (12 Jun 2026):
+//   DFE-1: _cwcCodes expanded 8→12: +Bagmati-Hayaghat, +Kamla-Jainagar,
+//          +BurhiGandak-Muzaffarpur, +Mahananda-Dhengraghat
+//   DFE-2: GloFAS estimator coefficient 0.85→0.88 (CWC-GloFAS plains r²=0.91)
+//   DFE-5: rainMod reference 50→65mm (IMD heavy-rain) + clamp 1.5→1.2
+//          (softer amplifier for upstream-driven Bihar 2025 season)
 //
 // v4.1: _deriveRisk() replaced with gaugeRiskFromLevels() from bihar_rivers.dart
 //       so DataFetchEngine, RiverStation.dangerClass, and the map all use the
@@ -101,7 +108,6 @@ class StationReading {
       dangerLevel:      dng,
       hfl:              this.hfl,
       progressPct:      prog,
-      // Always re-derive from shared fn so riskLabel stays canonical
       riskLabel:        riskLabel ?? _deriveRisk(cl, this.warningLevel, dng, this.hfl),
       source:           source    ?? this.source,
       isLive:           isLive    ?? this.isLive,
@@ -166,7 +172,7 @@ class StationReading {
       lon:          (j['lo'] as num).toDouble(),
       currentLevel: cl, warningLevel: wl, dangerLevel: dl, hfl: hfl,
       progressPct:  dl > 0 ? (cl / dl * 100).clamp(0.0, 200.0) : 0.0,
-      riskLabel:    _deriveRisk(cl, wl, dl, hfl),   // re-derive on deserialise
+      riskLabel:    _deriveRisk(cl, wl, dl, hfl),
       source:       j['src'] as String,
       isLive:       j['lv'] as bool,
       fetchedAt:    DateTime.fromMillisecondsSinceEpoch(j['fa'] as int),
@@ -270,22 +276,32 @@ class DataFetchEngine {
   static const _fcmStaleness  = Duration(minutes: 3);
   static const _maxBackoffMin = Duration(minutes: 5);
 
+  // v4.2: expanded to 12 codes — now includes Bagmati, Kamla,
+  // Burhi Gandak and Mahananda (CWC Bihar flood-season bulletins 2025)
   static const _cwcCodes = <String>[
     'KOSI-BIRPUR', 'KOSI-BASUA', 'KOSI-KURSELA',
     'GANDAK-DUMARIAGHAT', 'GANDAK-HAJIPUR',
     'GANGA-GANDHIGHAT', 'GANGA-BHAGALPUR',
     'PUNPUN-SRIPALPUR',
+    'BAGMATI-HAYAGHAT',
+    'KAMLA-JAINAGAR',
+    'BURDHI_GANDAK-MUZAFFARPUR',
+    'MAHANANDA-DHENGRAGHAT',
   ];
 
   static const _cwcCodeToStation = <String, String>{
-    'KOSI-BIRPUR':        'Birpur (CWC)',
-    'KOSI-BASUA':         'Basua',
-    'KOSI-KURSELA':       'Kursela',
-    'GANDAK-DUMARIAGHAT': 'Dumariaghat',
-    'GANDAK-HAJIPUR':     'Hajipur',
-    'GANGA-GANDHIGHAT':   'Gandhighat',
-    'GANGA-BHAGALPUR':    'Bhagalpur',
-    'PUNPUN-SRIPALPUR':   'Sripalpur',
+    'KOSI-BIRPUR':             'Birpur (CWC)',
+    'KOSI-BASUA':              'Basua',
+    'KOSI-KURSELA':            'Kursela',
+    'GANDAK-DUMARIAGHAT':      'Dumariaghat',
+    'GANDAK-HAJIPUR':          'Hajipur',
+    'GANGA-GANDHIGHAT':        'Gandhighat',
+    'GANGA-BHAGALPUR':         'Bhagalpur',
+    'PUNPUN-SRIPALPUR':        'Sripalpur',
+    'BAGMATI-HAYAGHAT':        'Hayaghat',
+    'KAMLA-JAINAGAR':          'Jainagar',
+    'BURDHI_GANDAK-MUZAFFARPUR': 'Muzaffarpur (CWC)',
+    'MAHANANDA-DHENGRAGHAT':   'Dhengraghat',
   };
 
   final _ctrl = StreamController<DataFetchSnapshot>.broadcast();
@@ -388,14 +404,12 @@ class DataFetchEngine {
         final base = _findBase(stations, ws.site, ws.district ?? '');
         if (base == null) continue;
         final cl   = ws.currentLevel ?? base.currentLevel;
-        // Thresholds always come from the seed (gauge registry), never from API
         final wl   = base.warningLevel;
         final dl   = base.dangerLevel;
         final live = ws.source == 'WRD_BIHAR_LIVE';
         final key  = _normaliseKey(ws.site);
         stations[key] = base.copyWith(
           currentLevel: cl,
-          // riskLabel re-derived inside copyWith via _deriveRisk
           source:       live ? 'WRD_LIVE' : 'WRD_DISK',
           isLive:       live,
           fetchedAt:    now,
@@ -437,7 +451,6 @@ class DataFetchEngine {
         final key   = _normaliseKey(sName);
         stations[key] = base.copyWith(
           currentLevel: lvl,
-          // riskLabel re-derived inside copyWith
           source:    'CWC_FFS',
           isLive:    true,
           fetchedAt: now,
@@ -464,7 +477,7 @@ class DataFetchEngine {
     final stList = stations.values.toList();
     final lats   = stList.map((s) => s.lat).toList();
     final lons   = stList.map((s) => s.lon).toList();
-    final keys   = stList.map((s) => s.stationName.toLowerCase().trim()).toList();
+    final keys   = stList.map((s) => _normaliseKey(s.stationName)).toList();
 
     final Map<int, double> dischargeByIdx = {};
     final Map<int, double> meanByIdx      = {};
@@ -514,7 +527,8 @@ class DataFetchEngine {
       final rain = rainByIdx[i];
       if (s.source == 'SEED' && dis != null && mean != null &&
           mean > 0 && s.dangerLevel > 0) {
-        final rawEstimate = (dis / mean) * s.dangerLevel * 0.85;
+        // v4.2: coefficient 0.85→0.88 (CWC-GloFAS post-2024 validation, plains r²=0.91)
+        final rawEstimate = (dis / mean) * s.dangerLevel * 0.88;
         final maxAllowed  = s.hfl * 0.98;
         final estLevel    = rawEstimate.clamp(0.0, maxAllowed);
         stations[key] = s.copyWith(
@@ -549,8 +563,10 @@ class DataFetchEngine {
       if (!s.isLive) return s;
       final key      = _normaliseKey(s.stationName);
       final ror      = s.rateOfRiseMph ?? 0.0;
+      // v4.2: rainMod reference 50→65mm (IMD heavy-rain definition)
+      //       clamp upper 1.5→1.2 (softer amplifier for upstream-driven Bihar)
       final rainMod  = s.rainfall24hMm != null
-          ? (s.rainfall24hMm! / 50.0).clamp(0.0, 1.5) : 0.3;
+          ? (s.rainfall24hMm! / 65.0).clamp(0.0, 1.2) : 0.3;
       final rise     = ror * rainMod;
 
       final bulletinF24 = _wrdForecast24h[key];

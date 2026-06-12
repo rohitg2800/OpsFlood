@@ -1,6 +1,13 @@
-// lib/services/active_alert_controller.dart
+// lib/services/active_alert_controller.dart  v1.1
 //
 // OpsFlood — Active Alert Rules Engine
+//
+// v1.1 (12 Jun 2026):
+//   AAC-1: _kMaxAlerts 5→8 (12 stations now; tributaries were dropped at rank 6-12)
+//   AAC-3: _kClearWindow 5min→15min (CWC watch-period minimum)
+//   AAC-4: _kRorThreshold 0.5→0.3 m/h (Bagmati/Kamla faster-rising tributaries)
+//   AAC-5: _kRainThreshold 20.0→10.0 mm/24h
+//          (Bihar 2025 upstream floods had <5mm local rain; 20mm masked real events)
 //
 // Sits between DataFetchEngine and the UI alert widgets.
 // Converts raw StationReading snapshots into deduplicated, tiered
@@ -10,7 +17,7 @@
 //   EXTREME  — currentLevel >= hfl                   (above all-time flood)
 //   CRITICAL — currentLevel >= dangerLevel            (in danger zone)
 //   DANGER   — currentLevel >= warningLevel           (in warning zone)
-//   RISING   — live, below WL but RoR >= 0.5 m/h     (rapid rise warning)
+//   RISING   — live, below WL but RoR >= 0.3 m/h     (rapid rise warning)
 //   NORMAL   — no alert (suppressed / cleared)
 //
 // Rules:
@@ -18,7 +25,7 @@
 //   2. Each station has at most one active AlertItem.
 //   3. A station's alert is suppressed for _kSuppressWindow after it was
 //      last seen in the same tier, UNLESS the tier escalates.
-//   4. Stations that drop to NORMAL and stay there for _kClearWindow
+//   4. Stations that drop to NORMAL and stay there for _kClearWindow (15 min)
 //      are removed from the active set.
 //   5. At most _kMaxAlerts items are surfaced to the UI (highest first).
 library;
@@ -37,14 +44,14 @@ extension AlertSeverityX on AlertSeverity {
 
 // ── AlertItem ─────────────────────────────────────────────────────────────────
 class AlertItem {
-  final String        stationKey;     // normalised key for dedup
+  final String        stationKey;
   final String        stationName;
   final String        river;
   final String        district;
   final AlertSeverity severity;
-  final String        message;        // primary banner text
-  final String?       subMessage;     // secondary info line
-  final double?       rateOfRiseMph;  // m/h, shown as chip when >= 0.3
+  final String        message;
+  final String?       subMessage;
+  final double?       rateOfRiseMph;
   final double        currentLevel;
   final double        dangerLevel;
   final double        hfl;
@@ -98,20 +105,20 @@ class ActiveAlertController {
   ActiveAlertController._();
   static final instance = ActiveAlertController._();
 
-  // Max simultaneous alerts surfaced to UI
-  static const _kMaxAlerts      = 5;
-  // How long a station stays suppressed after last seen in same tier
+  // v1.1: raised 5→8 — 12 stations now; upstream tributaries were silently dropped
+  static const _kMaxAlerts      = 8;
+  // Suppress re-fire for same tier (escalation still bypasses this)
   static const _kSuppressWindow = Duration(minutes: 30);
-  // How long after NORMAL before removing from active set
-  static const _kClearWindow    = Duration(minutes: 5);
-  // Min RoR (m/h) to trigger a RISING alert
-  static const _kRorThreshold   = 0.5;
-  // Min rainfall (mm) to co-trigger RISING (prevents dry-season false positives)
-  static const _kRainThreshold  = 20.0;
+  // v1.1: raised 5min→15min (CWC minimum watch-period after de-escalation)
+  static const _kClearWindow    = Duration(minutes: 15);
+  // v1.1: lowered 0.5→0.3 m/h (Bagmati/Kamla rise faster than Ganga/Kosi plains)
+  static const _kRorThreshold   = 0.3;
+  // v1.1: lowered 20.0→10.0 mm/24h (Bihar 2025: upstream floods had <5mm local rain)
+  static const _kRainThreshold  = 10.0;
 
   // ── internal state ──────────────────────────────────────────────────────────
   final _activeMap   = <String, AlertItem>{};
-  final _normalSince = <String, DateTime>{};     // station → went-normal at
+  final _normalSince = <String, DateTime>{};
   StreamSubscription<DataFetchSnapshot>? _sub;
   bool _started = false;
 
@@ -150,7 +157,6 @@ class ActiveAlertController {
       final severity = _deriveSeverity(s);
 
       if (severity == AlertSeverity.normal) {
-        // Track when it went normal for clearance
         _normalSince.putIfAbsent(key, () => now);
         final sinceNormal = now.difference(_normalSince[key]!);
         if (sinceNormal >= _kClearWindow) {
@@ -160,24 +166,20 @@ class ActiveAlertController {
         continue;
       }
 
-      // Station is alertable — clear any "went normal" timestamp
       _normalSince.remove(key);
 
       final existing = _activeMap[key];
 
-      // Suppression: same tier, not yet expired
       final isSameTier = existing != null && existing.severity == severity;
       final isExpired  = existing == null ||
           now.difference(existing.lastSeenAt) >= _kSuppressWindow;
       final escalated  = existing != null && severity > existing.severity;
 
       if (isSameTier && !isExpired && !escalated) {
-        // Just update timestamp, no re-fire
         _activeMap[key] = existing.copyWithTime(now);
         continue;
       }
 
-      // Build new AlertItem
       _activeMap[key] = _buildAlert(s, severity, now,
           firstSeen: existing?.firstSeenAt ?? now);
     }
@@ -192,7 +194,6 @@ class ActiveAlertController {
   List<AlertItem> _sortedAlerts() {
     final all = _activeMap.values.toList()
       ..sort((a, b) {
-        // Sort by severity desc, then by (currentLevel / dangerLevel) desc
         final sc = b.severity.index.compareTo(a.severity.index);
         if (sc != 0) return sc;
         final ap = a.dangerLevel > 0 ? a.currentLevel / a.dangerLevel : 0.0;
@@ -204,11 +205,12 @@ class ActiveAlertController {
 
   // ── severity derivation ──────────────────────────────────────────────────────
   AlertSeverity _deriveSeverity(StationReading s) {
-    if (!s.isLive) return AlertSeverity.normal; // non-live never alerts
+    if (!s.isLive) return AlertSeverity.normal;
     if (s.currentLevel >= s.hfl)          return AlertSeverity.extreme;
     if (s.currentLevel >= s.dangerLevel)  return AlertSeverity.critical;
     if (s.currentLevel >= s.warningLevel) return AlertSeverity.danger;
     // RISING: below WL but rapid rise + rainfall co-trigger
+    // v1.1: threshold 0.5→0.3 m/h; rain guard 20→10 mm/24h
     final ror  = s.rateOfRiseMph ?? 0.0;
     final rain = s.rainfall24hMm ?? 0.0;
     if (ror >= _kRorThreshold && rain >= _kRainThreshold) {
@@ -226,7 +228,6 @@ class ActiveAlertController {
   }) {
     final key = _norm(s.stationName);
 
-    // Primary message
     final tierLabel = switch (severity) {
       AlertSeverity.extreme  => '🚨 ABOVE HFL',
       AlertSeverity.critical => '🔴 CRITICAL',
@@ -236,7 +237,6 @@ class ActiveAlertController {
     };
     final message = '$tierLabel — ${s.stationName} (${s.river})';
 
-    // Sub-message: level info
     final aboveDl = (s.currentLevel - s.dangerLevel);
     final sub = switch (severity) {
       AlertSeverity.extreme  =>
