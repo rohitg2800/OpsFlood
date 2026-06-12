@@ -1,11 +1,14 @@
-// lib/screens/alerts_screen.dart  v4.6 — stale-data fix
+// lib/screens/alerts_screen.dart  v4.7
 //
-// v4.6: AlertsScreen.initState() now calls DataFetchEngine.forceRefresh()
-//       and invalidates wrdStationsProvider so the Alerts tab always opens
-//       with a fresh network fetch rather than whatever was cached at the
-//       last background poll.  This cures the "active alerts show old data"
-//       symptom seen when the user switches to the tab after the app has
-//       been idle for > one poll cycle.
+// v4.7 (Problem 4 fix, 12 Jun 2026):
+//   _StatusBar was watching sourceStatusProvider which only carries
+//   CWC + GloFAS rows from DataFetchEngine.stream.  WRD Bihar never
+//   appeared in the status chips.  Switch to mergedSourceStatusProvider
+//   (exported from map_live_index_provider.dart) which prepends a
+//   synthetic WRD Bihar row built from wrdStationsProvider.
+//
+// v4.6: AlertsScreen.initState() calls DataFetchEngine.forceRefresh()
+//       and invalidates wrdStationsProvider on tab open.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,13 +16,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../providers/data_fetch_provider.dart';
+import '../providers/map_live_index_provider.dart'; // v4.7: mergedSourceStatusProvider
 import '../providers/real_time_river_provider.dart';
 import '../services/alert_engine.dart';
 import '../services/alert_share_service.dart';
 import '../services/data_fetch_engine.dart';
 import '../widgets/alert_share_button.dart';
 
-// ── colour helpers ────────────────────────────────────────────────────────────────
+// ── colour helpers ────────────────────────────────────────────────────────────────────
 Color _severityColor(AlertSeverity s, {bool dark = false}) {
   switch (s) {
     case AlertSeverity.emergency: return dark ? const Color(0xFF8B0000) : const Color(0xFFB71C1C);
@@ -47,9 +51,7 @@ IconData _severityIcon(AlertSeverity s) {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// AlertsScreen
-// ───────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends ConsumerStatefulWidget {
   static const String route = '/alerts';
   const AlertsScreen({super.key});
@@ -73,15 +75,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     _badgePulse = Tween<double>(begin: 1.0, end: 1.3).animate(
       CurvedAnimation(parent: _badgeCtrl, curve: Curves.elasticOut),
     );
-
-    // FIX v4.6: Force fresh data every time the Alerts tab opens.
-    // Without this the screen would show whichever station levels happened
-    // to be in the cache from the last background poll cycle, making alerts
-    // appear stale when the user hasn’t opened the tab in a while.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 1. Kick DataFetchEngine (CWC + backend tier)
       DataFetchEngine.instance.forceRefresh();
-      // 2. Kick WRD notifier so mergedStationsProvider also sees fresh WRD data
       ref.read(wrdStationsProvider.notifier).forceRefresh();
     });
   }
@@ -100,7 +95,8 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
   @override
   Widget build(BuildContext context) {
     final allAlerts = ref.watch(alertsProvider);
-    final sources   = ref.watch(sourceStatusProvider);
+    // v4.7: mergedSourceStatusProvider includes WRD Bihar row
+    final sources   = ref.watch(mergedSourceStatusProvider);
     final fetchSnap = ref.watch(dataFetchProvider);
 
     if (allAlerts.length > _prevCount) _badgeCtrl.forward(from: 0);
@@ -122,7 +118,6 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
       appBar: _buildAppBar(allAlerts.length, isLoading),
       body: RefreshIndicator(
         onRefresh: () async {
-          // Pull-to-refresh: kick both tiers simultaneously
           await Future.wait([
             DataFetchEngine.instance.forceRefresh(),
             ref.read(wrdStationsProvider.notifier).forceRefresh(),
@@ -191,9 +186,6 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _LoadingState
-// ───────────────────────────────────────────────────────────────────────────────
 class _LoadingState extends StatelessWidget {
   const _LoadingState();
   @override
@@ -212,9 +204,6 @@ class _LoadingState extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _EmptyState
-// ───────────────────────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final DateTime? lastUpdate;
   const _EmptyState({this.lastUpdate});
@@ -249,9 +238,6 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _AlertBadge
-// ───────────────────────────────────────────────────────────────────────────────
 class _AlertBadge extends StatelessWidget {
   final int count;
   const _AlertBadge({required this.count});
@@ -280,9 +266,6 @@ class _AlertBadge extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _StatusBar
-// ───────────────────────────────────────────────────────────────────────────────
 class _StatusBar extends StatelessWidget {
   final List<SourceStatus> sources;
   final DateTime?          lastUpdate;
@@ -359,8 +342,7 @@ class _SourceChip extends StatelessWidget {
         : (healthy ? Icons.check_circle : Icons.error);
     return Container(
       margin: const EdgeInsets.only(right: 6),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(12),
@@ -383,9 +365,6 @@ class _SourceChip extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _FilterRow
-// ───────────────────────────────────────────────────────────────────────────────
 class _FilterRow extends StatelessWidget {
   final AlertSeverity?               selected;
   final List<FloodAlert>             all;
@@ -407,8 +386,7 @@ class _FilterRow extends StatelessWidget {
       height: 52,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         children: [
           _Chip(
               label:    'All (${_count(null)})',
@@ -460,8 +438,7 @@ class _Chip extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(right: 8),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? c : Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -485,9 +462,6 @@ class _Chip extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _AlertCard
-// ───────────────────────────────────────────────────────────────────────────────
 class _AlertCard extends StatefulWidget {
   final FloodAlert alert;
   const _AlertCard({required this.alert});
@@ -603,9 +577,6 @@ class _AlertCardState extends State<_AlertCard>
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// _AlertDetail
-// ───────────────────────────────────────────────────────────────────────────────
 class _AlertDetail extends StatelessWidget {
   final FloodAlert alert;
   final Color      fg;
