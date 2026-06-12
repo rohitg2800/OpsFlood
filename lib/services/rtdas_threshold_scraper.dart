@@ -17,6 +17,15 @@
 //   7  Danger Level (m)
 //   8  Warning Level (m)
 //
+// UNIT ENCODING NOTE (discovered Jun 2026):
+//   WRD Bihar RTDAS encodes some station thresholds in CENTIMETRES
+//   (e.g. Birpur DL = 7470 meaning 74.70 m MSL, HFL = 7602 = 76.02 m).
+//   _normaliseLevel() detects this automatically:
+//     - Bihar river gauge levels are always in range [0, 200] m MSL
+//     - Any raw value > 500 is treated as centimetres → divided by 100
+//     - A sanity clamp [0, 200] is applied after conversion
+//   This fixes the "Birpur showing 210 m" display bug.
+//
 // If WRD ever restructures the table, update _kColMap below — nothing else
 // needs to change.
 library;
@@ -26,7 +35,7 @@ import 'package:html/parser.dart' as htmlParser;
 import 'package:flutter/foundation.dart';
 
 class RtdasRow {
-  final String station;
+  final String  station;
   final String? maintainedBy;
   final double? warningLevel;
   final double? dangerLevel;
@@ -63,6 +72,11 @@ class RtdasThresholdScraper {
     warningLevel: 8,
   );
 
+  // Bihar river gauges are always in [0, 200] m MSL.
+  // Any parsed value above this threshold is assumed to be in centimetres.
+  static const _kCmThreshold = 500.0;
+  static const _kMaxLevelM   = 200.0;
+
   /// Fetch RTDAS rows, trying primary URL first then fallback.
   Future<List<RtdasRow>> fetch() async {
     try {
@@ -77,7 +91,8 @@ class RtdasThresholdScraper {
     final res = await http
         .get(Uri.parse(url),
             headers: {
-              'User-Agent': 'OpsFlood/3 (Bihar Flood App; +github.com/rohitg2800)',
+              'User-Agent':
+                  'OpsFlood/3 (Bihar Flood App; +github.com/rohitg2800)',
               'Accept': 'text/html,application/xhtml+xml',
             })
         .timeout(const Duration(seconds: 25));
@@ -102,11 +117,11 @@ class RtdasThresholdScraper {
       if (cells.length < 9) continue;
 
       final station = cells[_kColMap.station];
-      if (station.isEmpty || station == 'Station Name') continue; // skip sub-headers
+      if (station.isEmpty || station == 'Station Name') continue;
 
-      final hfl     = _parse(cells[_kColMap.hfl]);
-      final danger  = _parse(cells[_kColMap.dangerLevel]);
-      final warning = _parse(cells[_kColMap.warningLevel]);
+      final hfl     = _normaliseLevel(_parse(cells[_kColMap.hfl]),     'HFL',  station);
+      final danger  = _normaliseLevel(_parse(cells[_kColMap.dangerLevel]),  'DL',   station);
+      final warning = _normaliseLevel(_parse(cells[_kColMap.warningLevel]), 'WL',   station);
 
       // Skip rows where all three are null (non-gauge entries)
       if (hfl == null && danger == null && warning == null) continue;
@@ -122,6 +137,32 @@ class RtdasThresholdScraper {
 
     debugPrint('[RtdasScraper] parsed ${result.length} rows from $url');
     return result;
+  }
+
+  // ── Unit normalisation ────────────────────────────────────────────────────
+  //
+  // WRD RTDAS encodes some stations in cm (raw value > 500).
+  // Converts to metres and clamps to [0, 200] m MSL.
+  //
+  // Examples:
+  //   7470.0  → 74.70 m  (Birpur DL)
+  //   7602.0  → 76.02 m  (Birpur HFL)
+  //   7370.0  → 73.70 m  (Birpur WL)
+  //   48.60   → 48.60 m  (Gandhighat DL — already metres, untouched)
+  //   4860.0  → 48.60 m  (same station if encoded as cm)
+  static double? _normaliseLevel(double? raw, String label, String station) {
+    if (raw == null) return null;
+    double metres = raw;
+    if (raw > _kCmThreshold) {
+      metres = raw / 100.0;
+      debugPrint('[RtdasScraper] $station $label: $raw cm → ${metres.toStringAsFixed(2)} m');
+    }
+    // Sanity clamp: no Bihar gauge is above 200 m MSL
+    if (metres < 0 || metres > _kMaxLevelM) {
+      debugPrint('[RtdasScraper] $station $label: $metres m out of range — discarded');
+      return null;
+    }
+    return metres;
   }
 
   static double? _parse(String raw) {
