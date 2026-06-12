@@ -1,16 +1,18 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5.5
+// EQUINOX-BH — Dashboard v5.6
 //
+// v5.6:
+//   • Replaced _AlertColorStrip (manual FloodData count) with
+//     StationStatusStripWired — driven by stationCountsProvider
+//     (mergedStationsProvider → Map<FloodSeverity,int>).
+//     Bihar/WRD live counts now appear in the strip immediately on refresh.
+//   • _AlertColorStrip, _StripItem, _StripCell removed.
 // v5.5:
 //   • Wired ActiveAlertController → AlertSeverityBannerList
-//     Replaces _CriticalBanner (raw count) with tiered alert cards:
-//     EXTREME / CRITICAL / DANGER / RISING, SEED-filtered, deduplicated.
-//   • Added DangerProximityBanner sliver below AppBar (proximity-aware,
-//     severity-based distance thresholds, SEED suppressed)
-//   • Removed _bannerDismissed state flag (controller handles suppression)
-//   • _CriticalBanner class retained but no longer inserted into the slivers
+//   • Added DangerProximityBanner sliver below AppBar
+//   • Removed _bannerDismissed state flag
 // v5.4:
-//   • App name renamed Equinox-BBR05 → EQUINOX-BR05 (AppBar title + status banner)
+//   • App name renamed Equinox-BBR05 → EQUINOX-BR05
 // v5.3:
 //   • App name renamed OpsFlood → Equinox-BBR05
 //   • Safe KPI count now includes LOW risk level
@@ -31,9 +33,11 @@ import '../providers/nearby_stations_provider.dart';
 import '../services/real_time_service.dart';
 import '../services/active_alert_controller.dart';     // v5.5
 import '../theme/river_theme.dart';
+import '../utils/flood_severity.dart';                 // v5.6
 import '../widgets/live_alert_banner.dart';            // v5.5
 import '../widgets/danger_proximity_banner.dart';      // v5.5
 import 'dashboard_screen_part2.dart';
+import 'dashboard_screen_strip_wiring.dart';           // v5.6
 import 'main_shell.dart';
 import 'alerts_screen.dart';
 import 'live_stations_screen.dart';
@@ -110,7 +114,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   bool    _reduceMotion  = false;
   bool    _isRefreshing  = false;
   bool    _nearbyBooted  = false;
-  // _bannerDismissed removed in v5.5 — ActiveAlertController handles suppression
 
   @override
   void initState() {
@@ -192,6 +195,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void _goCityDetail(FloodData d) =>
       Navigator.pushNamed(context, '/city_detail', arguments: d.city);
 
+  // v5.6: strip chip tap — critical/extreme go to alerts, rest to live stations
+  void _onStripTap(FloodSeverity sev) {
+    if (sev == FloodSeverity.extreme || sev == FloodSeverity.danger) {
+      _goAlerts();
+    } else {
+      _goLiveStations();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t          = RiverColors.of(context);
@@ -235,9 +247,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               child: DangerProximityBanner(),
             ),
 
-            // v5.5: AlertSeverityBannerList — replaces _CriticalBanner
-            // Driven by ActiveAlertController: tiered, deduped, SEED-suppressed.
-            // Tapping any card navigates to LiveStationsScreen for full detail.
+            // v5.5: AlertSeverityBannerList — tiered, deduped, SEED-suppressed
             SliverToBoxAdapter(
               child: AlertSeverityBannerList(
                 onTapAlert: (_) => _goLiveStations(),
@@ -284,12 +294,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
+              // v5.6: StationStatusStripWired replaces _AlertColorStrip.
+              // Counts come from mergedStationsProvider (Bihar + WRD live data),
+              // not from the JSON-backed liveLevels list.
               SliverToBoxAdapter(
-                child: _AlertColorStrip(
-                  t: t,
-                  levels: liveLevels,
-                  onAlertsTap: _goAlerts,
-                  onSafeTap: _goLiveStations,
+                child: StationStatusStripWired(
+                  onTap: _onStripTap,
                 ),
               ),
 
@@ -429,176 +439,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _AlertColorStrip
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _AlertColorStrip extends StatelessWidget {
-  final RiverColors    t;
-  final List<FloodData> levels;
-  final VoidCallback   onAlertsTap;
-  final VoidCallback   onSafeTap;
-
-  const _AlertColorStrip({
-    required this.t,
-    required this.levels,
-    required this.onAlertsTap,
-    required this.onSafeTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    int critical = 0, severe = 0, warning = 0, safe = 0, noData = 0;
-    for (final d in levels) {
-      switch (d.riskLevel.toUpperCase()) {
-        case 'CRITICAL':
-        case 'DANGER':   critical++; break;
-        case 'SEVERE':   severe++;   break;
-        case 'MODERATE':
-        case 'WARNING':
-        case 'HIGH':     warning++;  break;
-        case 'NORMAL':
-        case 'SAFE':
-        case 'LOW':      safe++;     break;
-        default:         noData++;   break;
-      }
-    }
-
-    final items = [
-      _StripItem(color: _kCriticalColor, label: 'Critical',  count: critical, icon: Icons.warning_rounded,       onTap: onAlertsTap, pulse: critical > 0),
-      _StripItem(color: _kSevereColor,   label: 'Severe',    count: severe,   icon: Icons.warning_amber_rounded,  onTap: onAlertsTap, pulse: severe > 0),
-      _StripItem(color: _kWarningColor,  label: 'Warning',   count: warning,  icon: Icons.info_rounded,           onTap: onAlertsTap),
-      _StripItem(color: _kSafeColor,     label: 'Safe',      count: safe,     icon: Icons.check_circle_rounded,   onTap: onSafeTap),
-      _StripItem(color: _kNoDataColor,   label: 'No data',   count: noData,   icon: Icons.help_outline_rounded,   onTap: onSafeTap),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-        decoration: BoxDecoration(
-          color: t.cardBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: t.stroke),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            for (int i = 0; i < items.length; i++) ...[
-              if (i > 0)
-                Container(width: 1, height: 36, color: t.stroke),
-              Expanded(child: _StripCell(item: items[i], t: t)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StripItem {
-  final Color      color;
-  final String     label;
-  final int        count;
-  final IconData   icon;
-  final VoidCallback onTap;
-  final bool       pulse;
-  const _StripItem({
-    required this.color,
-    required this.label,
-    required this.count,
-    required this.icon,
-    required this.onTap,
-    this.pulse = false,
-  });
-}
-
-class _StripCell extends StatelessWidget {
-  final _StripItem  item;
-  final RiverColors t;
-  const _StripCell({required this.item, required this.t});
-
-  @override
-  Widget build(BuildContext context) {
-    final isActive = item.count > 0;
-    final dotColor = isActive ? item.color : item.color.withValues(alpha: 0.35);
-
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        item.onTap();
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 28, height: 28,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                if (item.pulse && isActive)
-                  Container(
-                    width: 26, height: 26,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: item.color.withValues(alpha: 0.30),
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                Container(
-                  width: 18, height: 18,
-                  decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: isActive ? 0.80 : 0.30),
-                      width: 1.5,
-                    ),
-                    boxShadow: isActive ? [
-                      BoxShadow(
-                        color: item.color.withValues(alpha: 0.45),
-                        blurRadius: 6,
-                        spreadRadius: item.pulse ? 1 : 0,
-                      ),
-                    ] : null,
-                  ),
-                  child: Icon(item.icon, color: Colors.white, size: 10),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            '${item.count}',
-            style: TextStyle(
-              color: isActive ? item.color : t.textSecondary,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              fontFeatures: const [FontFeature.tabularFigures()],
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            item.label,
-            style: TextStyle(
-              color: t.textSecondary,
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _CriticalBanner  (retained for backward compat — not inserted into slivers
-// in v5.5; use AlertSeverityBannerList instead)
+// _CriticalBanner  (retained for backward compat — not inserted into slivers)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CriticalBanner extends StatelessWidget {
