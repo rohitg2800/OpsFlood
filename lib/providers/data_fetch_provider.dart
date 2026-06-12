@@ -1,21 +1,15 @@
-// lib/providers/data_fetch_provider.dart  v1.1
+// lib/providers/data_fetch_provider.dart  v1.2
+//
+// v1.2 (Problem-3 fix, 12 Jun 2026):
+//   Renamed internal criticalAlertCountProvider → mergedCriticalAlertCountProvider
+//   to eliminate the name clash with alerts_badge_provider.dart.
+//   No callers outside this file used the old name (all external consumers
+//   of the badge count go through alerts_badge_provider.dart which now
+//   watches alertCountProvider instead).
 //
 // v1.1 (dedup fix):
 //   alertsProvider now watches mergedStationsProvider (the already-deduped
 //   single-source-of-truth list) and calls AlertEngine.evaluateMerged().
-//
-//   BEFORE: watched dataFetchProvider (raw DataFetchSnapshot) and called
-//           AlertEngine.evaluate(snap) — ran on every raw station from every
-//           source tier BEFORE dedup, producing duplicate FloodAlert cards
-//           for Taibpur, Sonbarsa, and any other station that appeared in
-//           both WRD and DataFetch tiers.
-//
-//   AFTER:  mergedStationsProvider is always length-N where N = unique stations.
-//           One station → one StationReading → at most one level alert card.
-//
-//   All other providers (sourceStatusProvider, dataFetchStationsProvider,
-//   fetchSnapshotKpiProvider, etc.) are unchanged — they still watch
-//   dataFetchProvider directly for snapshot-level KPIs.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,9 +19,9 @@ import '../services/alert_engine.dart';
 import '../models/river_station.dart';
 import 'real_time_river_provider.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 // dataFetchProvider — StreamProvider<DataFetchSnapshot>
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 final dataFetchProvider = StreamProvider<DataFetchSnapshot>((ref) {
   final engine = DataFetchEngine.instance;
   engine.start();
@@ -35,9 +29,9 @@ final dataFetchProvider = StreamProvider<DataFetchSnapshot>((ref) {
   return engine.stream;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 // Derived: list of RiverStation (feeds existing mergedStationsProvider shim)
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 final dataFetchStationsProvider = Provider<List<RiverStation>>((ref) {
   final snap = ref.watch(dataFetchProvider);
   return snap.when(
@@ -47,20 +41,20 @@ final dataFetchStationsProvider = Provider<List<RiverStation>>((ref) {
   );
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 // alertsProvider — all active, sorted alerts
 //
 // v1.1: watches mergedStationsProvider (deduped) instead of the raw snapshot.
 //       One station in → one alert card out.  No more duplicate cards.
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 final alertsProvider = Provider<List<FloodAlert>>((ref) {
   final merged = ref.watch(mergedStationsProvider);
   return AlertEngine.instance.evaluateMerged(merged);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 // Filtered alert sub-providers
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────────
 final criticalAlertsProvider = Provider<List<FloodAlert>>((ref) =>
     ref.watch(alertsProvider)
         .where((a) =>
@@ -81,7 +75,9 @@ final warningAlertsProvider = Provider<List<FloodAlert>>((ref) =>
 final alertCountProvider = Provider<int>((ref) =>
     ref.watch(alertsProvider).length);
 
-final criticalAlertCountProvider = Provider<int>((ref) =>
+// v1.2: renamed from criticalAlertCountProvider to avoid clash with
+// alerts_badge_provider.dart which owns the externally-visible name.
+final mergedCriticalAlertCountProvider = Provider<int>((ref) =>
     ref.watch(criticalAlertsProvider).length);
 
 // Per-station alerts
