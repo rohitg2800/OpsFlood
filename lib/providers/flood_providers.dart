@@ -1,5 +1,16 @@
 // lib/providers/flood_providers.dart
-// v10 — selectedCityProvider uses NotifierProvider (StateProvider not in this project)
+// v10.1 — deduplicate liveLevelsProvider by city key.
+//
+// Root cause of duplicate cards (Taibpur ×3, Sonbarsa ×3 etc.):
+//   mergedStationsProvider returns all RiverStation rows from every source
+//   (WRD API, GloFAS, static geodata) without deduplication.  liveLevelsProvider
+//   was mapping them 1-to-1, so the same city appeared once per source.
+//
+// Fix: after converting RiverStation → FloodData, group by city.toLowerCase()
+//   and keep the single best entry:
+//     • prefer status == 'LIVE'   (any live reading over static)
+//     • among live entries, keep the one with the highest currentLevel
+//       (most recent / most accurate gauge reading)
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,16 +22,6 @@ import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // selectedCityProvider
-//
-// Holds the city name chosen on DashboardScreen / CityDetailScreen so that
-// PredictScreen can auto-fill and auto-run the prediction without any tap.
-//
-// Usage before navigating:
-//   ref.read(selectedCityProvider.notifier).set(city);
-//   Navigator.pushNamed(context, PredictScreen.route);
-//
-// Clear after returning (optional):
-//   ref.read(selectedCityProvider.notifier).clear();
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SelectedCityNotifier extends Notifier<String?> {
@@ -224,13 +225,52 @@ FloodData _riverStationToFloodData(RiverStation s) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Legacy shim: liveLevelsProvider
+// _deduplicateByCity
+//
+// Groups FloodData entries by city name (case-insensitive trim).
+// Within each group:
+//   1. Prefer LIVE entries over ESTIMATED/static.
+//   2. Among entries with the same status, keep the one with the
+//      highest currentLevel (= most recent / most accurate gauge reading).
+//
+// This collapses Taibpur ×3 → Taibpur ×1, Sonbarsa ×3 → Sonbarsa ×1, etc.
 // ─────────────────────────────────────────────────────────────────────────────
 
-final liveLevelsProvider = Provider<List<FloodData>>((ref) =>
-    ref.watch(mergedStationsProvider)
-        .map(_riverStationToFloodData)
-        .toList());
+List<FloodData> _deduplicateByCity(List<FloodData> raw) {
+  final map = <String, FloodData>{};
+  for (final fd in raw) {
+    final key = fd.city.toLowerCase().trim();
+    if (!map.containsKey(key)) {
+      map[key] = fd;
+    } else {
+      final existing = map[key]!;
+      final incomingIsLive   = fd.status == 'LIVE';
+      final existingIsLive   = existing.status == 'LIVE';
+
+      // Rule 1: live beats non-live
+      if (incomingIsLive && !existingIsLive) {
+        map[key] = fd;
+      } else if (!incomingIsLive && existingIsLive) {
+        // keep existing (already live)
+      } else {
+        // Rule 2: same live-status → keep highest currentLevel
+        if (fd.currentLevel > existing.currentLevel) map[key] = fd;
+      }
+    }
+  }
+  return map.values.toList();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy shim: liveLevelsProvider  (now deduped)
+// ─────────────────────────────────────────────────────────────────────────────
+
+final liveLevelsProvider = Provider<List<FloodData>>((ref) {
+  final raw = ref.watch(mergedStationsProvider)
+      .map(_riverStationToFloodData)
+      .toList();
+  return _deduplicateByCity(raw);
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Loading / offline / timestamp providers

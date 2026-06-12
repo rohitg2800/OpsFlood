@@ -1,6 +1,8 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5.3
+// EQUINOX-BH — Dashboard v5.4
 //
+// v5.4:
+//   • App name renamed Equinox-BBR05 → EQUINOX-BR05 (AppBar title + status banner)
 // v5.3:
 //   • App name renamed OpsFlood → Equinox-BBR05 (AppBar title + status banner)
 //   • Safe KPI count now includes LOW risk level to match _AlertColorStrip
@@ -445,7 +447,7 @@ class _AlertColorStrip extends StatelessWidget {
         case 'HIGH':     warning++;  break;
         case 'NORMAL':
         case 'SAFE':
-        case 'LOW':      safe++;     break;  // matches _isSafe()
+        case 'LOW':      safe++;     break;
         default:         noData++;   break;
       }
     }
@@ -973,8 +975,7 @@ class _DashboardAppBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                // v5.3: renamed from OpsFlood
-                'Equinox-BBR05',
+                'EQUINOX-BR05',   // v5.4: renamed from Equinox-BBR05
                 style: TextStyle(
                   color: t.textPrimary,
                   fontSize: 18,
@@ -1063,7 +1064,7 @@ class _StatusBanner extends StatelessWidget {
     final color = isOffline ? AppPalette.warning : t.accent;
     final msg   = isOffline
         ? 'No internet — showing last cached data'
-        : 'Connecting to Equinox-BBR05 servers…';  // v5.3: renamed
+        : 'Connecting to EQUINOX-BR05 servers…';  // v5.4: renamed
     final icon =
         isOffline ? Icons.wifi_off_rounded : Icons.cloud_sync_rounded;
     return Container(
@@ -1399,8 +1400,6 @@ class _KpiGrid extends StatelessWidget {
                 .reduce((a, b) => a + b) /
             levels.length;
 
-    // v5.3 fix: use _isSafe() so this matches _AlertColorStrip's safe bucket
-    // (NORMAL | SAFE | LOW).  Previously only NORMAL and SAFE were counted.
     final safeCount = levels.where((d) => _isSafe(d.riskLevel)).length;
 
     final kpis = [
