@@ -1,6 +1,12 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v7.2 — stale-disk-cache fix)
+// OpsFlood — WRD Bihar Service (v7.3 — type-annotation fix)
+//
+// v7.3 fix:
+//   _loadFromDiskWithAge() returned `(const [], null)` whose inferred type
+//   is `(List<dynamic>, Null)`, which is not assignable to the declared
+//   return type `(List<WrdStation>, Duration?)`.
+//   Fixed both early-return sites to use `(<WrdStation>[], null)`.
 //
 // v7.2 fix (stale-data on Alerts screen):
 //   _loadFromDisk now checks the disk-timestamp against a 30-min TTL.
@@ -84,7 +90,7 @@ class WrdStation {
     return '${forecast24h!.toStringAsFixed(2)} m';
   }
 
-  // ── Risk label — aligned with backend thresholds ─────────────────────
+  // ── Risk label — aligned with backend thresholds ─────────────────────────
   // Backend: CRITICAL=<=0m, HIGH=<=3m, MODERATE=<=6m, LOW=>6m
   String get riskLabel {
     final bd = belowDanger;
@@ -115,7 +121,7 @@ class WrdStation {
     return '—';
   }
 
-  // ── Serialization ────────────────────────────────────────────────────────
+  // ── Serialization ─────────────────────────────────────────────────────────
   Map<String, dynamic> toJson() => {
     'river':        river,
     'site':         site,
@@ -184,17 +190,17 @@ class WrdStation {
       'risk=$riskLabel | live=$hasLiveData)';
 }
 
-// ── WrdBiharService ──────────────────────────────────────────────────────────────
+// ── WrdBiharService ───────────────────────────────────────────────────────────
 class WrdBiharService {
   WrdBiharService._();
   static final WrdBiharService instance = WrdBiharService._();
 
   // In-memory TTL: 15 min (normal poll cadence)
-  static const _cacheTtl      = Duration(minutes: 15);
+  static const _cacheTtl     = Duration(minutes: 15);
   // Disk-cache TTL: 30 min — data older than this is considered stale on
   // cold-start and the service will NOT skip the network fetch.
-  static const _diskCacheTtl  = Duration(minutes: 30);
-  static const _persistKey    = 'wrd_bihar_stations_v7';
+  static const _diskCacheTtl = Duration(minutes: 30);
+  static const _persistKey   = 'wrd_bihar_stations_v7';
 
   List<WrdStation>?        _cache;
   DateTime?                _cacheTime;
@@ -202,7 +208,7 @@ class WrdBiharService {
 
   List<WrdStation>? get cachedStations => _cache;
 
-  // ── Public API ───────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
 
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
     // In-memory cache hit (skipped when forceRefresh=true)
@@ -227,13 +233,11 @@ class WrdBiharService {
         _buildIndex(diskStations);
         final isFresh = diskAge != null && diskAge < _diskCacheTtl;
         if (isFresh) {
-          // Disk is still fresh — honour it and skip the network round-trip.
           _cacheTime = DateTime.now().subtract(diskAge!);
           _log('cold-start: ${diskStations.length} stations from disk '
                '(${diskAge!.inMinutes} min old — within TTL, skipping network)');
           return _cache!;
         } else {
-          // Disk is stale — show as placeholder but still fetch from network.
           _cacheTime = null;
           _log('cold-start: ${diskStations.length} stations from disk '
                '(${diskAge?.inMinutes ?? "?"}min old — STALE, will refresh)');
@@ -305,7 +309,7 @@ class WrdBiharService {
     return map;
   }
 
-  // ── Persistence ──────────────────────────────────────────────────────────
+  // ── Persistence ───────────────────────────────────────────────────────────
 
   Future<void> _saveToDisk(List<WrdStation> stations) async {
     try {
@@ -326,7 +330,9 @@ class WrdBiharService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw   = prefs.getString(_persistKey);
-      if (raw == null || raw.isEmpty) return (const [], null);
+      // FIX v7.3: use typed empty list literal so the record type resolves
+      // to (List<WrdStation>, Duration?) rather than (List<dynamic>, Null).
+      if (raw == null || raw.isEmpty) return (<WrdStation>[], null);
       final tsRaw = prefs.getString('${_persistKey}_ts');
       final ts    = tsRaw != null ? DateTime.tryParse(tsRaw) : null;
       final age   = ts != null ? DateTime.now().difference(ts) : null;
@@ -340,7 +346,7 @@ class WrdBiharService {
       return (stations, age);
     } catch (e) {
       _log('disk load error: $e');
-      return (const [], null);
+      return (<WrdStation>[], null);
     }
   }
 
