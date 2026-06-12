@@ -1,12 +1,29 @@
-// lib/services/bihar_live_engine.dart  v1.2.1
+// lib/services/bihar_live_engine.dart  v2.0
 //
-// v1.2.1: add missing import '../models/flood_data.dart' (FloodData type).
+// v2.0 fix: replace per-source List caches with named Map slots.
+//
+// PROBLEM (v1.x): six separate List fields (_gaugeCache, _kosiCache, …).
+// _fetchGauge() called _gaugeCache.addAll(scraperItems) on every invocation,
+// so the scraper batch accumulated: 31→63→158→190 items across refresh cycles.
+//
+// FIX: _slots is a Map<String, List<BiharFeedItem>> with fixed keys.
+// Each fetch worker calls _setSlot(key, items) which REPLACES the slot.
+// _emit() flattens all slots fresh every time — no accumulation possible.
+//
+// Slot keys (stable, never change):
+//   'wrd'          WrdBiharService.fetch()
+//   'wrd_scrape'   BiharWrdScraper.fetchAll()
+//   'kosi'         KosiBirpurService
+//   'wris'         WrisService
+//   'rt'           RealTimeRiverService
+//   'india'        IndiaStationsService + BefiqrCwcService
+//   'news'         NewsService
 library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
-import '../models/flood_data.dart';   // FloodData
+import '../models/flood_data.dart';
 import 'befiqr_cwc_service.dart';
 import 'bihar_wrd_scraper.dart';
 import 'india_stations_service.dart';
@@ -58,7 +75,8 @@ class SourceHealth {
 
   @override
   String toString() =>
-      'SourceHealth($id ok=$ok latency=${latency?.inMilliseconds}ms${error != null ? ' err=$error' : ''})';
+      'SourceHealth($id ok=$ok latency=${latency?.inMilliseconds}ms'
+      '${error != null ? ' err=$error' : ''})';
 }
 
 /// A single normalised feed card — consumed directly by the Flutter feed UI.
@@ -143,24 +161,36 @@ class BiharLiveEngine {
   final _wrdScraper  = BiharWrdScraper.instance;
   final _news        = NewsService();
 
-  final _controller  = StreamController<BiharLiveFeed>.broadcast();
-  BiharLiveFeed?     _latest;
-  Timer?             _gaugeTimer;
-  Timer?             _newsTimer;
-  Timer?             _kosiTimer;
-  bool               _running = false;
+  final _controller = StreamController<BiharLiveFeed>.broadcast();
+  BiharLiveFeed?    _latest;
+  Timer?            _gaugeTimer;
+  Timer?            _newsTimer;
+  Timer?            _kosiTimer;
+  bool              _running = false;
 
-  List<BiharFeedItem> _gaugeCache    = [];
-  List<BiharFeedItem> _kosiCache     = [];
-  List<BiharFeedItem> _wrisCache     = [];
-  List<BiharFeedItem> _stationCache  = [];
-  List<BiharFeedItem> _rtCache       = [];
-  List<BiharFeedItem> _newsCache     = [];
+  // ── Named slots — each key is REPLACED (never appended) on every fetch ──────
+  // Fixed slot keys:
+  //   'wrd'        → WrdBiharService live stations
+  //   'wrd_scrape' → BiharWrdScraper HTML scrape
+  //   'kosi'       → KosiBirpurService barrage reading
+  //   'wris'       → WrisService telemetry
+  //   'rt'         → RealTimeRiverService RTRS results
+  //   'india'      → IndiaStationsService + BefiqrCwcService
+  //   'news'       → NewsService headlines
+  final Map<String, List<BiharFeedItem>> _slots = {
+    'wrd':        [],
+    'wrd_scrape': [],
+    'kosi':       [],
+    'wris':       [],
+    'rt':         [],
+    'india':      [],
+    'news':       [],
+  };
 
   final Map<SourceId, SourceHealth> _health = {};
 
-  Stream<BiharLiveFeed> get stream => _controller.stream;
-  BiharLiveFeed?        get latest => _latest;
+  Stream<BiharLiveFeed> get stream  => _controller.stream;
+  BiharLiveFeed?        get latest  => _latest;
   bool                  get running => _running;
 
   Future<void> start() async {
@@ -191,6 +221,16 @@ class BiharLiveEngine {
       _fetchRealTime(),
       _fetchIndiaStations(),
     ]);
+    // _emit() is called inside each fetch worker, but call once more after
+    // all finish so the final fully-populated snapshot is broadcast.
+    _emit();
+  }
+
+  // ── slot write helper ──────────────────────────────────────────────────────
+
+  /// Atomically replace a named slot and re-emit.
+  void _setSlot(String key, List<BiharFeedItem> items) {
+    _slots[key] = items;
     _emit();
   }
 
@@ -199,15 +239,24 @@ class BiharLiveEngine {
   Future<void> _fetchGauge() async {
     final t0 = DateTime.now();
     try {
+      // 'wrd' slot: WrdBiharService (API/cache) — replaced atomically.
       final data = await _wrd.fetch().timeout(_timeout);
-      _gaugeCache = data.map(_wrdStationToItem).toList();
+      _slots['wrd'] = data.map(_wrdStationToItem).toList();
       _setHealth(SourceId.wrdBihar, true, DateTime.now().difference(t0));
+
+      // 'wrd_scrape' slot: BiharWrdScraper (HTML bulletin) — separate slot
+      // so the scraper result never grows the 'wrd' slot on each call.
       try {
         final scraped = await _wrdScraper.fetchAll().timeout(_timeout);
-        final scraperItems = scraped.map(_biharStationToItem).toList();
-        final seen = {for (final i in _gaugeCache) i.id};
-        _gaugeCache.addAll(scraperItems.where((i) => !seen.contains(i.id)));
-      } catch (_) {}
+        // Only keep scraper stations not already present in the WRD slot.
+        final wrdIds  = { for (final i in _slots['wrd']!) i.id };
+        _slots['wrd_scrape'] =
+            scraped.map(_biharStationToItem)
+                   .where((i) => !wrdIds.contains(i.id))
+                   .toList();
+      } catch (_) {
+        // Scraper failure is non-fatal; keep whatever was in the slot.
+      }
     } catch (e) {
       _setHealth(SourceId.wrdBihar, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] WRD: $e');
@@ -219,43 +268,43 @@ class BiharLiveEngine {
     final t0 = DateTime.now();
     try {
       final data = await _kosiBirpur.fetchLive().timeout(_timeout);
-      _kosiCache = [_kosiReadingToItem(data)];
+      _setSlot('kosi', [_kosiReadingToItem(data)]);
       _setHealth(SourceId.kosiBirpur, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.kosiBirpur, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] Kosi: $e');
+      _emit();
     }
-    _emit();
   }
 
   Future<void> _fetchWris() async {
     final t0 = DateTime.now();
     try {
       final data = await _wris.fetchBiharTelemetry().timeout(_timeout);
-      _wrisCache = _listToItems(
+      _setSlot('wris', _listToItems(
         data, SourceId.wris, FeedItemKind.telemetry,
         titleKey: 'stationName', valueKey: 'waterLevel',
         dangerKey: 'alertLevel', subtitleKey: 'riverName',
-      );
+      ));
       _setHealth(SourceId.wris, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.wris, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] WRIS: $e');
+      _emit();
     }
-    _emit();
   }
 
   Future<void> _fetchRealTime() async {
     final t0 = DateTime.now();
     try {
       final results = await _rtRiver.fetchAll().timeout(_timeout);
-      _rtCache = results.map(_liveResultToItem).toList();
+      _setSlot('rt', results.map(_liveResultToItem).toList());
       _setHealth(SourceId.realTimeRiver, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.realTimeRiver, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] RT-River: $e');
+      _emit();
     }
-    _emit();
   }
 
   Future<void> _fetchIndiaStations() async {
@@ -297,39 +346,46 @@ class BiharLiveEngine {
         _setHealth(SourceId.cwcBefiqr, true, DateTime.now().difference(t0));
       } catch (_) {}
 
-      final stationItems = stations.map(_floodDataToItem).toList();
-      _stationCache = <BiharFeedItem>[...stationItems, ...befiqrItems];
+      _setSlot('india', [...stations.map(_floodDataToItem), ...befiqrItems]);
       _setHealth(SourceId.indiaStations, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.indiaStations, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] IndiaStations: $e');
+      _emit();
     }
-    _emit();
   }
 
   Future<void> _fetchNews() async {
     final t0 = DateTime.now();
     try {
       final items = await _news.fetchAll();
-      _newsCache = items.map(_newsToItem).toList();
+      _setSlot('news', items.map(_newsToItem).toList());
       _setHealth(SourceId.news, true, DateTime.now().difference(t0));
     } catch (e) {
       _setHealth(SourceId.news, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] News: $e');
+      _emit();
     }
-    _emit();
   }
 
-  // ── emit ──────────────────────────────────────────────────────────────────
+  // ── emit ───────────────────────────────────────────────────────────────────
+  // Reads ALL slots fresh, flattens, deduplicates by id, then broadcasts once.
+  // Because every slot is replaced (never appended), the item count is always
+  // the union of current slot sizes — it can never grow unboundedly.
 
   void _emit() {
-    final all = [
-      ..._gaugeCache, ..._kosiCache, ..._wrisCache,
-      ..._rtCache,    ..._stationCache, ..._newsCache,
-    ];
     final seen  = <String>{};
-    final dedup = all.where((i) => seen.add(i.id)).toList();
-    final feed  = BiharLiveFeed(
+    final dedup = <BiharFeedItem>[];
+
+    // Slot iteration order determines priority for dedup:
+    // rt > wrd > wrd_scrape > kosi > wris > india > news
+    for (final key in ['rt', 'wrd', 'wrd_scrape', 'kosi', 'wris', 'india', 'news']) {
+      for (final item in (_slots[key] ?? [])) {
+        if (seen.add(item.id)) dedup.add(item);
+      }
+    }
+
+    final feed = BiharLiveFeed(
       items:       dedup,
       health:      Map.unmodifiable(_health),
       generatedAt: DateTime.now(),
