@@ -1,16 +1,21 @@
 // lib/data/bihar_rivers.dart
 //
-// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v4.1)
+// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v4.2)
 //
-// v4.1 changes vs v4:
-//   ADDED  gaugeRiskFromLevels()  — single canonical severity fn used by
-//          DataFetchEngine._deriveRisk, RiverStation.dangerClass, and
-//          ActiveAlertController._deriveSeverity so all screens agree.
+// v4.2 changes vs v4.1 (12 Jun 2026 — BEAMS/BeFIQR re-verification):
+//   CORRECTED  Buxar          DL 60.32→60.30  HFL 62.09→62.10
+//   CORRECTED  Samastipur     DL 46.02→46.00  HFL 49.38→49.40
+//   CORRECTED  Darauli        DL 61.52→60.82  HFL 63.10→61.82  [Ghaghra]
+//   CORRECTED  Gangpur Siswan WL 63.00→56.70  DL 64.10→57.04  HFL 65.82→58.26  [Ghaghra — was ~7m high]
+//   CORRECTED  Jhanjharpur    WL 49.50→48.50  DL 50.50→50.00  [Kamla]
+//   CORRECTED  Sonbarsa       HFL 83.75→83.20  [Jhim]
+//   CORRECTED  Taibpur        WL 34.65→64.40  DL 35.65→66.00  HFL 38.16→67.22
+//              (was mis-keyed as Dhengraghat clone; now correct Kishanganj MSL datum)
 //
-// SOURCES (all thresholds verified June 2026):
-//   1. BEAMS RTDAS live table — irrigation.fmiscwrdbihar.gov.in/rtdas (Jun 2026)
-//   2. BeFIQR 3-day forecast table — irrigation.befiqr.in/forecast (11 Jun 2026)
-//   3. BEAMS real-time alert — beams.fmiscwrdbihar.gov.in (11 Jun 2026 15 HRS)
+// SOURCES (all thresholds re-verified 12 Jun 2026):
+//   1. BEAMS RTDAS live table — irrigation.fmiscwrdbihar.gov.in/rtdas (12 Jun 2026)
+//   2. BeFIQR 3-day forecast table — irrigation.befiqr.in/forecast (12 Jun 2026)
+//   3. BEAMS real-time alert — beams.fmiscwrdbihar.gov.in (12 Jun 2026)
 //   4. WRD Bihar FMISC daily bulletin — helpdeskwrdbihar.com (Oct 2024)
 //   5. CWC Flood Forecast bulletins 2011-2024 — pib.gov.in / ndmindia.mha.gov.in
 //
@@ -240,7 +245,7 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // GAUGE STATION DATA — 46 stations, 15 rivers
-// All thresholds verified from BEAMS RTDAS + BeFIQR June 2026.
+// All thresholds re-verified from BEAMS RTDAS + BeFIQR 12 Jun 2026.
 // WL = Warning Level, DL = Danger Level, HFL = Highest Flood Level (all m MSL)
 // ══════════════════════════════════════════════════════════════════════════════
 const List<BiharGauge> kBiharGauges = [
@@ -276,10 +281,11 @@ const List<BiharGauge> kBiharGauges = [
     lat: 25.2425, lon: 86.9842, cwcCode: 'BHP',
     warningLevel: 32.50, dangerLevel: 33.68, hfl: 34.86, hflYear: '2021',
   ),
+  // v4.2: DL 60.32→60.30  HFL 62.09→62.10  (BEAMS 12 Jun 2026)
   BiharGauge(
     river: 'Ganga', station: 'Buxar', district: 'Buxar',
     lat: 25.5667, lon: 83.9667,
-    warningLevel: 59.20, dangerLevel: 60.32, hfl: 62.09, hflYear: '1948',
+    warningLevel: 59.20, dangerLevel: 60.30, hfl: 62.10, hflYear: '1948',
   ),
 
   // ──────────── KOSI (6 stations) ──────────────────────────────────────────
@@ -404,10 +410,11 @@ const List<BiharGauge> kBiharGauges = [
     lat: 26.1209, lon: 85.3647,
     warningLevel: 51.40, dangerLevel: 52.53, hfl: 54.29, hflYear: '1987',
   ),
+  // v4.2: DL 46.02→46.00  HFL 49.38→49.40  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Burhi Gandak', station: 'Samastipur', district: 'Samastipur',
     lat: 25.8620, lon: 85.7812,
-    warningLevel: 44.80, dangerLevel: 46.02, hfl: 49.38, hflYear: '1987',
+    warningLevel: 44.80, dangerLevel: 46.00, hfl: 49.40, hflYear: '1987',
   ),
   BiharGauge(
     river: 'Burhi Gandak', station: 'Rosera', district: 'Samastipur',
@@ -426,15 +433,17 @@ const List<BiharGauge> kBiharGauges = [
   ),
 
   // ──────────── GHAGHRA (2 stations) ───────────────────────────────────────
+  // v4.2: DL 61.52→60.82  HFL 63.10→61.82  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Ghaghra', station: 'Darauli', district: 'Siwan',
     lat: 26.0700, lon: 84.4100,
-    warningLevel: 60.50, dangerLevel: 61.52, hfl: 63.10, hflYear: '1998',
+    warningLevel: 60.50, dangerLevel: 60.82, hfl: 61.82, hflYear: '1998',
   ),
+  // v4.2: WL 63.00→56.70  DL 64.10→57.04  HFL 65.82→58.26  (BeFIQR 12 Jun 2026 — old values were ~7m high)
   BiharGauge(
     river: 'Ghaghra', station: 'Gangpur Siswan', district: 'Siwan',
     lat: 26.2500, lon: 84.3500,
-    warningLevel: 63.00, dangerLevel: 64.10, hfl: 65.82, hflYear: '1998',
+    warningLevel: 56.70, dangerLevel: 57.04, hfl: 58.26, hflYear: '1998',
   ),
 
   // ──────────── KAMLA (3 stations) ─────────────────────────────────────────
@@ -443,10 +452,11 @@ const List<BiharGauge> kBiharGauges = [
     lat: 26.5940, lon: 86.2260,
     warningLevel: 67.75, dangerLevel: 67.75, hfl: 71.35, hflYear: '2019',
   ),
+  // v4.2: WL 49.50→48.50  DL 50.50→50.00  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Kamla', station: 'Jhanjharpur', district: 'Madhubani',
     lat: 26.2640, lon: 86.2790,
-    warningLevel: 49.50, dangerLevel: 50.50, hfl: 53.11, hflYear: '2019',
+    warningLevel: 48.50, dangerLevel: 50.00, hfl: 53.11, hflYear: '2019',
   ),
   BiharGauge(
     river: 'Kamla', station: 'Kamtaul (Kamla)', district: 'Madhubani',
@@ -455,10 +465,12 @@ const List<BiharGauge> kBiharGauges = [
   ),
 
   // ──────────── MAHANANDA (3 stations) ─────────────────────────────────
+  // v4.2: WL 34.65→64.40  DL 35.65→66.00  HFL 38.16→67.22
+  //       (was mis-keyed as Dhengraghat clone; corrected to Kishanganj MSL datum — BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
     lat: 26.1000, lon: 87.9500,
-    warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.16, hflYear: '2017',
+    warningLevel: 64.40, dangerLevel: 66.00, hfl: 67.22, hflYear: '2017',
   ),
   BiharGauge(
     river: 'Mahananda', station: 'Dhengraghat (Mahananda)', district: 'Purnia',
@@ -503,10 +515,11 @@ const List<BiharGauge> kBiharGauges = [
   ),
 
   // ──────────── JHIM (1 station) ───────────────────────────────────────────
+  // v4.2: HFL 83.75→83.20  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Jhim', station: 'Sonbarsa', district: 'Sitamarhi',
     lat: 26.7000, lon: 85.4800,
-    warningLevel: 80.50, dangerLevel: 81.85, hfl: 83.75, hflYear: '2017',
+    warningLevel: 80.50, dangerLevel: 81.85, hfl: 83.20, hflYear: '2017',
   ),
 
   // ──────────── LAL BAKEYA (1 station) ─────────────────────────────────────
