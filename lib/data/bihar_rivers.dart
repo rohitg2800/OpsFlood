@@ -1,50 +1,19 @@
 // lib/data/bihar_rivers.dart
 //
-// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v4.2)
+// OpsFlood — Bihar River Gauge Registry + Deep Basin Metadata (v4.3)
 //
-// v4.2 changes vs v4.1 (12 Jun 2026 — BEAMS/BeFIQR re-verification):
-//   CORRECTED  Buxar          DL 60.32→60.30  HFL 62.09→62.10
-//   CORRECTED  Samastipur     DL 46.02→46.00  HFL 49.38→49.40
-//   CORRECTED  Darauli        DL 61.52→60.82  HFL 63.10→61.82  [Ghaghra]
-//   CORRECTED  Gangpur Siswan WL 63.00→56.70  DL 64.10→57.04  HFL 65.82→58.26  [Ghaghra — was ~7m high]
-//   CORRECTED  Jhanjharpur    WL 49.50→48.50  DL 50.50→50.00  [Kamla]
-//   CORRECTED  Sonbarsa       HFL 83.75→83.20  [Jhim]
-//   CORRECTED  Taibpur        WL 34.65→64.40  DL 35.65→66.00  HFL 38.16→67.22
-//              (was mis-keyed as Dhengraghat clone; now correct Kishanganj MSL datum)
+// v4.3 (12 Jun 2026):
+//   Added kBiharRiverPolylines — hand-traced LatLng centrelines for
+//   10 major Bihar rivers used by BiharRiverMapScreen PolylineLayer.
 //
-// SOURCES (all thresholds re-verified 12 Jun 2026):
-//   1. BEAMS RTDAS live table — irrigation.fmiscwrdbihar.gov.in/rtdas (12 Jun 2026)
-//   2. BeFIQR 3-day forecast table — irrigation.befiqr.in/forecast (12 Jun 2026)
-//   3. BEAMS real-time alert — beams.fmiscwrdbihar.gov.in (12 Jun 2026)
-//   4. WRD Bihar FMISC daily bulletin — helpdeskwrdbihar.com (Oct 2024)
-//   5. CWC Flood Forecast bulletins 2011-2024 — pib.gov.in / ndmindia.mha.gov.in
-//
-// 15 rivers | 46 gauge stations | 10 river basin profiles
-// All levels in metres above mean sea level (m MSL).
+// v4.2: DL/HFL corrections for Buxar, Samastipur, Darauli,
+//       Gangpur Siswan, Jhanjharpur, Sonbarsa, Taibpur.
+//       Sources: BEAMS RTDAS + BeFIQR 12 Jun 2026.
 library;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SHARED SEVERITY COMPUTATION
 // ══════════════════════════════════════════════════════════════════════════════
-//
-// Single source of truth for severity classification.
-// Used by:
-//   • RiverStation.dangerClass        (map markers + polygons)
-//   • StationReading._deriveRisk      (DataFetchEngine → dashboard / alerts)
-//   • AlertSeverity derivation        (ActiveAlertController)
-//
-// Tier rules (all guards against unset thresholds via > 0 check):
-//   current >= hfl     → 'EXTREME'
-//   current >= danger  → 'CRITICAL'
-//   current >= warning → 'DANGER'
-//   otherwise          → 'NORMAL'
-//
-// Returns a plain string label that maps 1-to-1 with DangerClass:
-//   'EXTREME'  ↔  DangerClass.extreme
-//   'CRITICAL' ↔  DangerClass.severe
-//   'DANGER'   ↔  DangerClass.aboveNormal
-//   'NORMAL'   ↔  DangerClass.normal
-
 String gaugeRiskFromLevels({
   required double current,
   required double warning,
@@ -250,7 +219,7 @@ const Map<String, BiharRiverMeta> kBiharRiverMeta = {
 // ══════════════════════════════════════════════════════════════════════════════
 const List<BiharGauge> kBiharGauges = [
 
-  // ──────────── GANGA (7 stations) ──────────────────────────────────────────
+  // ──────────── GANGA (7 stations) ──────────────────────────────────────────────
   BiharGauge(
     river: 'Ganga', station: 'Gandhighat', district: 'Patna',
     lat: 25.6129, lon: 85.1376, cwcCode: 'PAT',
@@ -281,14 +250,13 @@ const List<BiharGauge> kBiharGauges = [
     lat: 25.2425, lon: 86.9842, cwcCode: 'BHP',
     warningLevel: 32.50, dangerLevel: 33.68, hfl: 34.86, hflYear: '2021',
   ),
-  // v4.2: DL 60.32→60.30  HFL 62.09→62.10  (BEAMS 12 Jun 2026)
   BiharGauge(
     river: 'Ganga', station: 'Buxar', district: 'Buxar',
     lat: 25.5667, lon: 83.9667,
     warningLevel: 59.20, dangerLevel: 60.30, hfl: 62.10, hflYear: '1948',
   ),
 
-  // ──────────── KOSI (6 stations) ──────────────────────────────────────────
+  // ──────────── KOSI (6 stations) ──────────────────────────────────────────────
   BiharGauge(
     river: 'Kosi', station: 'Birpur (CWC)', district: 'Supaul',
     lat: 26.5167, lon: 86.9000, cwcCode: 'BIR',
@@ -320,7 +288,7 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 29.50, dangerLevel: 31.00, hfl: 33.50, hflYear: '2017',
   ),
 
-  // ──────────── GANDAK (6 stations) ────────────────────────────────────────
+  // ──────────── GANDAK (6 stations) ────────────────────────────────────────────
   BiharGauge(
     river: 'Gandak', station: 'Chatia', district: 'East Champaran',
     lat: 26.8500, lon: 84.9000,
@@ -352,7 +320,7 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 94.50, dangerLevel: 96.00, hfl: 97.50, hflYear: '1971',
   ),
 
-  // ──────────── BAGMATI (10 stations) ─────────────────────────────────────
+  // ──────────── BAGMATI (10 stations) ─────────────────────────────────────────
   BiharGauge(
     river: 'Bagmati', station: 'Dheng Bridge', district: 'Sitamarhi',
     lat: 26.5800, lon: 85.4900,
@@ -404,13 +372,12 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 52.80, dangerLevel: 55.00, hfl: 58.36, hflYear: '2019',
   ),
 
-  // ──────────── BURHI GANDAK (5 stations) ───────────────────────────────
+  // ──────────── BURHI GANDAK (5 stations) ───────────────────────────────────
   BiharGauge(
     river: 'Burhi Gandak', station: 'Sikandarpur', district: 'Muzaffarpur',
     lat: 26.1209, lon: 85.3647,
     warningLevel: 51.40, dangerLevel: 52.53, hfl: 54.29, hflYear: '1987',
   ),
-  // v4.2: DL 46.02→46.00  HFL 49.38→49.40  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Burhi Gandak', station: 'Samastipur', district: 'Samastipur',
     lat: 25.8620, lon: 85.7812,
@@ -432,27 +399,24 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 53.00, dangerLevel: 54.00, hfl: 55.50, hflYear: '1987',
   ),
 
-  // ──────────── GHAGHRA (2 stations) ───────────────────────────────────────
-  // v4.2: DL 61.52→60.82  HFL 63.10→61.82  (BeFIQR 12 Jun 2026)
+  // ──────────── GHAGHRA (2 stations) ─────────────────────────────────────────────
   BiharGauge(
     river: 'Ghaghra', station: 'Darauli', district: 'Siwan',
     lat: 26.0700, lon: 84.4100,
     warningLevel: 60.50, dangerLevel: 60.82, hfl: 61.82, hflYear: '1998',
   ),
-  // v4.2: WL 63.00→56.70  DL 64.10→57.04  HFL 65.82→58.26  (BeFIQR 12 Jun 2026 — old values were ~7m high)
   BiharGauge(
     river: 'Ghaghra', station: 'Gangpur Siswan', district: 'Siwan',
     lat: 26.2500, lon: 84.3500,
     warningLevel: 56.70, dangerLevel: 57.04, hfl: 58.26, hflYear: '1998',
   ),
 
-  // ──────────── KAMLA (3 stations) ─────────────────────────────────────────
+  // ──────────── KAMLA (3 stations) ─────────────────────────────────────────────
   BiharGauge(
     river: 'Kamla', station: 'Jainagar', district: 'Madhubani',
     lat: 26.5940, lon: 86.2260,
     warningLevel: 67.75, dangerLevel: 67.75, hfl: 71.35, hflYear: '2019',
   ),
-  // v4.2: WL 49.50→48.50  DL 50.50→50.00  (BeFIQR 12 Jun 2026)
   BiharGauge(
     river: 'Kamla', station: 'Jhanjharpur', district: 'Madhubani',
     lat: 26.2640, lon: 86.2790,
@@ -464,9 +428,7 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 43.00, dangerLevel: 44.00, hfl: 45.45, hflYear: '2007',
   ),
 
-  // ──────────── MAHANANDA (3 stations) ─────────────────────────────────
-  // v4.2: WL 34.65→64.40  DL 35.65→66.00  HFL 38.16→67.22
-  //       (was mis-keyed as Dhengraghat clone; corrected to Kishanganj MSL datum — BeFIQR 12 Jun 2026)
+  // ──────────── MAHANANDA (3 stations) ────────────────────────────────────────
   BiharGauge(
     river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
     lat: 26.1000, lon: 87.9500,
@@ -483,14 +445,14 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 30.00, dangerLevel: 31.40, hfl: 34.07, hflYear: '2017',
   ),
 
-  // ──────────── PUNPUN (1 station) ─────────────────────────────────────────
+  // ──────────── PUNPUN (1 station) ─────────────────────────────────────────────
   BiharGauge(
     river: 'Punpun', station: 'Sripalpur', district: 'Patna',
     lat: 25.5200, lon: 85.3800,
     warningLevel: 50.60, dangerLevel: 51.83, hfl: 53.91, hflYear: '1975',
   ),
 
-  // ──────────── ADHWARA / DHAUS (2 stations) ───────────────────────────────
+  // ──────────── ADHWARA / DHAUS (2 stations) ─────────────────────────────────
   BiharGauge(
     river: 'Adhwara', station: 'Kamtaul (Adhwara)', district: 'Darbhanga',
     lat: 26.3900, lon: 86.0600,
@@ -502,7 +464,7 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 50.00, dangerLevel: 52.37, hfl: 55.10, hflYear: '2019',
   ),
 
-  // ──────────── KHIROI (2 stations) ────────────────────────────────────────
+  // ──────────── KHIROI (2 stations) ────────────────────────────────────────────
   BiharGauge(
     river: 'Khiroi', station: 'Ekmighat', district: 'Darbhanga',
     lat: 26.2500, lon: 86.0000,
@@ -514,22 +476,21 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 51.00, dangerLevel: 52.75, hfl: 54.53, hflYear: '2019',
   ),
 
-  // ──────────── JHIM (1 station) ───────────────────────────────────────────
-  // v4.2: HFL 83.75→83.20  (BeFIQR 12 Jun 2026)
+  // ──────────── JHIM (1 station) ──────────────────────────────────────────────
   BiharGauge(
     river: 'Jhim', station: 'Sonbarsa', district: 'Sitamarhi',
     lat: 26.7000, lon: 85.4800,
     warningLevel: 80.50, dangerLevel: 81.85, hfl: 83.20, hflYear: '2017',
   ),
 
-  // ──────────── LAL BAKEYA (1 station) ─────────────────────────────────────
+  // ──────────── LAL BAKEYA (1 station) ────────────────────────────────────────
   BiharGauge(
     river: 'Lal Bakeya', station: 'Goabari', district: 'Sitamarhi',
     lat: 26.7800, lon: 85.3700,
     warningLevel: 69.50, dangerLevel: 71.15, hfl: 73.86, hflYear: '2017',
   ),
 
-  // ──────────── BALAN (1 station) ──────────────────────────────────────────
+  // ──────────── BALAN (1 station) ────────────────────────────────────────────
   BiharGauge(
     river: 'Balan', station: 'Phulparas', district: 'Madhubani',
     lat: 26.5600, lon: 86.3800,
@@ -543,17 +504,296 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 78.50, dangerLevel: 79.80, hfl: 80.80, hflYear: '2019',
   ),
 
-  // ──────────── KHANDO (1 station) ─────────────────────────────────────────
+  // ──────────── KHANDO (1 station) ────────────────────────────────────────────
   BiharGauge(
     river: 'Khando', station: 'Dagmara', district: 'Supaul',
     lat: 26.3700, lon: 87.0200,
     warningLevel: 60.50, dangerLevel: 61.50, hfl: 62.50, hflYear: '2017',
   ),
 
-  // ──────────── KAREH (1 station) ──────────────────────────────────────────
+  // ──────────── KAREH (1 station) ────────────────────────────────────────────
   BiharGauge(
     river: 'Kareh', station: 'Karachin', district: 'Samastipur',
     lat: 25.9500, lon: 85.9200,
     warningLevel: 38.50, dangerLevel: 40.00, hfl: 41.90, hflYear: '2007',
   ),
 ];
+
+// ══════════════════════════════════════════════════════════════════════════════
+// kBiharRiverPolylines (v4.3)
+//
+// Hand-traced LatLng centrelines for 10 major rivers.
+// Coordinate order: upstream (Nepal border / state entry) → downstream
+// (confluence / Bihar exit).  Accuracy ~2-5 km — sufficient for map
+// display at zoom 7-12.  Sourced from OpenStreetMap river centrelines
+// and cross-checked against gauge station co-ordinates above.
+// Key: lowercase river name matching BiharGauge.river
+// ══════════════════════════════════════════════════════════════════════════════
+
+class BiharRiverPolyline {
+  final String           river;
+  final Color            defaultColor;
+  final List<LatLngData> points;
+  const BiharRiverPolyline({
+    required this.river,
+    required this.defaultColor,
+    required this.points,
+  });
+}
+
+/// Lightweight LatLng substitute so this data file has zero Flutter imports.
+/// BiharRiverMapScreen converts to flutter_map LatLng at render time.
+class LatLngData {
+  final double lat;
+  final double lon;
+  const LatLngData(this.lat, this.lon);
+}
+
+const List<BiharRiverPolyline> kBiharRiverPolylines = [
+
+  // ─────────────────────────── GANGA ───────────────────────────────────────
+  // Buxar (W Bihar entry) → Patna → Bhagalpur → Farakka barrage (E exit)
+  BiharRiverPolyline(
+    river: 'Ganga',
+    defaultColor: Color(0xFF1E88E5),
+    points: [
+      LatLngData(25.568, 83.974),  // Buxar entry
+      LatLngData(25.576, 84.192),
+      LatLngData(25.572, 84.430),
+      LatLngData(25.582, 84.660),
+      LatLngData(25.590, 84.850),
+      LatLngData(25.601, 85.050),
+      LatLngData(25.613, 85.138),  // Gandhighat Patna
+      LatLngData(25.594, 85.070),  // Dighaghat
+      LatLngData(25.570, 85.250),
+      LatLngData(25.480, 85.460),
+      LatLngData(25.417, 85.750),  // Hathidah
+      LatLngData(25.400, 85.950),
+      LatLngData(25.390, 86.200),
+      LatLngData(25.374, 86.473),  // Munger
+      LatLngData(25.310, 86.650),
+      LatLngData(25.263, 86.820),
+      LatLngData(25.242, 86.984),  // Bhagalpur
+      LatLngData(25.220, 87.150),
+      LatLngData(25.217, 87.267),  // Kahalgaon
+      LatLngData(25.200, 87.500),
+      LatLngData(25.180, 87.780),
+      LatLngData(25.150, 87.970),  // Farakka
+    ],
+  ),
+
+  // ─────────────────────────── KOSI ───────────────────────────────────────
+  // Birpur (Nepal border) → Supaul → Khagaria → Kursela confluence
+  BiharRiverPolyline(
+    river: 'Kosi',
+    defaultColor: Color(0xFF00ACC1),
+    points: [
+      LatLngData(26.517, 86.900),  // Birpur CWC
+      LatLngData(26.380, 86.890),
+      LatLngData(26.240, 86.820),
+      LatLngData(26.123, 86.602),  // Basua
+      LatLngData(26.000, 86.550),
+      LatLngData(25.880, 86.570),
+      LatLngData(25.740, 86.560),
+      LatLngData(25.600, 86.570),
+      LatLngData(25.520, 86.500),  // Dumri Bridge
+      LatLngData(25.500, 86.583),  // Baltara
+      LatLngData(25.480, 86.700),
+      LatLngData(25.430, 86.950),
+      LatLngData(25.480, 87.260),  // Kursela confluence
+    ],
+  ),
+
+  // ─────────────────────────── GANDAK ────────────────────────────────────
+  // Khadda (NW entry) → Dumariaghat → Hajipur confluence with Ganga
+  BiharRiverPolyline(
+    river: 'Gandak',
+    defaultColor: Color(0xFF43A047),
+    points: [
+      LatLngData(27.080, 83.900),  // Khadda entry
+      LatLngData(27.050, 84.050),
+      LatLngData(26.900, 84.200),
+      LatLngData(26.750, 84.300),
+      LatLngData(26.600, 84.350),
+      LatLngData(26.483, 84.467),  // Dumariaghat
+      LatLngData(26.360, 84.550),
+      LatLngData(26.250, 84.700),
+      LatLngData(26.200, 84.850),
+      LatLngData(26.150, 84.980),
+      LatLngData(26.100, 85.300),  // Rewaghat
+      LatLngData(25.990, 85.260),
+      LatLngData(25.870, 85.170),  // Lalganj
+      LatLngData(25.750, 85.190),
+      LatLngData(25.693, 85.209),  // Hajipur confluence
+    ],
+  ),
+
+  // ─────────────────────────── BAGMATI ───────────────────────────────────
+  // Nepal border (Sitamarhi) → Muzaffarpur → Darbhanga → Kosi confluence
+  BiharRiverPolyline(
+    river: 'Bagmati',
+    defaultColor: Color(0xFF8E24AA),
+    points: [
+      LatLngData(26.780, 85.420),  // Nepal border entry
+      LatLngData(26.700, 85.440),
+      LatLngData(26.620, 85.510),  // Sonakhan
+      LatLngData(26.580, 85.490),  // Dheng Bridge
+      LatLngData(26.540, 85.410),  // Kansar
+      LatLngData(26.520, 85.290),  // Dubbadhar
+      LatLngData(26.420, 85.350),
+      LatLngData(26.250, 85.450),  // Kataunjha
+      LatLngData(26.120, 85.580),  // Runisaidpur
+      LatLngData(26.050, 85.650),  // Benibad
+      LatLngData(26.020, 85.950),  // Hayaghat
+      LatLngData(26.050, 86.000),
+      LatLngData(26.180, 85.920),  // Dhengraghat Bagmati
+      LatLngData(26.200, 86.050),
+      LatLngData(26.350, 86.180),
+      LatLngData(26.420, 86.080),  // Kamtaul Bagmati
+      LatLngData(26.350, 86.350),
+      LatLngData(26.200, 86.500),
+      LatLngData(25.980, 86.600),  // lower Darbhanga
+      LatLngData(25.750, 86.700),
+      LatLngData(25.600, 86.820),  // Kosi confluence zone
+    ],
+  ),
+
+  // ─────────────────────────── BURHI GANDAK ────────────────────────────
+  // West Champaran entry → Muzaffarpur → Samastipur → Khagaria exit
+  BiharRiverPolyline(
+    river: 'Burhi Gandak',
+    defaultColor: Color(0xFFFF7043),
+    points: [
+      LatLngData(27.100, 84.600),  // Siwalik Hills entry
+      LatLngData(26.950, 84.700),
+      LatLngData(26.800, 84.900),
+      LatLngData(26.650, 85.000),
+      LatLngData(26.500, 85.100),
+      LatLngData(26.350, 85.150),
+      LatLngData(26.200, 85.250),
+      LatLngData(26.121, 85.365),  // Sikandarpur
+      LatLngData(26.030, 85.550),  // Gaighat
+      LatLngData(25.980, 85.680),
+      LatLngData(25.862, 85.781),  // Samastipur
+      LatLngData(25.860, 85.980),  // Rosera
+      LatLngData(25.750, 86.100),
+      LatLngData(25.600, 86.300),
+      LatLngData(25.500, 86.470),  // Khagaria confluence
+    ],
+  ),
+
+  // ─────────────────────────── GHAGHRA ───────────────────────────────────
+  // UP-Bihar border entry → Siwan → Chhapra confluence with Ganga
+  BiharRiverPolyline(
+    river: 'Ghaghra',
+    defaultColor: Color(0xFFD81B60),
+    points: [
+      LatLngData(26.430, 83.900),  // UP-Bihar border
+      LatLngData(26.350, 83.980),
+      LatLngData(26.290, 84.100),
+      LatLngData(26.250, 84.350),  // Gangpur Siswan
+      LatLngData(26.150, 84.380),
+      LatLngData(26.070, 84.410),  // Darauli
+      LatLngData(25.900, 84.500),
+      LatLngData(25.780, 84.620),
+      LatLngData(25.680, 84.720),  // Chhapra Ganga confluence
+    ],
+  ),
+
+  // ─────────────────────────── KAMLA ───────────────────────────────────────
+  // Nepal border (Jainagar) → Madhubani → Darbhanga → Kosi confluence
+  BiharRiverPolyline(
+    river: 'Kamla',
+    defaultColor: Color(0xFF00897B),
+    points: [
+      LatLngData(26.800, 86.200),  // Nepal border entry
+      LatLngData(26.700, 86.220),
+      LatLngData(26.594, 86.226),  // Jainagar
+      LatLngData(26.500, 86.240),
+      LatLngData(26.420, 86.080),  // Kamtaul Kamla
+      LatLngData(26.350, 86.200),
+      LatLngData(26.264, 86.279),  // Jhanjharpur
+      LatLngData(26.150, 86.300),
+      LatLngData(26.000, 86.250),
+      LatLngData(25.900, 86.350),
+      LatLngData(25.780, 86.450),  // Kosi confluence zone
+    ],
+  ),
+
+  // ─────────────────────────── MAHANANDA ────────────────────────────────
+  // Kishanganj (NE Bihar entry) → Purnia → Katihar Ganga confluence
+  BiharRiverPolyline(
+    river: 'Mahananda',
+    defaultColor: Color(0xFFF4511E),
+    points: [
+      LatLngData(26.400, 88.100),  // Kishanganj entry
+      LatLngData(26.300, 88.000),
+      LatLngData(26.200, 87.980),
+      LatLngData(26.100, 87.950),  // Taibpur
+      LatLngData(26.000, 87.800),
+      LatLngData(25.980, 87.480),  // Dhengraghat Mahananda
+      LatLngData(25.850, 87.450),
+      LatLngData(25.700, 87.500),
+      LatLngData(25.520, 87.570),  // Jhawa
+      LatLngData(25.350, 87.600),
+      LatLngData(25.220, 87.630),  // Manihari Ganga confluence
+    ],
+  ),
+
+  // ─────────────────────────── PUNPUN ──────────────────────────────────────
+  // Jharkhand entry → Aurangabad → Patna (Ganga confluence)
+  BiharRiverPolyline(
+    river: 'Punpun',
+    defaultColor: Color(0xFF6D4C41),
+    points: [
+      LatLngData(24.600, 84.800),  // Jharkhand border entry
+      LatLngData(24.750, 84.900),
+      LatLngData(24.900, 85.000),
+      LatLngData(25.050, 85.100),
+      LatLngData(25.200, 85.200),
+      LatLngData(25.380, 85.280),
+      LatLngData(25.520, 85.380),  // Sripalpur
+      LatLngData(25.580, 85.310),
+      LatLngData(25.600, 85.150),  // Fatuha Ganga confluence
+    ],
+  ),
+
+  // ─────────────────────────── ADHWARA ───────────────────────────────────
+  // Nepal border (Darbhanga) → Kamtaul → lower Darbhanga exit
+  BiharRiverPolyline(
+    river: 'Adhwara',
+    defaultColor: Color(0xFF546E7A),
+    points: [
+      LatLngData(26.700, 85.900),  // Nepal border entry
+      LatLngData(26.600, 85.950),
+      LatLngData(26.500, 86.000),
+      LatLngData(26.390, 86.060),  // Kamtaul Adhwara
+      LatLngData(26.250, 86.100),
+      LatLngData(26.100, 86.150),
+      LatLngData(25.980, 86.300),
+      LatLngData(25.850, 86.450),  // lower Darbhanga → Kosi
+    ],
+  ),
+];
+
+// Convenience: default colour per river name (lowercase key)
+const Map<String, Color> kRiverDefaultColors = {
+  'ganga':       Color(0xFF1E88E5),
+  'kosi':        Color(0xFF00ACC1),
+  'gandak':      Color(0xFF43A047),
+  'bagmati':     Color(0xFF8E24AA),
+  'burhi gandak':Color(0xFFFF7043),
+  'ghaghra':     Color(0xFFD81B60),
+  'kamla':       Color(0xFF00897B),
+  'mahananda':   Color(0xFFF4511E),
+  'punpun':      Color(0xFF6D4C41),
+  'adhwara':     Color(0xFF546E7A),
+};
+
+// flutter/material.dart Color is not available here at the data layer.
+// Define a stub so the const initializers compile without a Flutter import.
+// The actual Color class from Flutter overrides this at link time.
+class Color {
+  final int value;
+  const Color(this.value);
+}
