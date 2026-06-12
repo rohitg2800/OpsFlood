@@ -323,16 +323,19 @@ const List<BiharGauge> kBiharGauges = [
     warningLevel: 44.50, dangerLevel: 45.72, hfl: 48.96, hflYear: '1987',
   ),
   BiharGauge(
-    river: 'Bagmati', station: 'Dhengraghat', district: 'Darbhanga',
+    // FIX: renamed from 'Dhengraghat' → 'Dhengraghat (Bagmati)' to disambiguate
+    // from Mahananda's Dhengraghat (Purnia district) below.
+    river: 'Bagmati', station: 'Dhengraghat (Bagmati)', district: 'Darbhanga',
     lat: 26.1800, lon: 85.9200,
     // Source: WRD bulletin + PIB 2011 — WL 34.65, DL 35.65, HFL 47.30/2002
     warningLevel: 34.65, dangerLevel: 35.65, hfl: 47.30, hflYear: '2002',
   ),
   BiharGauge(
-    river: 'Bagmati', station: 'Kamtaul', district: 'Darbhanga',
+    // FIX: renamed from 'Kamtaul' → 'Kamtaul (Bagmati)' to disambiguate
+    // from Kamla's Kamtaul (Madhubani district) below.
+    river: 'Bagmati', station: 'Kamtaul (Bagmati)', district: 'Darbhanga',
     lat: 26.4200, lon: 86.0800,
     // Source: WRD FMISC bulletin — DL 50.00, HFL 53.01/2004
-    // Previous seed had wrong DL 67.10 (confused with Jainagar/Kamla)
     warningLevel: 49.00, dangerLevel: 50.00, hfl: 53.01, hflYear: '2004',
   ),
 
@@ -379,21 +382,20 @@ const List<BiharGauge> kBiharGauges = [
     river: 'Kamla', station: 'Jainagar', district: 'Madhubani',
     lat: 26.5940, lon: 86.2260,
     // WRD bulletin DL 68.50, HFL 71.35/2019
-    // Previous seed had WRONG DL 72.10 (above the actual HFL!)
     warningLevel: 67.50, dangerLevel: 68.50, hfl: 71.35, hflYear: '2019',
   ),
   BiharGauge(
     river: 'Kamla', station: 'Jhanjharpur', district: 'Madhubani',
     lat: 26.2640, lon: 86.2790,
     // WRD bulletin DL 50.50, HFL 53.11/2019
-    // Previous seed had WRONG DL 58.96 (confusing Kamla Balan vs Kamla)
     warningLevel: 49.50, dangerLevel: 50.50, hfl: 53.11, hflYear: '2019',
   ),
   BiharGauge(
-    river: 'Kamla', station: 'Kamtaul', district: 'Madhubani',
-    // Note: this is the Kamla gauge at Kamtaul, different from Bagmati Kamtaul
-    // BeFIQR manual: Kamla Kothram DL 44.00, HFL 45.45
+    // FIX: renamed from 'Kamtaul' → 'Kamtaul (Kamla)' to disambiguate
+    // from Bagmati's Kamtaul (Darbhanga district) above.
+    river: 'Kamla', station: 'Kamtaul (Kamla)', district: 'Madhubani',
     lat: 26.4200, lon: 86.0800,
+    // BeFIQR manual: Kamla Kothram DL 44.00, HFL 45.45
     warningLevel: 43.00, dangerLevel: 44.00, hfl: 45.45, hflYear: '2007',
   ),
 
@@ -403,11 +405,12 @@ const List<BiharGauge> kBiharGauges = [
     river: 'Mahananda', station: 'Taibpur', district: 'Kishanganj',
     lat: 26.1000, lon: 87.9500,
     // Source: WRD bulletin — DL 35.65, HFL 38.16/2017
-    // Previous seed had WRONG DL 35.20, HFL 37.40 causing 150% display
     warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.16, hflYear: '2017',
   ),
   BiharGauge(
-    river: 'Mahananda', station: 'Dhengraghat', district: 'Purnia',
+    // FIX: renamed from 'Dhengraghat' → 'Dhengraghat (Mahananda)' to disambiguate
+    // from Bagmati's Dhengraghat (Darbhanga district) above.
+    river: 'Mahananda', station: 'Dhengraghat (Mahananda)', district: 'Purnia',
     lat: 25.9800, lon: 87.4800,
     // Source: PIB CWC 2011 bulletin + WRD — WL 34.65, DL 35.65, HFL 38.16/2017
     warningLevel: 34.65, dangerLevel: 35.65, hfl: 38.16, hflYear: '2017',

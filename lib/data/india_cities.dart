@@ -114,18 +114,9 @@ const List<IndiaCity> kIndiaCities = [
     warningLevel: 114.50, dangerLevel: 115.50, hfl: 117.00,
     cwcStation: 'ELGIN_BRIDGE',
   ),
-  IndiaCity(
-    id: 'bhagalpur', name: 'Bhagalpur', state: 'Bihar', river: 'Ganga',
-    lat: 25.2425, lon: 86.9842,
-    warningLevel: 33.53, dangerLevel: 35.08, hfl: 36.50,
-    cwcStation: 'BHAGALPUR',
-  ),
-  IndiaCity(
-    id: 'munger', name: 'Munger', state: 'Bihar', river: 'Ganga',
-    lat: 25.3756, lon: 86.4733,
-    warningLevel: 38.46, dangerLevel: 40.21, hfl: 42.00,
-    cwcStation: 'MUNGER',
-  ),
+  // NOTE: Bhagalpur and Munger removed — covered by kBiharGauges WRD stations
+  // (Ganga/Bhagalpur and Ganga/Munger). Keeping CWC versions here caused
+  // duplicate fetches and conflicting thresholds on the dashboard.
   IndiaCity(
     id: 'begusarai', name: 'Begusarai', state: 'Bihar', river: 'Ganga',
     lat: 25.4182, lon: 86.1272,
@@ -175,7 +166,10 @@ const List<IndiaCity> kIndiaCities = [
     cwcStation: 'DORIGHATS',
   ),
   IndiaCity(
-    id: 'khagaria', name: 'Khagaria', state: 'Bihar', river: 'Kosi',
+    // FIX: river corrected from 'Kosi' → 'Burhi Gandak'.
+    // kBiharGauges maps Khagaria gauge to Burhi Gandak river.
+    // The CWC KHAGARIA station sits on the Burhi Gandak, not the Kosi mainstream.
+    id: 'khagaria', name: 'Khagaria', state: 'Bihar', river: 'Burhi Gandak',
     lat: 25.5010, lon: 86.4622,
     warningLevel: 38.00, dangerLevel: 40.00, hfl: 42.00,
     cwcStation: 'KHAGARIA',
@@ -366,12 +360,7 @@ const List<IndiaCity> kIndiaCities = [
     warningLevel: 290.00, dangerLevel: 292.00, hfl: 295.00,
     cwcStation: 'HOSHANGABAD',
   ),
-  IndiaCity(
-    id: 'nashik', name: 'Nashik', state: 'Maharashtra', river: 'Godavari',
-    lat: 19.9975, lon: 73.7898,
-    warningLevel: 572.90, dangerLevel: 574.40, hfl: 576.00,
-    cwcStation: 'GANGAPUR',
-  ),
+  // FIX: duplicate nashik entry removed (was copy-pasted twice).
   IndiaCity(
     id: 'nashik', name: 'Nashik', state: 'Maharashtra', river: 'Godavari',
     lat: 19.9975, lon: 73.7898,
