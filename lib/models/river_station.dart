@@ -1,26 +1,27 @@
 // lib/models/river_station.dart
 // Extended model — carries both static CWC thresholds AND live API fields.
 // v2:   added lat/lon (nullable) and riskLabel getter.
-// v2.1: guard hfl==0 and danger==0 in dangerClass so stations with no
-//       seeded thresholds don't falsely show EXTREME/SEVERE.
+// v2.1: guard hfl==0 and danger==0 in dangerClass.
+// v2.2: dangerClass now delegates to gaugeRiskFromLevels() (bihar_rivers.dart)
+//       so the map and all other screens share one severity computation.
 
 export 'live_river_result_ext.dart';
+
+import '../data/bihar_rivers.dart';
 
 class RiverStation {
   final String city;
   final String state;
   final String river;
   final String station;
-  final double current;   // m – gauge reading (live or seeded)
-  final double warning;   // m – CWC warning level
-  final double danger;    // m – CWC danger level
-  final double hfl;       // m – highest flood level
+  final double current;
+  final double warning;
+  final double danger;
+  final double hfl;
 
-  // ── Geographic coordinates (null = not available) ──────────────────────
   final double? lat;
   final double? lon;
 
-  // ── Live fields (null = not yet fetched) ────────────────────────────────
   final double?  rainfallLastHour;
   final double?  flowRate;
   final String?  trend;
@@ -49,25 +50,30 @@ class RiverStation {
     this.isLive = false,
   });
 
+  /// Delegates to gaugeRiskFromLevels() — the single canonical severity fn.
+  /// Map markers, polygons, and all UI consumers share this computation.
   DangerClass get dangerClass {
-    // Guard: if hfl or danger are 0 (not seeded) skip those tiers to avoid
-    // falsely classifying every station as extreme/severe.
-    if (hfl    > 0 && current >= hfl)    return DangerClass.extreme;
-    if (danger > 0 && current >= danger) return DangerClass.severe;
-    if (warning > 0 && current >= warning) return DangerClass.aboveNormal;
-    return DangerClass.normal;
+    final label = gaugeRiskFromLevels(
+      current: current,
+      warning: warning,
+      danger:  danger,
+      hfl:     hfl,
+    );
+    return switch (label) {
+      'EXTREME'  => DangerClass.extreme,
+      'CRITICAL' => DangerClass.severe,
+      'DANGER'   => DangerClass.aboveNormal,
+      _          => DangerClass.normal,
+    };
   }
 
-  /// Human-readable risk label — kept in sync with AlertSeverity labels
-  /// used across the rest of the app.
-  String get riskLabel {
-    switch (dangerClass) {
-      case DangerClass.extreme:     return 'CRITICAL';
-      case DangerClass.severe:      return 'SEVERE';
-      case DangerClass.aboveNormal: return 'WARNING';
-      case DangerClass.normal:      return 'NORMAL';
-    }
-  }
+  /// Human-readable risk label — kept in sync with AlertSeverity labels.
+  String get riskLabel => gaugeRiskFromLevels(
+    current: current,
+    warning: warning,
+    danger:  danger,
+    hfl:     hfl,
+  );
 
   double get progressPct => hfl > 0 ? (current / hfl).clamp(0.0, 1.0) : 0.0;
   int    get riskScore   => dangerClass.index;

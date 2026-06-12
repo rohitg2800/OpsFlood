@@ -1,11 +1,11 @@
-// lib/services/data_fetch_engine.dart  v4.0 — backend-bidirectional
+// lib/services/data_fetch_engine.dart  v4.1
 //
-// v4.0 changes (vs v3.0):
-//   After every completed _fetchCycle() the full DataFetchSnapshot is pushed
-//   to the Railway backend via BackendSyncService.pushGaugeTelemetry().
-//   Critical/danger events are extracted and pushed separately.
+// v4.1: _deriveRisk() replaced with gaugeRiskFromLevels() from bihar_rivers.dart
+//       so DataFetchEngine, RiverStation.dangerClass, and the map all use the
+//       same four-tier severity computation (EXTREME/CRITICAL/DANGER/NORMAL).
+//       The old warn*0.85 pre-warning bucket is removed.
 //
-//   All other logic is identical to v3.0.
+// v4.0: backend-bidirectional push via BackendSyncService.
 library;
 
 import 'dart:async';
@@ -17,7 +17,7 @@ import 'package:flutter/foundation.dart';
 import '../data/bihar_rivers.dart';
 import '../models/river_station.dart';
 import 'backend_api_service.dart';
-import 'backend_sync_service.dart';   // ← NEW v4.0
+import 'backend_sync_service.dart';
 import 'wrd_bihar_service.dart';
 import 'fcm_broadcast_service.dart';
 
@@ -101,7 +101,8 @@ class StationReading {
       dangerLevel:      dng,
       hfl:              this.hfl,
       progressPct:      prog,
-      riskLabel:        riskLabel ?? _deriveRisk(cl, this.warningLevel, dng),
+      // Always re-derive from shared fn so riskLabel stays canonical
+      riskLabel:        riskLabel ?? _deriveRisk(cl, this.warningLevel, dng, this.hfl),
       source:           source    ?? this.source,
       isLive:           isLive    ?? this.isLive,
       fetchedAt:        fetchedAt ?? this.fetchedAt,
@@ -127,12 +128,15 @@ class StationReading {
     dataSource: source,
   );
 
-  static String _deriveRisk(double cur, double warn, double dng) {
-    if (cur >= dng)          return 'CRITICAL';
-    if (cur >= warn)         return 'DANGER';
-    if (cur >= warn * 0.85)  return 'WARNING';
-    return 'NORMAL';
-  }
+  /// Single canonical severity derivation — delegates to gaugeRiskFromLevels()
+  /// in bihar_rivers.dart.  Used by DataFetchEngine, map, and alert controller.
+  static String _deriveRisk(double cur, double warn, double dng, double hfl) =>
+      gaugeRiskFromLevels(
+        current: cur,
+        warning: warn,
+        danger:  dng,
+        hfl:     hfl,
+      );
 
   Map<String, dynamic> toJson() => {
     'n': stationName, 'r': river, 'd': district, 's': state,
@@ -162,7 +166,7 @@ class StationReading {
       lon:          (j['lo'] as num).toDouble(),
       currentLevel: cl, warningLevel: wl, dangerLevel: dl, hfl: hfl,
       progressPct:  dl > 0 ? (cl / dl * 100).clamp(0.0, 200.0) : 0.0,
-      riskLabel:    j['rl'] as String,
+      riskLabel:    _deriveRisk(cl, wl, dl, hfl),   // re-derive on deserialise
       source:       j['src'] as String,
       isLive:       j['lv'] as bool,
       fetchedAt:    DateTime.fromMillisecondsSinceEpoch(j['fa'] as int),
@@ -209,7 +213,7 @@ class DataFetchSnapshot {
   int    get criticalCount   => stations.where((s) => s.riskLabel == 'CRITICAL').length;
   int    get dangerCount     => stations.where((s) =>
       s.riskLabel == 'CRITICAL' || s.riskLabel == 'DANGER').length;
-  int    get warningCount    => stations.where((s) => s.riskLabel == 'WARNING').length;
+  int    get warningCount    => stations.where((s) => s.riskLabel == 'DANGER').length;
   double get maxLevel        => stations.isEmpty ? 0
       : stations.map((s) => s.currentLevel).reduce(math.max);
   String get maxLevelStation => stations.isEmpty ? '—'
@@ -384,15 +388,14 @@ class DataFetchEngine {
         final base = _findBase(stations, ws.site, ws.district ?? '');
         if (base == null) continue;
         final cl   = ws.currentLevel ?? base.currentLevel;
-        final wl   = (ws.warningLevel != null && ws.warningLevel! > 0)
-            ? ws.warningLevel! : base.warningLevel;
-        final dl   = (ws.dangerLevel  != null && ws.dangerLevel!  > 0)
-            ? ws.dangerLevel!  : base.dangerLevel;
+        // Thresholds always come from the seed (gauge registry), never from API
+        final wl   = base.warningLevel;
+        final dl   = base.dangerLevel;
         final live = ws.source == 'WRD_BIHAR_LIVE';
         final key  = _normaliseKey(ws.site);
         stations[key] = base.copyWith(
           currentLevel: cl,
-          riskLabel:    StationReading._deriveRisk(cl, wl, dl),
+          // riskLabel re-derived inside copyWith via _deriveRisk
           source:       live ? 'WRD_LIVE' : 'WRD_DISK',
           isLive:       live,
           fetchedAt:    now,
@@ -434,7 +437,7 @@ class DataFetchEngine {
         final key   = _normaliseKey(sName);
         stations[key] = base.copyWith(
           currentLevel: lvl,
-          riskLabel: StationReading._deriveRisk(lvl, base.warningLevel, base.dangerLevel),
+          // riskLabel re-derived inside copyWith
           source:    'CWC_FFS',
           isLive:    true,
           fetchedAt: now,
@@ -579,8 +582,6 @@ class DataFetchEngine {
     _errorStreak = 0;
     if (!_ctrl.isClosed) _ctrl.add(snap);
 
-    // ── v4.0: push to backend ──────────────────────────────────────────────────────
-    // Fire-and-forget: does NOT block the UI stream or the next cycle.
     unawaited(BackendSyncService.instance.pushGaugeTelemetry(snap));
 
     _log('cycle done: ${finalList.length} stations, '
