@@ -1,10 +1,20 @@
 // lib/models/flood_data.dart
 //
 // FloodData — one city's live flood snapshot.
-// v2: added `district` field for zila display on river cards.
+// v2:   added `district` field for zila display on river cards.
 // v2.1: added latitude/longitude nullable alias getters for dashboard_screen.
+// v2.2: added FloodData.fromRiverStation() factory so any screen that has a
+//       RiverStation (from mergedStationsProvider) can produce a FloodData
+//       without going through JSON serialization.
+//       Vocab bridge:
+//         RiverStation.riskLabel  →  FloodData.riskLevel
+//           'EXTREME'  → 'CRITICAL'  (above HFL — most severe bucket)
+//           'CRITICAL' → 'SEVERE'
+//           'DANGER'   → 'MODERATE'
+//           'NORMAL'   → 'LOW'
 
 import 'dart:ui' show Color;
+import '../models/river_station.dart';
 
 class FloodData {
   final String  city;
@@ -51,6 +61,68 @@ class FloodData {
     double? lon,
   })  : _lat = lat,
         _lon = lon;
+
+  // ── v2.2: RiverStation adapter ───────────────────────────────────────────
+
+  /// Converts a [RiverStation] (from mergedStationsProvider) into a [FloodData]
+  /// so that widgets like [StationCard] can be driven by live data without
+  /// going through JSON round-trips.
+  ///
+  /// Vocab bridge (RiverStation.riskLabel → FloodData.riskLevel):
+  ///   'EXTREME'  → 'CRITICAL'
+  ///   'CRITICAL' → 'SEVERE'
+  ///   'DANGER'   → 'MODERATE'
+  ///   'NORMAL'   → 'LOW'
+  factory FloodData.fromRiverStation(RiverStation s) {
+    // riskLabel comes from gaugeRiskFromLevels() — values: EXTREME, CRITICAL,
+    // DANGER, NORMAL.  Map to FloodData's 4-bucket vocab.
+    final String riskLevel;
+    switch (s.riskLabel.toUpperCase()) {
+      case 'EXTREME':  riskLevel = 'CRITICAL'; break;
+      case 'CRITICAL': riskLevel = 'SEVERE';   break;
+      case 'DANGER':   riskLevel = 'MODERATE'; break;
+      default:         riskLevel = 'LOW';       break;
+    }
+
+    // Capacity: use HFL as ceiling when available, else danger level.
+    final ceiling = s.hfl > 0 ? s.hfl : (s.danger > 0 ? s.danger : 1.0);
+    final cap = (s.current / ceiling * 100).clamp(0.0, 100.0);
+
+    // Parse lastUpdated 'HH:mm' string into a DateTime (today's date).
+    final now = DateTime.now();
+    DateTime lastUpdated = now;
+    if (s.lastUpdated != null) {
+      final parts = s.lastUpdated!.split(':');
+      if (parts.length >= 2) {
+        final h = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (h != null && m != null) {
+          lastUpdated = DateTime(now.year, now.month, now.day, h, m);
+        }
+      }
+    }
+
+    return FloodData(
+      city:                s.city,
+      district:            '',          // RiverStation has no district field
+      state:               s.state,
+      riverName:           s.river,
+      currentLevel:        s.current,
+      warningLevel:        s.warning,
+      dangerLevel:         s.danger,
+      safeLevel:           s.warning,   // treat warning as the 'safe ceiling'
+      capacityPercent:     cap,
+      riskLevel:           riskLevel,
+      status:              s.isLive ? 'LIVE' : 'ESTIMATED',
+      effectiveRainfallMm: s.rainfallLastHour ?? 0.0,
+      flowRate:            s.flowRate,
+      lastUpdated:         lastUpdated,
+      lat:                 s.lat,
+      lon:                 s.lon,
+    );
+  }
+
+  // ── Existing API (unchanged) ─────────────────────────────────────────────
 
   /// Geographic latitude — null when not provided by the data source.
   double? get latitude  => _lat;
