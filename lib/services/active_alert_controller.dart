@@ -1,33 +1,39 @@
-// lib/services/active_alert_controller.dart  v1.1
+// lib/services/active_alert_controller.dart  v2.0
 //
 // OpsFlood — Active Alert Rules Engine
 //
-// v1.1 (12 Jun 2026):
-//   AAC-1: _kMaxAlerts 5→8 (12 stations now; tributaries were dropped at rank 6-12)
-//   AAC-3: _kClearWindow 5min→15min (CWC watch-period minimum)
-//   AAC-4: _kRorThreshold 0.5→0.3 m/h (Bagmati/Kamla faster-rising tributaries)
+// v2.0 (12 Jun 2026)  — CANONICAL PARENT WIRING
+//
+//   AAC-10 (BREAKING): DataFetchEngine.stream subscription REMOVED.
+//
+//   Problem (v1.x):
+//     ActiveAlertController subscribed directly to DataFetchEngine.instance.stream,
+//     a pipeline SEPARATE from mergedStationsProvider (the All Stations screen
+//     source of truth).  This caused:
+//       • DL/WL thresholds in LiveAlertBanner / DangerProximityBanner to differ
+//         from the corrected kBiharGauges values shown in All Stations.
+//       • Duplicate/stale alerts for stations whose DL was corrected in v4.2
+//         (Taibpur 35.65→66.00, Gangpur Siswan 64.10→57.04, Darauli 61.52→60.82…)
+//       • alertsProvider (FloodAlert cards) and ActiveAlertController (live banners)
+//         reading different level snapshots for the same station.
+//
+//   Fix (v2.0):
+//     • Remove _sub / DataFetchEngine subscription entirely.
+//     • Expose push(List<StationReading> stations) — called by
+//       alerts_parent_bridge_provider.dart whenever mergedStationsProvider
+//       rebuilds (i.e. same data that drives ALL screens).
+//     • _norm / severity / build-alert logic unchanged.
+//
+//   Callers:
+//     alerts_parent_bridge_provider.dart  (always-on Riverpod provider in
+//     main_shell.dart) converts RiverStation → StationReading via the same
+//     shim used by AlertEngine.evaluateMerged() and calls push().
+//
+// v1.1 history (preserved for reference):
+//   AAC-1: _kMaxAlerts 5→8
+//   AAC-3: _kClearWindow 5→15 min
+//   AAC-4: _kRorThreshold 0.5→0.3 m/h
 //   AAC-5: _kRainThreshold 20.0→10.0 mm/24h
-//          (Bihar 2025 upstream floods had <5mm local rain; 20mm masked real events)
-//
-// Sits between DataFetchEngine and the UI alert widgets.
-// Converts raw StationReading snapshots into deduplicated, tiered
-// AlertItem objects that drive LiveAlertBanner and DangerProximityBanner.
-//
-// Alert tiers (descending severity):
-//   EXTREME  — currentLevel >= hfl                   (above all-time flood)
-//   CRITICAL — currentLevel >= dangerLevel            (in danger zone)
-//   DANGER   — currentLevel >= warningLevel           (in warning zone)
-//   RISING   — live, below WL but RoR >= 0.3 m/h     (rapid rise warning)
-//   NORMAL   — no alert (suppressed / cleared)
-//
-// Rules:
-//   1. SEED-source stations NEVER trigger alerts.
-//   2. Each station has at most one active AlertItem.
-//   3. A station's alert is suppressed for _kSuppressWindow after it was
-//      last seen in the same tier, UNLESS the tier escalates.
-//   4. Stations that drop to NORMAL and stay there for _kClearWindow (15 min)
-//      are removed from the active set.
-//   5. At most _kMaxAlerts items are surfaced to the UI (highest first).
 library;
 
 import 'dart:async';
@@ -100,26 +106,21 @@ class AlertItem {
   );
 }
 
-// ── ActiveAlertController ────────────────────────────────────────────────────
+// ── ActiveAlertController ─────────────────────────────────────────────────────
 class ActiveAlertController {
   ActiveAlertController._();
   static final instance = ActiveAlertController._();
 
-  // v1.1: raised 5→8 — 12 stations now; upstream tributaries were silently dropped
   static const _kMaxAlerts      = 8;
-  // Suppress re-fire for same tier (escalation still bypasses this)
   static const _kSuppressWindow = Duration(minutes: 30);
-  // v1.1: raised 5min→15min (CWC minimum watch-period after de-escalation)
   static const _kClearWindow    = Duration(minutes: 15);
-  // v1.1: lowered 0.5→0.3 m/h (Bagmati/Kamla rise faster than Ganga/Kosi plains)
-  static const _kRorThreshold   = 0.3;
-  // v1.1: lowered 20.0→10.0 mm/24h (Bihar 2025: upstream floods had <5mm local rain)
-  static const _kRainThreshold  = 10.0;
+  // v1.1 values — unchanged; thresholds now come via correct DL from merged
+  static const _kRorThreshold   = 0.3;   // m/h
+  static const _kRainThreshold  = 10.0;  // mm/24h
 
-  // ── internal state ──────────────────────────────────────────────────────────
+  // ── internal state ───────────────────────────────────────────────────────────
   final _activeMap   = <String, AlertItem>{};
   final _normalSince = <String, DateTime>{};
-  StreamSubscription<DataFetchSnapshot>? _sub;
   bool _started = false;
 
   final _ctrl = StreamController<List<AlertItem>>.broadcast();
@@ -130,21 +131,36 @@ class ActiveAlertController {
   /// Current snapshot (sync read for widgets).
   List<AlertItem> get alerts => _sortedAlerts();
 
-  // ── lifecycle ────────────────────────────────────────────────────────────────
+  // ── lifecycle ─────────────────────────────────────────────────────────────────
+  /// v2.0: start() no longer subscribes to DataFetchEngine.
+  /// The bridge provider calls push() instead.
   void start() {
     if (_started) return;
     _started = true;
-    _sub = DataFetchEngine.instance.stream.listen(_onSnapshot);
-    debugPrint('[AlertCtrl] started');
+    debugPrint('[AlertCtrl v2.0] started — waiting for mergedStations push()');
   }
 
   void stop() {
-    _sub?.cancel();
     _started = false;
-    debugPrint('[AlertCtrl] stopped');
+    debugPrint('[AlertCtrl v2.0] stopped');
   }
 
-  // ── core processing ──────────────────────────────────────────────────────────
+  // ── push() — public entry-point fed by alerts_parent_bridge_provider ─────────
+  //
+  // Called with the converted StationReading list from mergedStationsProvider.
+  // This is the ONLY way the controller receives data in v2.0.
+  void push(List<StationReading> stations) {
+    if (stations.isEmpty) return;
+    final snap = DataFetchSnapshot(
+      stations:  stations,
+      sources:   const [],
+      fetchedAt: DateTime.now(),
+      isLoading: false,
+    );
+    _onSnapshot(snap);
+  }
+
+  // ── core processing ───────────────────────────────────────────────────────────
   void _onSnapshot(DataFetchSnapshot snap) {
     if (snap.isLoading || snap.stations.isEmpty) return;
     final now = DateTime.now();
@@ -203,14 +219,12 @@ class ActiveAlertController {
     return all.take(_kMaxAlerts).toList();
   }
 
-  // ── severity derivation ──────────────────────────────────────────────────────
+  // ── severity derivation ───────────────────────────────────────────────────────
   AlertSeverity _deriveSeverity(StationReading s) {
     if (!s.isLive) return AlertSeverity.normal;
     if (s.currentLevel >= s.hfl)          return AlertSeverity.extreme;
     if (s.currentLevel >= s.dangerLevel)  return AlertSeverity.critical;
     if (s.currentLevel >= s.warningLevel) return AlertSeverity.danger;
-    // RISING: below WL but rapid rise + rainfall co-trigger
-    // v1.1: threshold 0.5→0.3 m/h; rain guard 20→10 mm/24h
     final ror  = s.rateOfRiseMph ?? 0.0;
     final rain = s.rainfall24hMm ?? 0.0;
     if (ror >= _kRorThreshold && rain >= _kRainThreshold) {
@@ -219,15 +233,13 @@ class ActiveAlertController {
     return AlertSeverity.normal;
   }
 
-  // ── alert item builder ───────────────────────────────────────────────────────
+  // ── alert item builder ────────────────────────────────────────────────────────
   AlertItem _buildAlert(
     StationReading s,
     AlertSeverity  severity,
     DateTime       now, {
     required DateTime firstSeen,
   }) {
-    final key = _norm(s.stationName);
-
     final tierLabel = switch (severity) {
       AlertSeverity.extreme  => '🚨 ABOVE HFL',
       AlertSeverity.critical => '🔴 CRITICAL',
@@ -255,13 +267,13 @@ class ActiveAlertController {
     };
 
     return AlertItem(
-      stationKey:    key,
+      stationKey:    _norm(s.stationName),
       stationName:   s.stationName,
       river:         s.river,
       district:      s.district,
       severity:      severity,
       message:       message,
-      subMessage:    sub.isNotEmpty ? sub : null,
+      subMessage:    sub.isEmpty ? null : sub,
       rateOfRiseMph: s.rateOfRiseMph,
       currentLevel:  s.currentLevel,
       dangerLevel:   s.dangerLevel,
@@ -274,9 +286,6 @@ class ActiveAlertController {
     );
   }
 
-  static String _norm(String v) => v
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  static String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ' ').trim();
 }
