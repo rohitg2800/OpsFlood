@@ -26,6 +26,16 @@ class AlertLog extends StatelessWidget {
   bool _isStale(FloodData d) =>
       DateTime.now().difference(d.lastUpdated).inHours >= _staleHours;
 
+  /// Subtitle: "RiverName · State" or just "State" when riverName is absent.
+  /// Avoids the duplicate "Bihar · Bihar" shown when riverName falls back to state.
+  String _subtitle(FloodData d) {
+    final parts = <String>[];
+    if (d.riverName != null && d.riverName!.isNotEmpty) parts.add(d.riverName!);
+    if (d.district.isNotEmpty) parts.add(d.district);
+    parts.add(d.state);
+    return parts.join('  ·  ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RiverColors.of(context);
@@ -70,7 +80,12 @@ class AlertLog extends StatelessWidget {
             final d     = e.value;
             final col   = riskColor(d.riskLevel);
             final stale = _isStale(d);
-            final aboveWarning = d.currentLevel > d.warningLevel;
+
+            // Only show "▲ warning" when warningLevel was actually provided
+            // (non-zero) AND current level has crossed it.
+            final hasWarning    = d.warningLevel > 0;
+            final hasDanger     = d.dangerLevel  > 0;
+            final aboveWarning  = hasWarning && d.currentLevel > d.warningLevel;
 
             return AnimatedBuilder(
               animation: entryCtrl,
@@ -146,26 +161,28 @@ class AlertLog extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${d.riverName ?? d.state}  ·  ${d.state}',
-                            style:
-                                TextStyle(color: t.textSecondary, fontSize: 11),
+                            _subtitle(d),
+                            style: TextStyle(
+                                color: t.textSecondary, fontSize: 11),
                           ),
                           const SizedBox(height: 6),
                           Row(
                             children: [
                               AlertChip(
-                                label:
-                                    '${d.currentLevel.toStringAsFixed(2)} m',
+                                label: '${d.currentLevel.toStringAsFixed(2)} m',
                                 color: col,
                                 icon: Icons.height,
                               ),
-                              const SizedBox(width: 5),
-                              AlertChip(
-                                label:
-                                    '/${d.dangerLevel.toStringAsFixed(1)} m',
-                                color: t.textSecondary,
-                                icon: Icons.stream,
-                              ),
+                              // Only show danger threshold when it was provided
+                              if (hasDanger) ...[
+                                const SizedBox(width: 5),
+                                AlertChip(
+                                  label:
+                                      '/${d.dangerLevel.toStringAsFixed(1)} m',
+                                  color: t.textSecondary,
+                                  icon: Icons.stream,
+                                ),
+                              ],
                               if (d.effectiveRainfallMm > 0) ...[
                                 const SizedBox(width: 5),
                                 AlertChip(
