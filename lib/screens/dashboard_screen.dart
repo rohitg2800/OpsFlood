@@ -1,13 +1,10 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5.2
+// EQUINOX-BH — Dashboard v5.3
 //
-// v5.2 fix:
-//   • _bootNearby now calls nearbyStationsProvider.refresh() with no arguments,
-//     matching the simplified NearbyStationsNotifier signature.
-//   • Removed location_service.dart import — nearbyStationsProvider and
-//     NearbyStationsSection are imported from their canonical locations
-//     (nearby_stations_provider.dart and nearby_stations_section.dart via
-//     dashboard_screen_part2.dart) to avoid symbol ambiguity.
+// v5.3:
+//   • App name renamed OpsFlood → Equinox-BBR05 (AppBar title + status banner)
+//   • Safe KPI count now includes LOW risk level to match _AlertColorStrip
+//     (was only counting NORMAL and SAFE, missing LOW → showed wrong number)
 library;
 
 import 'dart:math' as math;
@@ -59,11 +56,26 @@ IconData _riskIcon(String level) {
 // Alert level colours — single source of truth matching the map legend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const _kCriticalColor  = Color(0xFFFF3B30); // vivid red
-const _kSevereColor    = Color(0xFFFF6B35); // orange
-const _kWarningColor   = Color(0xFFFFCC00); // bright yellow
-const _kSafeColor      = Color(0xFF34C759); // bright green
-const _kNoDataColor    = Color(0xFF8E8E93); // grey
+const _kCriticalColor  = Color(0xFFFF3B30);
+const _kSevereColor    = Color(0xFFFF6B35);
+const _kWarningColor   = Color(0xFFFFCC00);
+const _kSafeColor      = Color(0xFF34C759);
+const _kNoDataColor    = Color(0xFF8E8E93);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Safe-bucket helper — single source of truth used by both _KpiGrid and
+// _AlertColorStrip so the two widgets always show the same number.
+// ─────────────────────────────────────────────────────────────────────────────
+bool _isSafe(String riskLevel) {
+  switch (riskLevel.toUpperCase()) {
+    case 'NORMAL':
+    case 'SAFE':
+    case 'LOW':
+      return true;
+    default:
+      return false;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DashboardScreen
@@ -122,7 +134,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  // ── v5.2: no arguments — provider reads mergedStationsProvider internally ──
   Future<void> _bootNearby() async {
     if (_nearbyBooted) return;
     _nearbyBooted = true;
@@ -260,7 +271,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── 5-level alert colour strip ────────────────────────────
               SliverToBoxAdapter(
                 child: _AlertColorStrip(
                   t: t,
@@ -270,7 +280,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ),
 
-              // ── Preferred cities + emergency contacts ─────────────────
               const SliverToBoxAdapter(
                 child: NearbyStationsSection(),
               ),
@@ -407,7 +416,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _AlertColorStrip  — 5-level colour-coded summary matching the map legend
+// _AlertColorStrip
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AlertColorStrip extends StatelessWidget {
@@ -436,17 +445,17 @@ class _AlertColorStrip extends StatelessWidget {
         case 'HIGH':     warning++;  break;
         case 'NORMAL':
         case 'SAFE':
-        case 'LOW':      safe++;     break;
+        case 'LOW':      safe++;     break;  // matches _isSafe()
         default:         noData++;   break;
       }
     }
 
     final items = [
-      _StripItem(color: _kCriticalColor, label: 'Critical',  count: critical, icon: Icons.warning_rounded,        onTap: onAlertsTap, pulse: critical > 0),
-      _StripItem(color: _kSevereColor,   label: 'Severe',    count: severe,   icon: Icons.warning_amber_rounded,   onTap: onAlertsTap, pulse: severe > 0),
-      _StripItem(color: _kWarningColor,  label: 'Warning',   count: warning,  icon: Icons.info_rounded,            onTap: onAlertsTap),
-      _StripItem(color: _kSafeColor,     label: 'Safe',      count: safe,     icon: Icons.check_circle_rounded,    onTap: onSafeTap),
-      _StripItem(color: _kNoDataColor,   label: 'No data',   count: noData,   icon: Icons.help_outline_rounded,    onTap: onSafeTap),
+      _StripItem(color: _kCriticalColor, label: 'Critical',  count: critical, icon: Icons.warning_rounded,       onTap: onAlertsTap, pulse: critical > 0),
+      _StripItem(color: _kSevereColor,   label: 'Severe',    count: severe,   icon: Icons.warning_amber_rounded,  onTap: onAlertsTap, pulse: severe > 0),
+      _StripItem(color: _kWarningColor,  label: 'Warning',   count: warning,  icon: Icons.info_rounded,           onTap: onAlertsTap),
+      _StripItem(color: _kSafeColor,     label: 'Safe',      count: safe,     icon: Icons.check_circle_rounded,   onTap: onSafeTap),
+      _StripItem(color: _kNoDataColor,   label: 'No data',   count: noData,   icon: Icons.help_outline_rounded,   onTap: onSafeTap),
     ];
 
     return Padding(
@@ -541,9 +550,7 @@ class _StripCell extends StatelessWidget {
                       ),
                     ] : null,
                   ),
-                  child: Icon(item.icon,
-                      color: Colors.white,
-                      size: 10),
+                  child: Icon(item.icon, color: Colors.white, size: 10),
                 ),
               ],
             ),
@@ -602,8 +609,7 @@ class _CriticalBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_rounded,
-              color: AppPalette.critical, size: 18),
+          const Icon(Icons.warning_rounded, color: AppPalette.critical, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -624,8 +630,7 @@ class _CriticalBanner extends StatelessWidget {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             child: const Text('View →',
-                style: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w800)),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
           ),
           GestureDetector(
             onTap: onDismiss,
@@ -844,8 +849,7 @@ class _BiharAlertRow extends StatelessWidget {
                   [s.river, s.district]
                       .where((v) => v.isNotEmpty)
                       .join(' · '),
-                  style:
-                      TextStyle(color: t.textSecondary, fontSize: 11),
+                  style: TextStyle(color: t.textSecondary, fontSize: 11),
                 ),
               ],
             ),
@@ -869,8 +873,7 @@ class _BiharAlertRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
@@ -969,13 +972,16 @@ class _DashboardAppBar extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('OpsFlood',
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.5,
-                  )),
+              Text(
+                // v5.3: renamed from OpsFlood
+                'Equinox-BBR05',
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
               Text(subtitle,
                   style: TextStyle(
                     color: t.textSecondary,
@@ -1021,8 +1027,7 @@ class _CriticalBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppPalette.critical.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border:
-            Border.all(color: AppPalette.critical.withValues(alpha: 0.4)),
+        border: Border.all(color: AppPalette.critical.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1058,7 +1063,7 @@ class _StatusBanner extends StatelessWidget {
     final color = isOffline ? AppPalette.warning : t.accent;
     final msg   = isOffline
         ? 'No internet — showing last cached data'
-        : 'Connecting to OpsFlood servers…';
+        : 'Connecting to Equinox-BBR05 servers…';  // v5.3: renamed
     final icon =
         isOffline ? Icons.wifi_off_rounded : Icons.cloud_sync_rounded;
     return Container(
@@ -1137,13 +1142,11 @@ class _HeroGauge extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      padding:
-          const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
       decoration: BoxDecoration(
         color: t.cardBg,
         borderRadius: BorderRadius.circular(24),
-        border:
-            Border.all(color: gaugeColor.withValues(alpha: 0.25)),
+        border: Border.all(color: gaugeColor.withValues(alpha: 0.25)),
         boxShadow: [
           BoxShadow(
               color: gaugeColor.withValues(alpha: 0.10),
@@ -1173,9 +1176,7 @@ class _HeroGauge extends StatelessWidget {
                           color: t.textPrimary,
                           fontSize: 36,
                           fontWeight: FontWeight.w900,
-                          fontFeatures: const [
-                            FontFeature.tabularFigures()
-                          ],
+                          fontFeatures: const [FontFeature.tabularFigures()],
                           letterSpacing: -1,
                         ),
                       ),
@@ -1256,8 +1257,7 @@ class _HeroGauge extends StatelessWidget {
               _GaugeSubStat(
                   t: t,
                   label: 'STATES',
-                  value:
-                      '${levels.map((d) => d.state).toSet().length}',
+                  value: '${levels.map((d) => d.state).toSet().length}',
                   icon: Icons.map_rounded),
             ],
           ),
@@ -1340,8 +1340,7 @@ class _ArcGaugePainter extends CustomPainter {
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
 
-    final rect =
-        Rect.fromCircle(center: Offset(cx, cy), radius: radius);
+    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
     canvas.drawArc(rect, startAngle, sweepAngle, false, trackPaint);
     if (value > 0)
       canvas.drawArc(
@@ -1399,11 +1398,10 @@ class _KpiGrid extends StatelessWidget {
                 .map((d) => d.capacityPercent)
                 .reduce((a, b) => a + b) /
             levels.length;
-    final safeCount = levels
-        .where((d) =>
-            d.riskLevel.toUpperCase() == 'NORMAL' ||
-            d.riskLevel.toUpperCase() == 'SAFE')
-        .length;
+
+    // v5.3 fix: use _isSafe() so this matches _AlertColorStrip's safe bucket
+    // (NORMAL | SAFE | LOW).  Previously only NORMAL and SAFE were counted.
+    final safeCount = levels.where((d) => _isSafe(d.riskLevel)).length;
 
     final kpis = [
       _KpiItem(
@@ -1679,8 +1677,7 @@ class _StationTile extends StatelessWidget {
                 ),
                 Expanded(
                   child: Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1708,8 +1705,7 @@ class _StationTile extends StatelessWidget {
                                       style: TextStyle(
                                           color: t.textPrimary,
                                           fontSize: 14,
-                                          fontWeight:
-                                              FontWeight.w800)),
+                                          fontWeight: FontWeight.w800)),
                                   Text(
                                     '${data.riverName ?? 'River'} · ${data.state}',
                                     style: TextStyle(
@@ -1720,8 +1716,7 @@ class _StationTile extends StatelessWidget {
                               ),
                             ),
                             Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.end,
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
                                   '${data.currentLevel.toStringAsFixed(2)} m',
@@ -1734,9 +1729,8 @@ class _StationTile extends StatelessWidget {
                                       ]),
                                 ),
                                 Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
                                     color: col.withValues(alpha: 0.12),
                                     borderRadius:
@@ -1755,7 +1749,8 @@ class _StationTile extends StatelessWidget {
                             ),
                             const SizedBox(width: 4),
                             Icon(Icons.chevron_right_rounded,
-                                color: t.textSecondary.withValues(alpha: 0.4),
+                                color: t.textSecondary
+                                    .withValues(alpha: 0.4),
                                 size: 18),
                           ],
                         ),
@@ -1779,23 +1774,20 @@ class _StationTile extends StatelessWidget {
                                         style: TextStyle(
                                             color: t.textSecondary,
                                             fontSize: 11,
-                                            fontWeight:
-                                                FontWeight.w600)),
+                                            fontWeight: FontWeight.w600)),
                                     Text('$displayPct%',
                                         style: TextStyle(
                                             color: col,
                                             fontSize: 11,
                                             fontWeight: FontWeight.w800,
                                             fontFeatures: const [
-                                              FontFeature
-                                                  .tabularFigures()
+                                              FontFeature.tabularFigures()
                                             ])),
                                   ],
                                 ),
                                 const SizedBox(height: 5),
                                 ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(6),
+                                  borderRadius: BorderRadius.circular(6),
                                   child: Container(
                                     height: 6,
                                     decoration: BoxDecoration(
