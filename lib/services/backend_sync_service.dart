@@ -28,6 +28,15 @@
 //   POST /api/gauge-telemetry   → { ok: true, accepted: N }
 //   POST /api/rtdas-thresholds  → { ok: true, upserted: N }
 //   POST /api/flood-events      → { ok: true, recorded: N }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// _backendSyncEnabled (flip to true once Railway routes are implemented)
+//
+// Both /api/gauge-telemetry and /api/flood-events currently return HTTP 405.
+// They are already unawaited so they never block the UI, but they fire every
+// ~45 s, waste bandwidth, and pollute logcat.  This flag suppresses all
+// outbound pushes until the backend is ready.
+// ─────────────────────────────────────────────────────────────────────────────
 library;
 
 import 'dart:async';
@@ -43,6 +52,9 @@ class BackendSyncService {
       _instance ??= BackendSyncService._();
   BackendSyncService._();
 
+  // ── Kill-switch: set to true once Railway implements the POST routes ──────
+  static const bool _backendSyncEnabled = false;
+
   static const _minPushInterval = Duration(seconds: 30);
 
   final _api = BackendApiService.instance;
@@ -53,6 +65,8 @@ class BackendSyncService {
   /// Push a complete gauge snapshot to the backend.
   /// Fire-and-forget — await if you want to know the result, but not required.
   Future<void> pushGaugeTelemetry(DataFetchSnapshot snapshot) async {
+    if (!_backendSyncEnabled) return; // 405 guard — remove once routes exist
+
     // Rate-limit: skip if we pushed less than _minPushInterval ago.
     final now = DateTime.now();
     if (_lastGaugePush != null &&
@@ -119,6 +133,8 @@ class BackendSyncService {
   /// Push RTDAS threshold table to the backend after a sync.
   /// Converts raw RtdasRow list + ThresholdOverrideStore metadata.
   Future<void> pushRtdasThresholds(List<RtdasRow> rows) async {
+    if (!_backendSyncEnabled) return; // 405 guard — remove once routes exist
+
     if (rows.isEmpty) return;
 
     final store = ThresholdOverrideStore.instance;
