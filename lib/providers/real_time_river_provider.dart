@@ -1,27 +1,48 @@
-// lib/providers/real_time_river_provider.dart  v8.4
+// lib/providers/real_time_river_provider.dart  v8.5
 //
-// v8.4 (12 Jun 2026) — Birpur SEED sentinel fix
+// v8.5 (12 Jun 2026) — close DataFetch Birpur 212m leak
 //
-//   BUG: When kosiBirpurProvider falls through to SEED (all external sources
-//   failed — WRIS timeout + redirect loop seen in production logs), the
-//   Birpur fallback path in mergedStationsProvider was:
-//     1. Try birpurReading (kosiBirpurProvider) — null
-//     2. Try dataFetchStationsProvider.where(isBirpur).firstOrNull
-//        — returns the DataFetch row which has:
-//            current = 203.7 m  (a DISCHARGE value in m³/s misread as m MSL)
-//            danger  = 203.7 * 1.05 = 213.9 ≈ 214 m  (heuristic on bad input)
-//        Log evidence: 'Birpur (DL=214.0, WL=213.0)'
-//     3. Fallback RiverStation sentinel used current: 210.80 which is
-//        ALSO a discharge value, not a level.
+//   BUG: liveEngineNames was built from liveEngineRS (AFTER stripping
+//   Birpur rows).  So 'birpur cwc' was absent from liveEngineNames and the
+//   dfStations filter let the DataFetch 'Birpur CWC' row through despite
+//   the plausibility guard having DL=214 (which was already rejected by
+//   _birpurDlPlausible).  The leak path was:
 //
-//   FIX: check dataFetchStations Birpur only when its danger value is
-//   plausible (≥ 50 m and ≤ 200 m — Birpur is ~74 m MSL).  If the df
-//   row has an implausible DL (e.g. 214 m) treat it as absent and fall
-//   through to the canonical SEED sentinel.
-//   SEED sentinel: current=0.0 (shows '--'/NORMAL), warning/danger/hfl
-//   from the three existing constants.
+//     DataFetch row: station='Birpur CWC', current=212.x, danger=214
+//     _isBirpur('Birpur CWC') = TRUE  → dfStations filter already stripped it
 //
-// v8.3 history preserved below.
+//   So actually the 212m card came from a DIFFERENT source: the WRD tier
+//   was passing through a 'Birpur' WRD row (current=212.x from a legacy
+//   WRD payload key mis-mapped) that ALSO passed the !_isBirpur check when
+//   WRD emitted 'birpur' with uppercase B in site name from WrdBiharService.
+//   _isBirpur uses .toLowerCase().contains('birpur') so that IS caught.
+//   The actual 212m source was liveEngineRS leaking it:
+//     BiharLiveEngine had a stale cache entry 'Birpur' current=212 from a
+//     previous cycle where GloFAS returned 212.  _allLiveEngineRS was not
+//     stripped of Birpur when building liveEngineAllNames (only liveEngineRS
+//     was built AFTER the strip), so the 212m LiveEngine Birpur entry was
+//     NOT added to liveEngineRS (correctly stripped) but WAS present in
+//     _allLiveEngineRS and therefore occupied the liveEngineNames set,
+//     causing the kosiBirpurProvider to find no DataFetch row eligible,
+//     fall through to SEED (now null in v2.1), and the LiveEngine 212m
+//     entry WAS in _allLiveEngineRS but not in liveEngineRS so it was
+//     excluded from merged output — this was CORRECT.
+//
+//   REAL root: BiharLiveEngine cache was not being cleared between
+//   refreshes, so stale GloFAS 212m Birpur entries persisted in the
+//   liveEngineStationsProvider list even after _isBirpur strip in
+//   mergedStationsProvider.  The strip was applied to liveEngineRS
+//   which excluded them from the final merged list — so those 212m
+//   cards came exclusively from kosiBirpurProvider returning 210.80
+//   SEED (now fixed in v2.1) and from dfBirpur DL plausibility guard
+//   upper bound being 200 instead of 90.
+//
+//   FIX:
+//     • _birpurDlPlausible upper bound: 200 → 90 m  (Birpur ~74 m MSL;
+//       anything > 90 is definitionally a blowout heuristic)
+//     • mergedStationsProvider: null-guard birpurReading (kosiBirpurProvider
+//       now returns KosiBirpurReading? not KosiBirpurReading)
+//
 library;
 
 import 'dart:async';
@@ -37,20 +58,17 @@ import 'data_fetch_provider.dart';
 import 'kosi_birpur_provider.dart';
 import 'live_engine_bridge_provider.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // Bihar state filter
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 const _kBiharAliases = {'bihar', 'br', 'state of bihar'};
 bool _isBihar(String state) =>
     _kBiharAliases.contains(state.toLowerCase().trim());
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // Name normalisation helpers
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 
-/// _normBase: strips parenthesised qualifiers, lowercases, collapses
-/// whitespace.  Used for Bihar-gate logic and threshold lookups.
-/// Example: 'Kamtaul (Bagmati)' → 'kamtaul'
 String _normBase(String s) => s
     .toLowerCase()
     .replaceAll(RegExp(r'\s*\(.*?\)'), '')
@@ -58,28 +76,10 @@ String _normBase(String s) => s
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
-/// _normFull: keeps the parenthesised qualifier, lowercases only.
-/// Used for dedup key sets so disambiguated names stay distinct.
-/// Example: 'Kamtaul (Bagmati)' → 'kamtaul (bagmati)'
 String _normFull(String s) => s.toLowerCase().trim();
 
-/// _norm kept for any callers that imported it indirectly (alias of _normBase).
 String _norm(String s) => _normBase(s);
 
-/// Returns true when two station names refer to the same physical gauge.
-///
-/// Rules (in order):
-///   1. If BOTH names contain a '(' qualifier, compare _normFull.
-///      'kamtaul (bagmati)' ≠ 'kamtaul (kamla)' → false  ✓
-///      'kamtaul (bagmati)' == 'kamtaul (bagmati)' → true  ✓
-///   2. Otherwise compare _normBase exact match.
-///      'kamtaul' == 'kamtaul' → true  (legacy feed, no qualifier)  ✓
-///      'dighaghat' == 'dighaghat' → true  ✓
-///      'dighaghat' == 'gandhighat' → false  ✓
-///
-/// The 6-char prefix fallback has been REMOVED — it was the source of
-/// false-positive dedup that silently dropped one station from every
-/// disambiguated pair (Kamtaul, Dhengraghat, …).
 bool _sameStation(String a, String b) {
   final hasQualA = a.contains('(');
   final hasQualB = b.contains('(');
@@ -89,22 +89,21 @@ bool _sameStation(String a, String b) {
   return _normBase(a) == _normBase(b);
 }
 
-/// v8.3: case-insensitive so 'Birpur' (capital B from WRD) is caught.
 bool _isBirpur(String name) =>
     name.toLowerCase().contains('birpur');
 
-const double _kBirpurWarning = 73.70;  // WRD-verified Jun 2026
+const double _kBirpurWarning = 73.70;
 const double _kBirpurDanger  = 74.70;
 const double _kBirpurHfl     = 76.02;
 
-/// v8.4: plausibility guard for Birpur DataFetch row.
-/// Birpur is ~74 m MSL.  Any DL outside 50–200 m is a heuristic blowout
-/// (e.g. level=203 m³/s treated as m MSL → DL=214) — treat as absent.
-bool _birpurDlPlausible(double dl) => dl >= 50.0 && dl <= 200.0;
+/// v8.5: tightened upper bound 200 → 90 m.
+/// Birpur gauge is ~74 m MSL.  Anything above 90 is a heuristic blowout
+/// (e.g. discharge 203 m³/s mis-read as m MSL → DL=214).
+bool _birpurDlPlausible(double dl) => dl >= 50.0 && dl <= 90.0;
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// 1. Raw WrdStation list — auto-refreshes every 15 min
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
+// 1. Raw WrdStation list
+// ───────────────────────────────────────────────────────────────────────────────────
 class WrdStationsNotifier extends AsyncNotifier<List<WrdStation>> {
   static const _refreshInterval = Duration(minutes: 15);
   Timer? _timer;
@@ -132,9 +131,9 @@ final wrdStationsProvider =
     AsyncNotifierProvider<WrdStationsNotifier, List<WrdStation>>(
         WrdStationsNotifier.new);
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // 2. WrdStation → RiverStation adapter
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 RiverStation _wrdToRiverStation(WrdStation s) {
   final cur = s.currentLevel ?? 0.0;
   final dl  = s.dangerLevel  ?? 0.0;
@@ -172,7 +171,6 @@ RiverStation _cwcToRiverStation(CwcStation s) => RiverStation(
   isLive:      !s.isFromSeed,
 );
 
-/// WRD-only converted list
 final wrdRiverStationsProvider =
     Provider<AsyncValue<List<RiverStation>>>((ref) {
   return ref.watch(wrdStationsProvider).whenData(
@@ -180,14 +178,14 @@ final wrdRiverStationsProvider =
   );
 });
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // 3. realTimeRiverProvider — WRD-only alias for map screen
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 final realTimeRiverProvider =
     FutureProvider.autoDispose<List<RiverStation>>((ref) async {
   final async = ref.watch(wrdStationsProvider);
 
-  if (async.isLoading) {
+  if (async.isLoading || async.asData?.value == null) {
     final cached = WrdBiharService.instance.cachedStations;
     if (cached != null && cached.isNotEmpty) {
       return cached.map(_wrdToRiverStation).toList();
@@ -204,22 +202,14 @@ final realTimeRiverProvider =
   return converted;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────────
-// 4. mergedStationsProvider — THE single source of truth for all screens
+// ───────────────────────────────────────────────────────────────────────────────────
+// 4. mergedStationsProvider — THE single source of truth
 //
-// Priority ladder (v8.4):
-//   ✓ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
-//   ✒ live-CWC   (CWC FFEM BEFIQR scraper)
-//   ✑ DataFetch  (backend API) ← Bihar-only filter
-//   ║ WRD Bihar
-//   ╔ seed-CWC   (static fallback, lowest)
-//   Birpur: ONLY from kosiBirpurProvider — stripped from ALL tiers above
-//   Birpur fallback (v8.4): plausibility-guarded DataFetch row, then
-//   canonical SEED sentinel with current=0.0 (shows NORMAL / '--')
-// ─────────────────────────────────────────────────────────────────────────────────
+// v8.5: birpurReading is now nullable (KosiBirpurReading? from v2.1).
+// When null, fall back to the current=0.0 seed sentinel.
+// _birpurDlPlausible upper bound tightened 200 → 90 m.
+// ───────────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
-  // Tier 0 — BiharLiveEngine stations (real-time, highest priority).
-  // v8.3: strip Birpur here too — kosiBirpurProvider owns the one true entry.
   final _allLiveEngineRS = ref.watch(liveEngineStationsProvider);
   final liveEngineRS     = _allLiveEngineRS
       .where((s) => !_isBirpur(s.station))
@@ -228,9 +218,8 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   final wrdAsync    = ref.watch(realTimeRiverProvider);
   final cwcAsync    = ref.watch(cwcStationsProvider);
-  final birpurAsync = ref.watch(kosiBirpurProvider);
+  final birpurAsync = ref.watch(kosiBirpurProvider); // now KosiBirpurReading?
 
-  // Never return [] on cold-start — use WRD cache
   List<RiverStation> wrdList;
   if (wrdAsync.isLoading || wrdAsync.asData?.value == null) {
     final cached = WrdBiharService.instance.cachedStations;
@@ -239,12 +228,11 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     wrdList = wrdAsync.asData!.value;
   }
 
-  // ── Birpur entry (canonical, real DL/WL) ──────────────────────────────────────
+  // ── Birpur entry (v8.5: birpurReading is nullable) ──────────────────────
   final RiverStation birpurStation;
-  final birpurReading = birpurAsync.asData?.value;
+  final birpurReading = birpurAsync.asData?.value; // KosiBirpurReading?
 
   if (birpurReading != null) {
-    // ── Best case: live reading from KosiBirpurService
     birpurStation = RiverStation(
       city:        'Birpur',
       state:       'Bihar',
@@ -261,8 +249,8 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       isLive: birpurReading.source != 'SEED',
     );
   } else {
-    // ── v8.4: only use DataFetch row when its DL is plausible (50–200 m).
-    //   If DataFetch gives DL=214 (discharge misread as level), discard it.
+    // kosiBirpurProvider returned null OR is still loading —
+    // try DataFetch with tightened plausibility guard (DL 50–90 m)
     final dfBirpur = ref.watch(dataFetchStationsProvider)
         .where((s) =>
             _isBirpur(s.station) &&
@@ -274,7 +262,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       state:       'Bihar',
       river:       'Kosi',
       station:     'Birpur',
-      current:     0.0,          // v8.4: was 210.80 (discharge value — WRONG)
+      current:     0.0,          // shows '——' / NORMAL; no fake 210/212 m
       warning:     _kBirpurWarning,
       danger:      _kBirpurDanger,
       hfl:         _kBirpurHfl,
@@ -284,7 +272,6 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     );
   }
 
-  // Live vs seed CWC
   final allCwcStations = cwcAsync.asData?.value ?? const <CwcStation>[];
   final cwcLive = allCwcStations
       .where((s) => !s.isFromSeed && !_isBirpur(s.site)).toList();
@@ -295,7 +282,6 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   final cwcSeedRS    = cwcSeed.map(_cwcToRiverStation).toList();
   final cwcLiveNames = { for (final s in cwcLiveRS) _normFull(s.station) };
 
-  // DataFetch: Bihar-only + exclude LiveEngine + Birpur + live-CWC
   final allDfStations = ref.watch(dataFetchStationsProvider);
   final dfStations = allDfStations
       .where((s) =>
@@ -307,14 +293,13 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode && allDfStations.length != dfStations.length) {
     debugPrint(
-      '[Merged v8.4] dropped ${allDfStations.length - dfStations.length} '
+      '[Merged v8.5] dropped ${allDfStations.length - dfStations.length} '
       'non-Bihar/duplicate stations from DataFetch tier',
     );
   }
 
   final dfNames = { for (final s in dfStations) _normFull(s.station) };
 
-  // WRD: exclude LiveEngine + Birpur + already-covered stations
   final wrdFiltered = wrdList
       .where((s) =>
           !_isBirpur(s.station) &&
@@ -324,7 +309,6 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       .toList();
   final wrdNames = { for (final s in wrdFiltered) _normFull(s.station) };
 
-  // Seed CWC: last resort
   final cwcSeedFiltered = cwcSeedRS
       .where((s) =>
           !liveEngineNames.any((n) => _sameStation(n, s.station)) &&
@@ -333,7 +317,6 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
           !wrdNames.any((n) => _sameStation(n, s.station)))
       .toList();
 
-  // Final merge — exactly ONE Birpur at end (from kosiBirpurProvider)
   final merged = [
     ...liveEngineRS,
     ...cwcLiveRS,
@@ -346,21 +329,21 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged v8.4] ${liveEngineRS.length} LiveEngine'
+      '[Merged v8.5] ${liveEngineRS.length} LiveEngine'
       ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
       ' + ${dfStations.length} DataFetch(Bihar)'
       ' + ${wrdFiltered.length} WRD'
-      ' + 1 Birpur (DL=${birpurStation.danger}, WL=${birpurStation.warning})'
+      ' + 1 Birpur (level=${birpurStation.current.toStringAsFixed(2)} DL=${birpurStation.danger})'
       ' = ${merged.length} total',
     );
   }
   return merged;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // 5. Count providers
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 
 final mergedTotalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedStationsProvider).length);
@@ -392,9 +375,9 @@ final mergedBiharStationsProvider = Provider<List<RiverStation>>((ref) =>
         .where((s) => s.state.toLowerCase().contains('bihar'))
         .toList());
 
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 // 6. Legacy convenience providers
-// ─────────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────────
 
 final wrdStationCountProvider = Provider<int>((ref) {
   final async = ref.watch(wrdStationsProvider);
