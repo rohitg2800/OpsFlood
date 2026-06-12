@@ -1,20 +1,18 @@
-// lib/providers/real_time_river_provider.dart  v8.2
+// lib/providers/real_time_river_provider.dart  v8.3
 //
-// v8.2 fix (P0 #3):
-//   • _sameStation() 6-char prefix fallback REMOVED.
-//     Root cause: _norm() strips parentheses, so 'Kamtaul (Bagmati)' and
-//     'Kamtaul (Kamla)' both normalised to 'kamtaul', then the 6-char
-//     prefix 'kamtau' matched — one of each pair was silently dropped.
-//   • New helpers:
-//       _normBase(s)  — strips parens (old _norm behaviour, used for
-//                         threshold/Bihar-gate logic)
-//       _normFull(s)  — keeps the '(River)' qualifier, lowercases only
-//   • _sameStation(a, b):
-//       Both have qualifier → compare _normFull (qualified names are
-//       distinct across rivers).
-//       Otherwise → _normBase exact match only (no prefix shortcut).
-//   • liveEngineNames Set and all dedup filters now key on _normFull
-//     so BiharLiveEngine's qualified names don't alias plain WRD names.
+// v8.3 fix — single Birpur (P0 dedup):
+//   • _isBirpur() was CASE-SENSITIVE: 'Birpur'.contains('birpur') → false
+//     so WRD's 'Birpur' (capital B) sailed through the !_isBirpur() guard
+//     and appeared as a 2nd entry alongside the kosiBirpurProvider row.
+//   • BiharLiveEngine could also emit a 'Birpur' row with no real DL/WL
+//     (LiveEngine tier was never filtered for Birpur).
+//   Fix: _isBirpur() now lowercases first; liveEngineRS is also filtered.
+//   Result: exactly ONE Birpur with real DL=74.70, WL=73.70 from
+//           kosiBirpurProvider + KosiBirpurService enrichment.
+//
+// v8.2 fix:
+//   • _sameStation() 6-char prefix fallback removed.
+//   • _normBase/_normFull split introduced.
 //
 // v8.1 fix:
 //   • Bihar-only guard added to dfStations filter.
@@ -22,12 +20,12 @@
 // v8.0: liveEngineStationsProvider injected as TOP priority tier.
 //
 // Priority ladder (highest → lowest):
-//   ✳ LiveEngine  (BiharLiveEngine feed, updated every 15 min)
-//   ✲ live-CWC    (CWC FFEM BEFIQR scraper)
-//   ✱ DataFetch   (backend API) ← Bihar-filtered ★ v8.1
+//   ✳ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
+//   ✲ live-CWC   (CWC FFEM BEFIQR scraper)
+//   ✱ DataFetch  (backend API) ← Bihar-only filter
 //   ▕ WRD Bihar
-//   ▔ seed-CWC    (static fallback)
-//   Birpur always explicit via kosiBirpurProvider
+//   ▔ seed-CWC   (static fallback, lowest)
+//   Birpur always explicit via kosiBirpurProvider (never from any tier above)
 library;
 
 import 'dart:async';
@@ -90,13 +88,12 @@ bool _sameStation(String a, String b) {
   final hasQualA = a.contains('(');
   final hasQualB = b.contains('(');
   if (hasQualA && hasQualB) {
-    // Both have river qualifiers — must match including the qualifier.
     return _normFull(a) == _normFull(b);
   }
-  // At least one name has no qualifier — fall back to base-name exact match.
   return _normBase(a) == _normBase(b);
 }
 
+/// v8.3: case-insensitive so 'Birpur' (capital B from WRD) is caught.
 bool _isBirpur(String name) =>
     name.toLowerCase().contains('birpur');
 
@@ -209,20 +206,22 @@ final realTimeRiverProvider =
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. mergedStationsProvider — THE single source of truth for all screens
 //
-// Priority ladder (v8.2):
+// Priority ladder (v8.3):
 //   ✳ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
 //   ✲ live-CWC   (CWC FFEM BEFIQR scraper)
-//   ✱ DataFetch  (backend API) ← Bihar-only filter ★ v8.1
+//   ✱ DataFetch  (backend API) ← Bihar-only filter
 //   ▕ WRD Bihar
 //   ▔ seed-CWC   (static fallback, lowest)
-//   Birpur always explicit via kosiBirpurProvider
+//   Birpur: ONLY from kosiBirpurProvider — stripped from ALL tiers above
 // ─────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
-  // Tier 0 — BiharLiveEngine stations (real-time, highest priority)
-  // Key set uses _normFull so 'kamtaul (bagmati)' and 'kamtaul (kamla)'
-  // are stored as DISTINCT keys.
-  final liveEngineRS    = ref.watch(liveEngineStationsProvider);
-  final liveEngineNames = { for (final s in liveEngineRS) _normFull(s.station) };
+  // Tier 0 — BiharLiveEngine stations (real-time, highest priority).
+  // v8.3: strip Birpur here too — kosiBirpurProvider owns the one true entry.
+  final _allLiveEngineRS = ref.watch(liveEngineStationsProvider);
+  final liveEngineRS     = _allLiveEngineRS
+      .where((s) => !_isBirpur(s.station))
+      .toList();
+  final liveEngineNames  = { for (final s in liveEngineRS) _normFull(s.station) };
 
   final wrdAsync    = ref.watch(realTimeRiverProvider);
   final cwcAsync    = ref.watch(cwcStationsProvider);
@@ -237,7 +236,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     wrdList = wrdAsync.asData!.value;
   }
 
-  // Build Birpur entry from kosiBirpurProvider
+  // Build Birpur entry from kosiBirpurProvider (canonical, real DL/WL)
   final RiverStation birpurStation;
   final birpurReading = birpurAsync.asData?.value;
   if (birpurReading != null) {
@@ -247,8 +246,8 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       river:       'Kosi',
       station:     'Birpur',
       current:     birpurReading.levelM,
-      warning:     birpurReading.warningLevel,
-      danger:      birpurReading.dangerLevel,
+      warning:     birpurReading.warningLevel,   // 73.70 m (AMSL, WRD-verified)
+      danger:      birpurReading.dangerLevel,    // 74.70 m
       hfl:         birpurReading.dangerLevel + 1.5,
       dataSource:  birpurReading.source,
       lastUpdated:
@@ -294,7 +293,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode && allDfStations.length != dfStations.length) {
     debugPrint(
-      '[Merged v8.2] dropped ${allDfStations.length - dfStations.length} '
+      '[Merged v8.3] dropped ${allDfStations.length - dfStations.length} '
       'non-Bihar/duplicate stations from DataFetch tier',
     );
   }
@@ -320,7 +319,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
           !wrdNames.any((n) => _sameStation(n, s.station)))
       .toList();
 
-  // Final merge
+  // Final merge — exactly ONE Birpur at end (from kosiBirpurProvider)
   final merged = [
     ...liveEngineRS,
     ...cwcLiveRS,
@@ -333,12 +332,12 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged v8.2] ${liveEngineRS.length} LiveEngine'
+      '[Merged v8.3] ${liveEngineRS.length} LiveEngine'
       ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
       ' + ${dfStations.length} DataFetch(Bihar)'
       ' + ${wrdFiltered.length} WRD'
-      ' + 1 Birpur'
+      ' + 1 Birpur (DL=${birpurStation.danger}, WL=${birpurStation.warning})'
       ' = ${merged.length} total',
     );
   }
