@@ -44,7 +44,8 @@ import 'services/notification_channel_service.dart';
 import 'services/fcm_topic_manager.dart';
 import 'services/alert_notification_bridge.dart';
 import 'services/alert_engine.dart';
-import 'services/rtdas_threshold_sync_service.dart'; // ← NEW
+import 'services/rtdas_threshold_sync_service.dart';
+import 'services/active_alert_controller.dart'; // ← NEW v6
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
@@ -121,11 +122,16 @@ Future<void> main() async {
   // ── RTDAS threshold auto-sync (Layer 3) ───────────────────────────────────
   // Must run BEFORE DataFetchEngine.start() so thresholds in
   // ThresholdOverrideStore are ready when the first live gauge feed arrives.
-  // Idempotent: BiharLiveEngine.start() calls the same singleton — no double work.
   unawaited(RtdasThresholdSyncService.instance.start());
 
   // ── Data engine ───────────────────────────────────────────────────────────
   DataFetchEngine.instance.start();
+
+  // ── Active alert rules engine ─────────────────────────────────────────────
+  // Must start AFTER DataFetchEngine so its stream is already active.
+  // Consumes DataFetchEngine.instance.stream → emits deduplicated AlertItems
+  // to LiveAlertBanner / DangerProximityBanner widgets.
+  ActiveAlertController.instance.start();
 
   // ── Alert → Notification bridge ───────────────────────────────────────────
   final Stream<FloodAlert> alertStream = DataFetchEngine.instance.alertStream
@@ -135,8 +141,6 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      // Override localeProvider with the pre-loaded value so the first build
-      // already has the correct language — no async gap at all.
       overrides: [
         localeProvider.overrideWith(() => LocaleNotifier(savedLangCode)),
       ],

@@ -1,12 +1,19 @@
 // lib/screens/dashboard_screen.dart
-// EQUINOX-BH — Dashboard v5.4
+// EQUINOX-BH — Dashboard v5.5
 //
+// v5.5:
+//   • Wired ActiveAlertController → AlertSeverityBannerList
+//     Replaces _CriticalBanner (raw count) with tiered alert cards:
+//     EXTREME / CRITICAL / DANGER / RISING, SEED-filtered, deduplicated.
+//   • Added DangerProximityBanner sliver below AppBar (proximity-aware,
+//     severity-based distance thresholds, SEED suppressed)
+//   • Removed _bannerDismissed state flag (controller handles suppression)
+//   • _CriticalBanner class retained but no longer inserted into the slivers
 // v5.4:
 //   • App name renamed Equinox-BBR05 → EQUINOX-BR05 (AppBar title + status banner)
 // v5.3:
-//   • App name renamed OpsFlood → Equinox-BBR05 (AppBar title + status banner)
-//   • Safe KPI count now includes LOW risk level to match _AlertColorStrip
-//     (was only counting NORMAL and SAFE, missing LOW → showed wrong number)
+//   • App name renamed OpsFlood → Equinox-BBR05
+//   • Safe KPI count now includes LOW risk level
 library;
 
 import 'dart:math' as math;
@@ -22,7 +29,10 @@ import '../providers/bihar_dashboard_provider.dart';
 import '../providers/bihar_live_provider.dart';
 import '../providers/nearby_stations_provider.dart';
 import '../services/real_time_service.dart';
+import '../services/active_alert_controller.dart';     // v5.5
 import '../theme/river_theme.dart';
+import '../widgets/live_alert_banner.dart';            // v5.5
+import '../widgets/danger_proximity_banner.dart';      // v5.5
 import 'dashboard_screen_part2.dart';
 import 'main_shell.dart';
 import 'alerts_screen.dart';
@@ -55,7 +65,7 @@ IconData _riskIcon(String level) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Alert level colours — single source of truth matching the map legend
+// Alert level colours
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kCriticalColor  = Color(0xFFFF3B30);
@@ -64,10 +74,6 @@ const _kWarningColor   = Color(0xFFFFCC00);
 const _kSafeColor      = Color(0xFF34C759);
 const _kNoDataColor    = Color(0xFF8E8E93);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Safe-bucket helper — single source of truth used by both _KpiGrid and
-// _AlertColorStrip so the two widgets always show the same number.
-// ─────────────────────────────────────────────────────────────────────────────
 bool _isSafe(String riskLevel) {
   switch (riskLevel.toUpperCase()) {
     case 'NORMAL':
@@ -104,7 +110,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   bool    _reduceMotion  = false;
   bool    _isRefreshing  = false;
   bool    _nearbyBooted  = false;
-  bool    _bannerDismissed = false;
+  // _bannerDismissed removed in v5.5 — ActiveAlertController handles suppression
 
   @override
   void initState() {
@@ -224,14 +230,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               onAlertsTap: _goAlerts,
             ),
 
-            if (critCount > 0 && !_bannerDismissed)
-              SliverToBoxAdapter(
-                child: _CriticalBanner(
-                  count: critCount,
-                  onView: _goAlerts,
-                  onDismiss: () => setState(() => _bannerDismissed = true),
-                ),
+            // v5.5: DangerProximityBanner — location-aware, SEED-filtered
+            const SliverToBoxAdapter(
+              child: DangerProximityBanner(),
+            ),
+
+            // v5.5: AlertSeverityBannerList — replaces _CriticalBanner
+            // Driven by ActiveAlertController: tiered, deduped, SEED-suppressed.
+            // Tapping any card navigates to LiveStationsScreen for full detail.
+            SliverToBoxAdapter(
+              child: AlertSeverityBannerList(
+                onTapAlert: (_) => _goLiveStations(),
               ),
+            ),
 
             if (isOffline || isWakingUp)
               SliverToBoxAdapter(
@@ -586,7 +597,8 @@ class _StripCell extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _CriticalBanner
+// _CriticalBanner  (retained for backward compat — not inserted into slivers
+// in v5.5; use AlertSeverityBannerList instead)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CriticalBanner extends StatelessWidget {
@@ -975,7 +987,7 @@ class _DashboardAppBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'EQUINOX-BR05',   // v5.4: renamed from Equinox-BBR05
+                'EQUINOX-BR05',
                 style: TextStyle(
                   color: t.textPrimary,
                   fontSize: 18,
@@ -1064,7 +1076,7 @@ class _StatusBanner extends StatelessWidget {
     final color = isOffline ? AppPalette.warning : t.accent;
     final msg   = isOffline
         ? 'No internet — showing last cached data'
-        : 'Connecting to EQUINOX-BR05 servers…';  // v5.4: renamed
+        : 'Connecting to EQUINOX-BR05 servers…';
     final icon =
         isOffline ? Icons.wifi_off_rounded : Icons.cloud_sync_rounded;
     return Container(
