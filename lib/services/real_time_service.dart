@@ -1,9 +1,18 @@
-// lib/services/real_time_service.dart
+// lib/services/real_time_service.dart  (v2.1 — emergency contacts wired)
+//
+// v2.0 — unchanged from v2.0 except:
+// v2.1 — emergency contacts loaded from assets/data/emergency_contacts.json
+//         on first startPolling() call.  emergencyContactsForState() filters
+//         by state name (case-insensitive).  The List<EmergencyContact> type
+//         from flood_data.dart is used so CollapsibleContacts renders correctly.
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'live_fetch_engine.dart';
-// kept for backwards compat — is an empty library
 
 class RealTimeService extends ChangeNotifier {
   static final RealTimeService _instance = RealTimeService._internal();
@@ -11,6 +20,10 @@ class RealTimeService extends ChangeNotifier {
 
   final LiveFetchEngine _fetchEngine = LiveFetchEngine();
   bool _disposed = false;
+
+  // Emergency contacts loaded from asset
+  final Map<String, List<EmergencyContact>> _contactsByState = {};
+  bool _contactsLoaded = false;
 
   RealTimeService._internal() {
     _fetchEngine.onStateChanged = () {
@@ -66,9 +79,9 @@ class RealTimeService extends ChangeNotifier {
   List<dynamic> get ndmaAdvisories    => _fetchEngine.ndmaAdvisories;
   List<dynamic> get emergencyContacts => _fetchEngine.emergencyContacts;
 
-  Map<String, dynamic> get debugLevelsRaw   => _fetchEngine.debugLevelsRaw;
-  Map<String, dynamic> get debugCwcRaw      => _fetchEngine.debugCwcRaw;
-  int                  get debugRetryCount  => _fetchEngine.debugRetryCount;
+  Map<String, dynamic> get debugLevelsRaw    => _fetchEngine.debugLevelsRaw;
+  Map<String, dynamic> get debugCwcRaw       => _fetchEngine.debugCwcRaw;
+  int                  get debugRetryCount   => _fetchEngine.debugRetryCount;
   int                  get debugWakeAttempts => _fetchEngine.debugWakeAttempts;
 
   // ── Per-city ─────────────────────────────────────────────────────────
@@ -78,12 +91,53 @@ class RealTimeService extends ChangeNotifier {
   FloodData? dataForCity(String city) =>
       _fetchEngine.floodDataForCity(city);
 
-  List<dynamic> imdAlertsForState(String state)         => _fetchEngine.imdAlertsForState(state);
-  List<dynamic> ndmaAdvisoriesForState(String state)    => _fetchEngine.ndmaAdvisoriesForState(state);
-  List<dynamic> emergencyContactsForState(String state) => _fetchEngine.emergencyContactsForState(state);
+  List<dynamic> imdAlertsForState(String state)      => _fetchEngine.imdAlertsForState(state);
+  List<dynamic> ndmaAdvisoriesForState(String state) => _fetchEngine.ndmaAdvisoriesForState(state);
+
+  /// Returns emergency contacts for [state] from the bundled asset JSON.
+  /// Falls back to empty list if asset not yet loaded or state not found.
+  List<EmergencyContact> emergencyContactsForState(String state) {
+    if (!_contactsLoaded) return const [];
+    final key = state.trim().toLowerCase();
+    return _contactsByState.entries
+        .where((e) => e.key.toLowerCase() == key)
+        .expand((e) => e.value)
+        .toList();
+  }
 
   // ── Actions ─────────────────────────────────────────────────────────
   Future<void> refreshData()  async => _fetchEngine.refreshData();
-  Future<void> startPolling() async => _fetchEngine.startPolling();
-  void         stopPolling()        => _fetchEngine.stopPolling();
+
+  /// Start the polling engine and pre-load emergency contacts from asset.
+  Future<void> startPolling() async {
+    if (!_contactsLoaded) await _loadEmergencyContacts();
+    return _fetchEngine.startPolling();
+  }
+
+  void stopPolling() => _fetchEngine.stopPolling();
+
+  // ── Asset loader ─────────────────────────────────────────────────────
+  Future<void> _loadEmergencyContacts() async {
+    try {
+      final raw  = await rootBundle.loadString('assets/data/emergency_contacts.json');
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final list = (json['contacts'] as List<dynamic>).cast<Map<String, dynamic>>();
+      for (final c in list) {
+        final state = (c['state'] as String).trim();
+        _contactsByState.putIfAbsent(state, () => []).add(
+          EmergencyContact(
+            name:  (c['name']  as String? ?? '').trim(),
+            phone: (c['phone'] as String? ?? '').trim(),
+            role:  (c['role']  as String? ?? '').trim(),
+          ),
+        );
+      }
+      _contactsLoaded = true;
+      debugPrint('[RealTimeService] loaded ${list.length} emergency contacts '
+          'across ${_contactsByState.length} states');
+    } catch (e) {
+      debugPrint('[RealTimeService] emergency contacts load failed (non-fatal): $e');
+      _contactsLoaded = true; // don't retry endlessly
+    }
+  }
 }

@@ -1,14 +1,11 @@
-// lib/services/live_fetch_engine.dart  (v4.0 — All-State + 100K multiuser)
+// lib/services/live_fetch_engine.dart  (v4.1 — TrendCard wired)
 //
-// v3.1 → v4.0 changes:
-//   • Bihar-only filter REMOVED — all states in IndiaGeodata.monitoredCities fetched.
-//   • SharedFetchCoordinator: collapses concurrent identical fetches from N users
-//     into a single upstream call (request-deduplication / fan-in).
-//   • VersionedDataCache: in-process ETag/timestamp cache so 100K simultaneous
-//     readers never trigger >1 upstream parse per TTL window.
-//   • CircuitBreaker per source: opens after 5 consecutive errors, self-heals
-//     after 30 s half-open window.
-//   • _pollInterval → 30 s; _cacheTtl → 5 min (serves burst without hammering upstream).
+// v4.0 → v4.1 changes:
+//   • StationTrendStore.instance.append() called at end of _fetchAllCities()
+//     for every city that has a non-zero currentLevel in _cache.
+//   • trendForCity() now delegates to StationTrendStore.instance.get(city)
+//     instead of returning const [].
+//   All other logic is unchanged from v4.0.
 
 import 'dart:async';
 
@@ -18,6 +15,7 @@ import '../constants/india_geodata.dart';
 import '../models/flood_data.dart';
 import '../models/river_monitoring.dart';
 import 'backend_api_service.dart';
+import 'station_trend_store.dart';
 import 'wrd_bihar_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,7 +31,6 @@ class _CircuitBreaker {
 
   bool get isOpen {
     if (!_open) return false;
-    // half-open: try after cooldown
     if (_openedAt != null &&
         DateTime.now().difference(_openedAt!) >= _halfOpenAfter) {
       _open = false;
@@ -59,9 +56,7 @@ class _CircuitBreaker {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SharedFetchCoordinator  — singleton that collapses concurrent identical
-// upstream fetches.  Up to 100K callers waiting for the same key all share
-// a single Future instead of issuing N parallel HTTP requests.
+// SharedFetchCoordinator
 // ─────────────────────────────────────────────────────────────────────────────
 class SharedFetchCoordinator {
   SharedFetchCoordinator._();
@@ -80,7 +75,7 @@ class SharedFetchCoordinator {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VersionedDataCache  — lightweight in-process cache with TTL + version tag
+// VersionedDataCache
 // ─────────────────────────────────────────────────────────────────────────────
 class VersionedDataCache<T> {
   final Duration ttl;
@@ -218,23 +213,19 @@ class LiveCityData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LiveFetchEngine  (v4.0 — all states, 100K-ready)
+// LiveFetchEngine  (v4.1)
 // ─────────────────────────────────────────────────────────────────────────────
 class LiveFetchEngine {
-  // v4.0: reduced TTL so cache serves 100K concurrent readers between upstream calls
   static const _cacheTtl     = Duration(minutes: 5);
   static const _pollInterval = Duration(seconds: 30);
 
-  // v4.0: ALL monitored cities, no state filter
   static final List<Map<String, dynamic>> _allCities =
       List.unmodifiable(IndiaGeodata.monitoredCities);
 
-  // per-source circuit breakers
   final _cbWrd     = _CircuitBreaker();
   final _cbGlofas  = _CircuitBreaker();
   final _cbRain    = _CircuitBreaker();
 
-  // versioned in-process caches for upstream data
   final _wrdCache    = VersionedDataCache<List<WrdStation>>(ttl: const Duration(minutes: 5));
   final _glofasCache = VersionedDataCache<List<Map<String, dynamic>>>(ttl: const Duration(minutes: 5));
   final _rainCache   = VersionedDataCache<List<Map<String, dynamic>>>(ttl: const Duration(minutes: 5));
@@ -313,7 +304,6 @@ class LiveFetchEngine {
   // —— Data getters ——————————————————————————————————————————————————————————
   List<LiveCityData?> get liveLevels => _cache.values.toList();
 
-  // v4.0: all states — no Bihar guard
   List<FloodData> get liveFloodData {
     return _cache.entries.map((e) {
       final city = e.key;
@@ -382,14 +372,14 @@ class LiveFetchEngine {
   List<dynamic> imdAlertsForState(String state)         => const [];
   List<dynamic> ndmaAdvisoriesForState(String state)    => const [];
   List<dynamic> emergencyContactsForState(String state) => const [];
-  List<dynamic> trendForCity(String city)               => const [];
+  List<dynamic> trendForCity(String city)               =>
+      StationTrendStore.instance.get(city);
 
   // —— Refresh ———————————————————————————————————————————————————————————————
   Future<void> refreshData() async {
     _isLoading = true;
     _notify();
     try {
-      // v4.0: deduplicate concurrent refreshData() calls from multiple users/listeners
       await SharedFetchCoordinator.instance.dedupe(
         'live_fetch_engine_all',
         _fetchAllCities,
@@ -417,7 +407,7 @@ class LiveFetchEngine {
     await refreshData();
   }
 
-  // —— Core fetch — ALL cities, all states, with circuit-breakers + caching ——
+  // —— Core fetch ————————————————————————————————————————————————————————————
   Future<void> _fetchAllCities() async {
     final allCities = _allCities;
     if (allCities.isEmpty) return;
@@ -426,7 +416,7 @@ class LiveFetchEngine {
     final lons     = allCities.map((c) => (c['lon']  as num).toDouble()).toList();
     final cityKeys = allCities.map((c) => (c['city'] as String).toLowerCase().trim()).toList();
 
-    // 1. WRD Bihar gauge readings (circuit-breaker + TTL cache)
+    // 1. WRD Bihar gauge readings
     final wrdStart = DateTime.now();
     Map<String, WrdStation> wrdByKey = {};
     _wrdLiveCount = 0;
@@ -476,7 +466,7 @@ class LiveFetchEngine {
       _log('WRD circuit-breaker OPEN — skipping');
     }
 
-    // 2. GloFAS — river discharge (all stations)
+    // 2. GloFAS
     var dischargeMap = <String, double?>{};
     var meanMap      = <String, double?>{};
     final glofasStart = DateTime.now();
@@ -520,7 +510,7 @@ class LiveFetchEngine {
       _log('GloFAS circuit-breaker OPEN — skipping');
     }
 
-    // 3. Rainfall — all stations
+    // 3. Rainfall
     var rainMap = <String, double?>{};
     final imdStart = DateTime.now();
 
@@ -562,7 +552,7 @@ class LiveFetchEngine {
       _log('Rainfall circuit-breaker OPEN — skipping');
     }
 
-    // 4. Assemble cache — ALL cities across ALL states
+    // 4. Assemble cache
     final now = DateTime.now();
     for (int i = 0; i < allCities.length; i++) {
       final mc       = allCities[i];
@@ -607,10 +597,16 @@ class LiveFetchEngine {
         riskLevel:    _mergeRisk(wrd?.riskLabel, risk),
         lastUpdated:  now,
       );
+
+      // v4.1 — feed trend store with every non-zero reading
+      final lvl = _cache[key]!.currentLevel;
+      if (lvl != null && lvl > 0) {
+        StationTrendStore.instance.append(key, lvl, now);
+      }
     }
 
     _lastFetch = now;
-    _log('v4.0 cache updated — ${_cache.length} stations across all states '
+    _log('v4.1 cache updated — ${_cache.length} stations across all states '
         '(wrd=${_wrdHealth.healthy} [live=$_wrdLiveCount disk=$_wrdDiskCount], '
         'glofas=${_glofasHealth.healthy}, '
         'rainfall=${_imdHealth.healthy})');
@@ -663,6 +659,6 @@ class LiveFetchEngine {
 
   void _notify() => onStateChanged?.call();
   void _log(String msg) {
-    if (kDebugMode) debugPrint('[LiveFetchEngine v4.0] $msg');
+    if (kDebugMode) debugPrint('[LiveFetchEngine v4.1] $msg');
   }
 }
