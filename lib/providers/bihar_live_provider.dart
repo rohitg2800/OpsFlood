@@ -1,29 +1,26 @@
-// lib/providers/bihar_live_provider.dart  (v3.2)
+// lib/providers/bihar_live_provider.dart  (v3.3)
 //
 // OpsFlood — All-Stations Live Provider
 //
-// v3.1 had a dead-code smell:
-//   StationsUnifiedBridge.instance.attach(LiveFetchEngine())
-//   • LiveFetchEngine has zero usages anywhere in the app.
-//   • StationsUnifiedBridge has zero usages anywhere in the app.
-//   • The attach() call created a brand-new, never-started LiveFetchEngine
-//     instance on every build(), silently wiring a dead bridge to nothing.
+// v3.3 (12 Jun 2026) — Three city-card load-time fixes:
 //
-// v3.2 fix: remove both imports and the attach() call entirely.
-// The live data pipeline is:
-//   BiharLiveEngine.instance.stream  (Engines A)
-//   DataFetchEngine.instance.stream  (Engine B, via dataFetchProvider)
-// Both are already correctly wired — no third engine is needed.
+//   Fix 1 — Cold-start AsyncLoading:
+//     build() previously returned _buildState(engine.latest) which is
+//     AsyncData([]) when engine.latest==null.  isLoading was therefore
+//     false and city cards showed blank instead of a spinner.
+//     Now: if latest==null, build() suspends via a Completer until the
+//     first stream event, keeping the provider in AsyncLoading state.
 //
-// Data flow (this file):
-//   BiharLiveEngine.instance.stream
-//     └─ BiharLiveFeed (items: List<BiharFeedItem>)
-//           └─ BiharStationData.fromFeedItem() per gauge/barrage/telemetry item
-//                 └─ BiharLiveState (sorted by risk)
-//                       └─ biharLiveProvider (AsyncNotifier)
-//                             ├─ LiveStationsScreen
-//                             ├─ BiharDashboardProvider counts
-//                             └─ BiharRiverMapScreen pins
+//   Fix 2 — O(1) city lookup:
+//     BiharLiveState now carries _index (Map<String,BiharStationData>)
+//     built once in the constructor.  byCity(city) replaces the O(n)
+//     firstWhere scan that ran for every card on every rebuild.
+//
+//   Fix 3 — biharCityLoadingProvider correctness:
+//     See bihar_city_provider.dart.
+//
+// v3.2: removed dead StationsUnifiedBridge / LiveFetchEngine attach().
+// v3.1: single-engine BiharLiveEngine wiring.
 
 import 'dart:async';
 
@@ -32,7 +29,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/bihar_live_engine.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BiharStationData  (model consumed by LiveStationsScreen + Map)
+// BiharStationData
 // ─────────────────────────────────────────────────────────────────────────────
 class BiharStationData {
   final String  city;
@@ -73,38 +70,21 @@ class BiharStationData {
   });
 
   // ── Factory: BiharFeedItem → BiharStationData ─────────────────────────────
-  //
-  // BiharFeedItem fields used:
-  //   item.title           → city / station name
-  //   item.raw['river']    → river name
-  //   item.raw['district'] → district (may be absent)
-  //   item.raw['state']    → state    (absent → 'Bihar')
-  //   item.raw['level']    → numeric level (double, most reliable)
-  //   item.value           → "12.34 m" string fallback
-  //   item.raw['danger']   → danger threshold (double or null)
-  //   item.raw['warning']  → warning threshold (double or null)
-  //   item.dangerLevel     → status string ("Danger", "Warning", "Normal" …)
-  //   item.fetchedAt       → timestamp
-  //   item.changeStr       → diff string (e.g. "+0.12 m ↑")  optional
   factory BiharStationData.fromFeedItem(BiharFeedItem item) {
-    // level
     final rawLevel  = item.raw['level'];
     final curDouble = rawLevel != null
         ? _safeLevel(rawLevel)
         : _parseLevelString(item.value);
 
-    // thresholds
     final dan = _safeThreshold(item.raw['danger'],  fallback: 99.0);
     final war = _safeThreshold(item.raw['warning'], fallback: dan * 0.85);
 
-    // diff from changeStr  e.g. "+0.12 m ↑"
     double? diff;
     if (item.changeStr != null) {
       final numStr = item.changeStr!.replaceAll(RegExp(r'[^0-9.+-]'), '');
       diff = _safeLevel(double.tryParse(numStr));
     }
 
-    // trend: prefer changeStr arrow, fall back to level vs warning
     String trend = '→';
     if (item.changeStr != null) {
       if (item.changeStr!.contains('↑')) trend = '↑';
@@ -114,10 +94,8 @@ class BiharStationData {
       if (curDouble < war * 0.9) trend = '↓';
     }
 
-    // risk label — normalise the dangerLevel status string
     final risk = _normaliseRisk((item.dangerLevel ?? '').trim().toUpperCase());
 
-    // river
     String river = '';
     if (item.raw['river'] is String) {
       river = (item.raw['river'] as String).trim();
@@ -211,13 +189,23 @@ class BiharStationData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BiharLiveState
+// BiharLiveState  (v3.3 — adds O(1) city index)
 // ─────────────────────────────────────────────────────────────────────────────
 class BiharLiveState {
-  final List<BiharStationData> stations;
-  final DateTime? lastFetched;
+  final List<BiharStationData>        stations;
+  final DateTime?                      lastFetched;
+  // Fix 2: index built once in constructor — O(1) city lookup.
+  final Map<String, BiharStationData> _index;
 
-  const BiharLiveState({this.stations = const [], this.lastFetched});
+  BiharLiveState({this.stations = const [], this.lastFetched})
+      : _index = {
+          for (final s in stations)
+            s.city.trim().toLowerCase(): s,
+        };
+
+  /// O(1) lookup by city name (case-insensitive, trimmed).
+  BiharStationData? byCity(String city) =>
+      _index[city.trim().toLowerCase()];
 
   int get criticalCount => stations.where((s) => s.isCritical).length;
   int get severeCount   => stations.where((s) => s.isSevere).length;
@@ -227,7 +215,7 @@ class BiharLiveState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Notifier  (v3.2 — clean, single-engine: BiharLiveEngine)
+// Notifier  (v3.3)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kRiskOrder = {
@@ -250,26 +238,33 @@ class BiharLiveNotifier extends AsyncNotifier<BiharLiveState> {
     // Start engine if not already running (idempotent).
     if (!engine.running) engine.start();
 
-    // Cancel any previous subscription (e.g. hot-reload).
+    // Cancel any previous subscription (hot-reload safety).
     _sub?.cancel();
-
-    // Subscribe to the broadcast stream — fires after every engine cycle.
     _sub = engine.stream.listen(_onFeed);
-
-    // Clean up on provider dispose.
     ref.onDispose(() => _sub?.cancel());
 
-    // Build state from whatever the engine has cached already
-    // (instant first paint; empty state shows loading spinner).
-    return _buildState(engine.latest);
+    // Fix 1: Fast path — engine already has data (e.g. after hot-reload or
+    // provider re-creation after the engine has run at least once).
+    if (engine.latest != null) return _buildState(engine.latest);
+
+    // Fix 1: Slow path — engine hasn't emitted yet (cold start).
+    // Suspend build() so the provider stays in AsyncLoading and the card
+    // correctly shows a shimmer instead of blank-no-spinner.
+    final completer = Completer<BiharLiveState>();
+    late StreamSubscription<BiharLiveFeed> onceSub;
+    onceSub = engine.stream.listen((feed) {
+      if (!completer.isCompleted) {
+        completer.complete(_buildState(feed));
+      }
+      onceSub.cancel();
+    });
+    return completer.future;
   }
 
-  // Called by the engine after every refresh (≈every 15 min for gauges).
   void _onFeed(BiharLiveFeed feed) {
     state = AsyncData(_buildState(feed));
   }
 
-  // Convert BiharLiveFeed → BiharLiveState.
   BiharLiveState _buildState(BiharLiveFeed? feed) {
     if (feed == null || feed.items.isEmpty) {
       return BiharLiveState(lastFetched: feed?.generatedAt);
@@ -298,7 +293,7 @@ class BiharLiveNotifier extends AsyncNotifier<BiharLiveState> {
     state = const AsyncLoading();
     try {
       await BiharLiveEngine.instance.refresh();
-      // _onFeed() fires automatically from the stream — no manual assignment.
+      // _onFeed() fires automatically from the stream.
     } catch (e, st) {
       state = AsyncError(e, st);
     }
