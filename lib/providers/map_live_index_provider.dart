@@ -1,6 +1,13 @@
-// lib/providers/map_live_index_provider.dart  v1.0
+// lib/providers/map_live_index_provider.dart  v1.1
 //
-// Single source of truth for the Bihar River Map screen.
+// v1.1 (12 Jun 2026 — compile fixes):
+//   - Fix wrong import: SourceStatus is in data_fetch_engine.dart,
+//     not alert_engine.dart.
+//   - Fix operator-precedence bug on source: field —
+//     s.dataSource ?? s.isLive ? 'LIVE' : 'SEED'
+//     → s.dataSource ?? (s.isLive ? 'LIVE' : 'SEED')
+//
+// v1.0: Single source of truth for the Bihar River Map screen.
 //
 // PROBLEM (v5.3 and earlier):
 //   BiharRiverMapScreen watched biharLiveProvider (BiharLiveEngine only).
@@ -26,7 +33,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/river_station.dart';
-import '../services/alert_engine.dart'; // SourceStatus
+import '../services/data_fetch_engine.dart'; // SourceStatus lives here (v1.1 fix)
 import 'bihar_live_provider.dart';
 import 'data_fetch_provider.dart';
 import 'kosi_birpur_provider.dart';
@@ -144,16 +151,16 @@ final mapLiveIndexProvider =
     // For Birpur, prefer kosiBirpurProvider for discharge/trend
     final isBirpur = s.station.toLowerCase().contains('birpur');
 
-    final diff24h      = isBirpur ? null                 : enrich?.diff24h;
-    final forecast24h  = isBirpur ? null                 : enrich?.forecast24h;
-    final trend        = isBirpur
+    final diff24h       = isBirpur ? null                                : enrich?.diff24h;
+    final forecast24h   = isBirpur ? null                                : enrich?.forecast24h;
+    final trend         = isBirpur
         ? (birpurReading?.trend ?? enrich?.trend ?? '→')
         : (enrich?.trend ?? '→');
-    final discharge    = isBirpur
+    final discharge     = isBirpur
         ? (birpurReading?.dischargeCumecs ?? enrich?.discharge)
         : enrich?.discharge;
     final dischargeMean = enrich?.dischargeMean;
-    final rainfall24h  = enrich?.rainfall24h;
+    final rainfall24h   = enrich?.rainfall24h;
 
     index[key] = MapStationData(
       city:          s.station,
@@ -165,7 +172,8 @@ final mapLiveIndexProvider =
       warningLevel:  s.warning,
       hfl:           s.hfl,
       riskLabel:     _riskLabelFromDangerClass(s.dangerClass),
-      source:        s.dataSource ?? s.isLive ? 'LIVE' : 'SEED',
+      // v1.1: fix operator-precedence — ?? binds tighter than ?:
+      source:        s.dataSource ?? (s.isLive ? 'LIVE' : 'SEED'),
       fetchedAt:     s.lastUpdated ?? '--:--',
       isLive:        s.isLive && s.current > 0.0,
       diff24h:       diff24h,
