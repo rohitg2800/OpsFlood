@@ -1,40 +1,35 @@
-// lib/providers/bihar_live_provider.dart  (v3.0)
+// lib/providers/bihar_live_provider.dart  (v3.1)
 //
 // OpsFlood — All-Stations Live Provider
 //
-// v2.x → v3.0:
-//   ROOT FIX: The notifier was a one-shot AsyncNotifier — it called
-//   StationsUnifiedBridge.allStations once on build() and never again unless
-//   the user manually tapped Refresh.  Even if LiveFetchEngine fetched new
-//   data every 30 s, the UI never updated.
+// v3.0 had a compile error: LiveFetchEngine has NO .instance singleton.
+// v3.1 fix: wires to BiharLiveEngine.instance — the real broadcast-stream
+// singleton used by the rest of the app (live_engine_bridge_provider,
+// cwc_provider, etc.).
 //
-//   NOW:
-//   • BiharLiveNotifier wires itself directly to LiveFetchEngine.instance.
-//   • On build() it:
-//       1. Attaches itself as onStateChanged listener.
-//       2. Calls LiveFetchEngine.startPolling() so the 30 s ticker is running.
-//       3. Builds state from the engine's current cache (instant first paint).
-//   • Every time the engine finishes a fetch it fires onStateChanged →
-//     the notifier calls _rebuild() → AsyncNotifier state is replaced →
-//     LiveStationsScreen, BiharDashboardProvider counts, and the Map all
-//     get the fresh data automatically.
-//   • ref.onDispose() removes the listener so there are no leaks.
+// Data flow:
+//   BiharLiveEngine.instance.stream  →  BiharLiveFeed  →  BiharFeedItem[]
+//   BiharFeedItem  →  BiharStationData.fromFeedItem()  →  BiharLiveState
 //
-//   DASHBOARD COUNTS (biharStationCountProvider, biharCriticalCountProvider,
-//   biharWarningCountProvider, biharAvgRainfallProvider, etc.) are derived
-//   from biharLiveProvider — they update for free with no changes needed.
+// On build():
+//   1. Starts the engine if not already running (idempotent).
+//   2. Subscribes to the broadcast stream (multiple subscribers are fine).
+//   3. Converts the current engine snapshot for an instant first paint.
+//   4. Every subsequent stream event replaces the provider state — all
+//      three dependents (LiveStationsScreen, BiharDashboardProvider counts,
+//      BiharRiverMapScreen) update automatically.
+//   5. ref.onDispose() cancels the subscription — no leaks.
 //
-//   MAP (BiharRiverMapScreen) watches biharLiveProvider — it also updates
-//   for free; no changes needed there either.
-//
-//   SAFE-PARSING: every numeric field is guarded against null / NaN / Inf
-//   / string-encoded numbers so the screen never throws.
+// SAFE-PARSING: every numeric field is guarded against null / NaN / Inf
+// / string-encoded numbers so the screen never throws.
+
+import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/flood_data.dart';
-import '../services/live_fetch_engine.dart';
+import '../services/bihar_live_engine.dart';
 import '../services/stations_unified_bridge.dart';
+import '../services/live_fetch_engine.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BiharStationData (model consumed by LiveStationsScreen + Map)
@@ -54,7 +49,7 @@ class BiharStationData {
   final String  source;       // LIVE / STATIC
   final String  fetchedAt;    // ISO-8601 string
 
-  // GloFAS
+  // GloFAS / river discharge
   final double? discharge;
   final double? dischargeMean;
 
@@ -80,47 +75,95 @@ class BiharStationData {
     this.rainfall24h,
   });
 
-  // ── Factory: FloodData → BiharStationData ──────────────────────────────
-  factory BiharStationData.fromFloodData(FloodData fd) {
-    final cur = _safeLevel(fd.currentLevel);
-    final dan = _safeThreshold(fd.dangerLevel,  fallback: 99.0);
-    final war = _safeThreshold(fd.warningLevel, fallback: dan * 0.85);
+  // ─── Factory: BiharFeedItem → BiharStationData ─────────────────────────────
+  //
+  // BiharFeedItem fields used:
+  //   item.title       → city / station name
+  //   item.raw['river']→ river name
+  //   item.raw['district'] → district (may be absent)
+  //   item.raw['state']→ state (may be absent → default 'Bihar')
+  //   item.value       → "12.34 m" string — parse the numeric part
+  //   item.raw['level']→ numeric level when set by converter (more reliable)
+  //   item.raw['danger']   → danger level (double or null)
+  //   item.raw['warning']  → warning level (double or null)
+  //   item.dangerLevel → status string (e.g. "Danger", "Warning", "Normal")
+  //   item.fetchedAt   → timestamp
+  //   item.changeStr   → diff string (e.g. "+0.12 m ↑") — optional
+  factory BiharStationData.fromFeedItem(BiharFeedItem item) {
+    // ── level ──────────────────────────────────────────────────────────────
+    // Prefer raw['level'] (already a double from the converter).
+    // Fall back to parsing item.value ("12.34 m").
+    final rawLevel  = item.raw['level'];
+    final curDouble = rawLevel != null
+        ? _safeLevel(rawLevel)
+        : _parseLevelString(item.value);
 
-    // Trend from level vs warning threshold
-    String trend = '→';
-    if (cur != null && war > 0) {
-      if (cur > war)          trend = '↑';
-      if (cur < war * 0.9)   trend = '↓';
+    // ── thresholds ─────────────────────────────────────────────────────────
+    final dan = _safeThreshold(item.raw['danger'],  fallback: 99.0);
+    final war = _safeThreshold(item.raw['warning'], fallback: dan * 0.85);
+
+    // ── diff from changeStr ────────────────────────────────────────────────
+    // changeStr format: "+0.12 m ↑"  or  "-0.05 m ↓"
+    double? diff;
+    if (item.changeStr != null) {
+      final numStr = item.changeStr!.replaceAll(RegExp(r'[^0-9.+-]'), '');
+      diff = _safeLevel(double.tryParse(numStr));
     }
 
-    final risk      = _normaliseRisk(fd.riskLevel.trim().toUpperCase());
-    final src       = (fd.status == 'LIVE') ? 'LIVE' : 'STATIC';
-    final fetchedAt = fd.lastUpdated != null
-        ? fd.lastUpdated!.toIso8601String()
-        : '';
+    // ── trend from changeStr arrow OR level vs warning ─────────────────────
+    String trend = '→';
+    if (item.changeStr != null) {
+      if (item.changeStr!.contains('↑')) trend = '↑';
+      if (item.changeStr!.contains('↓')) trend = '↓';
+    } else if (curDouble != null && war > 0) {
+      if (curDouble > war)        trend = '↑';
+      if (curDouble < war * 0.9)  trend = '↓';
+    }
+
+    // ── risk label ─────────────────────────────────────────────────────────
+    // item.dangerLevel is the status string from the source
+    // ("Danger", "Above Warning", "CRITICAL", etc.)
+    final risk = _normaliseRisk((item.dangerLevel ?? '').trim().toUpperCase());
+
+    // ── source tag ─────────────────────────────────────────────────────────
+    // Any item coming from the engine is live data
+    const src = 'LIVE';
+
+    // ── river / district / state ───────────────────────────────────────────
+    String river = '';
+    if (item.raw['river'] is String) {
+      river = (item.raw['river'] as String).trim();
+    }
+    if (river.isEmpty && item.subtitle.startsWith('River: ')) {
+      river = item.subtitle.substring('River: '.length).trim();
+    }
+
+    final district = (item.raw['district'] as String?)?.trim() ?? '';
+    final state    = (item.raw['state']    as String?)?.trim().isNotEmpty == true
+        ? (item.raw['state'] as String).trim()
+        : 'Bihar';
 
     return BiharStationData(
-      city:          fd.city,
-      river:         fd.riverName ?? '',
-      district:      fd.district,
-      state:         fd.state,
-      currentLevel:  cur,
+      city:          item.title,
+      river:         river,
+      district:      district,
+      state:         state,
+      currentLevel:  curDouble,
       dangerLevel:   dan,
       warningLevel:  war,
-      diff24h:       null,   // single-snapshot — no prior level to diff
+      diff24h:       diff,
       forecast24h:   null,
       trend:         trend,
       riskLabel:     risk,
       source:        src,
-      fetchedAt:     fetchedAt,
-      discharge:     _safeLevel(fd.flowRate),
+      fetchedAt:     item.fetchedAt.toIso8601String(),
+      discharge:     null,
       dischargeMean: null,
-      rainfall24h:   _safeLevel(
-          fd.effectiveRainfallMm > 0 ? fd.effectiveRainfallMm : null),
+      rainfall24h:   _safeLevel(item.raw['rainfall']),
     );
   }
 
-  // ── Gauge helpers ────────────────────────────────────────────────────────
+  // ─── Gauge helpers ────────────────────────────────────────────────────────
   double get dangerPercent {
     final cur = currentLevel;
     final dan = dangerLevel;
@@ -135,7 +178,14 @@ class BiharStationData {
   bool get isSafe     => riskLabel == 'LOW' || riskLabel == 'NORMAL';
   bool get hasNoData  => riskLabel == 'UNKNOWN' || source == 'STATIC';
 
-  // ── Private safe-parse helpers ───────────────────────────────────────────
+  // ─── Private safe-parse helpers ───────────────────────────────────────────
+  static double? _parseLevelString(String? s) {
+    if (s == null || s.isEmpty || s == '—') return null;
+    // "12.34 m"  →  "12.34"
+    final numStr = RegExp(r'[-+]?\d+\.?\d*').firstMatch(s)?.group(0);
+    return _safeLevel(double.tryParse(numStr ?? ''));
+  }
+
   static double? _safeLevel(dynamic v) {
     if (v == null) return null;
     double? d;
@@ -155,22 +205,23 @@ class BiharStationData {
   }
 
   static String _normaliseRisk(String raw) {
-    switch (raw) {
-      case 'CRITICAL':    return 'CRITICAL';
-      case 'SEVERE':      return 'SEVERE';
-      case 'HIGH':        return 'HIGH';
-      case 'WARNING':     return 'HIGH';       // alias
-      case 'DANGER':      return 'CRITICAL';   // alias
-      case 'MODERATE':    return 'MODERATE';
-      case 'LOW':         return 'LOW';
-      case 'SAFE':        return 'LOW';        // alias
-      case 'PRE-MONSOON': return 'LOW';
-      case 'UNKNOWN':
-      case 'NO_DATA':
-      case 'NA':
-      case '':            return 'NORMAL';
-      default:            return 'NORMAL';
-    }
+    if (raw.contains('DANGER') || raw.contains('BREACH') ||
+        raw.contains('EXTREME') || raw.contains('CRITICAL'))
+      return 'CRITICAL';
+    if (raw.contains('SEVERE') || raw.contains('ABOVE_HFL') ||
+        raw.contains('ABOVE DANGER'))
+      return 'SEVERE';
+    if (raw.contains('WARNING') || raw.contains('HIGH') ||
+        raw.contains('ABOVE') || raw.contains('MODERATE'))
+      return 'HIGH';
+    if (raw.contains('WATCH') || raw.contains('CAUTION'))
+      return 'MODERATE';
+    if (raw == 'LOW' || raw == 'SAFE' || raw == 'NORMAL' ||
+        raw == 'PRE-MONSOON' || raw == 'BELOW WARNING')
+      return 'LOW';
+    if (raw.isEmpty || raw == 'NA' || raw == 'NO_DATA' || raw == 'UNKNOWN')
+      return 'NORMAL';
+    return 'NORMAL';
   }
 }
 
@@ -183,7 +234,6 @@ class BiharLiveState {
 
   const BiharLiveState({this.stations = const [], this.lastFetched});
 
-  // Convenience counts — drive both the summary header and DashboardProvider
   int get criticalCount => stations.where((s) => s.isCritical).length;
   int get severeCount   => stations.where((s) => s.isSevere).length;
   int get warningCount  => stations.where((s) => s.isWarning).length;
@@ -192,7 +242,7 @@ class BiharLiveState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Notifier  (v3.0 — wired to LiveFetchEngine, auto-rebuilds on every push)
+// Notifier  (v3.1 — wired to BiharLiveEngine.instance stream)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kRiskOrder = {
@@ -206,55 +256,54 @@ const _kRiskOrder = {
 };
 
 class BiharLiveNotifier extends AsyncNotifier<BiharLiveState> {
-  // Keep a reference to the engine so we can remove the listener on dispose.
-  late final LiveFetchEngine _engine;
+  StreamSubscription<BiharLiveFeed>? _sub;
 
   @override
   Future<BiharLiveState> build() async {
-    _engine = LiveFetchEngine.instance;
+    final engine = BiharLiveEngine.instance;
 
-    // ── 1. Make sure StationsUnifiedBridge is attached to the same engine ──
-    //    (required so the map-screen helper markersForMap stays in sync too)
-    StationsUnifiedBridge.instance.attach(_engine);
+    // Also keep StationsUnifiedBridge wired to LiveFetchEngine for
+    // the map's markersForMap helper (separate concern — does not affect
+    // the biharLiveProvider data path).
+    StationsUnifiedBridge.instance.attach(LiveFetchEngine());
 
-    // ── 2. Register ourselves as the engine's change listener ──────────────
-    //    Any previous listener is replaced; that's fine because there is only
-    //    ever one biharLiveProvider instance.
-    _engine.onStateChanged = _onEngineUpdate;
+    // Start the engine if it isn't already running.
+    if (!engine.running) engine.start();
 
-    // ── 3. Remove listener when the provider is disposed ───────────────────
-    ref.onDispose(() {
-      if (_engine.onStateChanged == _onEngineUpdate) {
-        _engine.onStateChanged = null;
-      }
-    });
+    // Cancel any existing subscription (e.g. on hot-reload / provider rebuild).
+    _sub?.cancel();
 
-    // ── 4. Kick off the 30 s polling loop (idempotent — safe to call N times)
-    _engine.startPolling(); // returns Future<void> but we don't await it here;
-                             // the first result fires _onEngineUpdate shortly.
+    // Listen to the broadcast stream — fires after every engine refresh cycle.
+    _sub = engine.stream.listen(_onFeed);
 
-    // ── 5. Build state from whatever is already in the engine cache ─────────
-    //    This gives an instant first paint even before the first HTTP call
-    //    completes.  If cache is empty we return an empty state — the loading
-    //    spinner in LiveStationsScreen covers this.
-    return _buildState();
+    // Remove listener when Riverpod disposes this notifier.
+    ref.onDispose(() => _sub?.cancel());
+
+    // Build initial state from whatever the engine has cached already.
+    return _buildState(engine.latest);
   }
 
-  // Called by the engine after every successful fetch (≈every 30 s).
-  void _onEngineUpdate() {
-    state = AsyncData(_buildState());
+  // Called after every engine refresh (≈every 15 min for gauges).
+  void _onFeed(BiharLiveFeed feed) {
+    state = AsyncData(_buildState(feed));
   }
 
-  // Convert engine's current cache → BiharLiveState.
-  BiharLiveState _buildState() {
-    final floodList = _engine.liveFloodData; // List<FloodData> — all states
-
-    if (floodList.isEmpty) {
-      return BiharLiveState(lastFetched: _engine.lastFetchTime);
+  // Convert BiharLiveFeed → BiharLiveState.
+  // Only riverGauge / barrage / telemetry items carry level data.
+  BiharLiveState _buildState(BiharLiveFeed? feed) {
+    if (feed == null || feed.items.isEmpty) {
+      return BiharLiveState(lastFetched: feed?.generatedAt);
     }
 
-    final stations = floodList
-        .map(BiharStationData.fromFloodData)
+    final gaugeItems = feed.items.where((i) =>
+        i.kind == FeedItemKind.riverGauge ||
+        i.kind == FeedItemKind.barrage    ||
+        i.kind == FeedItemKind.telemetry);
+
+    final stations = gaugeItems
+        .map(BiharStationData.fromFeedItem)
+        // Only keep items that carry a parseable level value.
+        .where((s) => s.currentLevel != null && s.currentLevel! > 0)
         .toList()
       ..sort((a, b) =>
           (_kRiskOrder[a.riskLabel] ?? 5)
@@ -262,17 +311,19 @@ class BiharLiveNotifier extends AsyncNotifier<BiharLiveState> {
 
     return BiharLiveState(
       stations:    stations,
-      lastFetched: _engine.lastFetchTime ?? DateTime.now(),
+      lastFetched: feed.generatedAt,
     );
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // ── Public API ───────────────────────────────────────────────────────────
 
-  /// Force an immediate re-fetch (e.g. user taps the refresh button).
+  /// Force an immediate full refresh of all engine sources.
   Future<void> refresh() async {
     state = const AsyncLoading();
     try {
-      await _engine.refreshData(); // engine will call _onEngineUpdate when done
+      await BiharLiveEngine.instance.refresh();
+      // _onFeed() will fire automatically from the stream subscription
+      // and replace the loading state — no manual assignment needed.
     } catch (e, st) {
       state = AsyncError(e, st);
     }
