@@ -1,7 +1,7 @@
 // lib/screens/map_screen.dart
-// MapScreen — Bihar Flood Command Center Map v9
-// v9: markers and district polygons are now coloured from live data via
-//     liveEngineStationsProvider.  Level labels + live-badge on every pin.
+// MapScreen — Bihar Flood Command Center Map v9.1
+// v9.1: _isCritical now includes aboveNormal (WARNING) stations → amber pulse.
+//       AboveNormal stations rendered with AmberPulseMarker (softer amber ring).
 library;
 
 import 'package:flutter/material.dart';
@@ -13,18 +13,16 @@ import 'package:latlong2/latlong.dart';
 import '../models/river_station.dart';
 import '../providers/map_command_provider.dart';
 import '../providers/real_time_river_provider.dart';
-import '../providers/live_engine_bridge_provider.dart';   // ★ NEW
+import '../providers/live_engine_bridge_provider.dart';
 import '../theme/rx.dart';
 import '../widgets/map/map_widgets.dart';
 
-// ── View constants ───────────────────────────────────────────────────────────────
+// ── View constants ────────────────────────────────────────────────────────────
 const _biharCenter = LatLng(25.5, 85.1);
 const _biharZoom   = 6.8;
 const _indiaCenter = LatLng(22.5, 80.0);
 const _indiaZoom   = 4.5;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MapScreen
 // ─────────────────────────────────────────────────────────────────────────────
 class MapScreen extends ConsumerStatefulWidget {
   static const String route = '/map';
@@ -39,7 +37,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
   bool _showLegend = true;
   bool _showDrawer = false;
 
-  // One AnimationController per critical station, keyed by station name.
+  // One AnimationController per pulsing station, keyed by station name.
+  // Covers extreme, severe AND aboveNormal now.
   final Map<String, AnimationController> _pulseCtrl = {};
 
   @override
@@ -60,7 +59,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   void _flyTo(LatLng pt, double zoom) => _mapController.move(pt, zoom);
 
-  // ── GeoJSON → Polygon layer ────────────────────────────────────────────────────
+  // ── GeoJSON → Polygon layer ────────────────────────────────────────────────
   List<Polygon> _buildPolygons(
     Map<String, dynamic> geoJson,
     Map<String, DangerClass> riskMap,
@@ -95,7 +94,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
         if (ring.length < 3) continue;
         polygons.add(Polygon(
           points:            ring,
-          color:             riskColor(dc),               // live-driven colour
+          color:             riskColor(dc),
           borderColor:       riskColor(dc, opacity: 0.7),
           borderStrokeWidth: 1.0,
         ));
@@ -116,8 +115,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
           .toList())
       .toList();
 
-  // ── Marker builder ───────────────────────────────────────────────────────────
-  /// Formats a level double into a short string like "52.34m"
+  // ── Marker builder ────────────────────────────────────────────────────────
   String? _levelLabel(RiverStation s) {
     if (s.current <= 0) return null;
     return '${s.current.toStringAsFixed(2)}m';
@@ -129,29 +127,50 @@ class _MapScreenState extends ConsumerState<MapScreen>
         if (coordFor(s) case final coord?)
           Marker(
             point:  coord,
-            width:  _isCritical(s) ? 58 : 44,
-            height: _isCritical(s) ? 58 : 44,
+            width:  _markerSize(s),
+            height: _markerSize(s),
             child:  GestureDetector(
               onTap: () => _onMarkerTap(s),
-              child: _isCritical(s)
-                  ? PulseMarker(
-                      dangerClass: s.dangerClass,
-                      ctrl:        _pulseFor(s.station),
-                      level:       _levelLabel(s),  // ★ live level on pin
-                    )
-                  : StaticMarker(
-                      dangerClass: s.dangerClass,
-                      level:       _levelLabel(s),  // ★ live level on pin
-                      isLive:      s.isLive,         // ★ green live-badge
-                    ),
+              child: _buildMarkerWidget(s),
             ),
           ),
     ];
   }
 
-  bool _isCritical(RiverStation s) =>
-      s.dangerClass == DangerClass.extreme ||
-      s.dangerClass == DangerClass.severe;
+  double _markerSize(RiverStation s) {
+    switch (s.dangerClass) {
+      case DangerClass.extreme:
+      case DangerClass.severe:      return 58;
+      case DangerClass.aboveNormal: return 50;
+      case DangerClass.normal:      return 44;
+    }
+  }
+
+  Widget _buildMarkerWidget(RiverStation s) {
+    final level = _levelLabel(s);
+    switch (s.dangerClass) {
+      case DangerClass.extreme:
+      case DangerClass.severe:
+        // Red / orange full pulse for critical/severe
+        return PulseMarker(
+          dangerClass: s.dangerClass,
+          ctrl:        _pulseFor(s.station),
+          level:       level,
+        );
+      case DangerClass.aboveNormal:
+        // Softer amber pulse for WARNING stations
+        return AmberPulseMarker(
+          ctrl:  _pulseFor(s.station),
+          level: level,
+        );
+      case DangerClass.normal:
+        return StaticMarker(
+          dangerClass: s.dangerClass,
+          level:       level,
+          isLive:      s.isLive,
+        );
+    }
+  }
 
   void _onMarkerTap(RiverStation s) {
     HapticFeedback.selectionClick();
@@ -174,15 +193,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final geoAsync = ref.watch(biharGeoJsonProvider);
     final isBihar  = mode == MapViewMode.bihar;
 
-    // ★ Trigger liveEngineStationsProvider so the engine starts and
-    //   its stations flow into mergedStationsProvider.
     ref.watch(liveEngineStationsProvider);
 
     return Scaffold(
       backgroundColor: rc.scaffoldBg,
       body: Stack(
         children: [
-          // ── Base map ────────────────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -201,7 +217,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
               if (isBihar)
                 geoAsync.when(
                   data:    (gj) => PolygonLayer(
-                      polygons: _buildPolygons(gj, distRisk)),  // live-coloured
+                      polygons: _buildPolygons(gj, distRisk)),
                   loading: ()      => const SizedBox.shrink(),
                   error:   (_, __) => const SizedBox.shrink(),
                 ),
@@ -209,7 +225,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
             ],
           ),
 
-          // ── Top bar ───────────────────────────────────────────────────────
           Positioned(
             top:   MediaQuery.of(context).padding.top + 8,
             left:  12,
@@ -233,7 +248,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
             ),
           ),
 
-          // ── Legend (collapsible) ─────────────────────────────────────────
           if (_showLegend)
             Positioned(
               bottom: _showDrawer ? 340 : 100,
@@ -257,7 +271,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
               ),
             ),
 
-          // ── Telemetry sheet ───────────────────────────────────────────────
           if (_showDrawer)
             MapTelemetrySheet(
               stations: stations,
@@ -271,7 +284,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
               },
             ),
 
-          // ── Loading pill ──────────────────────────────────────────────────
           if (ref.watch(realTimeRiverProvider).isLoading)
             Positioned(
               top:   MediaQuery.of(context).padding.top + 72,

@@ -1,5 +1,6 @@
 // lib/widgets/map/map_legend.dart
 // MapSourceLegend — collapsible overlay showing data sources + risk scale.
+// v1.1: legend labels updated to match riskLabel / AlertSeverity terminology.
 import 'package:flutter/material.dart';
 import '../../models/river_station.dart'; // DangerClass
 import '../../providers/map_command_provider.dart'; // SyncMeta
@@ -22,19 +23,19 @@ class MapSourceLegend extends StatelessWidget {
     ('GLOFAS',    '🛰', 'GloFAS Global Forecast'),
   ];
 
-  // NOT const — DangerClass enum values are not const-safe in record literals
+  // Labels now match AlertSeverity / FloodData.riskLevel used across the app
   static final _legend = [
-    (DangerClass.extreme,     'Critical'),
-    (DangerClass.severe,      'High'),
-    (DangerClass.aboveNormal, 'Moderate'),
-    (DangerClass.normal,      'Low'),
+    (DangerClass.extreme,     'CRITICAL',  '≥ HFL — Highest Flood Level'),
+    (DangerClass.severe,      'SEVERE',    '≥ Danger Level'),
+    (DangerClass.aboveNormal, 'WARNING',   '≥ Warning Level'),
+    (DangerClass.normal,      'NORMAL',    'Below Warning Level'),
   ];
 
   @override
   Widget build(BuildContext context) {
     final rc = context.rc;
     return Container(
-      width: 200,
+      width: 210,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color:        rc.cardBg.withValues(alpha: 0.95),
@@ -126,9 +127,9 @@ class MapSourceLegend extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          for (final (dc, lbl) in _legend)
+          for (final (dc, lbl, sublbl) in _legend)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: 5),
               child: Row(
                 children: [
                   Container(
@@ -141,10 +142,28 @@ class MapSourceLegend extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(lbl,
-                      style: TextStyle(
-                          color:    rc.textSecondary,
-                          fontSize: 11)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          lbl,
+                          style: TextStyle(
+                            color:      rc.textPrimary,
+                            fontSize:   10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          sublbl,
+                          style: TextStyle(
+                            color:    rc.textSecondary,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),

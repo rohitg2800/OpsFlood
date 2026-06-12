@@ -1,7 +1,8 @@
 // lib/models/river_station.dart
 // Extended model — carries both static CWC thresholds AND live API fields.
-// v2: added lat/lon (nullable) and riskLabel getter for NearbyStationService
-//     and nearby_stations_section.dart.
+// v2:   added lat/lon (nullable) and riskLabel getter.
+// v2.1: guard hfl==0 and danger==0 in dangerClass so stations with no
+//       seeded thresholds don't falsely show EXTREME/SEVERE.
 
 export 'live_river_result_ext.dart';
 
@@ -49,13 +50,16 @@ class RiverStation {
   });
 
   DangerClass get dangerClass {
-    if (current >= hfl)     return DangerClass.extreme;
-    if (current >= danger)  return DangerClass.severe;
-    if (current >= warning) return DangerClass.aboveNormal;
+    // Guard: if hfl or danger are 0 (not seeded) skip those tiers to avoid
+    // falsely classifying every station as extreme/severe.
+    if (hfl    > 0 && current >= hfl)    return DangerClass.extreme;
+    if (danger > 0 && current >= danger) return DangerClass.severe;
+    if (warning > 0 && current >= warning) return DangerClass.aboveNormal;
     return DangerClass.normal;
   }
 
-  /// Human-readable risk label derived from dangerClass.
+  /// Human-readable risk label — kept in sync with AlertSeverity labels
+  /// used across the rest of the app.
   String get riskLabel {
     switch (dangerClass) {
       case DangerClass.extreme:     return 'CRITICAL';

@@ -1,7 +1,9 @@
-// lib/widgets/map/map_markers.dart  v2.0
-// PulseMarker  — animated ring for CRITICAL / HIGH stations.
-// StaticMarker — plain dot for MODERATE / LOW stations.
-// v2: show water-level text label + live badge on each pin.
+// lib/widgets/map/map_markers.dart  v2.1
+// PulseMarker      — animated red/orange ring for CRITICAL / SEVERE stations.
+// AmberPulseMarker — softer amber pulse for WARNING (aboveNormal) stations.
+// StaticMarker     — plain dot for NORMAL stations.
+// v2.1: added AmberPulseMarker; aboveNormal stations now pulse amber
+//       instead of showing a dull static dot.
 import 'package:flutter/material.dart';
 import '../../models/river_station.dart'; // DangerClass
 import 'map_risk_helpers.dart';
@@ -18,12 +20,11 @@ IconData _iconFor(DangerClass dc) {
 }
 
 // ── PulseMarker ───────────────────────────────────────────────────────────────
-/// Used for CRITICAL (extreme) and HIGH (severe) stations.
-/// [level] is the live reading string e.g. "52.34 m"; pass null to hide it.
+/// Used for CRITICAL (extreme) and SEVERE stations.
 class PulseMarker extends StatelessWidget {
   final DangerClass dangerClass;
   final AnimationController ctrl;
-  final String? level;   // optional text shown below the core dot
+  final String? level;
 
   const PulseMarker({
     super.key,
@@ -45,7 +46,6 @@ class PulseMarker extends StatelessWidget {
             Stack(
               alignment: Alignment.center,
               children: [
-                // Pulsing ring
                 Transform.scale(
                   scale: scale,
                   child: Container(
@@ -60,7 +60,6 @@ class PulseMarker extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Core dot
                 Container(
                   width: 24, height: 24,
                   decoration: BoxDecoration(
@@ -82,7 +81,6 @@ class PulseMarker extends StatelessWidget {
                 ),
               ],
             ),
-            // Level label below dot
             if (level != null && level!.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(top: 2),
@@ -114,13 +112,100 @@ class PulseMarker extends StatelessWidget {
   }
 }
 
+// ── AmberPulseMarker ──────────────────────────────────────────────────────────
+/// Softer amber pulse for WARNING (aboveNormal) stations.
+/// Smaller ring and lower opacity than PulseMarker to distinguish from CRITICAL.
+class AmberPulseMarker extends StatelessWidget {
+  final AnimationController ctrl;
+  final String? level;
+
+  const AmberPulseMarker({
+    super.key,
+    required this.ctrl,
+    this.level,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xFFFBC02D); // amber
+    return AnimatedBuilder(
+      animation: ctrl,
+      builder: (_, __) {
+        final scale = 1.0 + 0.22 * ctrl.value; // gentler than CRITICAL pulse
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color:  color.withValues(
+                          alpha: 0.12 * (1 - ctrl.value)),
+                      border: Border.all(
+                        color: color.withValues(
+                            alpha: 0.35 * (1 - ctrl.value)),
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 22, height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color,
+                    boxShadow: [
+                      BoxShadow(
+                        color:      color.withValues(alpha: 0.45),
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.water_rounded,
+                    color: Colors.white,
+                    size:  12,
+                  ),
+                ),
+              ],
+            ),
+            if (level != null && level!.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color:        color,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  level!,
+                  style: const TextStyle(
+                    color:      Colors.white,
+                    fontSize:   8,
+                    fontWeight: FontWeight.w700,
+                    height:     1.2,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 // ── StaticMarker ────────────────────────────────────────────────────────────────
-/// Used for NORMAL and ABOVE-NORMAL stations.
-/// [level] optionally shows the reading; [isLive] adds a green ● dot.
+/// Used for NORMAL stations only.
 class StaticMarker extends StatelessWidget {
   final DangerClass dangerClass;
-  final String?     level;    // e.g. "50.27 m"
-  final bool        isLive;   // shows a live-data ● badge
+  final String?     level;
+  final bool        isLive;
 
   const StaticMarker({
     super.key,
@@ -157,7 +242,6 @@ class StaticMarker extends StatelessWidget {
                 size:  14,
               ),
             ),
-            // Live badge — top-right corner
             if (isLive)
               Positioned(
                 top:   -2,
@@ -166,7 +250,7 @@ class StaticMarker extends StatelessWidget {
                   width: 8, height: 8,
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Color(0xFF00E676),   // bright green pulse dot
+                    color: Color(0xFF00E676),
                     boxShadow: [
                       BoxShadow(color: Color(0x8000E676), blurRadius: 4),
                     ],
@@ -175,7 +259,6 @@ class StaticMarker extends StatelessWidget {
               ),
           ],
         ),
-        // Level label
         if (level != null && level!.isNotEmpty)
           Container(
             margin: const EdgeInsets.only(top: 2),
