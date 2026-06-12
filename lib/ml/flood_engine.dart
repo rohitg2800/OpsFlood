@@ -8,7 +8,17 @@
 //   risk_score formula            — identical weight map
 //   STATE_SEVERITY_MATRIX         — Full India (all 36 states/UTs)
 //
-// FIXES (v1.2):
+// FIXES (v1.3 — 12 Jun 2026):
+//   1. PLAINS rainfall thresholds raised  150/300/450 → 200/350/500 (CWC Ganga 2025).
+//   2. HIMALAYAN thresholds raised        150/300/500 → 200/350/550.
+//   3. COASTAL thresholds LOWERED         200/400/600 → 150/300/500 (IMD coastal norms).
+//   4. ARID thresholds lowered            100/200/350 →  80/160/280 (Barmer 2024).
+//   5. Bihar state entry recalibrated to backend dashboard + CWC Bihar 2026.
+//   6. Assam / Odisha / Gujarat / UP state entries updated post-2024 bulletins.
+//   7. Ensemble weights: peakScore 0.52→0.55, rainScore 0.38→0.35.
+//   8. ML/Rule blend: mlW 0.75→0.70, ruleW 0.25→0.30 (rule engine stronger in deficit year).
+//
+// FIXES (v1.2 — carried forward):
 //   1. Delhi MSL-elevation flag (usesAbsoluteElevation = true).
 //   2. Unknown-state fallback returns PLAINS generic instead of Maharashtra.
 //   3. Rule engine probability distribution is right-skewed.
@@ -103,14 +113,15 @@ const Map<String, double> riskWeights = {
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
-// REGION RAINFALL THRESHOLDS
+// REGION RAINFALL THRESHOLDS  (mm / 7-day)
+// v1.3: PLAINS +50/+50/+50 | HIMALAYAN +50/+50/+50 | COASTAL -50/-100/-100 | ARID -20/-40/-70
 // ───────────────────────────────────────────────────────────────────────────────
 const Map<String, Map<String, double>> regionRainfallThresholds = {
-  'PLAINS':    {'moderate': 150.0, 'severe': 300.0, 'critical': 450.0},
-  'COASTAL':   {'moderate': 200.0, 'severe': 400.0, 'critical': 600.0},
-  'HIMALAYAN': {'moderate': 150.0, 'severe': 300.0, 'critical': 500.0},
+  'PLAINS':    {'moderate': 200.0, 'severe': 350.0, 'critical': 500.0},
+  'COASTAL':   {'moderate': 150.0, 'severe': 300.0, 'critical': 500.0},
+  'HIMALAYAN': {'moderate': 200.0, 'severe': 350.0, 'critical': 550.0},
   'NORTHEAST': {'moderate': 200.0, 'severe': 400.0, 'critical': 600.0},
-  'ARID':      {'moderate': 100.0, 'severe': 200.0, 'critical': 350.0},
+  'ARID':      {'moderate':  80.0, 'severe': 160.0, 'critical': 280.0},
   'ISLAND':    {'moderate': 200.0, 'severe': 400.0, 'critical': 600.0},
   'URBAN_UT':  {'moderate': 100.0, 'severe': 200.0, 'critical': 350.0},
 };
@@ -175,6 +186,7 @@ final StateEntry _unknownStateFallback = _entry(
 
 // ───────────────────────────────────────────────────────────────────────────────
 // STATE SEVERITY MATRIX — Full India (28 states + 8 UTs = 36)
+// v1.3: Bihar, Assam, Odisha, Gujarat, UP entries updated.
 // ───────────────────────────────────────────────────────────────────────────────
 final Map<String, StateEntry> stateSeverityMatrix = {
   // ── 28 STATES ──
@@ -192,17 +204,19 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Siang', 'Lohit', 'Subansiri'],
     districts: ['East Siang', 'Lohit', 'Dibang Valley'],
   ),
+  // v1.3: danger 11.5 → 12.0 (Brahmaputra Dibrugarh DL recalibrated post-2024)
   'assam': _entry(
     region: 'NORTHEAST',
     peak: {'moderate': 8.0, 'severe': 11.0, 'critical': 14.0},
-    danger: 11.5, warning: 8.5, hfl: 15.0,
+    danger: 12.0, warning: 8.5, hfl: 15.0,
     rivers: ['Brahmaputra', 'Barak', 'Kopili'],
     districts: ['Dhubri', 'Barpeta', 'Morigaon', 'Goalpara'],
   ),
+  // v1.3: peak 9.0/11.5/13.5 → 11.0/12.0/13.2 | danger 11.5→12.0 | warning 9.2→11.0 | hfl 14.0→13.5
   'bihar': _entry(
     region: 'PLAINS',
-    peak: {'moderate': 9.0, 'severe': 11.5, 'critical': 13.5},
-    danger: 11.5, warning: 9.2, hfl: 14.0,
+    peak: {'moderate': 11.0, 'severe': 12.0, 'critical': 13.2},
+    danger: 12.0, warning: 11.0, hfl: 13.5,
     rivers: ['Gandak', 'Kosi', 'Bagmati', 'Kamla', 'Mahananda'],
     districts: ['Darbhanga', 'Sitamarhi', 'Muzaffarpur', 'Supaul', 'Madhubani'],
   ),
@@ -220,10 +234,11 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Mandovi', 'Zuari'],
     districts: ['North Goa', 'South Goa'],
   ),
+  // v1.3: danger 11.5 → 12.0 (Tapi Surat 2024 revised)
   'gujarat': _entry(
     region: 'COASTAL',
     peak: {'moderate': 8.0, 'severe': 11.0, 'critical': 14.0},
-    danger: 11.5, warning: 8.5, hfl: 15.0,
+    danger: 12.0, warning: 8.5, hfl: 15.0,
     rivers: ['Sabarmati', 'Tapi', 'Narmada'],
     districts: ['Vadodara', 'Bharuch', 'Surat', 'Anand'],
   ),
@@ -305,10 +320,11 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Doyang', 'Dhansiri', 'Tizu'],
     districts: ['Dimapur', 'Mokokchung', 'Wokha'],
   ),
+  // v1.3: hfl 16.5 → 17.0 (Mahanadi Mundali 2024 new HFL)
   'odisha': _entry(
     region: 'COASTAL',
     peak: {'moderate': 9.5, 'severe': 12.5, 'critical': 15.5},
-    danger: 13.0, warning: 10.0, hfl: 16.5,
+    danger: 13.0, warning: 10.0, hfl: 17.0,
     rivers: ['Mahanadi', 'Brahmani', 'Baitarani'],
     districts: ['Cuttack', 'Jagatsinghpur', 'Kendrapara', 'Bhadrak'],
   ),
@@ -354,10 +370,11 @@ final Map<String, StateEntry> stateSeverityMatrix = {
     rivers: ['Gumti', 'Haora', 'Manu'],
     districts: ['West Tripura', 'Sepahijala', 'Khowai'],
   ),
+  // v1.3: warning 9.5 → 10.0 (CWC Ganga Varanasi WL bulletin 2025)
   'uttar pradesh': _entry(
     region: 'PLAINS',
     peak: {'moderate': 9.5, 'severe': 12.5, 'critical': 15.0},
-    danger: 12.5, warning: 9.5, hfl: 16.0,
+    danger: 12.5, warning: 10.0, hfl: 16.0,
     rivers: ['Ganga', 'Yamuna', 'Ghaghra', 'Rapti', 'Sharda'],
     districts: ['Varanasi', 'Allahabad', 'Ballia', 'Gorakhpur', 'Bahraich'],
   ),
@@ -560,6 +577,7 @@ Map<String, double> _ruleEngineProbMap(String thresholdSev) {
 
 // ───────────────────────────────────────────────────────────────────────────────
 // HEURISTIC ON-DEVICE ENGINE
+// v1.3: peakScore weight 0.52→0.55 | rainScore 0.38→0.35 | mlW 0.75→0.70 | ruleW 0.25→0.30
 // ───────────────────────────────────────────────────────────────────────────────
 FloodResult runOnDeviceEngine(FloodInput input) {
   final entry = getStateEntry(input.state);
@@ -605,8 +623,9 @@ FloodResult runOnDeviceEngine(FloodInput input) {
   final recessionScore = (input.recessionTimeDay / 10.0).clamp(0.0, 1.0);
   final temporalScore  = (durationScore * 0.4 + riseScore * 0.35 + recessionScore * 0.25).clamp(0.0, 1.0);
 
+  // v1.3: 0.52/0.38/0.10 → 0.55/0.35/0.10
   final combinedScore =
-      (peakScore * 0.52 + rainScore * 0.38 + temporalScore * 0.10).clamp(0.0, 1.0);
+      (peakScore * 0.55 + rainScore * 0.35 + temporalScore * 0.10).clamp(0.0, 1.0);
 
   final mlRank = (combinedScore * 3.0).clamp(0.0, 3.0);
   final mlProbs = <String, double>{};
@@ -621,8 +640,9 @@ FloodResult runOnDeviceEngine(FloodInput input) {
 
   final ruleProbs = _ruleEngineProbMap(thresholdSev);
 
-  const mlW   = 0.75;
-  const ruleW = 0.25;
+  // v1.3: mlW 0.75→0.70, ruleW 0.25→0.30 (rule engine stronger in 2025 deficit year)
+  const mlW   = 0.70;
+  const ruleW = 0.30;
   final finalProbs = <String, double>{};
   for (final label in ['LOW', 'MODERATE', 'SEVERE', 'CRITICAL']) {
     finalProbs[label] = (normMlProbs[label]! * mlW) + (ruleProbs[label]! * ruleW);
@@ -672,7 +692,7 @@ FloodResult runOnDeviceEngine(FloodInput input) {
     probabilities: {for (final e in normFinal.entries) e.key: e.value * 100},
     riskScore: riskScore,
     proximityToDangerM: proximityToDanger,
-    algorithm: 'On-Device Heuristic Ensemble v1.2 (OpsFlood port)',
+    algorithm: 'On-Device Heuristic Ensemble v1.3 (OpsFlood port)',
     alert: alert,
     monitoringLevel: monitoring['level']!,
     monitoringAction: monitoring['action']!,
