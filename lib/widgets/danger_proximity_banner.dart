@@ -1,5 +1,15 @@
-// lib/widgets/danger_proximity_banner.dart
-// Shows animated danger/warning banner when user is within 80 km of a flood gauge.
+// lib/widgets/danger_proximity_banner.dart  v2.0
+//
+// v2.0 changes:
+//   - Reads from ActiveAlertController.alerts (not raw liveLevelsProvider)
+//     → SEED-source stations can no longer trigger false proximity alerts
+//   - Shows rate-of-rise in banner text when >= 0.5 m/h
+//   - Distance threshold now varies by severity:
+//       EXTREME / CRITICAL → 120 km
+//       DANGER             → 80 km  (unchanged)
+//       RISING             → 60 km
+//   - Haversine uses AlertItem lat/lon from BiharGauge lookup (unchanged)
+//   - Added RISING tier to banner colour (sky blue)
 library;
 
 import 'dart:math';
@@ -7,71 +17,64 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/bihar_rivers.dart';
-import '../models/flood_data.dart';              // ← FloodData
-import '../providers/flood_providers.dart';      // liveLevelsProvider
 import '../providers/location_provider.dart';
+import '../services/active_alert_controller.dart';
 import '../theme/river_theme.dart';
 
 class DangerProximityBanner extends ConsumerWidget {
   const DangerProximityBanner({super.key});
 
+  // Distance thresholds per severity (km)
+  static const _distBySeverity = {
+    AlertSeverity.extreme:  120.0,
+    AlertSeverity.critical: 120.0,
+    AlertSeverity.danger:    80.0,
+    AlertSeverity.rising:    60.0,
+    AlertSeverity.normal:     0.0,
+  };
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locState = ref.watch(locationProvider);
-    final stations = ref.watch(liveLevelsProvider); // List<FloodData>
-
     if (locState.isLoading || locState.lat == null) {
       return const SizedBox.shrink();
     }
 
-    BiharGauge? nearest;
-    double      minDist       = double.infinity;
-    String      nearestStatus = '';
+    final activeAlerts = ActiveAlertController.instance.alerts;
+    if (activeAlerts.isEmpty) return const SizedBox.shrink();
 
-    for (final gauge in kBiharGauges) {
+    // Find the nearest alerting station within threshold
+    AlertItem? nearest;
+    double     minDist = double.infinity;
+
+    for (final alert in activeAlerts) {
+      final threshold = _distBySeverity[alert.severity] ?? 80.0;
+      if (threshold == 0.0) continue;
+
+      // Look up lat/lon from gauge registry
+      final gauge = kBiharGauges.where(
+        (g) => g.station.toLowerCase() == alert.stationName.toLowerCase(),
+      ).firstOrNull;
+      if (gauge == null) continue;
+
       final d = _haversine(
         locState.lat!, locState.lon!,
-        gauge.lat,     gauge.lon,
+        gauge.lat, gauge.lon,
       );
-      if (d > 80.0) continue;
+      if (d > threshold) continue;
 
-      final live = stations.firstWhere(
-        (s) => s.city.toLowerCase().contains(
-                   gauge.station.toLowerCase().split(' ').first),
-        orElse: () => stations.isNotEmpty ? stations.first : _emptyFlood(),
-      );
-
-      final level  = live.currentLevel;
-      final status = level >= gauge.dangerLevel  ? 'DANGER'
-                   : level >= gauge.warningLevel ? 'WARNING'
-                   : 'SAFE';
-
-      if ((status == 'DANGER' || status == 'WARNING') && d < minDist) {
-        minDist       = d;
-        nearest       = gauge;
-        nearestStatus = status;
+      if (d < minDist) {
+        minDist = d;
+        nearest = alert;
       }
     }
 
     if (nearest == null) return const SizedBox.shrink();
-    return _BannerWidget(
-      station:  nearest.station,
-      district: nearest.district,
-      distKm:   minDist,
-      status:   nearestStatus,
-    );
+    return _BannerWidget(alert: nearest, distKm: minDist);
   }
 
-  static FloodData _emptyFlood() => FloodData(
-    city: '', district: '', state: '',
-    currentLevel: 0, warningLevel: 0, dangerLevel: 0,
-    safeLevel: 0, capacityPercent: 0,
-    riskLevel: 'LOW', status: 'ESTIMATED',
-    effectiveRainfallMm: 0,
-    lastUpdated: DateTime.now(),
-  );
-
-  double _haversine(double lat1, double lon1, double lat2, double lon2) {
+  static double _haversine(
+      double lat1, double lon1, double lat2, double lon2) {
     const r    = 6371.0;
     final dLat = (lat2 - lat1) * pi / 180;
     final dLon = (lon2 - lon1) * pi / 180;
@@ -84,16 +87,9 @@ class DangerProximityBanner extends ConsumerWidget {
 
 // ── Animated banner ───────────────────────────────────────────────────────────
 class _BannerWidget extends StatefulWidget {
-  final String station;
-  final String district;
-  final double distKm;
-  final String status;
-  const _BannerWidget({
-    required this.station,
-    required this.district,
-    required this.distKm,
-    required this.status,
-  });
+  final AlertItem alert;
+  final double    distKm;
+  const _BannerWidget({required this.alert, required this.distKm});
   @override
   State<_BannerWidget> createState() => _BannerWidgetState();
 }
@@ -114,12 +110,33 @@ class _BannerWidgetState extends State<_BannerWidget>
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDanger  = widget.status == 'DANGER';
-    final baseColor = isDanger ? AppPalette.critical : AppPalette.warning;
+    final sev       = widget.alert.severity;
+    final baseColor = switch (sev) {
+      AlertSeverity.extreme  => const Color(0xFFD32F2F),
+      AlertSeverity.critical => AppPalette.critical,
+      AlertSeverity.danger   => AppPalette.warning,
+      AlertSeverity.rising   => const Color(0xFF039BE5),
+      AlertSeverity.normal   => AppPalette.textGrey,
+    };
+
+    final ror        = widget.alert.rateOfRiseMph ?? 0.0;
+    final rorText    = ror >= 0.5
+        ? ' · rising +${ror.toStringAsFixed(2)} m/h'
+        : '';
+    final sevLabel   = switch (sev) {
+      AlertSeverity.extreme  => 'EXTREME FLOOD',
+      AlertSeverity.critical => 'CRITICAL',
+      AlertSeverity.danger   => 'DANGER',
+      AlertSeverity.rising   => 'RAPID RISE',
+      AlertSeverity.normal   => '',
+    };
 
     return AnimatedBuilder(
       animation: _anim,
@@ -127,18 +144,22 @@ class _BannerWidgetState extends State<_BannerWidget>
         width:   double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         color:   Color.lerp(
-            baseColor, baseColor.withValues(alpha: 0.7), _anim.value),
+            baseColor, baseColor.withValues(alpha: 0.70), _anim.value),
         child: Row(
           children: [
             Icon(
-              isDanger ? Icons.warning_rounded : Icons.info_rounded,
-              color: Colors.white, size: 20,
+              sev == AlertSeverity.rising
+                  ? Icons.trending_up_rounded
+                  : Icons.warning_rounded,
+              color: Colors.white,
+              size:  20,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                '${widget.status}: ${widget.station} (${widget.district}) '
-                '${widget.distKm.toStringAsFixed(0)} km away',
+                '$sevLabel: ${widget.alert.stationName} '
+                '(${widget.alert.district}) '
+                '${widget.distKm.toStringAsFixed(0)} km away$rorText',
                 style: const TextStyle(
                   color:      Colors.white,
                   fontWeight: FontWeight.w700,
