@@ -1,9 +1,11 @@
-// lib/widgets/danger_proximity_banner.dart  v2.1
+// lib/widgets/danger_proximity_banner.dart  v2.2
+//
+// v2.2 fix:
+//   - Riverpod 3.x removed valueOrNull; use asData?.value instead.
 //
 // v2.1 fix:
-//   - Use userLocationProvider (FutureProvider<Position?>) from
-//     location_provider.dart instead of the non-existent locationProvider.
-//   - Access Position.latitude / Position.longitude directly.
+//   - Use userLocationProvider (FutureProvider<Position?>) instead of
+//     the non-existent locationProvider.
 //
 // v2.0 changes:
 //   - Reads from ActiveAlertController.alerts (not raw liveLevelsProvider)
@@ -39,11 +41,8 @@ class DangerProximityBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // userLocationProvider is FutureProvider<Position?>
-    final locAsync = ref.watch(userLocationProvider);
-
-    // Still loading or errored → hide
-    final Position? position = locAsync.valueOrNull;
+    // Riverpod 3.x: use asData?.value instead of valueOrNull
+    final Position? position = ref.watch(userLocationProvider).asData?.value;
     if (position == null) return const SizedBox.shrink();
 
     final activeAlerts = ActiveAlertController.instance.alerts;
