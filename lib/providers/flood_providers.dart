@@ -1,16 +1,7 @@
 // lib/providers/flood_providers.dart
-// v10.1 — deduplicate liveLevelsProvider by city key.
+// v10.2 — _normCityKey() collapses qualifier variants so Birpur x3 → Birpur x1
 //
-// Root cause of duplicate cards (Taibpur ×3, Sonbarsa ×3 etc.):
-//   mergedStationsProvider returns all RiverStation rows from every source
-//   (WRD API, GloFAS, static geodata) without deduplication.  liveLevelsProvider
-//   was mapping them 1-to-1, so the same city appeared once per source.
-//
-// Fix: after converting RiverStation → FloodData, group by city.toLowerCase()
-//   and keep the single best entry:
-//     • prefer status == 'LIVE'   (any live reading over static)
-//     • among live entries, keep the one with the highest currentLevel
-//       (most recent / most accurate gauge reading)
+// v10.1 history: deduplicate liveLevelsProvider by city key.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,9 +11,9 @@ import '../models/river_station.dart';
 import '../services/real_time_service.dart';
 import 'real_time_river_provider.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // selectedCityProvider
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 class SelectedCityNotifier extends Notifier<String?> {
   @override
@@ -35,17 +26,17 @@ class SelectedCityNotifier extends Notifier<String?> {
 final selectedCityProvider =
     NotifierProvider<SelectedCityNotifier, String?>(SelectedCityNotifier.new);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // realTimeProvider
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final realTimeProvider = Provider<RealTimeService>(
   (_) => RealTimeService(),
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // criticalCountProvider / isWakingUpProvider
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final criticalCountProvider = Provider<int>((ref) =>
     ref.watch(mergedCriticalCountProvider));
@@ -56,9 +47,9 @@ final isWakingUpProvider = Provider<bool>((ref) {
   return loading && !hasData;
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // cityDataProvider / cityTrendProvider
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final cityDataProvider =
     Provider.family<FloodData?, String>((ref, city) {
@@ -72,9 +63,9 @@ final cityTrendProvider =
   return service.trendForCity(city);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // State-scoped alert / contact providers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final stateImdAlertsProvider =
     Provider.family<List<dynamic>, String>((ref, state) {
@@ -94,9 +85,9 @@ final stateEmergencyContactsProvider =
   return service.emergencyContactsForState(state);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // FloodSummary
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 class FloodSummary {
   final int    totalStations;
@@ -129,9 +120,9 @@ class FloodSummary {
   double get alertPercent  => totalStations == 0 ? 0 : alertCount  / totalStations * 100;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // floodSummaryProvider
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final floodSummaryProvider = Provider<FloodSummary>((ref) {
   final stations = ref.watch(mergedStationsProvider);
@@ -176,9 +167,9 @@ final floodSummaryProvider = Provider<FloodSummary>((ref) {
   );
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // Scalar KPI providers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final floodTotalStationsProvider   = Provider<int>((ref) => ref.watch(floodSummaryProvider).totalStations);
 final floodCriticalCountProvider   = Provider<int>((ref) => ref.watch(floodSummaryProvider).criticalCount);
@@ -192,9 +183,9 @@ final floodMaxLevelProvider        = Provider<double>((ref) => ref.watch(floodSu
 final floodMaxLevelStationProvider = Provider<String>((ref) => ref.watch(floodSummaryProvider).maxLevelStation);
 final floodDataSourceProvider      = Provider<String>((ref) => ref.watch(floodSummaryProvider).dataSource);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // Helper: RiverStation → FloodData
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 FloodData _riverStationToFloodData(RiverStation s) {
   String riskLevel;
@@ -224,46 +215,81 @@ FloodData _riverStationToFloodData(RiverStation s) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _deduplicateByCity
+// ─────────────────────────────────────────────────────────────────────────────────
+// _normCityKey  (v10.2)
 //
-// Groups FloodData entries by city name (case-insensitive trim).
+// Normalise a station/city name into a dedup key that is immune to:
+//   • qualifier suffixes:  'Birpur (CWC)'   → 'birpur'
+//   • double spaces:       'birpur  cwc'    → 'birpur'
+//   • capitalisation:      'Birpur CWC'     → 'birpur'
+//
+// Steps:
+//   1. Lowercase
+//   2. Strip anything inside parentheses (and the parens themselves)
+//   3. Replace non-alphanumeric chars with space
+//   4. Collapse multiple spaces to one
+//   5. Trim
+//
+// This ensures ALL of the following map to the same key 'birpur':
+//   'Birpur', 'Birpur (CWC)', 'Birpur CWC', 'birpur  cwc', 'BIRPUR'
+//
+// And these still stay distinct (no parens to strip):
+//   'Kamtaul (Bagmati)' → 'kamtaul'
+//   'Kamtaul (Kamla)'   → 'kamtaul'
+//   (both collapse to 'kamtaul' — intentional: same gauge, different river label)
+// ─────────────────────────────────────────────────────────────────────────────────
+
+String _normCityKey(String name) => name
+    .toLowerCase()
+    .replaceAll(RegExp(r'\s*\(.*?\)'), '') // strip (qualifier)
+    .replaceAll(RegExp(r'[^a-z0-9\s]'),  ' ') // non-alnum → space
+    .replaceAll(RegExp(r' +'),            ' ') // collapse spaces
+    .trim();
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// _deduplicateByCity  (v10.2 — uses _normCityKey)
+//
+// Groups FloodData entries by normalised city name.
 // Within each group:
 //   1. Prefer LIVE entries over ESTIMATED/static.
 //   2. Among entries with the same status, keep the one with the
-//      highest currentLevel (= most recent / most accurate gauge reading).
+//      highest currentLevel (most recent / most accurate gauge reading).
 //
-// This collapses Taibpur ×3 → Taibpur ×1, Sonbarsa ×3 → Sonbarsa ×1, etc.
-// ─────────────────────────────────────────────────────────────────────────────
+// After this:
+//   'Birpur'        }
+//   'Birpur (CWC)'  }  all → key 'birpur'  → single card
+//   'birpur  cwc'   }
+// ─────────────────────────────────────────────────────────────────────────────────
 
 List<FloodData> _deduplicateByCity(List<FloodData> raw) {
   final map = <String, FloodData>{};
   for (final fd in raw) {
-    final key = fd.city.toLowerCase().trim();
+    final key = _normCityKey(fd.city); // v10.2: was fd.city.toLowerCase().trim()
     if (!map.containsKey(key)) {
       map[key] = fd;
     } else {
-      final existing = map[key]!;
-      final incomingIsLive   = fd.status == 'LIVE';
-      final existingIsLive   = existing.status == 'LIVE';
+      final existing        = map[key]!;
+      final incomingIsLive  = fd.status == 'LIVE';
+      final existingIsLive  = existing.status == 'LIVE';
 
       // Rule 1: live beats non-live
       if (incomingIsLive && !existingIsLive) {
         map[key] = fd;
       } else if (!incomingIsLive && existingIsLive) {
-        // keep existing (already live)
+        // keep existing
       } else {
         // Rule 2: same live-status → keep highest currentLevel
         if (fd.currentLevel > existing.currentLevel) map[key] = fd;
       }
     }
   }
+  // Preserve the riskScore sort order from mergedStationsProvider
   return map.values.toList();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy shim: liveLevelsProvider  (now deduped)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
+// Legacy shim: liveLevelsProvider  (v10.2 — deduped with _normCityKey)
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final liveLevelsProvider = Provider<List<FloodData>>((ref) {
   final raw = ref.watch(mergedStationsProvider)
@@ -272,9 +298,9 @@ final liveLevelsProvider = Provider<List<FloodData>>((ref) {
   return _deduplicateByCity(raw);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // Loading / offline / timestamp providers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final isLoadingProvider = Provider<bool>((ref) =>
     ref.watch(wrdIsLoadingProvider) && ref.watch(mergedStationsProvider).isEmpty);
@@ -295,9 +321,9 @@ final lastFetchTimeProvider = Provider<DateTime?>((ref) {
   return DateTime(now.year, now.month, now.day, h, m);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 // IMD / NDMA global stubs (kept for AlertsScreen)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────────
 
 final imdAlertsProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
 final ndmaAdvisoriesProvider = Provider<List<Map<String, dynamic>>>((ref) => const []);
