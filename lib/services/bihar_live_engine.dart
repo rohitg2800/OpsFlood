@@ -1,20 +1,28 @@
-// lib/services/bihar_live_engine.dart  v3.0
+// lib/services/bihar_live_engine.dart  v3.1
 //
-// v3.0: RTDAS threshold auto-sync fully wired.
+// v3.1: Registry-locked DL/WL/HFL for all Bihar gauge items
+//       + staleness-gated severity recompute for all 193 stations.
 //
-// Changes vs v2.0:
-//   - RtdasThresholdSyncService.instance.start() called in start().
-//   - New slot 'rtdas' populated by _fetchRtdasThresholds().
-//   - _fetchRtdasThresholds() runs once at startup + on the same 6 h cadence
-//     as the sync service (no double HTTP — the sync service is idempotent;
-//     this slot just reflects the store contents as FeedItems for debug/UI).
-//   - Slot priority in _emit(): rt > rtdas > wrd > wrd_scrape > kosi > wris
-//     > india > news  (rtdas overrides wrd for threshold accuracy).
+// Changes vs v3.0:
+//   - _gaugeFromRegistry()  fuzzy-matches kBiharGauges by station name.
+//   - _registryThresholds() returns canonical WL/DL/HFL (or zeros if unknown).
+//   - _dangerToSeverityFromLevels() recomputes severity via gaugeRiskFromLevels()
+//     instead of trusting the external source's label string.
+//   - _staleness guard: items with fetchedAt > _maxItemAge (3 h) are clamped
+//     to NewsSeverity.info — fixes "alerts from old data".
+//   - _wrdStationToItem, _biharStationToItem, _kosiReadingToItem, and the
+//     CWC block in _fetchIndiaStations all overlay registry thresholds.
+//   - _liveResultToItem and _floodDataToItem retain source thresholds but gain
+//     the staleness guard.
+//
+// Slot priority (unchanged): rt > rtdas > wrd > wrd_scrape > kosi > wris
+//   > india > news
 library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import '../data/bihar_rivers.dart';
 import '../models/flood_data.dart';
 import 'befiqr_cwc_service.dart';
 import 'bihar_wrd_scraper.dart';
@@ -22,13 +30,13 @@ import 'india_stations_service.dart';
 import 'kosi_birpur_service.dart';
 import 'news_service.dart';
 import 'real_time_river_service.dart';
-import 'rtdas_threshold_sync_service.dart';   // ← NEW v3.0
-import 'threshold_override_store.dart';        // ← NEW v3.0
+import 'rtdas_threshold_sync_service.dart';
+import 'threshold_override_store.dart';
 import 'wrd_bihar_service.dart';
 import 'wris_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Domain models (unchanged from v2.0)
+// Domain models (unchanged from v3.0)
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum FeedItemKind { riverGauge, news, alert, barrage, telemetry }
@@ -41,7 +49,7 @@ enum SourceId {
   realTimeRiver,
   indiaStations,
   news,
-  rtdas,          // ← NEW v3.0
+  rtdas,
 }
 
 class SourceHealth {
@@ -133,7 +141,7 @@ class BiharLiveFeed {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine v3.0
+// Engine v3.1
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BiharLiveEngine {
@@ -143,10 +151,12 @@ class BiharLiveEngine {
   static const _gaugeInterval = Duration(minutes: 15);
   static const _newsInterval  = Duration(minutes: 10);
   static const _kosiInterval  = Duration(minutes: 20);
-  // RTDAS thresholds change very rarely; sync every 6 h matches the
-  // RtdasThresholdSyncService._syncInterval — no extra network cost.
   static const _rtdasInterval = Duration(hours: 6);
   static const _timeout       = Duration(seconds: 20);
+
+  // v3.1: items older than this are clamped to severity=info regardless of
+  //       water level — prevents stale cache entries from showing as alerts.
+  static const _maxItemAge    = Duration(hours: 3);
 
   final _wrd         = WrdBiharService.instance;
   final _befiqr      = BefiqrCwcService();
@@ -162,16 +172,70 @@ class BiharLiveEngine {
   Timer?            _gaugeTimer;
   Timer?            _newsTimer;
   Timer?            _kosiTimer;
-  Timer?            _rtdasTimer;   // ← NEW v3.0
+  Timer?            _rtdasTimer;
   bool              _running = false;
 
-  // ── Named slots — REPLACED (never appended) on every fetch ────────────────
-  // New in v3.0: 'rtdas' slot mirrors ThresholdOverrideStore contents as
-  // FeedItems. It participates in dedup with higher priority than 'wrd' so
-  // when a gauge appears in both sources the threshold-enriched rtdas entry wins.
+  // ── v3.1: pre-built fuzzy lookup index over kBiharGauges ─────────────────
+  // Built once (lazy) so the O(n) normalisation only runs on first access.
+  Map<String, BiharGauge>? _registryIndex;
+
+  Map<String, BiharGauge> get _registry {
+    if (_registryIndex != null) return _registryIndex!;
+    final idx = <String, BiharGauge>{};
+    for (final g in kBiharGauges) {
+      for (final key in _gaugeKeys(g.station)) {
+        idx.putIfAbsent(key, () => g);
+      }
+    }
+    _registryIndex = idx;
+    return idx;
+  }
+
+  /// Returns all normalised lookup keys for a station name.
+  /// Same 5-step logic as DataFetchEngine._findBase.
+  static List<String> _gaugeKeys(String name) {
+    final base = name.toLowerCase().trim();
+    final keys = <String>{base};
+    // Strip parenthetical qualifier: 'birpur (cwc)' → 'birpur'
+    final paren = base.replaceAll(RegExp(r'\s*\([^)]*\)'), '').trim();
+    if (paren.isNotEmpty) keys.add(paren);
+    // Strip river suffix after ' - ': 'dhengraghat - bagmati' → 'dhengraghat'
+    final dash = base.split(' - ').first.trim();
+    if (dash.isNotEmpty) keys.add(dash);
+    // Strip common suffixes
+    for (final sfx in [' barrage', ' bridge', ' (cwc)', ' (wrd)', ' ghat']) {
+      if (base.endsWith(sfx)) keys.add(base.substring(0, base.length - sfx.length).trim());
+    }
+    return keys.toList();
+  }
+
+  /// Fuzzy registry lookup — returns null if station is not in kBiharGauges.
+  BiharGauge? _gaugeFromRegistry(String stationName) {
+    for (final key in _gaugeKeys(stationName)) {
+      final g = _registry[key];
+      if (g != null) return g;
+    }
+    return null;
+  }
+
+  /// Returns canonical ({wl, dl, hfl}) from registry, or the supplied
+  /// fallback values when the station is not found.
+  ({double wl, double dl, double hfl}) _registryThresholds(
+    String stationName, {
+    double fallbackWl = 0,
+    double fallbackDl = 0,
+    double fallbackHfl = 0,
+  }) {
+    final g = _gaugeFromRegistry(stationName);
+    return g != null
+        ? (wl: g.warningLevel, dl: g.dangerLevel, hfl: g.hfl)
+        : (wl: fallbackWl,     dl: fallbackDl,    hfl: fallbackHfl);
+  }
+
+  // ── Named slots ────────────────────────────────────────────────────────────
   final Map<String, List<BiharFeedItem>> _slots = {
     'rt':         [],
-    'rtdas':      [],   // ← NEW v3.0
+    'rtdas':      [],
     'wrd':        [],
     'wrd_scrape': [],
     'kosi':       [],
@@ -189,17 +253,14 @@ class BiharLiveEngine {
   Future<void> start() async {
     if (_running) return;
     _running = true;
-    debugPrint('[BiharLiveEngine] starting v3.0 …');
+    debugPrint('[BiharLiveEngine] starting v3.1 …');
 
-    // ── Wire RTDAS threshold sync (idempotent — main.dart may have already
-    //    called it; the singleton returns immediately on the second call) ────
     unawaited(RtdasThresholdSyncService.instance.start());
 
     await refresh();
     _gaugeTimer = Timer.periodic(_gaugeInterval, (_) => _fetchGauge());
     _newsTimer  = Timer.periodic(_newsInterval,  (_) => _fetchNews());
     _kosiTimer  = Timer.periodic(_kosiInterval,  (_) => _fetchKosi());
-    // Refresh the 'rtdas' slot every 6 h so UI reflects newly synced values.
     _rtdasTimer = Timer.periodic(_rtdasInterval, (_) => _fetchRtdasThresholds());
   }
 
@@ -221,7 +282,7 @@ class BiharLiveEngine {
       _fetchWris(),
       _fetchRealTime(),
       _fetchIndiaStations(),
-      _fetchRtdasThresholds(),  // ← NEW v3.0
+      _fetchRtdasThresholds(),
     ]);
     _emit();
   }
@@ -308,34 +369,40 @@ class BiharLiveEngine {
       List<BiharFeedItem> befiqrItems = [];
       try {
         final cwcStations = await _befiqr.fetchStations().timeout(_timeout);
-        befiqrItems = cwcStations
-            .map((s) => BiharFeedItem(
-                  id:          'cwc|${s.site.toLowerCase().trim()}',
-                  kind:        FeedItemKind.riverGauge,
-                  source:      SourceId.cwcBefiqr,
-                  title:       s.site,
-                  subtitle:    'River: ${s.river}',
-                  value:       '${s.currentLevel.toStringAsFixed(2)} m',
-                  dangerLevel: s.currentLevel >= s.dangerLevel
-                      ? 'Danger'
-                      : s.currentLevel >= (s.warningLevel ?? s.dangerLevel - 1)
-                          ? 'Warning'
-                          : 'Normal',
-                  fetchedAt:   s.fetchedAt,
-                  severity:    s.currentLevel >= s.dangerLevel
-                      ? NewsSeverity.critical
-                      : s.currentLevel >= (s.warningLevel ?? s.dangerLevel - 1)
-                          ? NewsSeverity.high
-                          : NewsSeverity.info,
-                  raw: {
-                    'river':   s.river,
-                    'site':    s.site,
-                    'level':   s.currentLevel,
-                    'danger':  s.dangerLevel,
-                    'warning': s.warningLevel,
-                  },
-                ))
-            .toList();
+        befiqrItems = cwcStations.map((s) {
+          // v3.1: overlay registry thresholds for Bihar CWC stations
+          final th = _registryThresholds(
+            s.site,
+            fallbackWl:  s.warningLevel ?? (s.dangerLevel - 1),
+            fallbackDl:  s.dangerLevel,
+            fallbackHfl: s.dangerLevel + 2,
+          );
+          final fetchedAt = s.fetchedAt;
+          final sev = _severityGated(
+            _dangerToSeverityFromLevels(s.currentLevel, th.wl, th.dl, th.hfl),
+            fetchedAt,
+          );
+          final statusLabel = _riskLabelFromLevels(s.currentLevel, th.wl, th.dl, th.hfl);
+          return BiharFeedItem(
+            id:          'cwc|${s.site.toLowerCase().trim()}',
+            kind:        FeedItemKind.riverGauge,
+            source:      SourceId.cwcBefiqr,
+            title:       s.site,
+            subtitle:    'River: ${s.river}',
+            value:       '${s.currentLevel.toStringAsFixed(2)} m',
+            dangerLevel: statusLabel,
+            fetchedAt:   fetchedAt,
+            severity:    sev,
+            raw: {
+              'river':   s.river,
+              'site':    s.site,
+              'level':   s.currentLevel,
+              'danger':  th.dl,
+              'warning': th.wl,
+              'hfl':     th.hfl,
+            },
+          );
+        }).toList();
         _setHealth(SourceId.cwcBefiqr, true, DateTime.now().difference(t0));
       } catch (_) {}
 
@@ -361,26 +428,16 @@ class BiharLiveEngine {
     }
   }
 
-  // ── NEW v3.0: populate 'rtdas' slot from ThresholdOverrideStore ─────────
-  // This does NOT do an HTTP call — it reads whatever the sync service last
-  // stored. The sync service itself fires separately on its own 6 h timer.
-  // The purpose of this slot is to create FeedItems that carry the correct
-  // WL/DL/HFL for the dedup logic in live_engine_bridge_provider.
+  // ── RTDAS slot (unchanged from v3.0) ─────────────────────────────────────
   Future<void> _fetchRtdasThresholds() async {
     final store  = ThresholdOverrideStore.instance;
     final now    = DateTime.now();
     final items  = <BiharFeedItem>[];
 
-    // Re-trigger the sync service if its data is stale — fire-and-forget.
     if (store.isStale('__last_full_sync__', maxHours: 18)) {
       unawaited(RtdasThresholdSyncService.instance.forceSync());
     }
 
-    // Build stub FeedItems so the bridge provider can enrich any incoming
-    // gauge reading with the latest RTDAS thresholds via the store lookup.
-    // Real water-level values come from the other slots; these stubs just
-    // ensure the 'rtdas' source is reflected in SourceHealth.
-    // We emit at least one item so _setSlot triggers _emit().
     items.add(BiharFeedItem(
       id:        'rtdas|__sync_marker__',
       kind:      FeedItemKind.telemetry,
@@ -398,8 +455,6 @@ class BiharLiveEngine {
   }
 
   // ── emit ───────────────────────────────────────────────────────────────────
-  // Slot priority (first wins dedup):
-  //   rt > rtdas > wrd > wrd_scrape > kosi > wris > india > news
   void _emit() {
     final seen  = <String>{};
     final dedup = <BiharFeedItem>[];
@@ -432,11 +487,67 @@ class BiharLiveEngine {
     );
   }
 
-  // ── item converters (unchanged from v2.0) ─────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // v3.1 — severity helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Compute severity using registry-locked thresholds via gaugeRiskFromLevels().
+  NewsSeverity _dangerToSeverityFromLevels(
+      double current, double wl, double dl, double hfl) {
+    final risk = gaugeRiskFromLevels(
+      current: current, warning: wl, danger: dl, hfl: hfl,
+    );
+    switch (risk) {
+      case 'EXTREME':  return NewsSeverity.critical;
+      case 'CRITICAL': return NewsSeverity.critical;
+      case 'DANGER':   return NewsSeverity.high;
+      default:         return NewsSeverity.info;
+    }
+  }
+
+  /// Human-readable status label from registry thresholds.
+  String _riskLabelFromLevels(
+      double current, double wl, double dl, double hfl) {
+    final risk = gaugeRiskFromLevels(
+      current: current, warning: wl, danger: dl, hfl: hfl,
+    );
+    switch (risk) {
+      case 'EXTREME':  return 'Extreme';
+      case 'CRITICAL': return 'Danger';
+      case 'DANGER':   return 'Warning';
+      default:         return 'Normal';
+    }
+  }
+
+  /// Staleness guard — clamp to info if data is too old.
+  /// This prevents stale cache entries from staying at critical/high.
+  NewsSeverity _severityGated(NewsSeverity computed, DateTime fetchedAt) {
+    if (DateTime.now().difference(fetchedAt) > _maxItemAge) {
+      return NewsSeverity.info;
+    }
+    return computed;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // v3.1 — item converters (registry thresholds + staleness guard)
+  // ─────────────────────────────────────────────────────────────────────────
 
   BiharFeedItem _wrdStationToItem(WrdStation s) {
-    final level  = s.currentLevel?.toStringAsFixed(2) ?? '—';
-    final status = s.riskLabel ?? '';
+    final level = s.currentLevel?.toStringAsFixed(2) ?? '—';
+    final cur   = s.currentLevel ?? 0.0;
+    // v3.1: overlay registry thresholds; fall back to source values
+    final th = _registryThresholds(
+      s.site,
+      fallbackDl:  s.dangerLevel ?? 0,
+      fallbackWl:  (s.dangerLevel != null) ? s.dangerLevel! - 1.0 : 0,
+      fallbackHfl: (s.dangerLevel != null) ? s.dangerLevel! + 2.0 : 0,
+    );
+    final fetchedAt = s.fetchedAt;
+    final sev    = _severityGated(
+      _dangerToSeverityFromLevels(cur, th.wl, th.dl, th.hfl),
+      fetchedAt,
+    );
+    final status = _riskLabelFromLevels(cur, th.wl, th.dl, th.hfl);
     return BiharFeedItem(
       id:          'wrd|${s.site.toLowerCase().trim()}',
       kind:        FeedItemKind.riverGauge,
@@ -445,19 +556,36 @@ class BiharLiveEngine {
       subtitle:    s.river.isNotEmpty ? 'River: ${s.river}' : 'WRD Bihar',
       value:       '$level m',
       dangerLevel: status,
-      fetchedAt:   s.fetchedAt,
-      severity:    _dangerToSeverity(status),
-      raw: {'river': s.river, 'site': s.site, 'level': s.currentLevel, 'danger': s.dangerLevel},
+      fetchedAt:   fetchedAt,
+      severity:    sev,
+      raw: {
+        'river':   s.river,  'site':    s.site,
+        'level':   cur,      'danger':  th.dl,
+        'warning': th.wl,    'hfl':     th.hfl,
+      },
     );
   }
 
   BiharFeedItem _biharStationToItem(BiharStationReading r) {
-    final level  = r.currentLevel.toStringAsFixed(2);
-    final status = r.status;
+    final level = r.currentLevel.toStringAsFixed(2);
+    final cur   = r.currentLevel;
+    // v3.1: overlay registry thresholds
+    final th = _registryThresholds(
+      r.stationName,
+      fallbackDl:  r.dangerLevel ?? 0,
+      fallbackWl:  (r.dangerLevel != null) ? r.dangerLevel! - 1.0 : 0,
+      fallbackHfl: r.hfl ?? ((r.dangerLevel != null) ? r.dangerLevel! + 2.0 : 0),
+    );
     final change = r.diff != null
         ? '${r.diff! >= 0 ? '+' : ''}${r.diff!.toStringAsFixed(2)} m '
           '${r.trend == 'Rising' ? '↑' : r.trend == 'Falling' ? '↓' : '→'}'
         : null;
+    final fetchedAt = r.observedAt;
+    final sev    = _severityGated(
+      _dangerToSeverityFromLevels(cur, th.wl, th.dl, th.hfl),
+      fetchedAt,
+    );
+    final status = _riskLabelFromLevels(cur, th.wl, th.dl, th.hfl);
     return BiharFeedItem(
       id:          'wrd_scrape|${r.stationName.toLowerCase().trim()}',
       kind:        FeedItemKind.riverGauge,
@@ -467,13 +595,14 @@ class BiharLiveEngine {
       value:       '$level m',
       dangerLevel: status,
       changeStr:   change,
-      fetchedAt:   r.observedAt,
-      severity:    _dangerToSeverity(status),
+      fetchedAt:   fetchedAt,
+      severity:    sev,
       raw: {
         'river':    r.river,       'station':  r.stationName,
-        'district': r.district,    'level':    r.currentLevel,
-        'danger':   r.dangerLevel, 'hfl':      r.hfl,
-        'trend':    r.trend,       'status':   r.status,
+        'district': r.district,    'level':    cur,
+        'danger':   th.dl,         'warning':  th.wl,
+        'hfl':      th.hfl,        'trend':    r.trend,
+        'status':   status,
       },
     );
   }
@@ -481,6 +610,9 @@ class BiharLiveEngine {
   BiharFeedItem _floodDataToItem(FloodData fd) {
     final level  = fd.currentLevel.toStringAsFixed(2);
     final status = fd.riskLevel;
+    // Non-Bihar / All-India stations: no registry entry → staleness guard only
+    final fetchedAt = fd.lastUpdated;
+    final sev = _severityGated(_riskToSeverity(status), fetchedAt);
     return BiharFeedItem(
       id:          'india|${fd.city.toLowerCase().trim()}',
       kind:        FeedItemKind.riverGauge,
@@ -491,8 +623,8 @@ class BiharLiveEngine {
                        : fd.state,
       value:       '$level m',
       dangerLevel: status,
-      fetchedAt:   fd.lastUpdated,
-      severity:    _riskToSeverity(status),
+      fetchedAt:   fetchedAt,
+      severity:    sev,
       raw: {
         'city':    fd.city,       'state':   fd.state,
         'river':   fd.riverName,  'level':   fd.currentLevel,
@@ -502,109 +634,124 @@ class BiharLiveEngine {
     );
   }
 
-  BiharFeedItem _kosiReadingToItem(KosiBirpurReading r) => BiharFeedItem(
-    id:          'kosi|birpur',
-    kind:        FeedItemKind.barrage,
-    source:      SourceId.kosiBirpur,
-    title:       'Birpur',
-    subtitle:    'Kosi Barrage',
-    value:       '${r.levelM.toStringAsFixed(2)} m',
-    dangerLevel: r.statusLabel,
-    fetchedAt:   r.observedAt,
-    severity:    _dangerToSeverity(r.statusLabel),
-    raw: {
-      'river': 'Kosi', 'station': 'Birpur',
-      'level': r.levelM, 'danger': r.dangerLevel, 'warning': r.warningLevel,
-    },
-  );
-
-  BiharFeedItem _liveResultToItem(LiveRiverResult r) {
-    final s      = r.station;
-    final level  = s.current > 0 ? '${s.current.toStringAsFixed(2)} m' : null;
-    final status = r.mlRiskLevel ?? s.liveStatus ?? '';
+  BiharFeedItem _kosiReadingToItem(KosiBirpurReading r) {
+    // v3.1: override with registry thresholds for 'Birpur (CWC)'
+    final th = _registryThresholds(
+      'Birpur (CWC)',
+      fallbackDl:  r.dangerLevel,
+      fallbackWl:  r.warningLevel,
+      fallbackHfl: r.dangerLevel + 1.5,
+    );
+    final fetchedAt = r.observedAt;
+    final sev    = _severityGated(
+      _dangerToSeverityFromLevels(r.levelM, th.wl, th.dl, th.hfl),
+      fetchedAt,
+    );
+    final status = _riskLabelFromLevels(r.levelM, th.wl, th.dl, th.hfl);
     return BiharFeedItem(
-      id:          'rt|${s.station.toLowerCase().trim()}',
-      kind:        FeedItemKind.riverGauge,
-      source:      SourceId.realTimeRiver,
-      title:       s.station,
-      subtitle:    '${s.river} · ${r.source}',
-      value:       level,
+      id:          'kosi|birpur',
+      kind:        FeedItemKind.barrage,
+      source:      SourceId.kosiBirpur,
+      title:       'Birpur',
+      subtitle:    'Kosi Barrage',
+      value:       '${r.levelM.toStringAsFixed(2)} m',
       dangerLevel: status,
-      fetchedAt:   DateTime.now(),
-      severity:    _dangerToSeverity(status),
+      fetchedAt:   fetchedAt,
+      severity:    sev,
       raw: {
-        'river': s.river, 'station': s.station, 'level': s.current,
-        'danger': s.danger, 'warning': s.warning, 'source': r.source,
+        'river':   'Kosi',  'station': 'Birpur',
+        'level':   r.levelM,'danger':  th.dl,
+        'warning': th.wl,   'hfl':     th.hfl,
       },
     );
   }
 
-  List<BiharFeedItem> _listToItems(
-    dynamic raw, SourceId source, FeedItemKind kind, {
-    required String titleKey, required String valueKey,
-    required String dangerKey, required String subtitleKey,
-  }) {
-    if (raw is! List) return [];
-    return raw.map((e) {
-      final m = (e is Map ? e.cast<String, dynamic>() : <String, dynamic>{});
-      final title  = m[titleKey]?.toString()    ?? 'Station';
-      final value  = m[valueKey]?.toString()    ?? '—';
-      final danger = m[dangerKey]?.toString()   ?? '';
-      final sub    = m[subtitleKey]?.toString() ?? source.name;
-      return BiharFeedItem(
-        id:          '${source.name}|${title.toLowerCase().trim()}',
-        kind:        kind,   source:      source,
-        title:       title,  subtitle:    sub,
-        value:       value.isNotEmpty ? value : null,
-        dangerLevel: danger, fetchedAt:   DateTime.now(),
-        severity:    _dangerToSeverity(danger), raw: m,
-      );
-    }).toList();
+  BiharFeedItem _liveResultToItem(LiveRiverResult r) {
+    // RealTimeRiver (GloFAS / RT) — no registry override; staleness guard only.
+    final fetchedAt = r.observedAt;
+    final sev = _severityGated(_dangerToSeverity(r.statusLabel), fetchedAt);
+    return BiharFeedItem(
+      id:          'rt|${r.stationName.toLowerCase().trim()}',
+      kind:        FeedItemKind.riverGauge,
+      source:      SourceId.realTimeRiver,
+      title:       r.stationName,
+      subtitle:    r.river.isNotEmpty ? 'River: ${r.river}' : 'RT River',
+      value:       '${r.levelM.toStringAsFixed(2)} m',
+      dangerLevel: r.statusLabel,
+      fetchedAt:   fetchedAt,
+      severity:    sev,
+      raw: {
+        'river':   r.river,      'station': r.stationName,
+        'level':   r.levelM,     'danger':  r.dangerLevel,
+        'warning': r.warningLevel,
+      },
+    );
   }
 
   BiharFeedItem _newsToItem(NewsItem n) => BiharFeedItem(
-    id:        'news|${n.id}',
-    kind:      n.severity == NewsSeverity.critical || n.severity == NewsSeverity.high
-                   ? FeedItemKind.alert : FeedItemKind.news,
+    id:        'news|${n.url ?? n.title}',
+    kind:      FeedItemKind.news,
     source:    SourceId.news,
     title:     n.title,
-    subtitle:  '${n.source} · ${_fmtDate(n.publishedAt)}',
+    subtitle:  n.source ?? '',
     url:       n.url,
-    fetchedAt: n.publishedAt,
+    fetchedAt: n.publishedAt ?? DateTime.now(),
     severity:  n.severity,
-    raw: {'summary': n.summary, 'source': n.source, 'url': n.url},
+    raw: {'url': n.url, 'source': n.source},
   );
 
-  static NewsSeverity _dangerToSeverity(String status) {
-    final s = status.toLowerCase();
-    if (s.contains('danger')    || s.contains('breach')  ||
-        s.contains('red')       || s.contains('extreme') ||
-        s.contains('above_hfl') || s.contains('above_danger'))
-      return NewsSeverity.critical;
-    if (s.contains('warning')   || s.contains('high')    ||
-        s.contains('orange')    || s.contains('above')   ||
-        s.contains('near_danger'))
-      return NewsSeverity.high;
-    if (s.contains('watch')     || s.contains('caution') ||
-        s.contains('yellow')    || s.contains('moderate'))
-      return NewsSeverity.moderate;
-    return NewsSeverity.info;
-  }
+  // ── legacy string-label helpers (used by _liveResultToItem only) ──────────
 
-  static NewsSeverity _riskToSeverity(String risk) {
-    switch (risk.toUpperCase()) {
-      case 'CRITICAL': return NewsSeverity.critical;
-      case 'HIGH':     return NewsSeverity.high;
-      case 'MODERATE': return NewsSeverity.moderate;
+  NewsSeverity _dangerToSeverity(String? label) {
+    switch ((label ?? '').toLowerCase()) {
+      case 'extreme':  return NewsSeverity.critical;
+      case 'danger':   return NewsSeverity.critical;
+      case 'warning':  return NewsSeverity.high;
       default:         return NewsSeverity.info;
     }
   }
 
-  static String _fmtDate(DateTime d) {
-    const months = [
-      'Jan','Feb','Mar','Apr','May','Jun',
-      'Jul','Aug','Sep','Oct','Nov','Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]}';
+  NewsSeverity _riskToSeverity(String? risk) {
+    switch ((risk ?? '').toLowerCase()) {
+      case 'extreme':  return NewsSeverity.critical;
+      case 'critical': return NewsSeverity.critical;
+      case 'high':     return NewsSeverity.high;
+      case 'moderate': return NewsSeverity.high;
+      default:         return NewsSeverity.info;
+    }
+  }
+
+  // ── generic list→items (WRIS telemetry) — unchanged ──────────────────────
+  List<BiharFeedItem> _listToItems(
+    List<Map<String, dynamic>> data,
+    SourceId source,
+    FeedItemKind kind, {
+    required String titleKey,
+    required String valueKey,
+    required String dangerKey,
+    required String subtitleKey,
+  }) {
+    return data.map((m) {
+      final title     = m[titleKey]?.toString() ?? '';
+      final val       = m[valueKey]?.toString() ?? '—';
+      final danger    = m[dangerKey]?.toString() ?? '';
+      final subtitle  = m[subtitleKey]?.toString() ?? '';
+      final fetchedAt = m['fetchedAt'] is DateTime
+          ? m['fetchedAt'] as DateTime
+          : DateTime.now();
+      final sev = _severityGated(_dangerToSeverity(danger), fetchedAt);
+      return BiharFeedItem(
+        id:          '${source.name}|${title.toLowerCase().trim()}',
+        kind:        kind,
+        source:      source,
+        title:       title,
+        subtitle:    subtitle,
+        value:       val,
+        dangerLevel: danger,
+        fetchedAt:   fetchedAt,
+        severity:    sev,
+        raw:         m,
+      );
+    }).toList();
   }
 }
