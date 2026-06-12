@@ -1,14 +1,20 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v5.3
+// OpsFlood — BiharRiverMapScreen v5.4
 //
-// v5.3 additions:
-//   • "Station Risk" overlay toggle in Layers panel — mirrors Precipitation
-//     toggle. Shows live risk-count badge (e.g. "3 CRIT").
-//   • _showStations bool gates the MarkerLayer so it can be toggled off.
-//   • Each pin now shows the current level label below the dot (like rainfall)
-//     even when risk is SAFE — so criticality is always visible at a glance.
-//   • "Critical Only" quick-filter shortcut button in Layers panel.
-//   • Opacity slider for station markers (fade non-critical ones).
+// v5.4 (12 Jun 2026 — map data-source migration):
+//   • Replace biharLiveProvider watch with mapLiveIndexProvider.
+//     Map<String, MapStationData> from mergedStationsProvider (all tiers
+//     — CWC, GloFAS, WRD) as the authoritative level/threshold base,
+//     enriched with BiharLiveEngine diff24h/trend/discharge/rainfall.
+//     Birpur force-patched from kosiBirpurProvider.
+//   • _resolve() → _resolveMerged(): same fuzzy-match, MapStationData.
+//   • _StationSheet / _StationPin: BiharStationData → MapStationData.
+//   • Every CWC/GloFAS/WRD station that was grey NO DATA now shows
+//     a correctly coloured live pin.
+//
+// v5.3 additions (unchanged):
+//   • Station Risk overlay toggle, opacity slider, Critical Only filter.
+//   • Each pin shows level label even when risk is SAFE.
 library;
 
 import 'package:flutter/material.dart';
@@ -19,13 +25,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/bihar_rivers.dart';
-import '../providers/bihar_live_provider.dart';
+import '../providers/map_live_index_provider.dart'; // v5.4
 import '../theme/river_theme.dart';
 import 'city_detail_screen.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Severity system  (5 levels)
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 enum RiskLevel { critical, severe, moderate, safe, noData }
 
@@ -82,9 +88,9 @@ IconData _riskIcon(RiskLevel level) {
 
 Color _riskColour(String risk, RiverColors t) => _riskColor(_parseRisk(risk));
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // RainViewer
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 const _rainViewerUrl =
     'https://tilecache.rainviewer.com/v2/radar/nowcast/{z}/{x}/{y}/2/1_1.png';
 
@@ -92,9 +98,9 @@ final _rainViewerHeaders = <String, String>{
   'Cache-Control': 'max-age=600',
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Tile styles
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 enum _TileStyle { voyager, dark, osm, satellite, terrain, hybrid }
 
@@ -184,9 +190,9 @@ String _norm(String s) => s
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // BiharRiverMapScreen
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class BiharRiverMapScreen extends ConsumerStatefulWidget {
   static const String route = '/bihar_river_map';
@@ -205,42 +211,33 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   _TileStyle _tileStyle         = _TileStyle.voyager;
   bool       _showPrecip        = false;
   double     _precipOpacity     = 0.65;
-  bool       _showStations      = true;   // ← NEW: station risk overlay toggle
-  double     _stationOpacity    = 1.0;    // ← NEW: station marker opacity
+  bool       _showStations      = true;
+  double     _stationOpacity    = 1.0;
   bool       _layerPanelOpen    = false;
-
-  ({Map<String, BiharStationData> byKey, List<BiharStationData> all})?
-      _cachedIndex;
-  Object? _lastData;
 
   static final _rivers =
       kBiharGauges.map((g) => g.river).toSet().toList()..sort();
 
-  ({Map<String, BiharStationData> byKey, List<BiharStationData> all})
-      _buildLiveIndex(List<BiharStationData> stations) {
-    final byKey = <String, BiharStationData>{};
-    for (final st in stations) byKey[_norm(st.city)] = st;
-    return (byKey: byKey, all: stations);
-  }
-
-  BiharStationData? _resolve(
+  // v5.4: fuzzy-match a BiharGauge to a MapStationData entry.
+  // Tries direct key match, then token prefix match, then river+city scan.
+  MapStationData? _resolveMerged(
     BiharGauge gauge,
-    Map<String, BiharStationData> byKey,
-    List<BiharStationData> all,
+    Map<String, MapStationData> index,
   ) {
     final normStation  = _norm(gauge.station);
     final normRiver    = _norm(gauge.river);
-    final direct       = byKey[normStation];
+    final direct       = index[normStation];
     if (direct != null) return direct;
-    final stationFirst = normStation.split(' ').first;
-    final riverFirst   = normRiver.split(' ').first;
-    for (final entry in byKey.entries) {
-      if (entry.key.contains(stationFirst) &&
-          entry.key.contains(riverFirst)) return entry.value;
+
+    final stFirst = normStation.split(' ').first;
+    final rvFirst = normRiver.split(' ').first;
+    for (final entry in index.entries) {
+      if (entry.key.contains(stFirst) &&
+          entry.key.contains(rvFirst)) return entry.value;
     }
-    for (final st in all) {
-      if (_norm(st.river) != normRiver) continue;
-      if (_norm(st.city).contains(stationFirst)) return st;
+    for (final sd in index.values) {
+      if (_norm(sd.river) != normRiver) continue;
+      if (_norm(sd.city).contains(stFirst)) return sd;
     }
     return null;
   }
@@ -248,7 +245,7 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   void _showStationSheet(
     BuildContext context,
     BiharGauge gauge,
-    BiharStationData? live,
+    MapStationData? live, // v5.4
     RiverColors t,
   ) {
     showModalBottomSheet(
@@ -262,39 +259,32 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   @override
   Widget build(BuildContext context) {
     final t          = RiverColors.of(context);
-    final biharState = ref.watch(biharLiveProvider);
+    // v5.4: single watch — Riverpod caches, no manual _cachedIndex needed
+    final liveIndex  = ref.watch(mapLiveIndexProvider);
 
-    final rawData = biharState.whenOrNull(data: (v) => v);
-    if (rawData != _lastData) {
-      _lastData    = rawData;
-      _cachedIndex = rawData != null
-          ? _buildLiveIndex(rawData.stations)
-          : (byKey: <String, BiharStationData>{},
-             all:   <BiharStationData>[]);
-    }
-    final liveIndex = _cachedIndex ??
-        (byKey: <String, BiharStationData>{}, all: <BiharStationData>[]);
+    final liveCount = liveIndex.values.where((s) => s.isLive).length;
 
     final gauges = kBiharGauges.where((g) {
       if (_filterRiver != null && g.river != _filterRiver) return false;
       if (_filterRisk != null) {
-        final live  = _resolve(g, liveIndex.byKey, liveIndex.all);
-        final level = _parseRisk(live?.riskLabel, hasLiveData: live != null);
+        final live  = _resolveMerged(g, liveIndex);
+        final level = _parseRisk(live?.riskLabel,
+            hasLiveData: live != null && live.isLive);
         if (level != _filterRisk) return false;
       }
       return true;
     }).toList();
 
-    // Build risk counts for ALL gauges (used in filter chips + layer badge)
     final Map<RiskLevel, int> riskCounts = {};
     for (final g in kBiharGauges) {
-      final live  = _resolve(g, liveIndex.byKey, liveIndex.all);
-      final level = _parseRisk(live?.riskLabel, hasLiveData: live != null);
+      final live  = _resolveMerged(g, liveIndex);
+      final level = _parseRisk(live?.riskLabel,
+          hasLiveData: live != null && live.isLive);
       riskCounts[level] = (riskCounts[level] ?? 0) + 1;
     }
-    final critCount     = riskCounts[RiskLevel.critical] ?? 0;
-    final severeCount   = riskCounts[RiskLevel.severe]   ?? 0;
-    final dangerTotal   = critCount + severeCount;
+    final critCount   = riskCounts[RiskLevel.critical] ?? 0;
+    final severeCount = riskCounts[RiskLevel.severe]   ?? 0;
+    final dangerTotal = critCount + severeCount;
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -335,16 +325,16 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                     ),
                   ),
                 ),
-              // ── Station risk overlay (toggleable) ──────────────────────────
               if (_showStations)
                 Opacity(
                   opacity: _stationOpacity,
                   child: MarkerLayer(
                     markers: gauges.map((gauge) {
-                      final live  = _resolve(gauge, liveIndex.byKey, liveIndex.all);
-                      final level = _parseRisk(live?.riskLabel, hasLiveData: live != null);
-                      final rainfall    = live?.rainfall24h;
-                      final currentLvl  = live?.currentLevel;
+                      final live  = _resolveMerged(gauge, liveIndex);
+                      final level = _parseRisk(live?.riskLabel,
+                          hasLiveData: live != null && live.isLive);
+                      final rainfall   = live?.rainfall24h;
+                      final currentLvl = live?.currentLevel;
                       return Marker(
                         point:  LatLng(gauge.lat, gauge.lon),
                         width:  72,
@@ -396,13 +386,12 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                                   fontWeight: FontWeight.w800,
                                   fontSize: 15)),
                         ),
-                        // ── danger count badge ──────────────────────────────
                         if (dangerTotal > 0)
                           _DangerCountBadge(
                               critCount: critCount,
                               severeCount: severeCount),
                         const SizedBox(width: 6),
-                        _LiveBadge(count: liveIndex.all.length),
+                        _LiveBadge(count: liveCount), // v5.4: merged count
                         const SizedBox(width: 8),
                         GestureDetector(
                           onTap: () => setState(
@@ -417,8 +406,9 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
                                   : t.cardBgElevated,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                  color:
-                                      _layerPanelOpen ? t.accent : t.stroke),
+                                  color: _layerPanelOpen
+                                      ? t.accent
+                                      : t.stroke),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -601,9 +591,9 @@ class _BiharRiverMapScreenState extends ConsumerState<BiharRiverMapScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _DangerCountBadge  (header bar)
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
+// _DangerCountBadge
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _DangerCountBadge extends StatelessWidget {
   final int critCount;
@@ -644,14 +634,14 @@ class _DangerCountBadge extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _StationPin  — now accepts currentLevel and always shows level label
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
+// _StationPin
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _StationPin extends StatelessWidget {
   final RiskLevel level;
   final double?   rainfall;
-  final double?   currentLevel;   // ← NEW
+  final double?   currentLevel;
   const _StationPin({
     required this.level,
     this.rainfall,
@@ -690,13 +680,8 @@ class _StationPin extends StatelessWidget {
     final dotSize       = _dotSize;
     final containerSize = dotSize + 20.0;
 
-    // Determine what sub-label to show:
-    // Priority: criticality label > level reading > rainfall
-    // We show the level reading as the primary sub-label for ALL stations
-    // (not just critical). The risk label (CRIT/SEV/WARN) is the colour itself.
     Widget? subLabel;
     if (hasLevel) {
-      // risk-coloured level label — always shown when live data available
       final labelText = level == RiskLevel.critical
           ? '⚠ ${currentLevel!.toStringAsFixed(2)}m'
           : level == RiskLevel.severe
@@ -719,7 +704,6 @@ class _StationPin extends StatelessWidget {
         ),
       );
     } else if (hasRainfall) {
-      // fallback: show rainfall if no level data
       subLabel = Container(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         decoration: BoxDecoration(
@@ -793,9 +777,9 @@ class _StationPin extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // _PulsingRing
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _PulsingRing extends StatefulWidget {
   final Color  color;
@@ -846,9 +830,9 @@ class _PulsingRingState extends State<_PulsingRing>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _LayerPanel  — now includes Station Risk overlay section
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
+// _LayerPanel
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _LayerPanel extends StatelessWidget {
   final RiverColors t;
@@ -900,7 +884,6 @@ class _LayerPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── BASE MAP ──────────────────────────────────────────────────────
           Text('BASE MAP',
               style: TextStyle(color: t.textSecondary, fontSize: 9,
                   fontWeight: FontWeight.w800, letterSpacing: 1.5)),
@@ -948,13 +931,11 @@ class _LayerPanel extends StatelessWidget {
           Divider(height: 1, color: t.stroke),
           const SizedBox(height: 10),
 
-          // ── OVERLAYS ──────────────────────────────────────────────────────
           Text('OVERLAYS',
               style: TextStyle(color: t.textSecondary, fontSize: 9,
                   fontWeight: FontWeight.w800, letterSpacing: 1.5)),
           const SizedBox(height: 8),
 
-          // ── Station Risk overlay ──────────────────────────────────────────
           GestureDetector(
             onTap: onStationsToggle,
             child: AnimatedContainer(
@@ -990,7 +971,6 @@ class _LayerPanel extends StatelessWidget {
                               ? FontWeight.w800
                               : FontWeight.w500)),
                   const SizedBox(width: 6),
-                  // Live risk count badge
                   if (dangerTotal > 0 && showStations)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1032,7 +1012,6 @@ class _LayerPanel extends StatelessWidget {
                               fontWeight: FontWeight.w900)),
                     ),
                   const Spacer(),
-                  // Critical-only quick filter
                   if (showStations && critCount > 0)
                     GestureDetector(
                       onTap: onCriticalOnly,
@@ -1062,7 +1041,6 @@ class _LayerPanel extends StatelessWidget {
             ),
           ),
 
-          // Opacity slider for station markers
           if (showStations) ...[
             const SizedBox(height: 8),
             Row(
@@ -1103,7 +1081,6 @@ class _LayerPanel extends StatelessWidget {
 
           const SizedBox(height: 8),
 
-          // ── Precipitation overlay ─────────────────────────────────────────
           GestureDetector(
             onTap: onPrecipToggle,
             child: AnimatedContainer(
@@ -1203,19 +1180,23 @@ class _LayerPanel extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _StationSheet
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
+// _StationSheet  (v5.4 — MapStationData replaces BiharStationData)
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
-  final BiharGauge        gauge;
-  final BiharStationData? live;
-  final RiverColors       t;
-  const _StationSheet({required this.gauge, required this.live, required this.t});
+  final BiharGauge       gauge;
+  final MapStationData?  live;   // v5.4: was BiharStationData?
+  final RiverColors      t;
+  const _StationSheet({
+    required this.gauge,
+    required this.live,
+    required this.t,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final hasLive = live != null;
+    final hasLive = live != null && live!.isLive;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
       decoration: BoxDecoration(
@@ -1251,12 +1232,14 @@ class _StationSheet extends StatelessWidget {
                               fontSize: 18)),
                       const SizedBox(height: 2),
                       Text('${gauge.river}  ·  ${gauge.district}',
-                          style: TextStyle(color: t.textSecondary, fontSize: 12)),
+                          style: TextStyle(
+                              color: t.textSecondary, fontSize: 12)),
                     ],
                   ),
                 ),
                 if (hasLive)
-                  _badge(label: live!.riskLabel,
+                  _badge(
+                      label: live!.riskLabel,
                       color: _riskColour(live!.riskLabel, t)),
               ],
             ),
@@ -1274,8 +1257,10 @@ class _StationSheet extends StatelessWidget {
                         color: t.textSecondary, size: 18),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text('No live data — static thresholds only',
-                          style: TextStyle(color: t.textSecondary, fontSize: 12)),
+                      child: Text(
+                          'No live data — static thresholds only',
+                          style: TextStyle(
+                              color: t.textSecondary, fontSize: 12)),
                     ),
                   ],
                 ),
@@ -1306,7 +1291,8 @@ class _StationSheet extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: t.accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: t.accent.withValues(alpha: 0.40)),
+                  border: Border.all(
+                      color: t.accent.withValues(alpha: 0.40)),
                 ),
                 child: Center(
                   child: Text('Open Full Detail  →',
@@ -1327,8 +1313,9 @@ class _StationSheet extends StatelessWidget {
   Widget _liveSection(BuildContext context) {
     final s   = live!;
     final rc  = _riskColour(s.riskLabel, t);
-    final cur = s.currentLevel;
-    final dan = gauge.dangerLevel;
+    final cur = s.currentLevel > 0 ? s.currentLevel : null;
+    // v5.4: dangerLevel from MapStationData (mergedStationsProvider v4.2 DL)
+    final dan = s.dangerLevel;
     String margin      = '—';
     Color  marginColor = AppPalette.safe;
     if (cur != null) {
@@ -1366,7 +1353,8 @@ class _StationSheet extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 5),
                 child: Text('Current Level',
-                    style: TextStyle(color: t.textSecondary, fontSize: 12)),
+                    style: TextStyle(
+                        color: t.textSecondary, fontSize: 12)),
               ),
             ],
           ),
@@ -1400,10 +1388,12 @@ class _StationSheet extends StatelessWidget {
             border: Border.all(color: t.stroke)),
         child: Column(children: [
           _threshRow('Warning Level',
-              '${gauge.warningLevel.toStringAsFixed(2)} m', AppPalette.warning),
+              '${gauge.warningLevel.toStringAsFixed(2)} m',
+              AppPalette.warning),
           const SizedBox(height: 8),
           _threshRow('Danger Level',
-              '${gauge.dangerLevel.toStringAsFixed(2)} m', AppPalette.danger),
+              '${gauge.dangerLevel.toStringAsFixed(2)} m',
+              AppPalette.danger),
           const SizedBox(height: 8),
           _threshRow(
             'HFL${gauge.hflYear != null ? ' (${gauge.hflYear})' : ''}',
@@ -1416,10 +1406,13 @@ class _StationSheet extends StatelessWidget {
   Widget _threshRow(String label, String value, Color color) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: t.textSecondary, fontSize: 12)),
+          Text(label,
+              style: TextStyle(color: t.textSecondary, fontSize: 12)),
           Text(value,
               style: TextStyle(
-                  color: color, fontWeight: FontWeight.w800, fontSize: 13)),
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13)),
         ],
       );
 
@@ -1434,20 +1427,19 @@ class _StationSheet extends StatelessWidget {
           ? AppPalette.danger
           : d < 0 ? AppPalette.safe : AppPalette.warning;
     }
+    // v5.4: trend string comes from MapStationData.trend
+    final trendRaw = s.trend.toUpperCase();
     final IconData trendIcon;
     final Color    trendColor;
-    switch (s.trend.toUpperCase()) {
-      case 'RISING':
-        trendIcon  = Icons.trending_up_rounded;
-        trendColor = AppPalette.danger;
-        break;
-      case 'FALLING':
-        trendIcon  = Icons.trending_down_rounded;
-        trendColor = AppPalette.safe;
-        break;
-      default:
-        trendIcon  = Icons.trending_flat_rounded;
-        trendColor = AppPalette.warning;
+    if (trendRaw.contains('↑') || trendRaw == 'RISING') {
+      trendIcon  = Icons.trending_up_rounded;
+      trendColor = AppPalette.danger;
+    } else if (trendRaw.contains('↓') || trendRaw == 'FALLING') {
+      trendIcon  = Icons.trending_down_rounded;
+      trendColor = AppPalette.safe;
+    } else {
+      trendIcon  = Icons.trending_flat_rounded;
+      trendColor = AppPalette.warning;
     }
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1475,14 +1467,16 @@ class _StationSheet extends StatelessWidget {
                   color: t.textSecondary, fontSize: 10,
                   fontWeight: FontWeight.w600)),
               const SizedBox(height: 4),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(trendIcon, color: trendColor, size: 16),
-                const SizedBox(width: 3),
-                Text(s.trend.isEmpty ? '—' : s.trend,
-                    style: TextStyle(
-                        color: trendColor,
-                        fontWeight: FontWeight.w800, fontSize: 11)),
-              ]),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(trendIcon, color: trendColor, size: 16),
+                  const SizedBox(width: 3),
+                  Text(s.trend.isEmpty ? '—' : s.trend,
+                      style: TextStyle(
+                          color: trendColor,
+                          fontWeight: FontWeight.w800, fontSize: 11)),
+                ]),
             ],
           ),
         )),
@@ -1501,7 +1495,8 @@ class _StationSheet extends StatelessWidget {
     if (hasGloFAS) {
       dischargeStr = _fmtQ(s.discharge!);
       if (s.dischargeMean != null && s.dischargeMean! > 0) {
-        final pct = (s.discharge! - s.dischargeMean!) / s.dischargeMean! * 100;
+        final pct =
+            (s.discharge! - s.dischargeMean!) / s.dischargeMean! * 100;
         deltaBadge = pct >= 0
             ? '+${pct.toStringAsFixed(0)}%'
             : '${pct.toStringAsFixed(0)}%';
@@ -1515,7 +1510,8 @@ class _StationSheet extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppPalette.cyanGlow2,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppPalette.cyan.withValues(alpha: 0.22)),
+        border: Border.all(
+            color: AppPalette.cyan.withValues(alpha: 0.22)),
       ),
       child: Row(children: [
         if (hasGloFAS)
@@ -1523,7 +1519,8 @@ class _StationSheet extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                const Icon(Icons.water_rounded, color: AppPalette.cyan, size: 11),
+                const Icon(Icons.water_rounded,
+                    color: AppPalette.cyan, size: 11),
                 const SizedBox(width: 4),
                 Text('GloFAS Discharge',
                     style: TextStyle(
@@ -1537,13 +1534,15 @@ class _StationSheet extends StatelessWidget {
                       fontWeight: FontWeight.w800, fontSize: 13)),
               if (s.dischargeMean != null)
                 Text('Mean: ${_fmtQ(s.dischargeMean!)} m³/s',
-                    style: TextStyle(color: t.textSecondary, fontSize: 10)),
+                    style: TextStyle(
+                        color: t.textSecondary, fontSize: 10)),
             ],
           )),
         if (hasGloFAS && deltaBadge.isNotEmpty) ...[
           const SizedBox(width: 6),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 7, vertical: 4),
             decoration: BoxDecoration(
                 color: dischargeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
@@ -1552,7 +1551,8 @@ class _StationSheet extends StatelessWidget {
             child: Text(deltaBadge,
                 style: TextStyle(
                     color: dischargeColor,
-                    fontWeight: FontWeight.w800, fontSize: 10)),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 10)),
           ),
         ],
         if (hasRainfall) ...[
@@ -1561,8 +1561,10 @@ class _StationSheet extends StatelessWidget {
                 color: t.stroke.withValues(alpha: 0.5)),
           Expanded(child: _miniCell(
               icon: Icons.grain_rounded, label: '24h Rainfall',
-              value: '${s.rainfall24h!.toStringAsFixed(1)} mm',
-              valueColor: Colors.lightBlue, centered: hasGloFAS)),
+              value:
+                  '${s.rainfall24h!.toStringAsFixed(1)} mm',
+              valueColor: Colors.lightBlue,
+              centered: hasGloFAS)),
         ],
       ]),
     );
@@ -1573,12 +1575,14 @@ class _StationSheet extends StatelessWidget {
     return Row(children: [
       Icon(Icons.verified_outlined, color: t.textSecondary, size: 12),
       const SizedBox(width: 5),
-      Text(s.source, style: TextStyle(
-          color: t.textSecondary, fontSize: 10,
-          fontWeight: FontWeight.w600)),
+      Text(s.source,
+          style: TextStyle(
+              color: t.textSecondary, fontSize: 10,
+              fontWeight: FontWeight.w600)),
       const Spacer(),
       if (s.fetchedAt.isNotEmpty)
-        Text(s.fetchedAt, style: TextStyle(color: t.stroke, fontSize: 9)),
+        Text(s.fetchedAt,
+            style: TextStyle(color: t.stroke, fontSize: 9)),
     ]);
   }
 
@@ -1601,39 +1605,48 @@ class _StationSheet extends StatelessWidget {
             children: [
               Icon(icon, size: 10, color: t.textSecondary),
               const SizedBox(width: 4),
-              Text(label, style: TextStyle(
-                  color: t.textSecondary, fontSize: 10,
-                  fontWeight: FontWeight.w600)),
+              Text(label,
+                  style: TextStyle(
+                      color: t.textSecondary, fontSize: 10,
+                      fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 3),
-          Text(value, style: TextStyle(
-              color: valueColor,
-              fontWeight: FontWeight.w800, fontSize: 13)),
+          Text(value,
+              style: TextStyle(
+                  color: valueColor,
+                  fontWeight: FontWeight.w800, fontSize: 13)),
         ],
       ),
     );
   }
 
-  Widget _badge({required String label, required Color color}) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.14),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: color.withValues(alpha: 0.50)),
-    ),
-    child: Text(label,
-        style: TextStyle(
-            color: color, fontWeight: FontWeight.w800, fontSize: 10)),
-  );
+  Widget _badge({required String label, required Color color}) =>
+      Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(20),
+          border:
+              Border.all(color: color.withValues(alpha: 0.50)),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: 10)),
+      );
 
   static String _fmtQ(double v) =>
-      v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : v.toStringAsFixed(0);
+      v >= 1000
+          ? '${(v / 1000).toStringAsFixed(1)}k'
+          : v.toStringAsFixed(0);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // _LiveBadge
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _LiveBadge extends StatelessWidget {
   final int count;
@@ -1644,23 +1657,29 @@ class _LiveBadge extends StatelessWidget {
     final hasData = count > 0;
     final color   = hasData ? AppPalette.safe : t.textSecondary;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.40)),
+        border:
+            Border.all(color: color.withValues(alpha: 0.40)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          Container(
+              width: 6, height: 6,
+              decoration: BoxDecoration(
+                  color: color, shape: BoxShape.circle)),
           const SizedBox(width: 5),
           Text(
             hasData ? 'LIVE · $count' : 'NO DATA',
             style: TextStyle(
-                color: color, fontSize: 9,
-                fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                color: color,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5),
           ),
         ],
       ),
@@ -1668,9 +1687,9 @@ class _LiveBadge extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // _FilterChip
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _FilterChip extends StatelessWidget {
   final String label;
@@ -1688,9 +1707,12 @@ class _FilterChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.only(right: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? t.accent.withValues(alpha: 0.18) : t.cardBgElevated,
+          color: active
+              ? t.accent.withValues(alpha: 0.18)
+              : t.cardBgElevated,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: active ? t.accent : t.stroke,
@@ -1700,15 +1722,16 @@ class _FilterChip extends StatelessWidget {
             style: TextStyle(
                 color: active ? t.accent : t.textSecondary,
                 fontSize: 11,
-                fontWeight: active ? FontWeight.w800 : FontWeight.w500)),
+                fontWeight:
+                    active ? FontWeight.w800 : FontWeight.w500)),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // _RiskFilterChip
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _RiskFilterChip extends StatelessWidget {
   final String label;
@@ -1729,9 +1752,12 @@ class _RiskFilterChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.only(right: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.20) : t.cardBgElevated,
+          color: active
+              ? color.withValues(alpha: 0.20)
+              : t.cardBgElevated,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: active ? color : t.stroke,
@@ -1743,7 +1769,8 @@ class _RiskFilterChip extends StatelessWidget {
             Container(
               width: 7, height: 7,
               decoration: BoxDecoration(
-                  color: active ? color : color.withValues(alpha: 0.5),
+                  color:
+                      active ? color : color.withValues(alpha: 0.5),
                   shape: BoxShape.circle),
             ),
             const SizedBox(width: 5),
@@ -1751,17 +1778,21 @@ class _RiskFilterChip extends StatelessWidget {
                 style: TextStyle(
                     color: active ? color : t.textSecondary,
                     fontSize: 11,
-                    fontWeight: active ? FontWeight.w800 : FontWeight.w500)),
+                    fontWeight: active
+                        ? FontWeight.w800
+                        : FontWeight.w500)),
             const SizedBox(width: 4),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text('$count',
                   style: TextStyle(
-                      color: color, fontSize: 9,
+                      color: color,
+                      fontSize: 9,
                       fontWeight: FontWeight.w800)),
             ),
           ],
@@ -1771,9 +1802,9 @@ class _RiskFilterChip extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // _Legend
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
 class _Legend extends StatelessWidget {
   final RiverColors t;
@@ -1783,34 +1814,51 @@ class _Legend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: t.cardBg.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: t.stroke),
         boxShadow: [BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _LegendRow(color: const Color(0xFFFF3B30), dotSize: 9,
-              label: 'Critical', pulse: true),
+          _LegendRow(
+              color: const Color(0xFFFF3B30),
+              dotSize: 9,
+              label: 'Critical',
+              pulse: true),
           const SizedBox(height: 5),
-          _LegendRow(color: const Color(0xFFFF6B35), dotSize: 8,
-              label: 'Severe', pulse: true),
+          _LegendRow(
+              color: const Color(0xFFFF6B35),
+              dotSize: 8,
+              label: 'Severe',
+              pulse: true),
           const SizedBox(height: 5),
-          _LegendRow(color: const Color(0xFFFFCC00), dotSize: 7,
+          _LegendRow(
+              color: const Color(0xFFFFCC00),
+              dotSize: 7,
               label: 'Warning / Moderate'),
           const SizedBox(height: 5),
-          _LegendRow(color: const Color(0xFF34C759), dotSize: 6,
+          _LegendRow(
+              color: const Color(0xFF34C759),
+              dotSize: 6,
               label: 'Safe / Normal'),
           const SizedBox(height: 5),
-          _LegendRow(color: const Color(0xFF8E8E93), dotSize: 5,
+          _LegendRow(
+              color: const Color(0xFF8E8E93),
+              dotSize: 5,
               label: 'No data'),
           const SizedBox(height: 5),
-          _LegendRow(color: Colors.lightBlue, dotSize: 6,
-              label: 'High rainfall >10mm', ring: true),
+          _LegendRow(
+              color: Colors.lightBlue,
+              dotSize: 6,
+              label: 'High rainfall >10mm',
+              ring: true),
           if (showPrecip) ...[
             const SizedBox(height: 5),
             Row(
@@ -1828,7 +1876,8 @@ class _Legend extends StatelessWidget {
                 Text('Radar (RainViewer)',
                     style: TextStyle(
                         color: t.textSecondary,
-                        fontSize: 10, fontWeight: FontWeight.w500)),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500)),
               ],
             ),
           ],
@@ -1845,8 +1894,11 @@ class _LegendRow extends StatelessWidget {
   final bool   pulse;
   final bool   ring;
   const _LegendRow({
-    required this.color, required this.dotSize, required this.label,
-    this.pulse = false, this.ring = false,
+    required this.color,
+    required this.dotSize,
+    required this.label,
+    this.pulse = false,
+    this.ring  = false,
   });
 
   @override
@@ -1866,7 +1918,8 @@ class _LegendRow extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: color.withValues(alpha: 0.55), width: 1.5),
+                        color: color.withValues(alpha: 0.55),
+                        width: 1.5),
                   ),
                 ),
               Container(
@@ -1874,7 +1927,8 @@ class _LegendRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: color, shape: BoxShape.circle,
                   border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.6), width: 1),
+                      color: Colors.white.withValues(alpha: 0.6),
+                      width: 1),
                 ),
               ),
             ],
@@ -1883,7 +1937,8 @@ class _LegendRow extends StatelessWidget {
         const SizedBox(width: 6),
         Text(label,
             style: TextStyle(
-                color: t.textSecondary, fontSize: 10,
+                color: t.textSecondary,
+                fontSize: 10,
                 fontWeight: FontWeight.w500)),
         if (pulse) ...[
           const SizedBox(width: 4),
