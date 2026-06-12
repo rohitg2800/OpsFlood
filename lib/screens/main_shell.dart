@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/context_l10n.dart';
 import '../providers/alerts_badge_provider.dart';
+import '../providers/alerts_parent_bridge_provider.dart'; // AAC v2.0 bridge
 import '../theme/river_theme.dart';
 import 'dashboard_screen.dart';
 import 'bihar_river_map_screen.dart';
@@ -74,6 +75,14 @@ class MainShell extends ConsumerWidget {
     final criticalCount = ref.watch(criticalAlertCountProvider);
     final t             = RiverColors.of(context);
     final admin         = _isAdmin(context);
+
+    // ── AAC v2.0: Keep the alerts-parent bridge alive for the lifetime of
+    //    MainShell.  This is a side-effect provider (returns void) that
+    //    watches mergedStationsProvider and pushes converted StationReadings
+    //    into ActiveAlertController so LiveAlertBanner / DangerProximityBanner
+    //    always evaluate against the same v4.2-corrected DL/WL as every other
+    //    screen.  No UI data should be read from this provider directly.
+    ref.watch(alertsParentBridgeProvider);
 
     return PopScope(
       canPop: currentIndex == 0,
