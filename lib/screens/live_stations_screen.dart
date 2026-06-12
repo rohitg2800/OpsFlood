@@ -1,11 +1,14 @@
-// lib/screens/live_stations_screen.dart
+// lib/screens/live_stations_screen.dart  (v2.0)
 //
-// OpsFlood — Bihar Live Stations Screen
+// OpsFlood — All-Stations Live Screen
 //
-// Wired to biharLiveProvider which calls:
-//   • /api/live-levels?state=Bihar  (WRD 31 gauge stations)
-//   • /api/glofas                   (river discharge m³/s)
-//   • /api/rainfall                 (24h rainfall mm)
+// v1.x → v2.0:
+//   • Title is now dynamic: 'All Stations (N)'
+//   • Summary bar gains: Severe (orange), Safe (green), No-Data (grey) chips
+//   • _StationCard shows state field below river·district
+//   • Level gauge bar renders 0–150% with a danger-line tick at 100%
+//   • Risk colour extracted to _riskColor() — riskLabel='NORMAL' → grey
+//   • Source badge shows LIVE (cyan) vs STATIC (grey)
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,11 +29,17 @@ class LiveStationsScreen extends ConsumerWidget {
       backgroundColor: AppPalette.abyss0,
       appBar: AppBar(
         backgroundColor: AppPalette.abyss0,
-        title: const Text(
-          'Bihar Live Stations',
-          style: TextStyle(
-            color: AppPalette.cyan,
-            fontWeight: FontWeight.bold,
+        title: async.when(
+          loading: () => const Text('Loading Stations…',
+              style: TextStyle(
+                  color: AppPalette.cyan, fontWeight: FontWeight.bold)),
+          error: (_, __) => const Text('Stations',
+              style: TextStyle(
+                  color: AppPalette.danger, fontWeight: FontWeight.bold)),
+          data: (s) => Text(
+            'All Stations (${s.stations.length})',
+            style: const TextStyle(
+                color: AppPalette.cyan, fontWeight: FontWeight.bold),
           ),
         ),
         iconTheme: const IconThemeData(color: AppPalette.gold),
@@ -56,9 +65,9 @@ class LiveStationsScreen extends ConsumerWidget {
                 const Icon(Icons.cloud_off_rounded,
                     size: 48, color: AppPalette.danger),
                 const SizedBox(height: 12),
-                Text(
-                  'Could not load Bihar data',
-                  style: const TextStyle(
+                const Text(
+                  'Could not load station data',
+                  style: TextStyle(
                       color: AppPalette.textWhite,
                       fontWeight: FontWeight.bold),
                 ),
@@ -92,7 +101,7 @@ class LiveStationsScreen extends ConsumerWidget {
                   const Icon(Icons.water_outlined,
                       size: 56, color: AppPalette.cyan),
                   const SizedBox(height: 12),
-                  const Text('No live station data yet',
+                  const Text('No station data yet',
                       style: TextStyle(color: AppPalette.textGrey)),
                   const SizedBox(height: 4),
                   const Text('Pull to refresh',
@@ -104,8 +113,6 @@ class LiveStationsScreen extends ConsumerWidget {
           }
 
           final lastFetch = state.lastFetched;
-          final critical = state.stations.where((s) => s.isCritical).length;
-          final warning  = state.stations.where((s) => s.isWarning).length;
 
           return RefreshIndicator(
             color: AppPalette.cyan,
@@ -113,33 +120,51 @@ class LiveStationsScreen extends ConsumerWidget {
                 ref.read(biharLiveProvider.notifier).refresh(),
             child: CustomScrollView(
               slivers: [
-                // ── Summary header ──────────────────────────────────────────
+                // ── Summary header ─────────────────────────────────────────
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
                           children: [
                             _statChip(
-                              label: '${state.stations.length} Stations',
+                              label: '${state.stations.length} Total',
                               color: AppPalette.cyan,
                               icon: Icons.sensors,
                             ),
-                            const SizedBox(width: 8),
-                            if (critical > 0)
+                            if (state.criticalCount > 0)
                               _statChip(
-                                label: '$critical Critical',
+                                label: '${state.criticalCount} Critical',
                                 color: AppPalette.danger,
                                 icon: Icons.warning_amber_rounded,
                               ),
-                            if (critical > 0) const SizedBox(width: 8),
-                            if (warning > 0)
+                            if (state.severeCount > 0)
                               _statChip(
-                                label: '$warning Warning',
+                                label: '${state.severeCount} Severe',
+                                color: Colors.deepOrange,
+                                icon: Icons.warning_rounded,
+                              ),
+                            if (state.warningCount > 0)
+                              _statChip(
+                                label: '${state.warningCount} Warning',
                                 color: AppPalette.warning,
                                 icon: Icons.info_outline_rounded,
+                              ),
+                            if (state.safeCount > 0)
+                              _statChip(
+                                label: '${state.safeCount} Safe',
+                                color: Colors.green,
+                                icon: Icons.check_circle_outline_rounded,
+                              ),
+                            if (state.noDataCount > 0)
+                              _statChip(
+                                label: '${state.noDataCount} No Data',
+                                color: AppPalette.textGrey,
+                                icon: Icons.signal_wifi_off_rounded,
                               ),
                           ],
                         ),
@@ -147,7 +172,7 @@ class LiveStationsScreen extends ConsumerWidget {
                           [
                             const SizedBox(height: 6),
                             Text(
-                              'Updated ${DateFormat('HH:mm').format(lastFetch)}',
+                              'Updated ${DateFormat('HH:mm:ss').format(lastFetch)}',
                               style: const TextStyle(
                                   color: AppPalette.textDim, fontSize: 11),
                             ),
@@ -157,12 +182,13 @@ class LiveStationsScreen extends ConsumerWidget {
                   ),
                 ),
 
-                // ── Station cards ───────────────────────────────────────────
+                // ── Station cards ──────────────────────────────────────────
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (ctx, i) => _StationCard(station: state.stations[i]),
+                      (ctx, i) =>
+                          _StationCard(station: state.stations[i]),
                       childCount: state.stations.length,
                     ),
                   ),
@@ -183,9 +209,9 @@ class LiveStationsScreen extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color:        color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+        border:       Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -203,7 +229,16 @@ class LiveStationsScreen extends ConsumerWidget {
   }
 }
 
-// ── Station card ─────────────────────────────────────────────────────────────
+// ── Risk colour helper ────────────────────────────────────────────────────────
+Color _riskColor(BiharStationData s) {
+  if (s.isCritical)  return AppPalette.danger;
+  if (s.isSevere)    return Colors.deepOrange;
+  if (s.isWarning)   return AppPalette.warning;
+  if (s.isSafe)      return Colors.green;
+  return AppPalette.textGrey; // NORMAL / NO_DATA
+}
+
+// ── Station card ──────────────────────────────────────────────────────────────
 class _StationCard extends StatelessWidget {
   final BiharStationData station;
   const _StationCard({required this.station});
@@ -211,30 +246,25 @@ class _StationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s     = station;
-    final color = s.isCritical
-        ? AppPalette.danger
-        : s.isWarning
-            ? AppPalette.warning
-            : AppPalette.cyan;
+    final color = _riskColor(s);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1B2A),
+        color:        const Color(0xFF0D1B2A),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border:       Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Row 1: name + risk badge ──────────────────────────────────
+            // ── Row 1: dot + name + risk badge + source tag ───────────────
             Row(
               children: [
                 Container(
-                  width: 10,
-                  height: 10,
+                  width: 10, height: 10,
                   decoration:
                       BoxDecoration(shape: BoxShape.circle, color: color),
                 ),
@@ -249,16 +279,19 @@ class _StationCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                _SourceTag(live: s.source == 'LIVE'),
+                const SizedBox(width: 6),
                 _RiskBadge(label: s.riskLabel, color: color),
               ],
             ),
 
-            // ── River + district ─────────────────────────────────────────
-            if (s.river.isNotEmpty || s.district.isNotEmpty) ...
+            // ── River · district · state ──────────────────────────────────
+            if ([s.river, s.district, s.state]
+                .any((v) => v.isNotEmpty)) ...
               [
                 const SizedBox(height: 4),
                 Text(
-                  [s.river, s.district]
+                  [s.river, s.district, s.state]
                       .where((v) => v.isNotEmpty)
                       .join(' · '),
                   style: const TextStyle(
@@ -268,7 +301,7 @@ class _StationCard extends StatelessWidget {
 
             const SizedBox(height: 10),
 
-            // ── Level gauge bar ──────────────────────────────────────────
+            // ── Level gauge (0 – 150%) ────────────────────────────────────
             if (s.currentLevel != null && s.dangerLevel != null) ...
               [
                 Row(
@@ -286,19 +319,35 @@ class _StationCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: s.dangerPercent / 100,
-                    minHeight: 6,
-                    backgroundColor: color.withValues(alpha: 0.1),
-                    valueColor: AlwaysStoppedAnimation<Color>(color),
-                  ),
+                // Gauge bar: fill = pct/150 so that 100% (danger) is at 2/3
+                Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: (s.dangerPercent / 150).clamp(0.0, 1.0),
+                        minHeight: 7,
+                        backgroundColor: color.withValues(alpha: 0.1),
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                      ),
+                    ),
+                    // Danger-line tick at the 2/3 mark
+                    FractionallySizedBox(
+                      widthFactor: 2 / 3,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          width: 2, height: 7,
+                          color: AppPalette.danger.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
               ],
 
-            // ── Data chips row ───────────────────────────────────────────
+            // ── Data chips ────────────────────────────────────────────────
             Wrap(
               spacing: 8,
               runSpacing: 6,
@@ -311,42 +360,46 @@ class _StationCard extends StatelessWidget {
                             ? Icons.arrow_downward
                             : Icons.remove,
                     label:
-                        '${s.diff24h! >= 0 ? '+' : ''}${s.diff24h!.toStringAsFixed(2)} m/24h',
+                        '${s.diff24h! >= 0 ? '+' : ''}'  
+                        '${s.diff24h!.toStringAsFixed(2)} m/24h',
                     color: s.diff24h! > 0
                         ? AppPalette.danger
                         : AppPalette.cyan,
                   ),
                 if (s.discharge != null)
                   _DataChip(
-                    icon: Icons.water,
-                    label: '${_fmt(s.discharge!)} m³/s',
-                    color: AppPalette.cyan,
+                    icon:    Icons.water,
+                    label:   '${_fmt(s.discharge!)} m³/s',
+                    color:   AppPalette.cyan,
                     tooltip: 'GloFAS river discharge',
                   ),
-                if (s.rainfall24h != null)
+                if (s.rainfall24h != null && s.rainfall24h! > 0)
                   _DataChip(
-                    icon: Icons.grain,
-                    label: '${s.rainfall24h!.toStringAsFixed(1)} mm',
-                    color: Colors.lightBlue,
+                    icon:    Icons.grain,
+                    label:   '${s.rainfall24h!.toStringAsFixed(1)} mm',
+                    color:   Colors.lightBlue,
                     tooltip: '24h rainfall',
                   ),
                 if (s.forecast24h != null)
                   _DataChip(
-                    icon: Icons.trending_up,
-                    label:
-                        'Fcst ${s.forecast24h!.toStringAsFixed(2)} m',
-                    color: AppPalette.gold,
+                    icon:    Icons.trending_up,
+                    label:   'Fcst ${s.forecast24h!.toStringAsFixed(2)} m',
+                    color:   AppPalette.gold,
                     tooltip: '24h forecast level',
                   ),
               ],
             ),
 
-            // ── Source tag ───────────────────────────────────────────────
-            if (s.source.isNotEmpty) ...
+            // ── Source + time ─────────────────────────────────────────────
+            if (s.source.isNotEmpty || s.fetchedAt.isNotEmpty) ...
               [
                 const SizedBox(height: 8),
                 Text(
-                  s.source,
+                  [
+                    s.source,
+                    if (s.fetchedAt.isNotEmpty)
+                      _shortTs(s.fetchedAt),
+                  ].join('  '),
                   style: const TextStyle(
                       color: AppPalette.textDim, fontSize: 10),
                 ),
@@ -361,12 +414,36 @@ class _StationCard extends StatelessWidget {
     if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
     return v.toStringAsFixed(0);
   }
+
+  static String _shortTs(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      return DateFormat('HH:mm').format(dt);
+    } catch (_) {
+      return iso;
+    }
+  }
+}
+
+// ── Source tag ────────────────────────────────────────────────────────────────
+class _SourceTag extends StatelessWidget {
+  final bool live;
+  const _SourceTag({required this.live});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = live ? AppPalette.cyan : AppPalette.textGrey;
+    final label = live ? '● LIVE' : '○ STATIC';
+    return Text(label,
+        style: TextStyle(
+            color: color, fontSize: 9, fontWeight: FontWeight.bold));
+  }
 }
 
 // ── Risk badge ────────────────────────────────────────────────────────────────
 class _RiskBadge extends StatelessWidget {
   final String label;
-  final Color color;
+  final Color  color;
   const _RiskBadge({required this.label, required this.color});
 
   @override
@@ -374,9 +451,9 @@ class _RiskBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
+        color:        color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
+        border:       Border.all(color: color.withValues(alpha: 0.5)),
       ),
       child: Text(
         label,
@@ -390,14 +467,15 @@ class _RiskBadge extends StatelessWidget {
 // ── Data chip ─────────────────────────────────────────────────────────────────
 class _DataChip extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final Color color;
-  final String? tooltip;
-  const _DataChip(
-      {required this.icon,
-      required this.label,
-      required this.color,
-      this.tooltip});
+  final String   label;
+  final Color    color;
+  final String?  tooltip;
+  const _DataChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.tooltip,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -414,9 +492,9 @@ class _DataChip extends StatelessWidget {
     final wrapped = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color:        color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
+        border:       Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: child,
     );
