@@ -1,21 +1,32 @@
-// lib/providers/real_time_river_provider.dart  v8.1
+// lib/providers/real_time_river_provider.dart  v8.2
+//
+// v8.2 fix (P0 #3):
+//   • _sameStation() 6-char prefix fallback REMOVED.
+//     Root cause: _norm() strips parentheses, so 'Kamtaul (Bagmati)' and
+//     'Kamtaul (Kamla)' both normalised to 'kamtaul', then the 6-char
+//     prefix 'kamtau' matched — one of each pair was silently dropped.
+//   • New helpers:
+//       _normBase(s)  — strips parens (old _norm behaviour, used for
+//                         threshold/Bihar-gate logic)
+//       _normFull(s)  — keeps the '(River)' qualifier, lowercases only
+//   • _sameStation(a, b):
+//       Both have qualifier → compare _normFull (qualified names are
+//       distinct across rivers).
+//       Otherwise → _normBase exact match only (no prefix shortcut).
+//   • liveEngineNames Set and all dedup filters now key on _normFull
+//     so BiharLiveEngine's qualified names don't alias plain WRD names.
 //
 // v8.1 fix:
-//   • Bihar-only guard added to dfStations filter inside mergedStationsProvider.
-//     Any non-Bihar station that leaks from dataFetchStationsProvider
-//     (e.g. backend /api/cwc-stations returning all-India rows) is now
-//     dropped before it reaches the merged list.
-//   • Added _isBihar() helper consistent with IndiaStationsService.
+//   • Bihar-only guard added to dfStations filter.
 //
-// v8.0: liveEngineStationsProvider injected as the TOP priority tier so
-//     BiharLiveEngine's real-time readings override any seed current=0 values.
+// v8.0: liveEngineStationsProvider injected as TOP priority tier.
 //
 // Priority ladder (highest → lowest):
-//   ❸ LiveEngine  (BiharLiveEngine feed, updated every 15 min)
-//   ❷ live-CWC    (CWC FFEM BEFIQR scraper)
-//   ❶ DataFetch   (backend API) ← Bihar-filtered ★ v8.1
-//   ❵ WRD Bihar
-//   ❴ seed-CWC    (static fallback)
+//   ✳ LiveEngine  (BiharLiveEngine feed, updated every 15 min)
+//   ✲ live-CWC    (CWC FFEM BEFIQR scraper)
+//   ✱ DataFetch   (backend API) ← Bihar-filtered ★ v8.1
+//   ▕ WRD Bihar
+//   ▔ seed-CWC    (static fallback)
 //   Birpur always explicit via kosiBirpurProvider
 library;
 
@@ -33,35 +44,65 @@ import 'kosi_birpur_provider.dart';
 import 'live_engine_bridge_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bihar state filter — matches all known backend spellings
+// Bihar state filter
 // ─────────────────────────────────────────────────────────────────────────────
 const _kBiharAliases = {'bihar', 'br', 'state of bihar'};
 bool _isBihar(String state) =>
     _kBiharAliases.contains(state.toLowerCase().trim());
 
 // ─────────────────────────────────────────────────────────────────────────────
-String _norm(String s) => s
+// Name normalisation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// _normBase: strips parenthesised qualifiers, lowercases, collapses
+/// whitespace.  Used for Bihar-gate logic and threshold lookups.
+/// Example: 'Kamtaul (Bagmati)' → 'kamtaul'
+String _normBase(String s) => s
     .toLowerCase()
     .replaceAll(RegExp(r'\s*\(.*?\)'), '')
     .replaceAll(RegExp(r'[^a-z0-9\s]'), '')
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
+/// _normFull: keeps the parenthesised qualifier, lowercases only.
+/// Used for dedup key sets so disambiguated names stay distinct.
+/// Example: 'Kamtaul (Bagmati)' → 'kamtaul (bagmati)'
+String _normFull(String s) => s.toLowerCase().trim();
+
+/// _norm kept for any callers that imported it indirectly (alias of _normBase).
+String _norm(String s) => _normBase(s);
+
+/// Returns true when two station names refer to the same physical gauge.
+///
+/// Rules (in order):
+///   1. If BOTH names contain a '(' qualifier, compare _normFull.
+///      'kamtaul (bagmati)' ≠ 'kamtaul (kamla)' → false  ✓
+///      'kamtaul (bagmati)' == 'kamtaul (bagmati)' → true  ✓
+///   2. Otherwise compare _normBase exact match.
+///      'kamtaul' == 'kamtaul' → true  (legacy feed, no qualifier)  ✓
+///      'dighaghat' == 'dighaghat' → true  ✓
+///      'dighaghat' == 'gandhighat' → false  ✓
+///
+/// The 6-char prefix fallback has been REMOVED — it was the source of
+/// false-positive dedup that silently dropped one station from every
+/// disambiguated pair (Kamtaul, Dhengraghat, …).
 bool _sameStation(String a, String b) {
-  final na = _norm(a);
-  final nb = _norm(b);
-  if (na == nb) return true;
-  final pa = na.length > 6 ? na.substring(0, 6) : na;
-  final pb = nb.length > 6 ? nb.substring(0, 6) : nb;
-  return pa == pb;
+  final hasQualA = a.contains('(');
+  final hasQualB = b.contains('(');
+  if (hasQualA && hasQualB) {
+    // Both have river qualifiers — must match including the qualifier.
+    return _normFull(a) == _normFull(b);
+  }
+  // At least one name has no qualifier — fall back to base-name exact match.
+  return _normBase(a) == _normBase(b);
 }
 
 bool _isBirpur(String name) =>
     name.toLowerCase().contains('birpur');
 
-const double _kBirpurWarning = 211.50;
-const double _kBirpurDanger  = 212.40;
-const double _kBirpurHfl     = _kBirpurDanger + 1.5; // 213.90
+const double _kBirpurWarning = 73.70;  // WRD-verified Jun 2026
+const double _kBirpurDanger  = 74.70;
+const double _kBirpurHfl     = 76.02;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Raw WrdStation list — auto-refreshes every 15 min
@@ -168,18 +209,20 @@ final realTimeRiverProvider =
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. mergedStationsProvider — THE single source of truth for all screens
 //
-// Priority ladder (v8.1):
-//   ❸ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
-//   ❷ live-CWC   (CWC FFEM BEFIQR scraper)
-//   ❶ DataFetch  (backend API) ← Bihar-only filter applied ★ v8.1
-//   ❵ WRD Bihar
-//   ❴ seed-CWC   (static fallback, lowest)
+// Priority ladder (v8.2):
+//   ✳ LiveEngine  (BiharLiveEngine broadcast, highest fidelity)
+//   ✲ live-CWC   (CWC FFEM BEFIQR scraper)
+//   ✱ DataFetch  (backend API) ← Bihar-only filter ★ v8.1
+//   ▕ WRD Bihar
+//   ▔ seed-CWC   (static fallback, lowest)
 //   Birpur always explicit via kosiBirpurProvider
 // ─────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   // Tier 0 — BiharLiveEngine stations (real-time, highest priority)
+  // Key set uses _normFull so 'kamtaul (bagmati)' and 'kamtaul (kamla)'
+  // are stored as DISTINCT keys.
   final liveEngineRS    = ref.watch(liveEngineStationsProvider);
-  final liveEngineNames = { for (final s in liveEngineRS) _norm(s.station) };
+  final liveEngineNames = { for (final s in liveEngineRS) _normFull(s.station) };
 
   final wrdAsync    = ref.watch(realTimeRiverProvider);
   final cwcAsync    = ref.watch(cwcStationsProvider);
@@ -222,7 +265,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       warning:     _kBirpurWarning,
       danger:      _kBirpurDanger,
       hfl:         _kBirpurHfl,
-      dataSource: 'SEED',
+      dataSource:  'SEED',
       lastUpdated: '00:00',
       isLive: false,
     );
@@ -237,13 +280,13 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   final cwcLiveRS    = cwcLive.map(_cwcToRiverStation).toList();
   final cwcSeedRS    = cwcSeed.map(_cwcToRiverStation).toList();
-  final cwcLiveNames = { for (final s in cwcLiveRS) _norm(s.station) };
+  final cwcLiveNames = { for (final s in cwcLiveRS) _normFull(s.station) };
 
-  // ★ v8.1 — DataFetch: Bihar-only + exclude LiveEngine + Birpur + live-CWC
+  // DataFetch: Bihar-only + exclude LiveEngine + Birpur + live-CWC
   final allDfStations = ref.watch(dataFetchStationsProvider);
   final dfStations = allDfStations
       .where((s) =>
-          _isBihar(s.state) &&                                          // ★ Bihar gate
+          _isBihar(s.state) &&
           !_isBirpur(s.station) &&
           !liveEngineNames.any((n) => _sameStation(n, s.station)) &&
           !cwcLiveNames.any((n) => _sameStation(n, s.station)))
@@ -251,12 +294,12 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode && allDfStations.length != dfStations.length) {
     debugPrint(
-      '[Merged v8.1] dropped ${allDfStations.length - dfStations.length} '
-      'non-Bihar stations from DataFetch tier',
+      '[Merged v8.2] dropped ${allDfStations.length - dfStations.length} '
+      'non-Bihar/duplicate stations from DataFetch tier',
     );
   }
 
-  final dfNames = { for (final s in dfStations) _norm(s.station) };
+  final dfNames = { for (final s in dfStations) _normFull(s.station) };
 
   // WRD: exclude LiveEngine + Birpur + already-covered stations
   final wrdFiltered = wrdList
@@ -266,7 +309,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
           !cwcLiveNames.any((n) => _sameStation(n, s.station)) &&
           !dfNames.any((n) => _sameStation(n, s.station)))
       .toList();
-  final wrdNames = { for (final s in wrdFiltered) _norm(s.station) };
+  final wrdNames = { for (final s in wrdFiltered) _normFull(s.station) };
 
   // Seed CWC: last resort
   final cwcSeedFiltered = cwcSeedRS
@@ -290,7 +333,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged v8.1] ${liveEngineRS.length} LiveEngine'
+      '[Merged v8.2] ${liveEngineRS.length} LiveEngine'
       ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
       ' + ${dfStations.length} DataFetch(Bihar)'
