@@ -1,6 +1,14 @@
 // lib/services/wrd_bihar_service.dart
 //
-// OpsFlood — WRD Bihar Service (v7.1 — backend-only)
+// OpsFlood — WRD Bihar Service (v7.2 — stale-disk-cache fix)
+//
+// v7.2 fix (stale-data on Alerts screen):
+//   _loadFromDisk now checks the disk-timestamp against a 30-min TTL.
+//   If the on-disk data is older than 30 min it is returned as a cold-start
+//   placeholder BUT _cacheTime is left null so the subsequent network fetch
+//   is NOT skipped by the in-memory TTL guard.  Previously _cacheTime was
+//   always null on cold-start which meant the in-memory guard let the stale
+//   disk data survive indefinitely without ever triggering a refresh.
 //
 // All BeFIQR HTML scraping has been moved to the Python backend.
 // This service is now a thin wrapper that:
@@ -8,15 +16,6 @@
 //   2. Deserialises the JSON into WrdStation objects.
 //   3. Caches results in memory (15 min TTL) and on disk via
 //      shared_preferences for offline fallback.
-//
-// The backend handles:
-//   • Direct BeFIQR scrape + allOrigins proxy fallback
-//   • CWC forecast merge
-//   • Risk label computation (CRITICAL / HIGH / MODERATE / LOW)
-//
-// v7.1 fix: WrdStation.fromJson now accepts both snake_case keys returned
-// by /api/live-levels (current_level, danger_level, river_name, etc.) AND
-// the legacy camelCase keys stored in disk cache from earlier app versions.
 library;
 
 import 'dart:convert';
@@ -85,7 +84,7 @@ class WrdStation {
     return '${forecast24h!.toStringAsFixed(2)} m';
   }
 
-  // ── Risk label — aligned with backend thresholds ─────────────────────────
+  // ── Risk label — aligned with backend thresholds ─────────────────────
   // Backend: CRITICAL=<=0m, HIGH=<=3m, MODERATE=<=6m, LOW=>6m
   String get riskLabel {
     final bd = belowDanger;
@@ -116,7 +115,7 @@ class WrdStation {
     return '—';
   }
 
-  // ── Serialization ─────────────────────────────────────────────────────────
+  // ── Serialization ────────────────────────────────────────────────────────
   Map<String, dynamic> toJson() => {
     'river':        river,
     'site':         site,
@@ -137,15 +136,14 @@ class WrdStation {
   // Accepts both snake_case keys from the live backend response AND
   // camelCase keys persisted to disk by earlier app versions.
   factory WrdStation.fromJson(Map<String, dynamic> j) {
-    // Helper: try multiple key names, return first non-null num as double
-    double? _d(List<String> keys) {
+    double? d(List<String> keys) {
       for (final k in keys) {
         final v = j[k];
         if (v is num) return v.toDouble();
       }
       return null;
     }
-    String _s(List<String> keys, String fallback) {
+    String s(List<String> keys, String fallback) {
       for (final k in keys) {
         final v = j[k];
         if (v is String && v.isNotEmpty) return v;
@@ -153,27 +151,25 @@ class WrdStation {
       return fallback;
     }
 
-    // above_below_danger_m is signed (negative = below DL).
-    // belowDanger is stored as a positive margin, so we negate it.
-    final aboveDl = _d(['above_below_danger_m']);
+    final aboveDl = d(['above_below_danger_m']);
     final belowDanger = aboveDl != null
-        ? -aboveDl          // e.g. above_dl=-3.2 → belowDanger=3.2
-        : _d(['belowDanger']);
+        ? -aboveDl
+        : d(['belowDanger']);
 
     return WrdStation(
-      river:        _s(['river_name', 'river'], ''),
-      site:         _s(['city', 'station', 'site'], ''),
-      district:     _s(['district'], ''),
-      hfl:          _d(['hfl_m', 'hfl']),
-      dangerLevel:  _d(['danger_level', 'dangerLevel']),
-      warningLevel: _d(['warning_level', 'warningLevel']),
-      prevLevel:    _d(['prevLevel']),
-      currentLevel: _d(['current_level', 'currentLevel']),
-      diff24h:      _d(['change_24h_m', 'diff24h']),
+      river:        s(['river_name', 'river'], ''),
+      site:         s(['city', 'station', 'site'], ''),
+      district:     s(['district'], ''),
+      hfl:          d(['hfl_m', 'hfl']),
+      dangerLevel:  d(['danger_level', 'dangerLevel']),
+      warningLevel: d(['warning_level', 'warningLevel']),
+      prevLevel:    d(['prevLevel']),
+      currentLevel: d(['current_level', 'currentLevel']),
+      diff24h:      d(['change_24h_m', 'diff24h']),
       belowDanger:  belowDanger,
       trend:        j['trend'] as String?,
-      forecast24h:  _d(['forecast24h']),
-      source:       _s(['data_source', 'source'], 'WRD_BIHAR_BACKEND'),
+      forecast24h:  d(['forecast24h']),
+      source:       s(['data_source', 'source'], 'WRD_BIHAR_BACKEND'),
       fetchedAt:    DateTime.tryParse(
                       j['timestamp'] as String? ??
                       j['fetchedAt'] as String? ?? '') ??
@@ -188,24 +184,28 @@ class WrdStation {
       'risk=$riskLabel | live=$hasLiveData)';
 }
 
-// ── WrdBiharService ───────────────────────────────────────────────────────────
+// ── WrdBiharService ──────────────────────────────────────────────────────────────
 class WrdBiharService {
   WrdBiharService._();
   static final WrdBiharService instance = WrdBiharService._();
 
-  static const _cacheTtl   = Duration(minutes: 15);
-  static const _persistKey = 'wrd_bihar_stations_v7';
+  // In-memory TTL: 15 min (normal poll cadence)
+  static const _cacheTtl      = Duration(minutes: 15);
+  // Disk-cache TTL: 30 min — data older than this is considered stale on
+  // cold-start and the service will NOT skip the network fetch.
+  static const _diskCacheTtl  = Duration(minutes: 30);
+  static const _persistKey    = 'wrd_bihar_stations_v7';
 
   List<WrdStation>?        _cache;
   DateTime?                _cacheTime;
-  Map<String, WrdStation>? _stationByKey; // lowercase site/city → station
+  Map<String, WrdStation>? _stationByKey;
 
   List<WrdStation>? get cachedStations => _cache;
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // ── Public API ───────────────────────────────────────────────────────────
 
   Future<List<WrdStation>> fetch({bool forceRefresh = false}) async {
-    // In-memory cache hit
+    // In-memory cache hit (skipped when forceRefresh=true)
     if (!forceRefresh &&
         _cache != null &&
         _cacheTime != null &&
@@ -214,14 +214,30 @@ class WrdBiharService {
       return _cache!;
     }
 
-    // Cold start: load from disk while we wait for network
+    // Cold-start: load from disk ONLY as a placeholder while network loads.
+    // FIX v7.2: only treat disk data as "fresh enough" to set _cacheTime
+    // when it is within the disk TTL. If the disk data is stale, we still
+    // show it briefly (better than blank screen) but _cacheTime stays null
+    // so the in-memory TTL guard will NOT short-circuit the upcoming network
+    // fetch — preventing stale data from persisting indefinitely.
     if (_cache == null) {
-      final disk = await _loadFromDisk();
-      if (disk.isNotEmpty) {
-        _cache     = disk;
-        _cacheTime = null;
-        _buildIndex(disk);
-        _log('cold-start: ${disk.length} stations from disk');
+      final (diskStations, diskAge) = await _loadFromDiskWithAge();
+      if (diskStations.isNotEmpty) {
+        _cache = diskStations;
+        _buildIndex(diskStations);
+        final isFresh = diskAge != null && diskAge < _diskCacheTtl;
+        if (isFresh) {
+          // Disk is still fresh — honour it and skip the network round-trip.
+          _cacheTime = DateTime.now().subtract(diskAge!);
+          _log('cold-start: ${diskStations.length} stations from disk '
+               '(${diskAge!.inMinutes} min old — within TTL, skipping network)');
+          return _cache!;
+        } else {
+          // Disk is stale — show as placeholder but still fetch from network.
+          _cacheTime = null;
+          _log('cold-start: ${diskStations.length} stations from disk '
+               '(${diskAge?.inMinutes ?? "?"}min old — STALE, will refresh)');
+        }
       }
     }
 
@@ -289,7 +305,7 @@ class WrdBiharService {
     return map;
   }
 
-  // ── Persistence ───────────────────────────────────────────────────────────
+  // ── Persistence ──────────────────────────────────────────────────────────
 
   Future<void> _saveToDisk(List<WrdStation> stations) async {
     try {
@@ -304,23 +320,27 @@ class WrdBiharService {
     }
   }
 
-  Future<List<WrdStation>> _loadFromDisk() async {
+  /// Returns (stations, age) where age is how old the disk data is.
+  /// age == null means no timestamp was persisted or it was unparseable.
+  Future<(List<WrdStation>, Duration?)> _loadFromDiskWithAge() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw   = prefs.getString(_persistKey);
-      if (raw == null || raw.isEmpty) return [];
+      if (raw == null || raw.isEmpty) return (const [], null);
       final tsRaw = prefs.getString('${_persistKey}_ts');
       final ts    = tsRaw != null ? DateTime.tryParse(tsRaw) : null;
-      if (ts != null) {
-        _log('disk: last saved ${DateTime.now().difference(ts).inMinutes} min ago');
+      final age   = ts != null ? DateTime.now().difference(ts) : null;
+      if (age != null) {
+        _log('disk: last saved ${age.inMinutes} min ago');
       }
-      return (jsonDecode(raw) as List)
+      final stations = (jsonDecode(raw) as List)
           .whereType<Map<String, dynamic>>()
           .map(WrdStation.fromJson)
           .toList();
+      return (stations, age);
     } catch (e) {
       _log('disk load error: $e');
-      return [];
+      return (const [], null);
     }
   }
 

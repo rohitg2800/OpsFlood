@@ -1,4 +1,11 @@
-// lib/screens/alerts_screen.dart  v4.5 — M2 fix: dangerLevel → thresholdLevel
+// lib/screens/alerts_screen.dart  v4.6 — stale-data fix
+//
+// v4.6: AlertsScreen.initState() now calls DataFetchEngine.forceRefresh()
+//       and invalidates wrdStationsProvider so the Alerts tab always opens
+//       with a fresh network fetch rather than whatever was cached at the
+//       last background poll.  This cures the "active alerts show old data"
+//       symptom seen when the user switches to the tab after the app has
+//       been idle for > one poll cycle.
 library;
 
 import 'package:flutter/material.dart';
@@ -6,12 +13,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../providers/data_fetch_provider.dart';
+import '../providers/real_time_river_provider.dart';
 import '../services/alert_engine.dart';
 import '../services/alert_share_service.dart';
 import '../services/data_fetch_engine.dart';
 import '../widgets/alert_share_button.dart';
 
-// ── colour helpers ───────────────────────────────────────────────────────────────────
+// ── colour helpers ────────────────────────────────────────────────────────────────
 Color _severityColor(AlertSeverity s, {bool dark = false}) {
   switch (s) {
     case AlertSeverity.emergency: return dark ? const Color(0xFF8B0000) : const Color(0xFFB71C1C);
@@ -65,6 +73,17 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
     _badgePulse = Tween<double>(begin: 1.0, end: 1.3).animate(
       CurvedAnimation(parent: _badgeCtrl, curve: Curves.elasticOut),
     );
+
+    // FIX v4.6: Force fresh data every time the Alerts tab opens.
+    // Without this the screen would show whichever station levels happened
+    // to be in the cache from the last background poll cycle, making alerts
+    // appear stale when the user hasn’t opened the tab in a while.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 1. Kick DataFetchEngine (CWC + backend tier)
+      DataFetchEngine.instance.forceRefresh();
+      // 2. Kick WRD notifier so mergedStationsProvider also sees fresh WRD data
+      ref.read(wrdStationsProvider.notifier).forceRefresh();
+    });
   }
 
   @override
@@ -102,7 +121,13 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen>
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: _buildAppBar(allAlerts.length, isLoading),
       body: RefreshIndicator(
-        onRefresh: () => DataFetchEngine.instance.forceRefresh(),
+        onRefresh: () async {
+          // Pull-to-refresh: kick both tiers simultaneously
+          await Future.wait([
+            DataFetchEngine.instance.forceRefresh(),
+            ref.read(wrdStationsProvider.notifier).forceRefresh(),
+          ]);
+        },
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -607,9 +632,6 @@ class _AlertDetail extends StatelessWidget {
           _row(Icons.thermostat_rounded,
               'Current Level',
               '${a.currentLevel.toStringAsFixed(2)} m', fg),
-          // FIX (M2): FloodAlert has no dangerLevel field.
-          // thresholdLevel is the correct field — it holds the danger/warning
-          // threshold that was breached to generate this alert.
           _row(Icons.warning_amber_rounded,
               'Threshold Level',
               '${a.thresholdLevel.toStringAsFixed(2)} m', fg),
