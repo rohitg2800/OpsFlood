@@ -1,6 +1,7 @@
 // lib/providers/flood_providers.dart
-// v10.2 — _normCityKey() collapses qualifier variants so Birpur x3 → Birpur x1
+// v10.3 — pre-warm LiveFetchEngine on first realTimeProvider access
 //
+// v10.2 history: _normCityKey() collapses qualifier variants so Birpur x3 → Birpur x1
 // v10.1 history: deduplicate liveLevelsProvider by city key.
 library;
 
@@ -27,12 +28,25 @@ final selectedCityProvider =
     NotifierProvider<SelectedCityNotifier, String?>(SelectedCityNotifier.new);
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// realTimeProvider
+// realTimeProvider  (v10.3)
+//
+// CHANGE: call svc.startPolling() on first access so LiveFetchEngine
+// pre-warms its 56-station GloFAS+WRD+rainfall cache at app start,
+// not lazily when the user first opens a city card.
+//
+// startPolling() is guarded inside LiveFetchEngine with:
+//   if (_pollTimer != null) return;
+// so repeated calls (hot-restart, provider rebuild) are safe no-ops.
 // ─────────────────────────────────────────────────────────────────────────────────
 
-final realTimeProvider = Provider<RealTimeService>(
-  (_) => RealTimeService(),
-);
+final realTimeProvider = Provider<RealTimeService>((ref) {
+  final svc = RealTimeService();
+  // Fire-and-forget: pre-warm the engine so data is ready before any
+  // city card opens.  No await — the UI will rebuild via notifyListeners()
+  // once the first fetch cycle completes.
+  svc.startPolling();
+  return svc;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────────
 // criticalCountProvider / isWakingUpProvider
