@@ -1,38 +1,21 @@
-// lib/services/rtdas_threshold_sync_service.dart
+// lib/services/rtdas_threshold_sync_service.dart  v2.0
 //
-// Periodic background sync: RTDAS → ThresholdOverrideStore.
-//
-// Schedule:
-//   - On app start: sync immediately if data is stale (>18 h) or missing.
-//   - Thereafter:  Timer.periodic(6 h) for the lifetime of the app.
-//
-// Failure model:
-//   - All failures are caught and logged; the app NEVER crashes.
-//   - On failure the existing store values are left intact (hardcoded v4
-//     bihar_rivers.dart values remain the fallback).
-//
-// Thread safety:
-//   - _doSync() is guarded by _syncing flag so concurrent timer fires
-//     (e.g. if forceSync() is called while a background sync is running)
-//     produce only one HTTP request.
+// v2.0: after every successful sync, push thresholds to the Railway backend
+// via BackendSyncService.pushRtdasThresholds().
+// All other logic unchanged from v1.0.
 library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'backend_sync_service.dart';        // ← NEW v2.0
 import 'rtdas_threshold_scraper.dart';
 import 'threshold_override_store.dart';
 
 class RtdasThresholdSyncService {
-  // How often to re-check RTDAS for threshold changes.
-  static const _syncInterval = Duration(hours: 6);
+  static const _syncInterval      = Duration(hours: 6);
+  static const _staleHoursGuard   = 18.0;
+  static const _syncSentinelKey   = '__last_full_sync__';
 
-  // Consider data stale and force a re-fetch after this many hours.
-  static const _staleHoursGuard = 18.0;
-
-  // SharedPrefs sentinel key that tracks last full-table sync timestamp.
-  static const _syncSentinelKey = '__last_full_sync__';
-
-  // Singleton
   static RtdasThresholdSyncService? _instance;
   static RtdasThresholdSyncService get instance =>
       _instance ??= RtdasThresholdSyncService._();
@@ -45,21 +28,13 @@ class RtdasThresholdSyncService {
   bool    _syncing = false;
   bool    _started = false;
 
-  /// Notifier: incremented each time at least one station threshold changes.
-  /// Riverpod providers or ValueListenableBuilders can watch this.
   final updatedCount = ValueNotifier<int>(0);
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
-  /// Call once from main.dart (and once from BiharLiveEngine.start).
-  /// Idempotent — safe to call multiple times.
   Future<void> start() async {
     if (_started) return;
     _started = true;
-
     await _store.load();
     await _syncIfNeeded();
-
     _timer?.cancel();
     _timer = Timer.periodic(_syncInterval, (_) => _syncIfNeeded());
     debugPrint('[RtdasSync] started — interval=${_syncInterval.inHours}h');
@@ -71,15 +46,10 @@ class RtdasThresholdSyncService {
     debugPrint('[RtdasSync] stopped.');
   }
 
-  /// Trigger an immediate sync regardless of staleness.
-  /// E.g. called from a "Refresh" button in Settings.
   Future<void> forceSync() => _doSync();
 
-  // ── Internal ───────────────────────────────────────────────────────────────
-
   Future<void> _syncIfNeeded() async {
-    final stale = _store.isStale(_syncSentinelKey,
-        maxHours: _staleHoursGuard);
+    final stale = _store.isStale(_syncSentinelKey, maxHours: _staleHoursGuard);
     if (!stale) {
       debugPrint('[RtdasSync] data is fresh — skipping sync');
       return;
@@ -97,8 +67,8 @@ class RtdasThresholdSyncService {
 
     try {
       final rows = await _scraper.fetch();
-      int changed  = 0;
-      int skipped  = 0;
+      int changed = 0;
+      int skipped = 0;
 
       for (final row in rows) {
         final key      = _norm(row.station);
@@ -108,10 +78,7 @@ class RtdasThresholdSyncService {
         final wlSame  = existing?.wl  == row.warningLevel;
         final hflSame = existing?.hfl == row.hfl;
 
-        if (dlSame && wlSame && hflSame) {
-          skipped++;
-          continue;
-        }
+        if (dlSame && wlSame && hflSame) { skipped++; continue; }
 
         _store.put(key, ThresholdEntry(
           wl:        row.warningLevel,
@@ -123,26 +90,25 @@ class RtdasThresholdSyncService {
         changed++;
 
         if (kDebugMode) {
-          debugPrint('[RtdasSync]  ↳ UPDATED $key  '
-              'WL=${row.warningLevel}  DL=${row.dangerLevel}  HFL=${row.hfl}  '
-              '(was WL=${existing?.wl}  DL=${existing?.dl}  HFL=${existing?.hfl})');
+          debugPrint('[RtdasSync]  ↳ UPDATED ${_norm(row.station)}  '
+              'WL=${row.warningLevel}  DL=${row.dangerLevel}  HFL=${row.hfl}');
         }
       }
 
-      // Stamp the sentinel with NOW so _syncIfNeeded() backs off for _staleHoursGuard h.
       _store.put(_syncSentinelKey, ThresholdEntry(
-        source:    'sentinel',
-        fetchedAt: DateTime.now(),
-      ));
-
+        source: 'sentinel', fetchedAt: DateTime.now()));
       await _store.save();
       updatedCount.value += changed;
 
       debugPrint('[RtdasSync] DONE — $changed updated / $skipped unchanged '
           '/ ${rows.length} total rows');
+
+      // ── v2.0: push to backend ────────────────────────────────────────────────
+      // Fire-and-forget — non-blocking, non-crashing.
+      unawaited(BackendSyncService.instance.pushRtdasThresholds(rows));
+
     } catch (e, st) {
       debugPrint('[RtdasSync] ERROR during sync: $e\n$st');
-      // Do NOT update the sentinel — the next _syncIfNeeded() call will retry.
     } finally {
       _syncing = false;
     }

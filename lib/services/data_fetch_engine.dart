@@ -1,16 +1,11 @@
-// lib/services/data_fetch_engine.dart  v3.0 — backend-only
+// lib/services/data_fetch_engine.dart  v4.0 — backend-bidirectional
 //
-// v2.2 → v3.0 changes:
-//   ALL direct external HTTP calls (GloFAS flood-api, Open-Meteo rainfall,
-//   CWC FFS multi-URL race) are now routed through BackendApiService.
-//   The Flutter app makes ZERO direct calls to any third-party API.
+// v4.0 changes (vs v3.0):
+//   After every completed _fetchCycle() the full DataFetchSnapshot is pushed
+//   to the Railway backend via BackendSyncService.pushGaugeTelemetry().
+//   Critical/danger events are extracted and pushed separately.
 //
-//   Endpoint mapping:
-//     Old: https://flood-api.open-meteo.com/v1/flood   → /api/glofas
-//     Old: https://api.open-meteo.com/v1/forecast      → /api/rainfall
-//     Old: CWC FFS multi-URL race                      → /api/cwc-stations
-//
-//   Forecast Step 6 (WRD bulletin forecast24h) is unchanged from v2.2.
+//   All other logic is identical to v3.0.
 library;
 
 import 'dart:async';
@@ -22,10 +17,11 @@ import 'package:flutter/foundation.dart';
 import '../data/bihar_rivers.dart';
 import '../models/river_station.dart';
 import 'backend_api_service.dart';
+import 'backend_sync_service.dart';   // ← NEW v4.0
 import 'wrd_bihar_service.dart';
 import 'fcm_broadcast_service.dart';
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 class StationReading {
   final String  stationName;
   final String  river;
@@ -259,7 +255,7 @@ class DataFetchSnapshot {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 class DataFetchEngine {
   DataFetchEngine._() {
     _last = _buildSeedSnapshot();
@@ -290,10 +286,7 @@ class DataFetchEngine {
 
   final _ctrl = StreamController<DataFetchSnapshot>.broadcast();
 
-  /// Primary stream — subscribe to receive every new snapshot.
-  Stream<DataFetchSnapshot> get stream => _ctrl.stream;
-
-  /// Alias so call-sites using .alertStream keep compiling.
+  Stream<DataFetchSnapshot> get stream     => _ctrl.stream;
   Stream<DataFetchSnapshot> get alertStream => _ctrl.stream;
 
   DataFetchSnapshot? _last;
@@ -431,14 +424,14 @@ class DataFetchEngine {
     try {
       final cwcRows = await api.fetchCwcStations(codes: _cwcCodes);
       for (final r in cwcRows) {
-        final code    = r['code'] as String? ?? '';
-        final lvl     = (r['level'] as num?)?.toDouble();
+        final code  = r['code'] as String? ?? '';
+        final lvl   = (r['level'] as num?)?.toDouble();
         if (lvl == null) continue;
-        final sName   = _cwcCodeToStation[code];
+        final sName = _cwcCodeToStation[code];
         if (sName == null) continue;
-        final base    = _findBase(stations, sName, '');
+        final base  = _findBase(stations, sName, '');
         if (base == null) continue;
-        final key     = _normaliseKey(sName);
+        final key   = _normaliseKey(sName);
         stations[key] = base.copyWith(
           currentLevel: lvl,
           riskLabel: StationReading._deriveRisk(lvl, base.warningLevel, base.dangerLevel),
@@ -484,10 +477,10 @@ class DataFetchEngine {
         if (mean != null) meanByIdx[i]      = mean;
       }
       sources.add(SourceStatus(
-        name:         'GLOFAS',
-        healthy:      dischargeByIdx.isNotEmpty,
-        latencyMs:    DateTime.now().difference(glofasStart).inMilliseconds,
-        stationCount: dischargeByIdx.length,
+        name:          'GLOFAS',
+        healthy:       dischargeByIdx.isNotEmpty,
+        latencyMs:     DateTime.now().difference(glofasStart).inMilliseconds,
+        stationCount:  dischargeByIdx.length,
         lastSuccessAt: now,
       ));
     } catch (e) {
@@ -529,8 +522,7 @@ class DataFetchEngine {
           isLive:   true,
         );
       } else {
-        stations[key] = s.copyWith(
-            flowRateCumecs: dis, rainfall24hMm: rain);
+        stations[key] = s.copyWith(flowRateCumecs: dis, rainfall24hMm: rain);
       }
     }
 
@@ -586,6 +578,11 @@ class DataFetchEngine {
     _last        = snap;
     _errorStreak = 0;
     if (!_ctrl.isClosed) _ctrl.add(snap);
+
+    // ── v4.0: push to backend ──────────────────────────────────────────────────────
+    // Fire-and-forget: does NOT block the UI stream or the next cycle.
+    unawaited(BackendSyncService.instance.pushGaugeTelemetry(snap));
+
     _log('cycle done: ${finalList.length} stations, '
         '${finalList.where((s) => s.isLive).length} live, '
         '${_wrdForecast24h.length} bulletin-24h forecasts');
