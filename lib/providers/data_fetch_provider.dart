@@ -1,10 +1,21 @@
-// lib/providers/data_fetch_provider.dart  v1.0
+// lib/providers/data_fetch_provider.dart  v1.1
 //
-// Riverpod providers that wrap DataFetchEngine + AlertEngine.
+// v1.1 (dedup fix):
+//   alertsProvider now watches mergedStationsProvider (the already-deduped
+//   single-source-of-truth list) and calls AlertEngine.evaluateMerged().
 //
-// Usage in any Widget:
-//   final snap = ref.watch(dataFetchProvider);
-//   final alerts = ref.watch(alertsProvider);
+//   BEFORE: watched dataFetchProvider (raw DataFetchSnapshot) and called
+//           AlertEngine.evaluate(snap) — ran on every raw station from every
+//           source tier BEFORE dedup, producing duplicate FloodAlert cards
+//           for Taibpur, Sonbarsa, and any other station that appeared in
+//           both WRD and DataFetch tiers.
+//
+//   AFTER:  mergedStationsProvider is always length-N where N = unique stations.
+//           One station → one StationReading → at most one level alert card.
+//
+//   All other providers (sourceStatusProvider, dataFetchStationsProvider,
+//   fetchSnapshotKpiProvider, etc.) are unchanged — they still watch
+//   dataFetchProvider directly for snapshot-level KPIs.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,11 +23,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/data_fetch_engine.dart';
 import '../services/alert_engine.dart';
 import '../models/river_station.dart';
+import 'real_time_river_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // dataFetchProvider — StreamProvider<DataFetchSnapshot>
-//
-// Automatically starts the engine on first listen and cancels on dispose.
 // ─────────────────────────────────────────────────────────────────────────────
 final dataFetchProvider = StreamProvider<DataFetchSnapshot>((ref) {
   final engine = DataFetchEngine.instance;
@@ -39,14 +49,13 @@ final dataFetchStationsProvider = Provider<List<RiverStation>>((ref) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // alertsProvider — all active, sorted alerts
+//
+// v1.1: watches mergedStationsProvider (deduped) instead of the raw snapshot.
+//       One station in → one alert card out.  No more duplicate cards.
 // ─────────────────────────────────────────────────────────────────────────────
 final alertsProvider = Provider<List<FloodAlert>>((ref) {
-  final snap = ref.watch(dataFetchProvider);
-  return snap.when(
-    data:    (s) => AlertEngine.instance.evaluate(s),
-    loading: ()  => const [],
-    error:   (_, __) => const [],
-  );
+  final merged = ref.watch(mergedStationsProvider);
+  return AlertEngine.instance.evaluateMerged(merged);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,12 +117,12 @@ final fetchSnapshotKpiProvider = Provider<_SnapshotKpi>((ref) {
   final snap = ref.watch(dataFetchProvider);
   return snap.when(
     data: (s) => _SnapshotKpi(
-      total:    s.totalStations,
-      live:     s.liveStations,
-      critical: s.criticalCount,
-      danger:   s.dangerCount,
-      warning:  s.warningCount,
-      maxLevel: s.maxLevel,
+      total:      s.totalStations,
+      live:       s.liveStations,
+      critical:   s.criticalCount,
+      danger:     s.dangerCount,
+      warning:    s.warningCount,
+      maxLevel:   s.maxLevel,
       maxStation: s.maxLevelStation,
     ),
     loading: () => _SnapshotKpi.empty(),

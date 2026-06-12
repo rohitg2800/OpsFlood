@@ -1,9 +1,17 @@
-// lib/services/alert_engine.dart  v1.1  (alias-getters added)
+// lib/services/alert_engine.dart  v1.2
+//
+// v1.2: added evaluateMerged(List<RiverStation>) — converts the already-deduped
+//       mergedStationsProvider list into StationReadings and runs the same
+//       evaluation pipeline.  alertsProvider now calls this instead of
+//       evaluate(DataFetchSnapshot) so duplicate alert cards are impossible.
+//
+// v1.1: alias-getters added (station, rateOfRise, rainfall24h, isOffline).
 //
 // Rule-based alert engine for OpsFlood.
 
 library;
 
+import '../models/river_station.dart';
 import 'data_fetch_engine.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,14 +129,10 @@ class FloodAlert {
     this.expiresAt,
   });
 
-  // ── Alias getters (consumed by bridge / share / notification screens) ──
-  /// Short alias for [stationName].
+  // ── Alias getters ──
   String get station      => stationName;
-  /// Short alias for [rateOfRiseMph].
   double? get rateOfRise  => rateOfRiseMph;
-  /// Short alias for [rainfall24hMm].
   double? get rainfall24h => rainfall24hMm;
-  /// Always false — offline evaluation flag (reserved for future use).
   bool   get isOffline    => false;
 
   bool get isExpired {
@@ -149,15 +153,37 @@ class AlertEngine {
   AlertEngine._();
   static final instance = AlertEngine._();
 
+  // ── Primary entry-point: evaluate the already-deduped merged list ─────────
+  //
+  // alertsProvider calls this with mergedStationsProvider so that one
+  // station = one card, guaranteed.  RiverStation carries no forecast /
+  // rainfall / RoR fields today, so those alert types are simply skipped
+  // (they require a DataFetchSnapshot with GloFAS data).  Level and
+  // basin alerts are fully functional.
+  List<FloodAlert> evaluateMerged(List<RiverStation> stations) {
+    final now     = DateTime.now();
+    final readings = stations.map(_riverStationToReading).toList();
+    return _runPipeline(readings, now);
+  }
+
+  // ── Legacy entry-point: evaluate a raw DataFetchSnapshot ─────────────────
+  //
+  // Kept for any admin/debug callers that still pass a snapshot directly.
+  // NOT used by alertsProvider any more.
   List<FloodAlert> evaluate(DataFetchSnapshot snapshot) {
     if (snapshot.isLoading) return const [];
-    final alerts = <FloodAlert>[];
-    final now    = snapshot.fetchedAt;
+    return _runPipeline(snapshot.stations, snapshot.fetchedAt);
+  }
 
-    for (final s in snapshot.stations) {
+  // ── Shared pipeline ───────────────────────────────────────────────────────
+  List<FloodAlert> _runPipeline(
+      List<StationReading> readings, DateTime now) {
+    final alerts = <FloodAlert>[];
+
+    for (final s in readings) {
       alerts.addAll(_evaluateStation(s, now));
     }
-    alerts.addAll(_evaluateBasin(snapshot.stations, now));
+    alerts.addAll(_evaluateBasin(readings, now));
 
     final Map<String, FloodAlert> deduped = {};
     for (final a in alerts) {
@@ -176,6 +202,41 @@ class AlertEngine {
         if (sc != 0) return sc;
         return b.issuedAt.compareTo(a.issuedAt);
       });
+  }
+
+  // ── RiverStation → StationReading shim ───────────────────────────────────
+  //
+  // RiverStation has no forecast / rainfall / RoR fields today.
+  // Those alert types (rapidRise, forecast*, rainfall*) require GloFAS /
+  // Open-Meteo data that only DataFetchEngine carries — they are simply
+  // null here and the guards in _evaluateStation skip them cleanly.
+  //
+  // district: RiverStation.city holds the city/district name in most rows;
+  // for WRD rows where city == station we fall back to river name so the
+  // alert body is still readable.
+  static StationReading _riverStationToReading(RiverStation s) {
+    final district = (s.city.isNotEmpty && s.city != s.station)
+        ? s.city
+        : s.river;
+    return StationReading(
+      stationName:  s.station,
+      river:        s.river,
+      district:     district,
+      state:        s.state,
+      lat:          s.lat  ?? 0.0,
+      lon:          s.lon  ?? 0.0,
+      currentLevel: s.current,
+      warningLevel: s.warning,
+      dangerLevel:  s.danger,
+      hfl:          s.hfl,
+      progressPct:  s.progressPct * 100,
+      riskLabel:    s.riskLabel,
+      source:       s.dataSource ?? 'MERGED',
+      isLive:       s.isLive,
+      fetchedAt:    DateTime.now(),
+      // forecast / rainfall / RoR: not available on RiverStation
+      // → null → _evaluateStation skips those alert branches cleanly
+    );
   }
 
   List<FloodAlert> _evaluateStation(StationReading s, DateTime now) {
@@ -267,7 +328,8 @@ class AlertEngine {
     }
 
     final f48 = s.forecastLevel48h;
-    if (f48 != null && f48 >= s.dangerLevel && (f24 == null || f24 < s.dangerLevel)) {
+    if (f48 != null && f48 >= s.dangerLevel &&
+        (f24 == null || f24 < s.dangerLevel)) {
       alerts.add(FloodAlert(
         id: '$id.forecast48', type: AlertType.forecastDanger48h,
         severity: AlertSeverity.warning,
@@ -318,7 +380,8 @@ class AlertEngine {
     return alerts;
   }
 
-  List<FloodAlert> _evaluateBasin(List<StationReading> stations, DateTime now) {
+  List<FloodAlert> _evaluateBasin(
+      List<StationReading> stations, DateTime now) {
     final alerts = <FloodAlert>[];
 
     final riverGroups = <String, List<StationReading>>{};
@@ -337,11 +400,16 @@ class AlertEngine {
                 '${dangerStns.map((s) => s.stationName).join(", ")}. '
                 'Downstream breach risk is HIGH.',
           stationName: dangerStns.first.stationName, river: river,
-          district: dangerStns.first.district, state: dangerStns.first.state,
-          currentLevel: dangerStns.map((s) => s.currentLevel).reduce((a, b) => a > b ? a : b),
+          district: dangerStns.first.district,
+          state: dangerStns.first.state,
+          currentLevel: dangerStns
+              .map((s) => s.currentLevel)
+              .reduce((a, b) => a > b ? a : b),
           thresholdLevel: dangerStns.first.dangerLevel,
-          action: 'Breach likely. Mobilise NDRF. Evacuate all riverside settlements.',
-          issuedAt: now, expiresAt: now.add(const Duration(hours: 8)),
+          action:
+              'Breach likely. Mobilise NDRF. Evacuate all riverside settlements.',
+          issuedAt: now,
+          expiresAt: now.add(const Duration(hours: 8)),
         ));
       }
     });
@@ -360,8 +428,10 @@ class AlertEngine {
         stationName: 'State-Wide', river: warnRivers.join(" / "),
         district: 'Multiple Districts', state: 'Bihar',
         currentLevel: 0, thresholdLevel: 0,
-        action: 'Activate State Emergency Operations Centre. Issue state-wide flood alert.',
-        issuedAt: now, expiresAt: now.add(const Duration(hours: 12)),
+        action:
+            'Activate State Emergency Operations Centre. Issue state-wide flood alert.',
+        issuedAt: now,
+        expiresAt: now.add(const Duration(hours: 12)),
       ));
     }
 
