@@ -1,20 +1,24 @@
-// lib/widgets/danger_proximity_banner.dart  v2.0
+// lib/widgets/danger_proximity_banner.dart  v2.1
+//
+// v2.1 fix:
+//   - Use userLocationProvider (FutureProvider<Position?>) from
+//     location_provider.dart instead of the non-existent locationProvider.
+//   - Access Position.latitude / Position.longitude directly.
 //
 // v2.0 changes:
 //   - Reads from ActiveAlertController.alerts (not raw liveLevelsProvider)
-//     → SEED-source stations can no longer trigger false proximity alerts
 //   - Shows rate-of-rise in banner text when >= 0.5 m/h
-//   - Distance threshold now varies by severity:
+//   - Distance threshold varies by severity:
 //       EXTREME / CRITICAL → 120 km
-//       DANGER             → 80 km  (unchanged)
+//       DANGER             → 80 km
 //       RISING             → 60 km
-//   - Haversine uses AlertItem lat/lon from BiharGauge lookup (unchanged)
 //   - Added RISING tier to banner colour (sky blue)
 library;
 
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../data/bihar_rivers.dart';
 import '../providers/location_provider.dart';
@@ -35,10 +39,12 @@ class DangerProximityBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final locState = ref.watch(locationProvider);
-    if (locState.isLoading || locState.lat == null) {
-      return const SizedBox.shrink();
-    }
+    // userLocationProvider is FutureProvider<Position?>
+    final locAsync = ref.watch(userLocationProvider);
+
+    // Still loading or errored → hide
+    final Position? position = locAsync.valueOrNull;
+    if (position == null) return const SizedBox.shrink();
 
     final activeAlerts = ActiveAlertController.instance.alerts;
     if (activeAlerts.isEmpty) return const SizedBox.shrink();
@@ -58,7 +64,7 @@ class DangerProximityBanner extends ConsumerWidget {
       if (gauge == null) continue;
 
       final d = _haversine(
-        locState.lat!, locState.lon!,
+        position.latitude, position.longitude,
         gauge.lat, gauge.lon,
       );
       if (d > threshold) continue;
@@ -126,11 +132,11 @@ class _BannerWidgetState extends State<_BannerWidget>
       AlertSeverity.normal   => AppPalette.textGrey,
     };
 
-    final ror        = widget.alert.rateOfRiseMph ?? 0.0;
-    final rorText    = ror >= 0.5
+    final ror      = widget.alert.rateOfRiseMph ?? 0.0;
+    final rorText  = ror >= 0.5
         ? ' · rising +${ror.toStringAsFixed(2)} m/h'
         : '';
-    final sevLabel   = switch (sev) {
+    final sevLabel = switch (sev) {
       AlertSeverity.extreme  => 'EXTREME FLOOD',
       AlertSeverity.critical => 'CRITICAL',
       AlertSeverity.danger   => 'DANGER',
