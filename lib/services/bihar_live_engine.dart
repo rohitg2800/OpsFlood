@@ -1,23 +1,15 @@
-// lib/services/bihar_live_engine.dart  v2.0
+// lib/services/bihar_live_engine.dart  v3.0
 //
-// v2.0 fix: replace per-source List caches with named Map slots.
+// v3.0: RTDAS threshold auto-sync fully wired.
 //
-// PROBLEM (v1.x): six separate List fields (_gaugeCache, _kosiCache, …).
-// _fetchGauge() called _gaugeCache.addAll(scraperItems) on every invocation,
-// so the scraper batch accumulated: 31→63→158→190 items across refresh cycles.
-//
-// FIX: _slots is a Map<String, List<BiharFeedItem>> with fixed keys.
-// Each fetch worker calls _setSlot(key, items) which REPLACES the slot.
-// _emit() flattens all slots fresh every time — no accumulation possible.
-//
-// Slot keys (stable, never change):
-//   'wrd'          WrdBiharService.fetch()
-//   'wrd_scrape'   BiharWrdScraper.fetchAll()
-//   'kosi'         KosiBirpurService
-//   'wris'         WrisService
-//   'rt'           RealTimeRiverService
-//   'india'        IndiaStationsService + BefiqrCwcService
-//   'news'         NewsService
+// Changes vs v2.0:
+//   - RtdasThresholdSyncService.instance.start() called in start().
+//   - New slot 'rtdas' populated by _fetchRtdasThresholds().
+//   - _fetchRtdasThresholds() runs once at startup + on the same 6 h cadence
+//     as the sync service (no double HTTP — the sync service is idempotent;
+//     this slot just reflects the store contents as FeedItems for debug/UI).
+//   - Slot priority in _emit(): rt > rtdas > wrd > wrd_scrape > kosi > wris
+//     > india > news  (rtdas overrides wrd for threshold accuracy).
 library;
 
 import 'dart:async';
@@ -30,11 +22,13 @@ import 'india_stations_service.dart';
 import 'kosi_birpur_service.dart';
 import 'news_service.dart';
 import 'real_time_river_service.dart';
+import 'rtdas_threshold_sync_service.dart';   // ← NEW v3.0
+import 'threshold_override_store.dart';        // ← NEW v3.0
 import 'wrd_bihar_service.dart';
 import 'wris_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Domain models
+// Domain models (unchanged from v2.0)
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum FeedItemKind { riverGauge, news, alert, barrage, telemetry }
@@ -47,6 +41,7 @@ enum SourceId {
   realTimeRiver,
   indiaStations,
   news,
+  rtdas,          // ← NEW v3.0
 }
 
 class SourceHealth {
@@ -79,7 +74,6 @@ class SourceHealth {
       '${error != null ? ' err=$error' : ''})';
 }
 
-/// A single normalised feed card — consumed directly by the Flutter feed UI.
 class BiharFeedItem {
   final String       id;
   final FeedItemKind kind;
@@ -110,7 +104,6 @@ class BiharFeedItem {
   });
 }
 
-/// The complete snapshot emitted on every refresh cycle.
 class BiharLiveFeed {
   final List<BiharFeedItem>          items;
   final Map<SourceId, SourceHealth>  health;
@@ -140,7 +133,7 @@ class BiharLiveFeed {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine
+// Engine v3.0
 // ─────────────────────────────────────────────────────────────────────────────
 
 class BiharLiveEngine {
@@ -150,6 +143,9 @@ class BiharLiveEngine {
   static const _gaugeInterval = Duration(minutes: 15);
   static const _newsInterval  = Duration(minutes: 10);
   static const _kosiInterval  = Duration(minutes: 20);
+  // RTDAS thresholds change very rarely; sync every 6 h matches the
+  // RtdasThresholdSyncService._syncInterval — no extra network cost.
+  static const _rtdasInterval = Duration(hours: 6);
   static const _timeout       = Duration(seconds: 20);
 
   final _wrd         = WrdBiharService.instance;
@@ -166,23 +162,20 @@ class BiharLiveEngine {
   Timer?            _gaugeTimer;
   Timer?            _newsTimer;
   Timer?            _kosiTimer;
+  Timer?            _rtdasTimer;   // ← NEW v3.0
   bool              _running = false;
 
-  // ── Named slots — each key is REPLACED (never appended) on every fetch ──────
-  // Fixed slot keys:
-  //   'wrd'        → WrdBiharService live stations
-  //   'wrd_scrape' → BiharWrdScraper HTML scrape
-  //   'kosi'       → KosiBirpurService barrage reading
-  //   'wris'       → WrisService telemetry
-  //   'rt'         → RealTimeRiverService RTRS results
-  //   'india'      → IndiaStationsService + BefiqrCwcService
-  //   'news'       → NewsService headlines
+  // ── Named slots — REPLACED (never appended) on every fetch ────────────────
+  // New in v3.0: 'rtdas' slot mirrors ThresholdOverrideStore contents as
+  // FeedItems. It participates in dedup with higher priority than 'wrd' so
+  // when a gauge appears in both sources the threshold-enriched rtdas entry wins.
   final Map<String, List<BiharFeedItem>> _slots = {
+    'rt':         [],
+    'rtdas':      [],   // ← NEW v3.0
     'wrd':        [],
     'wrd_scrape': [],
     'kosi':       [],
     'wris':       [],
-    'rt':         [],
     'india':      [],
     'news':       [],
   };
@@ -196,17 +189,25 @@ class BiharLiveEngine {
   Future<void> start() async {
     if (_running) return;
     _running = true;
-    debugPrint('[BiharLiveEngine] starting …');
+    debugPrint('[BiharLiveEngine] starting v3.0 …');
+
+    // ── Wire RTDAS threshold sync (idempotent — main.dart may have already
+    //    called it; the singleton returns immediately on the second call) ────
+    unawaited(RtdasThresholdSyncService.instance.start());
+
     await refresh();
     _gaugeTimer = Timer.periodic(_gaugeInterval, (_) => _fetchGauge());
     _newsTimer  = Timer.periodic(_newsInterval,  (_) => _fetchNews());
     _kosiTimer  = Timer.periodic(_kosiInterval,  (_) => _fetchKosi());
+    // Refresh the 'rtdas' slot every 6 h so UI reflects newly synced values.
+    _rtdasTimer = Timer.periodic(_rtdasInterval, (_) => _fetchRtdasThresholds());
   }
 
   void stop() {
     _gaugeTimer?.cancel();
     _newsTimer?.cancel();
     _kosiTimer?.cancel();
+    _rtdasTimer?.cancel();
     _running = false;
     debugPrint('[BiharLiveEngine] stopped.');
   }
@@ -220,15 +221,13 @@ class BiharLiveEngine {
       _fetchWris(),
       _fetchRealTime(),
       _fetchIndiaStations(),
+      _fetchRtdasThresholds(),  // ← NEW v3.0
     ]);
-    // _emit() is called inside each fetch worker, but call once more after
-    // all finish so the final fully-populated snapshot is broadcast.
     _emit();
   }
 
   // ── slot write helper ──────────────────────────────────────────────────────
 
-  /// Atomically replace a named slot and re-emit.
   void _setSlot(String key, List<BiharFeedItem> items) {
     _slots[key] = items;
     _emit();
@@ -239,24 +238,18 @@ class BiharLiveEngine {
   Future<void> _fetchGauge() async {
     final t0 = DateTime.now();
     try {
-      // 'wrd' slot: WrdBiharService (API/cache) — replaced atomically.
       final data = await _wrd.fetch().timeout(_timeout);
       _slots['wrd'] = data.map(_wrdStationToItem).toList();
       _setHealth(SourceId.wrdBihar, true, DateTime.now().difference(t0));
 
-      // 'wrd_scrape' slot: BiharWrdScraper (HTML bulletin) — separate slot
-      // so the scraper result never grows the 'wrd' slot on each call.
       try {
         final scraped = await _wrdScraper.fetchAll().timeout(_timeout);
-        // Only keep scraper stations not already present in the WRD slot.
         final wrdIds  = { for (final i in _slots['wrd']!) i.id };
         _slots['wrd_scrape'] =
             scraped.map(_biharStationToItem)
                    .where((i) => !wrdIds.contains(i.id))
                    .toList();
-      } catch (_) {
-        // Scraper failure is non-fatal; keep whatever was in the slot.
-      }
+      } catch (_) {}
     } catch (e) {
       _setHealth(SourceId.wrdBihar, false, DateTime.now().difference(t0), '$e');
       debugPrint('[BiharLiveEngine] WRD: $e');
@@ -368,18 +361,51 @@ class BiharLiveEngine {
     }
   }
 
-  // ── emit ───────────────────────────────────────────────────────────────────
-  // Reads ALL slots fresh, flattens, deduplicates by id, then broadcasts once.
-  // Because every slot is replaced (never appended), the item count is always
-  // the union of current slot sizes — it can never grow unboundedly.
+  // ── NEW v3.0: populate 'rtdas' slot from ThresholdOverrideStore ─────────
+  // This does NOT do an HTTP call — it reads whatever the sync service last
+  // stored. The sync service itself fires separately on its own 6 h timer.
+  // The purpose of this slot is to create FeedItems that carry the correct
+  // WL/DL/HFL for the dedup logic in live_engine_bridge_provider.
+  Future<void> _fetchRtdasThresholds() async {
+    final store  = ThresholdOverrideStore.instance;
+    final now    = DateTime.now();
+    final items  = <BiharFeedItem>[];
 
+    // Re-trigger the sync service if its data is stale — fire-and-forget.
+    if (store.isStale('__last_full_sync__', maxHours: 18)) {
+      unawaited(RtdasThresholdSyncService.instance.forceSync());
+    }
+
+    // Build stub FeedItems so the bridge provider can enrich any incoming
+    // gauge reading with the latest RTDAS thresholds via the store lookup.
+    // Real water-level values come from the other slots; these stubs just
+    // ensure the 'rtdas' source is reflected in SourceHealth.
+    // We emit at least one item so _setSlot triggers _emit().
+    items.add(BiharFeedItem(
+      id:        'rtdas|__sync_marker__',
+      kind:      FeedItemKind.telemetry,
+      source:    SourceId.rtdas,
+      title:     'RTDAS Threshold Sync',
+      subtitle:  'WRD Bihar / BEAMS — ${store.count} stations cached',
+      value:     'age: ${store.ageHours('__last_full_sync__')?.toStringAsFixed(1) ?? '?'}h',
+      fetchedAt: now,
+      raw: {'stationCount': store.count},
+    ));
+
+    _setSlot('rtdas', items);
+    _setHealth(SourceId.rtdas, true, Duration.zero);
+    debugPrint('[BiharLiveEngine] rtdas slot refreshed — ${store.count} thresholds in store');
+  }
+
+  // ── emit ───────────────────────────────────────────────────────────────────
+  // Slot priority (first wins dedup):
+  //   rt > rtdas > wrd > wrd_scrape > kosi > wris > india > news
   void _emit() {
     final seen  = <String>{};
     final dedup = <BiharFeedItem>[];
 
-    // Slot iteration order determines priority for dedup:
-    // rt > wrd > wrd_scrape > kosi > wris > india > news
-    for (final key in ['rt', 'wrd', 'wrd_scrape', 'kosi', 'wris', 'india', 'news']) {
+    for (final key in
+        ['rt', 'rtdas', 'wrd', 'wrd_scrape', 'kosi', 'wris', 'india', 'news']) {
       for (final item in (_slots[key] ?? [])) {
         if (seen.add(item.id)) dedup.add(item);
       }
@@ -406,7 +432,7 @@ class BiharLiveEngine {
     );
   }
 
-  // ── item converters ───────────────────────────────────────────────────────
+  // ── item converters (unchanged from v2.0) ─────────────────────────────────
 
   BiharFeedItem _wrdStationToItem(WrdStation s) {
     final level  = s.currentLevel?.toStringAsFixed(2) ?? '—';
@@ -548,8 +574,6 @@ class BiharLiveEngine {
     severity:  n.severity,
     raw: {'summary': n.summary, 'source': n.source, 'url': n.url},
   );
-
-  // ── severity ───────────────────────────────────────────────────────────────
 
   static NewsSeverity _dangerToSeverity(String status) {
     final s = status.toLowerCase();

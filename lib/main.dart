@@ -44,6 +44,7 @@ import 'services/notification_channel_service.dart';
 import 'services/fcm_topic_manager.dart';
 import 'services/alert_notification_bridge.dart';
 import 'services/alert_engine.dart';
+import 'services/rtdas_threshold_sync_service.dart'; // ← NEW
 import 'theme/river_theme.dart';
 import 'theme/robotic_theme.dart';
 import 'providers/theme_provider.dart';
@@ -116,6 +117,12 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.light,
     ),
   );
+
+  // ── RTDAS threshold auto-sync (Layer 3) ───────────────────────────────────
+  // Must run BEFORE DataFetchEngine.start() so thresholds in
+  // ThresholdOverrideStore are ready when the first live gauge feed arrives.
+  // Idempotent: BiharLiveEngine.start() calls the same singleton — no double work.
+  unawaited(RtdasThresholdSyncService.instance.start());
 
   // ── Data engine ───────────────────────────────────────────────────────────
   DataFetchEngine.instance.start();
@@ -193,13 +200,8 @@ class FloodWatchApp extends ConsumerWidget {
         Locale('en'),
         Locale('hi'),
       ],
-      // FIX: resolve device locales like Locale('hi','IN') → Locale('hi').
-      // Without this, Flutter can't match 'hi_IN' to supportedLocales and
-      // falls back to the first supported locale — always 'en' — making
-      // Hindi selection appear broken on Indian devices.
       localeResolutionCallback: (deviceLocale, supportedLocales) {
         if (deviceLocale == null) return const Locale('en');
-        // Exact match first
         for (final sl in supportedLocales) {
           if (sl.languageCode == deviceLocale.languageCode) return sl;
         }

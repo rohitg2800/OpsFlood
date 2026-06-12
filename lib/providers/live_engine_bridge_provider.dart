@@ -1,23 +1,14 @@
-// lib/providers/live_engine_bridge_provider.dart  v3.0
+// lib/providers/live_engine_bridge_provider.dart  v4.0
 //
-// v3.0 changes (threshold table sync with bihar_rivers.dart v4):
-//   FIXED  Jainagar WL 67.50→67.75  DL 68.50→67.75  [BeFIQR RTDAS Jun 2026]
-//   FIXED  Benibad HFL 50.01→50.12  [BeFIQR Jun 2026]
-//   FIXED  Ekmighat WL 40→45.00  DL 41→46.94  HFL 43→49.52  [RTDAS]
-//   FIXED  Sonbarsa WL 76→80.50  DL 77→81.85  HFL 78.50→83.75  [RTDAS Jhim]
-//   FIXED  Kamtaul (Adhwara) HFL 53.01→53.05  [BeFIQR]
-//   FIXED  Dhengraghat (Mahananda) HFL 38.16→38.20  [BeFIQR]
-//   FIXED  Hajipur HFL 51.93→50.93  [BeFIQR]
-//   FIXED  Dumariaghat HFL 63.70→64.36  [BeFIQR]
-//   ADDED  Runisaidpur, Dubbadhar, Kansar, Kataunjha (Bagmati)
-//   ADDED  Lalganj, Khadda (Gandak)
-//   ADDED  Vijay Ghat Bridge (Kosi)
-//   ADDED  Jhawa (Mahananda)
-//   ADDED  Agropatti (Khiroi), Saulighat (Dhaus), Goabari (Lal Bakeya)
-//   ADDED  Phulparas (Balan), Laukaha (Bhutahi Balan)
-//   ADDED  Dagmara (Khando), Karachin (Kareh)
+// v4.0: _lookupThreshold now checks ThresholdOverrideStore (RTDAS live values)
+// BEFORE falling back to the compiled-in _kThresholds table.
 //
-// Bridges BiharLiveEngine → List<RiverStation> for Riverpod consumers.
+// Priority:
+//   1. ThresholdOverrideStore (RTDAS scraped — updated every 6 h)
+//   2. _kThresholds (bihar_rivers.dart v4 hardcoded — updated at compile time)
+//   3. Heuristic fallback (level * 0.90 / 0.95 / 1.05)
+//
+// All other logic unchanged from v3.0.
 library;
 
 import 'dart:async';
@@ -25,8 +16,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/river_station.dart';
 import '../services/bihar_live_engine.dart';
+import '../services/threshold_override_store.dart'; // ← NEW v4.0
 
-// ── Threshold table ─────────────────────────────────────────────────────────
+// ── Threshold table ───────────────────────────────────────────────────────────
 // SOURCE: bihar_rivers.dart v4 kBiharGauges (BEAMS RTDAS + BeFIQR Jun 2026)
 // All levels in metres MSL.
 const Map<String, ({double warning, double danger, double hfl, String river})>
@@ -41,7 +33,7 @@ const Map<String, ({double warning, double danger, double hfl, String river})>
   'bhagalpur':  (warning: 32.50, danger: 33.68, hfl: 34.86, river: 'Ganga'),
   'buxar':      (warning: 59.20, danger: 60.32, hfl: 62.09, river: 'Ganga'),
 
-  // ── KOSI (6 stations) ───────────────────────────────────────────────────
+  // ── KOSI (6 stations) ────────────────────────────────────────────────────
   'birpur':           (warning: 73.70, danger: 74.70, hfl: 76.02, river: 'Kosi'),
   'birpur (cwc)':     (warning: 73.70, danger: 74.70, hfl: 76.02, river: 'Kosi'),
   'basua':            (warning: 46.50, danger: 47.75, hfl: 49.24, river: 'Kosi'),
@@ -50,17 +42,15 @@ const Map<String, ({double warning, double danger, double hfl, String river})>
   'dumri bridge':     (warning: 32.85, danger: 33.85, hfl: 36.40, river: 'Kosi'),
   'bhim nagar':       (warning: 70.00, danger: 71.00, hfl: 72.50, river: 'Kosi'),
   'bhimnagar':        (warning: 70.00, danger: 71.00, hfl: 72.50, river: 'Kosi'),
-  // NEW v3.0
   'vijay ghat bridge':(warning: 29.50, danger: 31.00, hfl: 33.50, river: 'Kosi'),
   'vijayghat':        (warning: 29.50, danger: 31.00, hfl: 33.50, river: 'Kosi'),
   'naugachia':        (warning: 29.50, danger: 31.00, hfl: 33.50, river: 'Ganga'),
 
   // ── GANDAK (6 stations) ──────────────────────────────────────────────────
   'chatia':      (warning: 68.10, danger: 69.15, hfl: 70.04, river: 'Gandak'),
-  'dumariaghat': (warning: 61.10, danger: 62.22, hfl: 64.36, river: 'Gandak'), // FIX HFL
+  'dumariaghat': (warning: 61.10, danger: 62.22, hfl: 64.36, river: 'Gandak'),
   'rewaghat':    (warning: 53.40, danger: 54.41, hfl: 55.46, river: 'Gandak'),
-  'hajipur':     (warning: 49.40, danger: 50.32, hfl: 50.93, river: 'Gandak'), // FIX HFL
-  // NEW v3.0
+  'hajipur':     (warning: 49.40, danger: 50.32, hfl: 50.93, river: 'Gandak'),
   'lalganj':     (warning: 49.30, danger: 50.50, hfl: 51.83, river: 'Gandak'),
   'khadda':      (warning: 94.50, danger: 96.00, hfl: 97.50, river: 'Gandak'),
 
@@ -68,16 +58,16 @@ const Map<String, ({double warning, double danger, double hfl, String river})>
   'dheng bridge':          (warning: 70.00, danger: 71.00, hfl: 73.47, river: 'Bagmati'),
   'dhengbridge':           (warning: 70.00, danger: 71.00, hfl: 73.47, river: 'Bagmati'),
   'sonakhan':              (warning: 67.80, danger: 68.80, hfl: 72.05, river: 'Bagmati'),
-  'benibad':               (warning: 47.68, danger: 48.68, hfl: 50.12, river: 'Bagmati'), // FIX HFL
+  'benibad':               (warning: 47.68, danger: 48.68, hfl: 50.12, river: 'Bagmati'),
   'hayaghat':              (warning: 44.50, danger: 45.72, hfl: 48.96, river: 'Bagmati'),
   'dhengraghat bagmati':   (warning: 34.65, danger: 35.65, hfl: 47.30, river: 'Bagmati'),
   'kamtaul bagmati':       (warning: 49.00, danger: 50.00, hfl: 53.01, river: 'Bagmati'),
   'kamtaul':               (warning: 49.00, danger: 50.00, hfl: 53.01, river: 'Bagmati'),
-  'runnisaidpur':          (warning: 52.50, danger: 55.00, hfl: 58.15, river: 'Bagmati'), // NEW
-  'runisaidpur':           (warning: 52.50, danger: 55.00, hfl: 58.15, river: 'Bagmati'), // NEW
-  'dubbadhar':             (warning: 59.00, danger: 61.28, hfl: 63.75, river: 'Bagmati'), // NEW
-  'kansar':                (warning: 57.50, danger: 59.06, hfl: 60.86, river: 'Bagmati'), // NEW
-  'kataunjha':             (warning: 52.80, danger: 55.00, hfl: 58.36, river: 'Bagmati'), // NEW
+  'runnisaidpur':          (warning: 52.50, danger: 55.00, hfl: 58.15, river: 'Bagmati'),
+  'runisaidpur':           (warning: 52.50, danger: 55.00, hfl: 58.15, river: 'Bagmati'),
+  'dubbadhar':             (warning: 59.00, danger: 61.28, hfl: 63.75, river: 'Bagmati'),
+  'kansar':                (warning: 57.50, danger: 59.06, hfl: 60.86, river: 'Bagmati'),
+  'kataunjha':             (warning: 52.80, danger: 55.00, hfl: 58.36, river: 'Bagmati'),
 
   // ── BURHI GANDAK (5 stations) ────────────────────────────────────────────
   'sikandarpur': (warning: 51.40, danger: 52.53, hfl: 54.29, river: 'Burhi Gandak'),
@@ -92,60 +82,39 @@ const Map<String, ({double warning, double danger, double hfl, String river})>
   'gangpur':          (warning: 63.00, danger: 64.10, hfl: 65.82, river: 'Ghaghra'),
 
   // ── KAMLA (3 stations) ───────────────────────────────────────────────────
-  // FIX v3.0: WL 67.50→67.75 DL 68.50→67.75 [BeFIQR RTDAS Jainagar Weir]
   'jainagar':      (warning: 67.75, danger: 67.75, hfl: 71.35, river: 'Kamla'),
   'jhanjharpur':   (warning: 49.50, danger: 50.50, hfl: 53.11, river: 'Kamla'),
   'kamtaul kamla': (warning: 43.00, danger: 44.00, hfl: 45.45, river: 'Kamla'),
-  'phulparas':     (warning: 49.50, danger: 50.50, hfl: 53.11, river: 'Kamla'), // legacy key fallback
+  'phulparas':     (warning: 49.50, danger: 50.50, hfl: 53.11, river: 'Kamla'),
 
   // ── MAHANANDA (3 stations) ───────────────────────────────────────────────
   'taibpur':                (warning: 34.65, danger: 35.65, hfl: 38.16, river: 'Mahananda'),
-  'dhengraghat mahananda':  (warning: 34.65, danger: 35.65, hfl: 38.20, river: 'Mahananda'), // FIX HFL
-  'dhengraghat':            (warning: 34.65, danger: 35.65, hfl: 38.20, river: 'Mahananda'), // FIX HFL
-  // NEW v3.0
+  'dhengraghat mahananda':  (warning: 34.65, danger: 35.65, hfl: 38.20, river: 'Mahananda'),
+  'dhengraghat':            (warning: 34.65, danger: 35.65, hfl: 38.20, river: 'Mahananda'),
   'jhawa':                  (warning: 30.00, danger: 31.40, hfl: 34.07, river: 'Mahananda'),
 
   // ── PUNPUN (1 station) ───────────────────────────────────────────────────
   'sripalpur': (warning: 50.60, danger: 51.83, hfl: 53.91, river: 'Punpun'),
 
-  // ── ADHWARA / DHAUS (2 stations) ─────────────────────────────────────────
-  // FIX v3.0: Kamtaul (Adhwara) HFL 53.01→53.05
-  'ekmighat':        (warning: 45.00, danger: 46.94, hfl: 49.52, river: 'Khiroi'),   // FIX all three
-  'kamtaul adhwara': (warning: 48.00, danger: 50.00, hfl: 53.05, river: 'Adhwara'), // FIX HFL
-  // NEW v3.0
+  // ── ADHWARA / DHAUS / KHIROI (4 stations) ───────────────────────────────
+  'ekmighat':        (warning: 45.00, danger: 46.94, hfl: 49.52, river: 'Khiroi'),
+  'kamtaul adhwara': (warning: 48.00, danger: 50.00, hfl: 53.05, river: 'Adhwara'),
   'saulighat':       (warning: 50.00, danger: 52.37, hfl: 55.10, river: 'Dhaus'),
+  'agropatti':       (warning: 51.00, danger: 52.75, hfl: 54.53, river: 'Khiroi'),
 
-  // ── KHIROI (2 stations) ──────────────────────────────────────────────────
-  // NEW v3.0
-  'agropatti': (warning: 51.00, danger: 52.75, hfl: 54.53, river: 'Khiroi'),
-
-  // ── JHIM (1 station) ─────────────────────────────────────────────────────
-  // FIX v3.0: was Lalbakeya; RTDAS confirms Jhim river
-  'sonbarsa':  (warning: 80.50, danger: 81.85, hfl: 83.75, river: 'Jhim'),
-  'lalbakeya': (warning: 73.00, danger: 74.00, hfl: 75.50, river: 'Lalbakeya'), // keep legacy key
-
-  // ── LAL BAKEYA (1 station) ───────────────────────────────────────────────
-  // NEW v3.0
-  'goabari': (warning: 69.50, danger: 71.15, hfl: 73.86, river: 'Lal Bakeya'),
-
-  // ── BALAN (1 station) ────────────────────────────────────────────────────
-  // NEW v3.0
+  // ── JHIM / LAL BAKEYA / BALAN / BHUTAHI BALAN (4 stations) ─────────────
+  'sonbarsa':         (warning: 80.50, danger: 81.85, hfl: 83.75, river: 'Jhim'),
+  'lalbakeya':        (warning: 73.00, danger: 74.00, hfl: 75.50, river: 'Lalbakeya'),
+  'goabari':          (warning: 69.50, danger: 71.15, hfl: 73.86, river: 'Lal Bakeya'),
   'phulparas balan':  (warning: 59.50, danger: 60.80, hfl: 61.80, river: 'Balan'),
+  'laukaha':          (warning: 78.50, danger: 79.80, hfl: 80.80, river: 'Bhutahi Balan'),
 
-  // ── BHUTAHI BALAN (1 station) ────────────────────────────────────────────
-  // NEW v3.0
-  'laukaha': (warning: 78.50, danger: 79.80, hfl: 80.80, river: 'Bhutahi Balan'),
-
-  // ── KHANDO (1 station) ───────────────────────────────────────────────────
-  // NEW v3.0
-  'dagmara': (warning: 60.50, danger: 61.50, hfl: 62.50, river: 'Khando'),
-
-  // ── KAREH (1 station) ────────────────────────────────────────────────────
-  // NEW v3.0
+  // ── KHANDO / KAREH (2 stations) ─────────────────────────────────────────
+  'dagmara':  (warning: 60.50, danger: 61.50, hfl: 62.50, river: 'Khando'),
   'karachin': (warning: 38.50, danger: 40.00, hfl: 41.90, river: 'Kareh'),
 };
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ────────────────────────────────────────────────────────────────
 
 String _norm(String v) => v
     .toLowerCase()
@@ -154,14 +123,33 @@ String _norm(String v) => v
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
+// v4.0: checks ThresholdOverrideStore FIRST (live RTDAS values),
+// then compiled-in _kThresholds, then returns null (caller applies heuristic).
 ({double warning, double danger, double hfl, String river})?
     _lookupThreshold(String normName) {
+
+  // ── Priority 1: Live RTDAS values from ThresholdOverrideStore ────────────
+  final override = ThresholdOverrideStore.instance.get(normName);
+  if (override != null && override.dl != null) {
+    final compiled = _kThresholds[normName];
+    return (
+      warning: override.wl ?? compiled?.warning ?? override.dl! * 0.99,
+      danger:  override.dl!,
+      hfl:     override.hfl ?? compiled?.hfl ?? override.dl! * 1.05,
+      river:   compiled?.river ?? 'Bihar River',
+    );
+  }
+
+  // ── Priority 2: Compiled-in table (bihar_rivers.dart v4) ─────────────────
   final exact = _kThresholds[normName];
   if (exact != null) return exact;
+
+  // Substring / prefix match for variant spellings.
   for (final entry in _kThresholds.entries) {
     final k = entry.key;
     if (normName.contains(k) || k.contains(normName)) return entry.value;
   }
+
   return null;
 }
 
@@ -197,6 +185,9 @@ class LiveEngineBridgeNotifier extends Notifier<List<RiverStation>> {
           item.kind != FeedItemKind.barrage    &&
           item.kind != FeedItemKind.telemetry) continue;
 
+      // Skip the RTDAS sync-marker stub item — it has no water level.
+      if (item.id == 'rtdas|__sync_marker__') continue;
+
       final rawVal = item.value ?? '';
       final numStr = rawVal.replaceAll(RegExp(r'[^0-9.]'), '');
       final level  = double.tryParse(numStr);
@@ -205,6 +196,7 @@ class LiveEngineBridgeNotifier extends Notifier<List<RiverStation>> {
       final normName = _norm(item.title);
       final thresh   = _lookupThreshold(normName);
 
+      // Heuristic fallback if even the store and compiled table miss this station.
       final warning = thresh?.warning ?? level * 0.90;
       final danger  = thresh?.danger  ?? level * 0.95;
       final hfl     = thresh?.hfl     ?? level * 1.05;
