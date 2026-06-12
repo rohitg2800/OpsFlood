@@ -1,16 +1,18 @@
 // lib/services/cwc_direct_service.dart
 //
-// OpsFlood — CwcDirectService (v3.2 — Bihar WRD HTML scraper)
+// OpsFlood — CwcDirectService (v3.3 — Bihar-only)
+//
+// v3.3 change: Removed all non-Bihar entries from _cwcFfemKey().
+//   FFEM map now covers only Bihar CWC gauge stations.
+//   Also removed non-Bihar entries from _ffsBase / _ffsApiBase usage
+//   (they were already guarded by IndiaCity.cwcStation == null for
+//   non-Bihar cities, but the map itself is now clean).
 //
 // SOURCES (in priority order per city):
-//   1. CWC FFEM national JSON  — ~80 cities, updated every 15 min
-//   2. CWC FFS per-station bulletin — needs cwcStation code
-//   3. BiharWrdScraper        — Bihar only, HTML table, 103 stations, 10-min cache
-//   4. CWC BEAMS Bihar        — Bihar only, needs cwcStation code
-//
-// v3.2 change: Source-3 now delegates to BiharWrdScraper.instance.fetchForCity()
-// instead of the old _fetchFromBiharWrd() JSON endpoint. The old method is
-// removed. BiharWrdScraper shares a single HTTP fetch across all Bihar cities.
+//   1. CWC FFEM national JSON  — Bihar stations only
+//   2. CWC FFS per-station bulletin — needs cwcStation code (Bihar only)
+//   3. BiharWrdScraper         — Bihar only, HTML table, 103 stations
+//   4. CWC BEAMS Bihar         — Bihar only
 library;
 
 import 'dart:convert';
@@ -20,7 +22,7 @@ import 'package:http/http.dart' as http;
 import '../data/india_cities.dart';
 import 'bihar_wrd_scraper.dart';
 
-// ── Reading model ─────────────────────────────────────────────────────
+// ── Reading model ───────────────────────────────────────────────────────────────
 class CwcReading {
   final double   level;
   final double   warning;
@@ -41,14 +43,14 @@ class CwcReading {
   });
 }
 
-// ── Private cache entry ────────────────────────────────────────────────
+// ── Private cache entry ───────────────────────────────────────────────────────────
 class _CacheEntry {
   final CwcReading reading;
   final DateTime   fetchedAt;
   const _CacheEntry({required this.reading, required this.fetchedAt});
 }
 
-// ── Service ───────────────────────────────────────────────────────────
+// ── Service ───────────────────────────────────────────────────────────────────
 class CwcDirectService {
   CwcDirectService._();
   static final CwcDirectService instance = CwcDirectService._();
@@ -63,7 +65,7 @@ class CwcDirectService {
   final Map<String, _CacheEntry> _cache = {};
   static const _kCacheTTL = Duration(minutes: 10);
 
-  // ── Public fetch ───────────────────────────────────────────────────
+  // ── Public fetch ───────────────────────────────────────────────────────────────
   Future<CwcReading?> fetch(IndiaCity city) async {
     final key    = city.id;
     final cached = _cache[key];
@@ -87,7 +89,7 @@ class CwcDirectService {
 
   void clearCache() => _cache.clear();
 
-  // ── Source 1: CWC FFEM national JSON ─────────────────────────────────
+  // ── Source 1: CWC FFEM national JSON (Bihar stations only) ───────────────
   static const _ffemUrl = 'https://cwc.gov.in/sites/default/files/ffem.json';
   static Map<String, dynamic>? _ffemCache;
   static DateTime?              _ffemCacheTime;
@@ -144,7 +146,7 @@ class CwcDirectService {
     }
   }
 
-  // ── Source 2: CWC FFS per-station bulletin ────────────────────────────
+  // ── Source 2: CWC FFS per-station bulletin ───────────────────────────────────
   static const _ffsBase    = 'https://cwc.gov.in/ffnew/stationwise_bulletin.php';
   static const _ffsApiBase = 'https://cwc.gov.in/api/v1/stations';
 
@@ -221,7 +223,7 @@ class CwcDirectService {
     );
   }
 
-  // ── Source 4: CWC BEAMS Bihar ─────────────────────────────────────────
+  // ── Source 4: CWC BEAMS Bihar ────────────────────────────────────────────────────────────
   static const _beamsUrl =
       'https://beams.fmiscwrdbihar.gov.in/bulletin/gaugereport.json';
   static List<dynamic>? _beamsCache;
@@ -280,89 +282,29 @@ class CwcDirectService {
     }
   }
 
-  // ── CWC FFEM station name map ──────────────────────────────────────────
+  // ── CWC FFEM station name map — BIHAR ONLY ──────────────────────────────────────
   String? _cwcFfemKey(IndiaCity city) {
+    // Only Bihar CWC gauge stations are mapped here.
+    // All non-Bihar entries have been removed (v3.3).
     const map = <String, String>{
-      'patna':           'GANDHIGHAT',
-      'bhagalpur':       'BHAGALPUR',
-      'munger':          'MUNGER',
-      'begusarai':       'HATHIDAH',
-      'katihar':         'KURSELA',
-      'supaul':          'BIRPUR',
-      'darbhanga':       'HAYAGHAT',
-      'muzaffarpur':     'ROSERA',
-      'sitamarhi':       'DHENG',
-      'gopalganj':       'TRIVENIGANJ',
-      'siwan':           'DORIGHATS',
-      'khagaria':        'KHAGARIA',
-      'purnia':          'JAMALPUR',
-      'guwahati':        'GUWAHATI',
-      'dibrugarh':       'DIBRUGARH',
-      'dhubri':          'DHUBRI',
-      'silchar':         'SILCHAR',
-      'tezpur':          'TEZPUR',
-      'jorhat':          'NEAMATIGHAT',
-      'barpeta':         'BARPETA_ROAD',
-      'kolkata':         'DIAMOND_HARBOUR',
-      'jalpaiguri':      'TEESTA_BARRAGE',
-      'malda':           'FARAKKA',
-      'murshidabad':     'JANGIPUR',
-      'cooch_behar':     'GHOKSADANGA',
-      'howrah':          'DIAMOND_HARBOUR',
-      'cuttack':         'MUNDALI',
-      'balasore':        'JAMSHOLAGHAT',
-      'sambalpur':       'SALEBHATA',
-      'bhubaneswar':     'NARAJ',
-      'varanasi':        'VARANASI',
-      'allahabad':       'ALLAHABAD',
-      'gorakhpur':       'BIRDGHAT',
-      'kanpur':          'KANPUR',
-      'agra':            'AGRA',
-      'lucknow':         'LUCKNOW',
-      'bareilly':        'BAREILLY',
-      'bahraich':        'ELGIN_BRIDGE',
-      'haridwar':        'HARIDWAR',
-      'rishikesh':       'RISHIKESH',
-      'jamshedpur':      'GHATSILA',
-      'jabalpur':        'GADARWARA',
-      'hoshangabad':     'HOSHANGABAD',
-      'kolhapur':        'KOLHAPUR',
-      'sangli':          'SANGLI',
-      'nashik':          'GANGAPUR',
-      'nanded':          'NANDED',
-      'nagpur':          'KANHAN',
-      'surat':           'SURAT',
-      'vadodara':        'VADODARA',
-      'bharuch':         'BHARUCH',
-      'ahmedabad':       'AHMEDABAD',
-      'anand':           'ANAND',
-      'kota':            'KOTA',
-      'vijayawada':      'PRAKASAM_BARRAGE',
-      'rajahmundry':     'RAJAHMUNDRY',
-      'guntur':          'NAGARJUNASAGAR',
-      'kurnool':         'KURNOOL',
-      'hyderabad':       'HYDERABAD',
-      'warangal':        'BHADRACHALAM',
-      'khammam':         'BHADRACHALAM',
-      'bangalore':       'BENGALURU',
-      'mysore':          'MYSURU',
-      'mangalore':       'MANGALURU',
-      'raichur':         'RAICHUR',
-      'kochi':           'KOCHI',
-      'thrissur':        'MULAMTHURUTHY',
-      'kozhikode':       'KOZHIKODE',
-      'alappuzha':       'KOTTAYAM',
-      'madurai':         'VAIGAI_DAM',
-      'tiruchirappalli': 'MUSIRI',
-      'chennai':         'CHEMBARAMBAKKAM',
-      'thanjavur':       'METTUR',
-      'delhi':           'OLD_RAILWAY_BRIDGE',
-      'srinagar':        'RAM_MUNSHI_BAGH',
+      'patna':       'GANDHIGHAT',
+      'bhagalpur':   'BHAGALPUR',
+      'munger':      'MUNGER',
+      'begusarai':   'HATHIDAH',
+      'katihar':     'KURSELA',
+      'supaul':      'BIRPUR',
+      'darbhanga':   'HAYAGHAT',
+      'muzaffarpur': 'ROSERA',
+      'sitamarhi':   'DHENG',
+      'gopalganj':   'TRIVENIGANJ',
+      'siwan':       'DORIGHATS',
+      'khagaria':    'KHAGARIA',
+      'purnia':      'JAMALPUR',
     };
     return map[city.id];
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────────
   double? _parseLevel(dynamic v) {
     if (v == null) return null;
     final d = double.tryParse(v.toString().trim());
