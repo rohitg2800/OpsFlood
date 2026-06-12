@@ -5,12 +5,10 @@
 // lists (IndiaGeodata.monitoredCities vs LiveFetchEngine.liveFloodData),
 // causing map pins and the monitored-stations list to diverge.
 //
-// Usage:
-//   final bridge = StationsUnifiedBridge.instance;
-//   bridge.attach(engine);          // call once in your provider/init
-//   bridge.allStations;             // List<FloodData> — map + monitored
-//   bridge.markersForMap;           // List<StationMarker>
-//   bridge.monitoredStations;       // same list, alias for monitored screen
+// fix(v1.1): FloodData.lastUpdated is required non-nullable DateTime.
+//   Static-fallback now passes DateTime.fromMillisecondsSinceEpoch(0)
+//   (epoch sentinel = "no live data") instead of null.
+//   markersForMap maps epoch → null for StationMarker.lastUpdated which IS nullable.
 
 import '../constants/india_geodata.dart';
 import '../models/flood_data.dart';
@@ -26,15 +24,15 @@ class StationMarker {
   final String? river;
   final double  lat;
   final double  lon;
-  final String  riskLevel;       // CRITICAL / SEVERE / MODERATE / LOW / UNKNOWN
-  final double  capacityPercent; // 0–150
+  final String  riskLevel;
+  final double  capacityPercent;
   final double? currentLevel;
   final double  warningLevel;
   final double  dangerLevel;
   final double? rainfall24h;
   final double? flowRate;
   final bool    hasLiveData;
-  final DateTime? lastUpdated;
+  final DateTime? lastUpdated;   // nullable — null means no live timestamp
 
   const StationMarker({
     required this.city,
@@ -56,6 +54,15 @@ class StationMarker {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Epoch sentinel: a non-null DateTime that signals "no live data was fetched".
+// Callers that need to display a timestamp should treat epoch as absent.
+// ─────────────────────────────────────────────────────────────────────────────
+final _kEpoch = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
+// Helper: returns null when the datetime is the epoch sentinel.
+DateTime? _liveTs(DateTime dt) => dt == _kEpoch ? null : dt;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // StationsUnifiedBridge
 // ─────────────────────────────────────────────────────────────────────────────
 class StationsUnifiedBridge {
@@ -65,17 +72,9 @@ class StationsUnifiedBridge {
   LiveFetchEngine? _engine;
 
   /// Call this once when your provider/state is initialised.
-  void attach(LiveFetchEngine engine) {
-    _engine = engine;
-  }
+  void attach(LiveFetchEngine engine) => _engine = engine;
 
-  // —— Core merge logic ——————————————————————————————————————————————————————
-  //
-  // For every station in IndiaGeodata.monitoredCities:
-  //  • If LiveFetchEngine has live data  → use it (FloodData from engine)
-  //  • Otherwise                         → synthesise a FloodData from geodata
-  //    with riskLevel='UNKNOWN' so the map can still show a grey pin.
-
+  // ── Core merge ──────────────────────────────────────────────────────────────
   List<FloodData> get allStations {
     final liveMap = <String, FloodData>{};
     if (_engine != null) {
@@ -88,42 +87,44 @@ class StationsUnifiedBridge {
       final key = (mc['city'] as String).toLowerCase().trim();
       if (liveMap.containsKey(key)) return liveMap[key]!;
 
-      // Synthetic fallback — static geodata, no live reading
+      // Synthetic fallback: static geodata, no live reading.
+      // lastUpdated = _kEpoch (epoch sentinel) satisfies the non-nullable
+      // requirement while signalling to consumers that no live fetch occurred.
       final dl = (mc['danger_level']  as num).toDouble();
       final wl = (mc['warning_level'] as num).toDouble();
       return FloodData(
-        city:            mc['city']     as String,
-        district:        (mc['district'] as String?) ?? '',
-        state:           mc['state']    as String,
-        riverName:       mc['river']    as String?,
-        currentLevel:    0.0,
-        warningLevel:    wl,
-        dangerLevel:     dl,
-        safeLevel:       wl * 0.8,
-        capacityPercent: 0.0,
-        riskLevel:       'UNKNOWN',
-        status:          'NO_DATA',
+        city:                mc['city']              as String,
+        district:            (mc['district'] as String?) ?? '',
+        state:               mc['state']             as String,
+        riverName:           mc['river']             as String?,
+        currentLevel:        0.0,
+        warningLevel:        wl,
+        dangerLevel:         dl,
+        safeLevel:           wl * 0.8,
+        capacityPercent:     0.0,
+        riskLevel:           'UNKNOWN',
+        status:              'NO_DATA',
         effectiveRainfallMm: 0.0,
-        flowRate:        null,
-        lastUpdated:     null,
+        flowRate:            null,
+        lastUpdated:         _kEpoch,   // ← fix: epoch sentinel, NOT null
       );
     }).toList();
   }
 
-  /// Alias for MonitoredStationsScreen — same live-enriched list.
+  /// Alias for MonitoredStationsScreen.
   List<FloodData> get monitoredStations => allStations;
 
-  /// Map-ready markers.  Colour/icon logic lives in the map widget;
-  /// this just provides the data layer.
+  /// Map-ready markers.
   List<StationMarker> get markersForMap {
     return allStations.map((fd) {
       final mc = IndiaGeodata.monitoredCities.firstWhere(
         (c) => (c['city'] as String).toLowerCase() == fd.city.toLowerCase(),
         orElse: () => {
-          'city': fd.city, 'state': fd.state,
+          'city': fd.city,  'state': fd.state,
           'district': fd.district, 'river': fd.riverName,
           'lat': 25.0, 'lon': 85.0,
-          'danger_level': fd.dangerLevel, 'warning_level': fd.warningLevel,
+          'danger_level': fd.dangerLevel,
+          'warning_level': fd.warningLevel,
         },
       );
       return StationMarker(
@@ -141,17 +142,16 @@ class StationsUnifiedBridge {
         rainfall24h:     fd.effectiveRainfallMm > 0 ? fd.effectiveRainfallMm : null,
         flowRate:        fd.flowRate,
         hasLiveData:     fd.status == 'LIVE',
-        lastUpdated:     fd.lastUpdated,
+        lastUpdated:     _liveTs(fd.lastUpdated), // null when no live data
       );
     }).toList();
   }
 
-  // Convenience counters used by dashboard KPI widgets
+  // Convenience counters
   int get totalCount    => allStations.length;
   int get criticalCount => allStations.where((s) => s.riskLevel == 'CRITICAL').length;
   int get severeCount   => allStations.where((s) => s.riskLevel == 'SEVERE').length;
   int get warningCount  => allStations.where((s) => s.riskLevel == 'MODERATE').length;
-  // v5.4: safe = LOW or UNKNOWN (station exists but no alert level)
   int get safeCount     => allStations.where((s) =>
       s.riskLevel == 'LOW' || s.riskLevel == 'UNKNOWN').length;
   int get noDataCount   => allStations.where((s) => s.status == 'NO_DATA').length;
