@@ -1,6 +1,12 @@
 // lib/constants/india_geodata.dart
 //
-// EQUINOX-BH — Geodata constants (v5.0 — Bihar only)
+// EQUINOX-BH — Geodata constants (v5.1 — add WRD-only stations)
+//
+// v5.1: Added Manpur and other WRD Bihar backend stations that were
+//       missing from monitoredCities, causing the city detail screen
+//       to spin forever (cityDataProvider returned null indefinitely).
+//       Rule: every station the WRD backend can return must have an
+//       entry here so LiveFetchEngine._cache[key] is populated.
 //
 // v5.0: Removed all non-Bihar cities and states.
 //       monitoredCities now contains only Bihar flood-monitoring stations.
@@ -39,6 +45,31 @@ class IndiaGeodata {
       'lat': 25.5667, 'lon': 83.9667,
       'danger_level': 60.30, 'warning_level': 59.20,
       'risk': 'MODERATE', 'flood_freq': 0.65, 'river_type': 'perennial', 'zone': 'himalayan' },
+    // ── Ganga (WRD-only stations added v5.1) ───────────────────────────────
+    { 'city': 'Manpur',         'district': 'Gopalganj',      'state': 'Bihar', 'river': 'Gandak',
+      'lat': 26.4700, 'lon': 84.4300,
+      'danger_level': 62.00, 'warning_level': 60.80,
+      'risk': 'HIGH',     'flood_freq': 0.75, 'river_type': 'perennial', 'zone': 'himalayan' },
+    { 'city': 'Gopalpur',       'district': 'Samastipur',     'state': 'Bihar', 'river': 'Burhi Gandak',
+      'lat': 25.8800, 'lon': 85.8200,
+      'danger_level': 44.00, 'warning_level': 43.00,
+      'risk': 'HIGH',     'flood_freq': 0.70, 'river_type': 'perennial', 'zone': 'himalayan' },
+    { 'city': 'Bhairoghat',     'district': 'Patna',          'state': 'Bihar', 'river': 'Ganga',
+      'lat': 25.6200, 'lon': 85.2000,
+      'danger_level': 49.00, 'warning_level': 47.80,
+      'risk': 'HIGH',     'flood_freq': 0.78, 'river_type': 'perennial', 'zone': 'himalayan' },
+    { 'city': 'Digha',          'district': 'Patna',          'state': 'Bihar', 'river': 'Ganga',
+      'lat': 25.6100, 'lon': 85.0500,
+      'danger_level': 50.60, 'warning_level': 49.50,
+      'risk': 'HIGH',     'flood_freq': 0.80, 'river_type': 'perennial', 'zone': 'himalayan' },
+    { 'city': 'Patna Sahib',    'district': 'Patna',          'state': 'Bihar', 'river': 'Ganga',
+      'lat': 25.6200, 'lon': 85.2100,
+      'danger_level': 48.80, 'warning_level': 47.60,
+      'risk': 'HIGH',     'flood_freq': 0.80, 'river_type': 'perennial', 'zone': 'himalayan' },
+    { 'city': 'Mokama',         'district': 'Patna',          'state': 'Bihar', 'river': 'Ganga',
+      'lat': 25.4000, 'lon': 85.9200,
+      'danger_level': 42.00, 'warning_level': 40.80,
+      'risk': 'HIGH',     'flood_freq': 0.75, 'river_type': 'perennial', 'zone': 'himalayan' },
     // ── Kosi ───────────────────────────────────────────────────────────────
     { 'city': 'Birpur',         'district': 'Supaul',         'state': 'Bihar', 'river': 'Kosi',
       'lat': 26.5167, 'lon': 86.9000,
