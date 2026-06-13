@@ -1,5 +1,15 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v5.4
+// OpsFlood — BiharRiverMapScreen v5.5
+//
+// v5.5 (13 Jun 2026 — Gap 3: city-card navigation fix):
+//   • _StationSheet "Open Full Detail →" now resolves the city name via
+//     live.city (MapStationData.city = canonical station name from
+//     mergedStationsProvider) instead of the raw gauge.station string.
+//     Fixes blank/no-data CityDetailScreen when gauge.station didn't
+//     fuzzy-match cityDataProvider's key (e.g. "Birpur" vs "Birpur (Kosi)").
+//   • Falls back to gauge.station when live == null so SEED-only pins
+//     still navigate (they just show CitySkeletonView if no FloodData
+//     entry exists for that name — that's already the correct UX).
 //
 // v5.4 (12 Jun 2026 — map data-source migration):
 //   • Replace biharLiveProvider watch with mapLiveIndexProvider.
@@ -1181,7 +1191,7 @@ class _LayerPanel extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// _StationSheet  (v5.4 — MapStationData replaces BiharStationData)
+// _StationSheet  (v5.5 — city-name resolution for CityDetailScreen navigation)
 // ────────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
@@ -1197,6 +1207,13 @@ class _StationSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasLive = live != null && live!.isLive;
+
+    // v5.5: resolve canonical city name from MapStationData.city so that
+    // CityDetailScreen.cityDataProvider(key) finds the right FloodData entry.
+    // Falls back to gauge.station when live is null (SEED-only pin).
+    final resolvedCity =
+        (live != null && live!.city.isNotEmpty) ? live!.city : gauge.station;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
       decoration: BoxDecoration(
@@ -1279,11 +1296,16 @@ class _StationSheet extends StatelessWidget {
               _sourceRow(),
             ],
             const SizedBox(height: 16),
+            // v5.5: use resolvedCity so CityDetailScreen receives the
+            // correct canonical key that cityDataProvider is indexed on.
             GestureDetector(
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, CityDetailScreen.route,
-                    arguments: gauge.station);
+                Navigator.pushNamed(
+                  context,
+                  CityDetailScreen.route,
+                  arguments: resolvedCity,
+                );
               },
               child: Container(
                 width: double.infinity,
@@ -1928,7 +1950,7 @@ class _LegendRow extends StatelessWidget {
                   color: color, shape: BoxShape.circle,
                   border: Border.all(
                       color: Colors.white.withValues(alpha: 0.6),
-                      width: 1),
+                      width: 1.0),
                 ),
               ),
             ],
@@ -1940,17 +1962,6 @@ class _LegendRow extends StatelessWidget {
                 color: t.textSecondary,
                 fontSize: 10,
                 fontWeight: FontWeight.w500)),
-        if (pulse) ...[
-          const SizedBox(width: 4),
-          Container(
-            width: 5, height: 5,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color.withValues(alpha: 0.5),
-              border: Border.all(color: color, width: 1),
-            ),
-          ),
-        ],
       ],
     );
   }
