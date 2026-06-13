@@ -1,5 +1,16 @@
 // lib/screens/bihar_river_map_screen.dart
-// OpsFlood — BiharRiverMapScreen v5.5
+// OpsFlood — BiharRiverMapScreen v5.5.1
+//
+// v5.5.1 (13 Jun 2026 — Option A graceful station-only fallback):
+//   • Replaces the always-active 'Open Full Detail' GestureDetector in
+//     _StationSheet with a Builder that checks resolvedCity:
+//     - resolvedCity matched in cityDataProvider → active accent button
+//       ('Open Full Detail →') behaves exactly as before.
+//     - resolvedCity NOT matched (unmatched / gauge-only station) →
+//       muted 'No city profile' label with onTap=null so the button is
+//       non-interactive and clearly communicates no data is available.
+//   • Prevents users from tapping into a blank CityDetailScreen for
+//     stations that have no FloodData entry in cityDataProvider.
 //
 // v5.5 (13 Jun 2026 — Gap 3: city-card navigation fix):
 //   • _StationSheet "Open Full Detail →" now resolves the city name via
@@ -1191,7 +1202,7 @@ class _LayerPanel extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// _StationSheet  (v5.5 — city-name resolution for CityDetailScreen navigation)
+// _StationSheet  (v5.5.1 — Option A graceful station-only fallback)
 // ────────────────────────────────────────────────────────────────────────────────
 
 class _StationSheet extends StatelessWidget {
@@ -1213,6 +1224,13 @@ class _StationSheet extends StatelessWidget {
     // Falls back to gauge.station when live is null (SEED-only pin).
     final resolvedCity =
         (live != null && live!.city.isNotEmpty) ? live!.city : gauge.station;
+
+    // v5.5.1 (Option A): check if resolvedCity has a matching city profile.
+    // cityDataProvider keys are normalised lowercase; we do the same check
+    // that CityDetailScreen does internally. If no match → show muted label.
+    final hasCityProfile = cityDataProvider.keys
+        .map(_norm)
+        .contains(_norm(resolvedCity));
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
@@ -1296,35 +1314,57 @@ class _StationSheet extends StatelessWidget {
               _sourceRow(),
             ],
             const SizedBox(height: 16),
-            // v5.5: use resolvedCity so CityDetailScreen receives the
-            // correct canonical key that cityDataProvider is indexed on.
-            GestureDetector(
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(
-                  context,
-                  CityDetailScreen.route,
-                  arguments: resolvedCity,
-                );
-              },
-              child: Container(
+
+            // v5.5.1 Option A: show active button only when city profile exists;
+            // otherwise show a non-interactive muted 'No city profile' label.
+            if (hasCityProfile)
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(
+                    context,
+                    CityDetailScreen.route,
+                    arguments: resolvedCity,
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: t.accent.withValues(alpha: 0.40)),
+                  ),
+                  child: Center(
+                    child: Text('Open Full Detail  →',
+                        style: TextStyle(
+                            color: t.accent,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13)),
+                  ),
+                ),
+              )
+            else
+              Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.12),
+                  color: t.cardBgElevated,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                      color: t.accent.withValues(alpha: 0.40)),
+                  border: Border.all(color: t.stroke),
                 ),
                 child: Center(
-                  child: Text('Open Full Detail  →',
-                      style: TextStyle(
-                          color: t.accent,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13)),
+                  child: Text(
+                    'No city profile available',
+                    style: TextStyle(
+                        color: t.textSecondary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13),
+                  ),
                 ),
               ),
-            ),
+
             const SizedBox(height: 8),
           ],
         ),
