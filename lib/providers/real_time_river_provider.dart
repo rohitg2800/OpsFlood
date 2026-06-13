@@ -1,47 +1,17 @@
-// lib/providers/real_time_river_provider.dart  v8.5
+// lib/providers/real_time_river_provider.dart  v8.6
 //
-// v8.5 (12 Jun 2026) — close DataFetch Birpur 212m leak
+// v8.6 (13 Jun 2026) — current-level plausibility guard for Birpur
 //
-//   BUG: liveEngineNames was built from liveEngineRS (AFTER stripping
-//   Birpur rows).  So 'birpur cwc' was absent from liveEngineNames and the
-//   dfStations filter let the DataFetch 'Birpur CWC' row through despite
-//   the plausibility guard having DL=214 (which was already rejected by
-//   _birpurDlPlausible).  The leak path was:
+//   BUG: kosiBirpurProvider could return levelM=212.05 or 210.80 m and it
+//   went straight into birpurStation.current with no sanity check.
+//   _birpurDlPlausible only guards the DataFetch fallback branch (DL check),
+//   not the primary kosiBirpurProvider branch (level check).
 //
-//     DataFetch row: station='Birpur CWC', current=212.x, danger=214
-//     _isBirpur('Birpur CWC') = TRUE  → dfStations filter already stripped it
-//
-//   So actually the 212m card came from a DIFFERENT source: the WRD tier
-//   was passing through a 'Birpur' WRD row (current=212.x from a legacy
-//   WRD payload key mis-mapped) that ALSO passed the !_isBirpur check when
-//   WRD emitted 'birpur' with uppercase B in site name from WrdBiharService.
-//   _isBirpur uses .toLowerCase().contains('birpur') so that IS caught.
-//   The actual 212m source was liveEngineRS leaking it:
-//     BiharLiveEngine had a stale cache entry 'Birpur' current=212 from a
-//     previous cycle where GloFAS returned 212.  _allLiveEngineRS was not
-//     stripped of Birpur when building liveEngineAllNames (only liveEngineRS
-//     was built AFTER the strip), so the 212m LiveEngine Birpur entry was
-//     NOT added to liveEngineRS (correctly stripped) but WAS present in
-//     _allLiveEngineRS and therefore occupied the liveEngineNames set,
-//     causing the kosiBirpurProvider to find no DataFetch row eligible,
-//     fall through to SEED (now null in v2.1), and the LiveEngine 212m
-//     entry WAS in _allLiveEngineRS but not in liveEngineRS so it was
-//     excluded from merged output — this was CORRECT.
-//
-//   REAL root: BiharLiveEngine cache was not being cleared between
-//   refreshes, so stale GloFAS 212m Birpur entries persisted in the
-//   liveEngineStationsProvider list even after _isBirpur strip in
-//   mergedStationsProvider.  The strip was applied to liveEngineRS
-//   which excluded them from the final merged list — so those 212m
-//   cards came exclusively from kosiBirpurProvider returning 210.80
-//   SEED (now fixed in v2.1) and from dfBirpur DL plausibility guard
-//   upper bound being 200 instead of 90.
-//
-//   FIX:
-//     • _birpurDlPlausible upper bound: 200 → 90 m  (Birpur ~74 m MSL;
-//       anything > 90 is definitionally a blowout heuristic)
-//     • mergedStationsProvider: null-guard birpurReading (kosiBirpurProvider
-//       now returns KosiBirpurReading? not KosiBirpurReading)
+//   FIX: add _birpurLevelPlausible(double level) => level > 0 && level <= 80.
+//   Birpur gauge is ~74 m MSL; HFL is 76.02 m.  Anything above 80 m is a
+//   discharge value (m³/s or cumec) mis-read as a water-level (m MSL).
+//   When the reading fails this check, fall through to the SEED sentinel
+//   (current=0.0, shows '——' / NORMAL) instead of showing 210/212 m.
 //
 library;
 
@@ -96,9 +66,12 @@ const double _kBirpurWarning = 73.70;
 const double _kBirpurDanger  = 74.70;
 const double _kBirpurHfl     = 76.02;
 
-/// v8.5: tightened upper bound 200 → 90 m.
-/// Birpur gauge is ~74 m MSL.  Anything above 90 is a heuristic blowout
-/// (e.g. discharge 203 m³/s mis-read as m MSL → DL=214).
+/// v8.6: current-level guard — Birpur is ~74 m MSL, HFL 76.02 m.
+/// Any reading above 80 m is a discharge value mis-read as water level.
+bool _birpurLevelPlausible(double level) => level > 0.0 && level <= 80.0;
+
+/// v8.5: danger-level guard for DataFetch fallback rows.
+/// Birpur danger level is 74.70 m.  Anything above 90 m is a blowout.
 bool _birpurDlPlausible(double dl) => dl >= 50.0 && dl <= 90.0;
 
 // ───────────────────────────────────────────────────────────────────────────────────
@@ -205,9 +178,11 @@ final realTimeRiverProvider =
 // ───────────────────────────────────────────────────────────────────────────────────
 // 4. mergedStationsProvider — THE single source of truth
 //
-// v8.5: birpurReading is now nullable (KosiBirpurReading? from v2.1).
-// When null, fall back to the current=0.0 seed sentinel.
-// _birpurDlPlausible upper bound tightened 200 → 90 m.
+// v8.6: added _birpurLevelPlausible check on the kosiBirpurProvider branch.
+//       If levelM > 80 m (discharge mis-read as water level), fall through
+//       to the SEED sentinel (current=0.0) instead of showing 210/212 m.
+// v8.5: birpurReading is nullable (KosiBirpurReading? from v2.1).
+//       _birpurDlPlausible upper bound tightened 200 → 90 m.
 // ───────────────────────────────────────────────────────────────────────────────────
 final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
   final _allLiveEngineRS = ref.watch(liveEngineStationsProvider);
@@ -218,7 +193,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   final wrdAsync    = ref.watch(realTimeRiverProvider);
   final cwcAsync    = ref.watch(cwcStationsProvider);
-  final birpurAsync = ref.watch(kosiBirpurProvider); // now KosiBirpurReading?
+  final birpurAsync = ref.watch(kosiBirpurProvider); // KosiBirpurReading?
 
   List<RiverStation> wrdList;
   if (wrdAsync.isLoading || wrdAsync.asData?.value == null) {
@@ -228,17 +203,22 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
     wrdList = wrdAsync.asData!.value;
   }
 
-  // ── Birpur entry (v8.5: birpurReading is nullable) ──────────────────────
+  // ── Birpur entry (v8.6: level plausibility guard added) ─────────────────
   final RiverStation birpurStation;
   final birpurReading = birpurAsync.asData?.value; // KosiBirpurReading?
 
-  if (birpurReading != null) {
+  // v8.6: treat a reading as valid only if levelM is in 0–80 m range.
+  // Values like 210.80 / 212.05 are cumec discharge mis-labelled as metres.
+  final bool readingPlausible =
+      birpurReading != null && _birpurLevelPlausible(birpurReading.levelM);
+
+  if (readingPlausible) {
     birpurStation = RiverStation(
       city:        'Birpur',
       state:       'Bihar',
       river:       'Kosi',
       station:     'Birpur',
-      current:     birpurReading.levelM,
+      current:     birpurReading!.levelM,
       warning:     birpurReading.warningLevel,
       danger:      birpurReading.dangerLevel,
       hfl:         birpurReading.dangerLevel + 1.5,
@@ -249,12 +229,23 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
       isLive: birpurReading.source != 'SEED',
     );
   } else {
-    // kosiBirpurProvider returned null OR is still loading —
-    // try DataFetch with tightened plausibility guard (DL 50–90 m)
+    // kosiBirpurProvider returned null, is loading, or gave an implausible
+    // level (> 80 m) — try DataFetch with tightened DL plausibility guard
+    if (birpurReading != null && !_birpurLevelPlausible(birpurReading.levelM)) {
+      if (kDebugMode) {
+        debugPrint(
+          '[Birpur v8.6] rejected implausible level '
+          '${birpurReading.levelM.toStringAsFixed(2)} m '
+          '(source=${birpurReading.source}); falling back to DataFetch/SEED',
+        );
+      }
+    }
+
     final dfBirpur = ref.watch(dataFetchStationsProvider)
         .where((s) =>
             _isBirpur(s.station) &&
-            _birpurDlPlausible(s.danger))
+            _birpurDlPlausible(s.danger) &&
+            _birpurLevelPlausible(s.current))
         .firstOrNull;
 
     birpurStation = dfBirpur ?? RiverStation(
@@ -293,7 +284,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode && allDfStations.length != dfStations.length) {
     debugPrint(
-      '[Merged v8.5] dropped ${allDfStations.length - dfStations.length} '
+      '[Merged v8.6] dropped ${allDfStations.length - dfStations.length} '
       'non-Bihar/duplicate stations from DataFetch tier',
     );
   }
@@ -329,7 +320,7 @@ final mergedStationsProvider = Provider<List<RiverStation>>((ref) {
 
   if (kDebugMode) {
     debugPrint(
-      '[Merged v8.5] ${liveEngineRS.length} LiveEngine'
+      '[Merged v8.6] ${liveEngineRS.length} LiveEngine'
       ' + ${cwcLiveRS.length} CWC-live'
       ' + ${cwcSeedFiltered.length} CWC-seed'
       ' + ${dfStations.length} DataFetch(Bihar)'
