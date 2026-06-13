@@ -1,636 +1,242 @@
-// lib/screens/alerts_screen.dart  v4.7
-//
-// v4.7 (Problem 4 fix, 12 Jun 2026):
-//   _StatusBar was watching sourceStatusProvider which only carries
-//   CWC + GloFAS rows from DataFetchEngine.stream.  WRD Bihar never
-//   appeared in the status chips.  Switch to mergedSourceStatusProvider
-//   (exported from map_live_index_provider.dart) which prepends a
-//   synthetic WRD Bihar row built from wrdStationsProvider.
-//
-// v4.6: AlertsScreen.initState() calls DataFetchEngine.forceRefresh()
-//       and invalidates wrdStationsProvider on tab open.
+// lib/screens/alerts_screen.dart  — 3-D UI rebuild
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../theme/river_theme.dart';
+import '../theme/theme_3d.dart';
+import '../providers/alert_provider.dart';
+import '../models/flood_alert.dart';
 
-import '../providers/data_fetch_provider.dart';
-import '../providers/map_live_index_provider.dart'; // v4.7: mergedSourceStatusProvider
-import '../providers/real_time_river_provider.dart';
-import '../services/alert_engine.dart';
-import '../services/alert_share_service.dart';
-import '../services/data_fetch_engine.dart';
-import '../widgets/alert_share_button.dart';
-
-// ── colour helpers ────────────────────────────────────────────────────────────────────
-Color _severityColor(AlertSeverity s, {bool dark = false}) {
-  switch (s) {
-    case AlertSeverity.emergency: return dark ? const Color(0xFF8B0000) : const Color(0xFFB71C1C);
-    case AlertSeverity.critical:  return dark ? const Color(0xFFBF360C) : const Color(0xFFE64A19);
-    case AlertSeverity.warning:   return dark ? const Color(0xFFF57F17) : const Color(0xFFF9A825);
-    case AlertSeverity.info:      return dark ? const Color(0xFF1565C0) : const Color(0xFF1976D2);
-  }
-}
-
-Color _severityBg(AlertSeverity s) {
-  switch (s) {
-    case AlertSeverity.emergency: return const Color(0xFFFFEBEE);
-    case AlertSeverity.critical:  return const Color(0xFFFBE9E7);
-    case AlertSeverity.warning:   return const Color(0xFFFFFDE7);
-    case AlertSeverity.info:      return const Color(0xFFE3F2FD);
-  }
-}
-
-IconData _severityIcon(AlertSeverity s) {
-  switch (s) {
-    case AlertSeverity.emergency: return Icons.warning_amber_rounded;
-    case AlertSeverity.critical:  return Icons.crisis_alert_rounded;
-    case AlertSeverity.warning:   return Icons.notifications_active_rounded;
-    case AlertSeverity.info:      return Icons.info_outline_rounded;
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────────────
-class AlertsScreen extends ConsumerStatefulWidget {
-  static const String route = '/alerts';
+class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
 
   @override
-  ConsumerState<AlertsScreen> createState() => _AlertsScreenState();
+  State<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsScreenState extends ConsumerState<AlertsScreen>
-    with TickerProviderStateMixin {
-  AlertSeverity? _filter;
-  late AnimationController _badgeCtrl;
-  late Animation<double>   _badgePulse;
-  int _prevCount = 0;
+class _AlertsScreenState extends State<AlertsScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tab;
 
   @override
   void initState() {
     super.initState();
-    _badgeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
-    _badgePulse = Tween<double>(begin: 1.0, end: 1.3).animate(
-      CurvedAnimation(parent: _badgeCtrl, curve: Curves.elasticOut),
-    );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      DataFetchEngine.instance.forceRefresh();
-      ref.read(wrdStationsProvider.notifier).forceRefresh();
-    });
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
   void dispose() {
-    _badgeCtrl.dispose();
+    _tab.dispose();
     super.dispose();
-  }
-
-  List<FloodAlert> _filtered(List<FloodAlert> all) {
-    if (_filter == null) return all;
-    return all.where((a) => a.severity == _filter).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final allAlerts = ref.watch(alertsProvider);
-    // v4.7: mergedSourceStatusProvider includes WRD Bihar row
-    final sources   = ref.watch(mergedSourceStatusProvider);
-    final fetchSnap = ref.watch(dataFetchProvider);
-
-    if (allAlerts.length > _prevCount) _badgeCtrl.forward(from: 0);
-    _prevCount = allAlerts.length;
-
-    final shown = _filtered(allAlerts);
-    final isLoading = fetchSnap.isLoading ||
-        fetchSnap.when(
-            data:    (s) => s.isLoading,
-            loading: () => true,
-            error:   (_, __) => false);
-    final lastUpdate = fetchSnap.when(
-        data:    (s) => s.fetchedAt,
-        loading: () => null,
-        error:   (_, __) => null);
+    final t  = RiverColors.of(context);
+    final ap = context.watch<AlertProvider>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
-      appBar: _buildAppBar(allAlerts.length, isLoading),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.wait([
-            DataFetchEngine.instance.forceRefresh(),
-            ref.read(wrdStationsProvider.notifier).forceRefresh(),
-          ]);
-        },
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-                child: _StatusBar(
-                    sources: sources, lastUpdate: lastUpdate)),
-            SliverToBoxAdapter(
-                child: _FilterRow(
-                    selected: _filter,
-                    all:      allAlerts,
-                    onChanged: (v) =>
-                        setState(() => _filter = v))),
-            if (isLoading && allAlerts.isEmpty)
-              const SliverFillRemaining(child: _LoadingState())
-            else if (shown.isEmpty)
-              SliverFillRemaining(
-                  child: _EmptyState(lastUpdate: lastUpdate))
-            else
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (ctx, i) {
-                    if (i == shown.length)
-                      return const SizedBox(height: 24);
-                    return _AlertCard(alert: shown[i]);
-                  },
-                  childCount: shown.length + 1,
+      backgroundColor: t.scaffoldBg,
+      body: NestedScrollView(
+        headerSliverBuilder: (ctx, _) => [
+          Td3AppBar(
+            title: 'Flood Alerts',
+            subtitle: '${ap.activeAlerts.length} active',
+            leading: Navigator.canPop(ctx)
+                ? IconButton(
+                    icon: Icon(Icons.arrow_back_ios_new_rounded,
+                        color: t.textPrimary, size: 18),
+                    onPressed: () => Navigator.pop(ctx),
+                  )
+                : null,
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: Td3Badge(
+                  label: '${ap.dangerCount} DANGER',
+                  color: t.danger,
+                  icon: Icons.warning_rounded,
+                  fontSize: 8,
                 ),
               ),
+            ],
+          ),
+        ],
+        body: Column(
+          children: [
+            // Tab bar
+            Container(
+              color: t.cardBg,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  _tab3D(context, 0, 'ALL', ap.activeAlerts.length, t.accent),
+                  const SizedBox(width: 8),
+                  _tab3D(context, 1, 'DANGER', ap.dangerCount, t.danger),
+                  const SizedBox(width: 8),
+                  _tab3D(context, 2, 'WARNING', ap.warningCount, t.warning),
+                ],
+              ),
+            ),
+            const Td3Divider(),
+            // List
+            Expanded(
+              child: TabBarView(
+                controller: _tab,
+                children: [
+                  _AlertList(alerts: ap.activeAlerts),
+                  _AlertList(
+                      alerts: ap.activeAlerts
+                          .where((a) => a.level == AlertLevel.danger)
+                          .toList()),
+                  _AlertList(
+                      alerts: ap.activeAlerts
+                          .where((a) => a.level == AlertLevel.warning)
+                          .toList()),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(int count, bool loading) {
-    return AppBar(
-      elevation: 0,
-      backgroundColor: const Color(0xFF0D47A1),
-      foregroundColor: Colors.white,
-      title: const Text('Flood Alerts',
-          style: TextStyle(
-              fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-      actions: [
-        if (loading)
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: SizedBox(
-              width: 20, height: 20,
-              child: CircularProgressIndicator(
-                  color: Colors.white, strokeWidth: 2),
-            ),
-          )
-        else
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: ScaleTransition(
-                scale: _badgePulse,
-                child: _AlertBadge(count: count)),
-          ),
-      ],
-    );
-  }
-}
-
-class _LoadingState extends StatelessWidget {
-  const _LoadingState();
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(color: Color(0xFF0D47A1)),
-          SizedBox(height: 16),
-          Text('Fetching live flood data…',
-              style: TextStyle(color: Colors.black54, fontSize: 13)),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final DateTime? lastUpdate;
-  const _EmptyState({this.lastUpdate});
-  @override
-  Widget build(BuildContext context) {
-    final fmt = lastUpdate != null
-        ? DateFormat('HH:mm').format(lastUpdate!)
-        : null;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.check_circle_outline_rounded,
-              size: 64, color: Color(0xFF43A047)),
-          const SizedBox(height: 16),
-          const Text('No active alerts',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87)),
-          const SizedBox(height: 6),
-          Text(
-            fmt != null
-                ? 'All stations normal as of $fmt'
-                : 'All stations are within normal levels.',
-            style: const TextStyle(
-                color: Colors.black54, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AlertBadge extends StatelessWidget {
-  final int count;
-  const _AlertBadge({required this.count});
-  @override
-  Widget build(BuildContext context) {
-    if (count == 0) return const Icon(Icons.notifications_none_rounded);
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        const Icon(Icons.notifications_active_rounded),
-        Positioned(
-          top: 0, right: 0,
-          child: Container(
-            padding: const EdgeInsets.all(3),
-            decoration: const BoxDecoration(
-                color: Colors.red, shape: BoxShape.circle),
-            child: Text('$count',
-                style: const TextStyle(
-                    fontSize: 9,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold)),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatusBar extends StatelessWidget {
-  final List<SourceStatus> sources;
-  final DateTime?          lastUpdate;
-  const _StatusBar({required this.sources, this.lastUpdate});
-
-  @override
-  Widget build(BuildContext context) {
-    final fmt =
-        lastUpdate != null
-            ? DateFormat('HH:mm:ss').format(lastUpdate!)
-            : '—';
-    final display = sources.where((s) => !s.isFromSeed).toList();
-    final chips = (display.isEmpty ? sources : display)
-        .map((s) => _SourceChip(
-              name:       s.name,
-              healthy:    s.healthy,
-              count:      s.stationCount,
-              isFromSeed: s.isFromSeed,
-            ))
-        .toList();
-
-    return Container(
-      color: const Color(0xFF0D47A1),
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text('Updated $fmt',
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 10)),
-          ),
-          const SizedBox(height: 4),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(mainAxisSize: MainAxisSize.min, children: chips),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SourceChip extends StatelessWidget {
-  final String name;
-  final bool   healthy;
-  final int    count;
-  final bool   isFromSeed;
-  const _SourceChip({
-    required this.name,
-    required this.healthy,
-    required this.count,
-    this.isFromSeed = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final borderColor = isFromSeed
-        ? Colors.white38
-        : (healthy ? Colors.greenAccent : Colors.redAccent);
-    final bgColor = isFromSeed
-        ? Colors.white.withOpacity(0.08)
-        : (healthy
-            ? Colors.green.withOpacity(0.25)
-            : Colors.red.withOpacity(0.25));
-    final iconColor = isFromSeed
-        ? Colors.white38
-        : (healthy ? Colors.greenAccent : Colors.redAccent);
-    final icon = isFromSeed
-        ? Icons.circle_outlined
-        : (healthy ? Icons.check_circle : Icons.error);
-    return Container(
-      margin: const EdgeInsets.only(right: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor, width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10, color: iconColor),
-          const SizedBox(width: 4),
-          Text(
-            '$name${count > 0 ? " $count" : ""} ',
-            style: TextStyle(
-                color: isFromSeed ? Colors.white54 : Colors.white,
-                fontSize: 10),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterRow extends StatelessWidget {
-  final AlertSeverity?               selected;
-  final List<FloodAlert>             all;
-  final ValueChanged<AlertSeverity?> onChanged;
-  const _FilterRow({
-    required this.selected,
-    required this.all,
-    required this.onChanged,
-  });
-
-  int _count(AlertSeverity? s) {
-    if (s == null) return all.length;
-    return all.where((a) => a.severity == s).length;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        children: [
-          _Chip(
-              label:    'All (${_count(null)})',
-              selected: selected == null,
-              onTap:    () => onChanged(null)),
-          _Chip(
-              label:    '🔴 Emergency (${_count(AlertSeverity.emergency)})',
-              selected: selected == AlertSeverity.emergency,
-              color:    const Color(0xFFB71C1C),
-              onTap:    () => onChanged(AlertSeverity.emergency)),
-          _Chip(
-              label:    '🚨 Critical (${_count(AlertSeverity.critical)})',
-              selected: selected == AlertSeverity.critical,
-              color:    const Color(0xFFE64A19),
-              onTap:    () => onChanged(AlertSeverity.critical)),
-          _Chip(
-              label:    '⚠️ Warning (${_count(AlertSeverity.warning)})',
-              selected: selected == AlertSeverity.warning,
-              color:    const Color(0xFFF9A825),
-              onTap:    () => onChanged(AlertSeverity.warning)),
-          _Chip(
-              label:    'ℹ️ Info (${_count(AlertSeverity.info)})',
-              selected: selected == AlertSeverity.info,
-              color:    const Color(0xFF1976D2),
-              onTap:    () => onChanged(AlertSeverity.info)),
-        ],
-      ),
-    );
-  }
-}
-
-class _Chip extends StatelessWidget {
-  final String     label;
-  final bool       selected;
-  final Color?     color;
-  final VoidCallback onTap;
-  const _Chip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = color ?? const Color(0xFF0D47A1);
+  Widget _tab3D(
+      BuildContext ctx, int idx, String label, int count, Color color) {
+    final selected = _tab.index == idx;
     return GestureDetector(
-      onTap: onTap,
+      onTap: () => setState(() => _tab.animateTo(idx)),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? c : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: c),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                      color:      c.withOpacity(0.3),
-                      blurRadius: 6,
-                      offset:     const Offset(0, 2))
-                ]
-              : null,
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: selected
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    color.withValues(alpha: 0.18),
+                    color.withValues(alpha: 0.08)
+                  ],
+                ),
+                border: Td3.depthBorder(
+                  topColor: color.withValues(alpha: 0.30),
+                  bottomColor: Td3.edgeMid,
+                ),
+                boxShadow: Td3.cardShadow(color, elev: Td3.elevLow),
+              )
+            : null,
+        child: Row(
+          children: [
+            Text(label,
+                style: TextStyle(
+                    color: selected ? color : RiverColors.of(ctx).textSecondary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5)),
+            const SizedBox(width: 4),
+            if (count > 0)
+              Td3Chip(
+                  label: '$count', color: color, fontSize: 9),
+          ],
         ),
-        child: Text(label,
-            style: TextStyle(
-                color:      selected ? Colors.white : c,
-                fontSize:   12,
-                fontWeight: FontWeight.w600)),
       ),
     );
   }
 }
 
-class _AlertCard extends StatefulWidget {
-  final FloodAlert alert;
-  const _AlertCard({required this.alert});
-  @override
-  State<_AlertCard> createState() => _AlertCardState();
-}
-
-class _AlertCardState extends State<_AlertCard>
-    with SingleTickerProviderStateMixin {
-  bool _expanded = false;
-  late AnimationController _ctrl;
-  late Animation<double>   _rotate;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 250));
-    _rotate = Tween<double>(begin: 0, end: 0.5).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _toggle() {
-    setState(() => _expanded = !_expanded);
-    _expanded ? _ctrl.forward() : _ctrl.reverse();
-  }
+class _AlertList extends StatelessWidget {
+  final List<FloodAlert> alerts;
+  const _AlertList({required this.alerts});
 
   @override
   Widget build(BuildContext context) {
-    final a  = widget.alert;
-    final bg = _severityBg(a.severity);
-    final fg = _severityColor(a.severity);
-
-    return Semantics(
-      label:
-          '${a.severity.label} flood alert: ${a.title}. ${a.river}, ${a.district}.',
-      child: Card(
-        margin:    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        elevation: 2,
-        shape:     RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14)),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            children: [
-              Container(height: 4, color: fg),
-              InkWell(
-                onTap: _toggle,
-                child: Container(
-                  color:   bg,
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
+    final t = RiverColors.of(context);
+    if (alerts.isEmpty) {
+      return Center(
+          child: Text('No alerts',
+              style: TextStyle(color: t.textSecondary)));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: alerts.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (ctx, i) {
+        final a = alerts[i];
+        final color = a.level == AlertLevel.danger ? t.danger : t.warning;
+        return Td3Card(
+          accentColor: color,
+          elevation: Td3.elevMid,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    a.level == AlertLevel.danger
+                        ? Icons.warning_rounded
+                        : Icons.error_outline_rounded,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircleAvatar(
-                        radius:          22,
-                        backgroundColor: fg.withOpacity(0.15),
-                        child: Icon(_severityIcon(a.severity),
-                            color: fg, size: 22),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(a.site,
+                                style: TextStyle(
+                                    color: t.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          Td3Chip(
+                              label: a.level.name.toUpperCase(),
+                              color: color,
+                              fontSize: 9),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              a.title,
-                              style: TextStyle(
-                                  color:      fg,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize:   14),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              '${a.river}  ·  ${a.district}',
-                              style: const TextStyle(
-                                  color:    Colors.black54,
-                                  fontSize: 11),
-                            ),
-                          ],
-                        ),
+                      const SizedBox(height: 4),
+                      Text(a.river,
+                          style: TextStyle(
+                              color: t.textSecondary,
+                              fontSize: 11)),
+                      const SizedBox(height: 6),
+                      Td3ProgressBar(
+                        value: a.levelPercent,
+                        fillColor: color,
+                        height: 6,
                       ),
-                      AlertShareButton(alert: a),
-                      RotationTransition(
-                        turns: _rotate,
-                        child: const Icon(
-                            Icons.expand_more_rounded,
-                            color: Colors.black54),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${a.currentLevel.toStringAsFixed(2)} m  /  danger at ${a.dangerLevel.toStringAsFixed(2)} m',
+                        style: TextStyle(
+                            color: t.textSecondary,
+                            fontSize: 10),
                       ),
                     ],
                   ),
                 ),
-              ),
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 220),
-                crossFadeState: _expanded
-                    ? CrossFadeState.showFirst
-                    : CrossFadeState.showSecond,
-                firstChild:  _AlertDetail(alert: a, fg: fg),
-                secondChild: const SizedBox.shrink(),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AlertDetail extends StatelessWidget {
-  final FloodAlert alert;
-  final Color      fg;
-  const _AlertDetail({required this.alert, required this.fg});
-
-  @override
-  Widget build(BuildContext context) {
-    final a = alert;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      color:   _severityBg(a.severity),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Divider(color: fg.withOpacity(0.2), height: 1),
-          const SizedBox(height: 10),
-          if (a.body.isNotEmpty)
-            Text(a.body,
-                style: const TextStyle(
-                    color: Colors.black87,
-                    fontSize: 13,
-                    height: 1.5)),
-          const SizedBox(height: 10),
-          _row(Icons.thermostat_rounded,
-              'Current Level',
-              '${a.currentLevel.toStringAsFixed(2)} m', fg),
-          _row(Icons.warning_amber_rounded,
-              'Threshold Level',
-              '${a.thresholdLevel.toStringAsFixed(2)} m', fg),
-          _row(Icons.access_time_rounded,
-              'Issued',
-              DateFormat('dd MMM HH:mm').format(a.issuedAt), fg),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(IconData icon, String label, String value, Color c) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 14, color: c),
-          const SizedBox(width: 6),
-          Text('$label: ',
-              style: TextStyle(
-                  color:      Colors.black54,
-                  fontSize:   12,
-                  fontWeight: FontWeight.w600)),
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.black87, fontSize: 12)),
-        ],
-      ),
+        );
+      },
     );
   }
 }
