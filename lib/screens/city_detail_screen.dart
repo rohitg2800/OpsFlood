@@ -1,12 +1,16 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v11
+// EQUINOX-BH — CityDetailScreen v12
 // Uses PUBLIC widget classes from city_detail_screen_widgets.dart
 // (Dart private _ classes can't cross file boundaries)
 //
+// v12 (2026-06-13) — Gap 3b:
+//   _refresh() now gates biharLiveProvider.refresh() behind isBihar.
+//   Non-Bihar cities (UP, Assam, WB, Odisha) no longer await the full
+//   WRD scrape on manual pull-to-refresh — removes 3-8 s spinner block.
+//
 // v11 (2026-06-13) — Gap 2:
 //   _BiharDataCard is now gated behind (data.state == 'Bihar').
-//   For all non-Bihar cities (UP, Assam, WB, Odisha) the card is
-//   completely omitted — no grey "No Bihar WRD data" banner.
+//   For all non-Bihar cities the card is completely omitted.
 library;
 
 import 'dart:async';
@@ -114,15 +118,23 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
     super.dispose();
   }
 
+  // v12: gate biharLiveProvider.refresh() behind isBihar so non-Bihar
+  // cities don't block on the full WRD scrape during manual refresh.
   Future<void> _refresh() async {
     if (_refreshing) return;
     setState(() => _refreshing = true);
     HapticFeedback.mediumImpact();
     try {
-      await Future.wait([
+      // Always needed: CWC / GloFAS / rainfall refresh.
+      final futures = <Future<void>>[
         ref.read(realTimeProvider).refreshData(),
-        ref.read(biharLiveProvider.notifier).refresh(),
-      ]);
+      ];
+      // Only Bihar cities need the WRD scrape.
+      final isBihar = ref.read(cityDataProvider(widget.cityName))?.state == 'Bihar';
+      if (isBihar) {
+        futures.add(ref.read(biharLiveProvider.notifier).refresh());
+      }
+      await Future.wait(futures);
       _entryCtrl..reset()..forward();
     } finally {
       if (mounted) setState(() => _refreshing = false);
@@ -235,7 +247,7 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
 
-                        // 0 ─ Hero gauge (now includes freshness footer)
+                        // 0 ─ Hero gauge (includes freshness footer from v3 widgets)
                         _section(0, GaugeHeroCard(data: data)),
                         const SizedBox(height: 12),
 

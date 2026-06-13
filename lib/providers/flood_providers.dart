@@ -1,8 +1,9 @@
 // lib/providers/flood_providers.dart
-// v10.3 — pre-warm LiveFetchEngine on first realTimeProvider access
+// v10.4 — cityLookupMapProvider: O(1) city lookup; Bihar-only refresh gate
 //
-// v10.2 history: _normCityKey() collapses qualifier variants so Birpur x3 → Birpur x1
-// v10.1 history: deduplicate liveLevelsProvider by city key.
+// v10.3: pre-warm LiveFetchEngine on first realTimeProvider access
+// v10.2: _normCityKey() collapses qualifier variants so Birpur x3 → Birpur x1
+// v10.1: deduplicate liveLevelsProvider by city key.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -62,13 +63,35 @@ final isWakingUpProvider = Provider<bool>((ref) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────
-// cityDataProvider / cityTrendProvider
+// cityLookupMapProvider  (v10.4)
+//
+// Builds a Map<String, FloodData> keyed by _normCityKey(city) once per
+// liveLevelsProvider rebuild.  Every cityDataProvider lookup is then O(1)
+// instead of O(n) linear scan through RealTimeService.dataForCity().
+//
+// Alignment guarantee: the same _normCityKey() is applied here AND in
+// _deduplicateByCity(), so city names passed from the map screen
+// ('Birpur (CWC)') resolve to the same key ('birpur') as deduped entries.
+// ─────────────────────────────────────────────────────────────────────────────────
+
+final cityLookupMapProvider = Provider<Map<String, FloodData>>((ref) {
+  final levels = ref.watch(liveLevelsProvider);
+  return { for (final d in levels) _normCityKey(d.city): d };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────
+// cityDataProvider / cityTrendProvider  (v10.4)
+//
+// cityDataProvider now hits cityLookupMapProvider (O(1)) instead of
+// RealTimeService.dataForCity() (O(n) scan on every widget rebuild).
+// Both paths normalise through _normCityKey so map-marker city names
+// ('Birpur (CWC)') match deduped dashboard names ('Birpur').
 // ─────────────────────────────────────────────────────────────────────────────────
 
 final cityDataProvider =
     Provider.family<FloodData?, String>((ref, city) {
-  final service = ref.watch(realTimeProvider);
-  return service.dataForCity(city);
+  final map = ref.watch(cityLookupMapProvider);
+  return map[_normCityKey(city)];
 });
 
 final cityTrendProvider =
