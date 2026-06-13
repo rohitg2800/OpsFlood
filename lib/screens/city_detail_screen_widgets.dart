@@ -6,6 +6,10 @@
 // v2 wiring (2026-06-11):
 //   CollapsibleContacts now accepts stationName and passes it to SosScreen
 //   via route arguments so SosScreen can pre-filter to that district.
+//
+// v3 (2026-06-13) — Gap 1:
+//   GaugeHeroCard: added freshness footer row showing lastUpdated timestamp
+//   and effectiveRainfallMm badge when rainfall > 0.
 library;
 
 import 'package:flutter/material.dart';
@@ -113,17 +117,40 @@ class CitySkeletonView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GaugeHeroCard
+// GaugeHeroCard   (v3 — Gap 1: freshness footer)
 // ─────────────────────────────────────────────────────────────────────────────
 class GaugeHeroCard extends StatelessWidget {
   final FloodData data;
   const GaugeHeroCard({super.key, required this.data});
+
+  /// Format lastUpdated as:
+  ///   • "Updated 14:32"         — same calendar day
+  ///   • "Updated 11 Jun 14:32"  — different day
+  static String _formatUpdated(DateTime ts) {
+    final now   = DateTime.now();
+    final hh    = ts.hour.toString().padLeft(2, '0');
+    final mm    = ts.minute.toString().padLeft(2, '0');
+    final time  = '$hh:$mm';
+    final sameDay = ts.year == now.year &&
+                    ts.month == now.month &&
+                    ts.day == now.day;
+    if (sameDay) return 'Updated $time';
+    const months = [
+      'Jan','Feb','Mar','Apr','May','Jun',
+      'Jul','Aug','Sep','Oct','Nov','Dec'
+    ];
+    return 'Updated ${ts.day} ${months[ts.month - 1]} $time';
+  }
 
   @override
   Widget build(BuildContext context) {
     final t     = RiverColors.of(context);
     final riskC = cityDetailRiskColor(data.riskLevel);
     final pct   = (data.currentLevel / data.dangerLevel).clamp(0.0, 1.2);
+
+    final updatedLabel = _formatUpdated(data.lastUpdated);
+    final rainfall     = data.effectiveRainfallMm;   // double or null
+    final hasRain      = rainfall != null && rainfall > 0;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -137,6 +164,8 @@ class GaugeHeroCard extends StatelessWidget {
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Level + Risk badge ──────────────────────────────────────────────
         Row(children: [
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -163,6 +192,8 @@ class GaugeHeroCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 14),
+
+        // ── Progress bar ────────────────────────────────────────────────────
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
@@ -173,11 +204,52 @@ class GaugeHeroCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
+
+        // ── Warning / Danger pills ──────────────────────────────────────────
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _levelPill(t, 'Warning', data.warningLevel, AppPalette.warning),
             _levelPill(t, 'Danger',  data.dangerLevel,  AppPalette.danger),
+          ],
+        ),
+
+        // ── Freshness footer (Gap 1) ────────────────────────────────────────
+        const SizedBox(height: 10),
+        Divider(height: 1, color: t.stroke),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(Icons.access_time_rounded, size: 11, color: t.textSecondary),
+            const SizedBox(width: 4),
+            Text(updatedLabel,
+                style: TextStyle(color: t.textSecondary, fontSize: 10,
+                    fontWeight: FontWeight.w600)),
+            if (hasRain) ...[
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.lightBlue.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: Colors.lightBlue.withValues(alpha: 0.30)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.grain_rounded,
+                        size: 10, color: Colors.lightBlue),
+                    const SizedBox(width: 3),
+                    Text('${rainfall!.toStringAsFixed(1)} mm',
+                        style: const TextStyle(
+                            color: Colors.lightBlue,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ]),

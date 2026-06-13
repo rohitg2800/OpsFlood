@@ -1,7 +1,12 @@
 // lib/screens/city_detail_screen.dart
-// EQUINOX-BH — CityDetailScreen v10
+// EQUINOX-BH — CityDetailScreen v11
 // Uses PUBLIC widget classes from city_detail_screen_widgets.dart
 // (Dart private _ classes can't cross file boundaries)
+//
+// v11 (2026-06-13) — Gap 2:
+//   _BiharDataCard is now gated behind (data.state == 'Bihar').
+//   For all non-Bihar cities (UP, Assam, WB, Odisha) the card is
+//   completely omitted — no grey "No Bihar WRD data" banner.
 library;
 
 import 'dart:async';
@@ -139,8 +144,15 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
     final contacts   = ref
         .watch(stateEmergencyContactsProvider(data?.state ?? ''))
         .cast<EmergencyContact>();
-    final biharStation = ref.watch(biharCityProvider(widget.cityName));
-    final biharLoading = ref.watch(biharCityLoadingProvider);
+
+    // Gap 2: only resolve Bihar providers when this is actually a Bihar city.
+    final isBihar      = data?.state == 'Bihar';
+    final biharStation = isBihar
+        ? ref.watch(biharCityProvider(widget.cityName))
+        : null;
+    final biharLoading = isBihar
+        ? ref.watch(biharCityLoadingProvider)
+        : false;
 
     return Scaffold(
       backgroundColor: t.scaffoldBg,
@@ -223,17 +235,19 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
 
-                        // 0 ─ Hero gauge
+                        // 0 ─ Hero gauge (now includes freshness footer)
                         _section(0, GaugeHeroCard(data: data)),
                         const SizedBox(height: 12),
 
-                        // 1 ─ Bihar live panel
-                        _section(1, _BiharDataCard(
-                          station:      biharStation,
-                          isLoading:    biharLoading,
-                          fallbackCity: widget.cityName,
-                        )),
-                        const SizedBox(height: 12),
+                        // 1 ─ Bihar live panel (Gap 2: only for Bihar cities)
+                        if (isBihar) ...[
+                          _section(1, _BiharDataCard(
+                            station:      biharStation,
+                            isLoading:    biharLoading,
+                            fallbackCity: widget.cityName,
+                          )),
+                          const SizedBox(height: 12),
+                        ],
 
                         // 2 ─ 24-hr trend sparkline
                         if (trend.length >= 2) ...[
@@ -271,8 +285,6 @@ class _CityDetailScreenState extends ConsumerState<CityDetailScreen>
                         ],
 
                         // 5 ─ Emergency contacts
-                        // stationName = widget.cityName so SosScreen can
-                        // pre-filter contacts to the matching district.
                         _section(5, CollapsibleContacts(
                           contacts:    contacts,
                           state:       data.state,
